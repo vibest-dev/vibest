@@ -1,57 +1,21 @@
-import {
-  AlertOctagon,
-  CheckCircle2,
-  Code,
-  FileCheck2,
-  FileText,
-  GitBranch,
-  Layout,
-  MessageSquare,
-  PenTool,
-  Play,
-  Plus,
-  Sparkles,
-} from "lucide-react"
-import { useState } from "react"
+import { Code, GitBranch, MessageSquare, Play, Plus } from "lucide-react"
+import { useState, type KeyboardEvent } from "react"
 
-import type { ArtifactKind, BoardViewData, ReviewStatus } from "../schema.ts"
+import type { ArtifactKind, BoardViewData } from "../schema.ts"
+import { hubApi, type ArtifactWithCount } from "./api.ts"
+import { KindLabel, ReviewStatusText, kindText } from "./labels.tsx"
 
-const REVIEW_BADGE_MAP: Record<ReviewStatus, string> = {
-  approved: "badge-green",
-  requested: "badge-urgent",
-  changes_requested: "badge-red",
-  none: "badge-neutral",
+function activateOnKey(action: () => void) {
+  return (ev: KeyboardEvent) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault()
+      action()
+    }
+  }
 }
 
-import { hubApi, type ArtifactWithCount } from "./api.ts"
-
-function kindBadge(kind: ArtifactKind) {
-  switch (kind) {
-    case "html":
-      return (
-        <span className="badge badge-blue">
-          <Layout size={11} /> HTML Prototype
-        </span>
-      )
-    case "whiteboard":
-      return (
-        <span className="badge badge-purple">
-          <PenTool size={11} /> Whiteboard
-        </span>
-      )
-    case "verify":
-      return (
-        <span className="badge badge-green">
-          <FileCheck2 size={11} /> Verify Gate
-        </span>
-      )
-    case "markdown":
-      return (
-        <span className="badge badge-neutral">
-          <FileText size={11} /> Spec Doc
-        </span>
-      )
-  }
+function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`
 }
 
 export function BoardView(props: {
@@ -63,172 +27,171 @@ export function BoardView(props: {
 }) {
   const { board, onOpenArtifact, onOpenNewTaskModal, onOpenNewArtifactModal, onBoardMutated } = props
   const [showFacts, setShowFacts] = useState(false)
+  const doneCount = board.doneTasks.length + board.doneStandaloneArtifacts.length
 
   return (
     <div className="page-scroll">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">{board.project.name} — Triage Board</h1>
-          <p className="page-subtitle">{board.project.description}</p>
-        </div>
-        <div className="btn-row">
-          <button
-            type="button"
-            data-testid="toggle-session-facts-btn"
-            className="btn"
-            onClick={() => setShowFacts((v) => !v)}
-          >
-            <Code size={14} /> Session Facts Block
-          </button>
-          <button type="button" data-testid="new-task-btn" className="btn" onClick={onOpenNewTaskModal}>
-            <Plus size={14} /> New Workstream
-          </button>
-          <button
-            type="button"
-            data-testid="new-artifact-btn"
-            className="btn btn-primary"
-            onClick={onOpenNewArtifactModal}
-          >
-            <Plus size={14} /> New Artifact
-          </button>
-        </div>
-      </div>
-
-      {showFacts && (
-        <div className="card" style={{ marginBottom: 24, borderColor: "var(--accent-blue)" }}>
-          <div className="drawer-section-title">
-            <span>Compaction-Proof Session Facts Injection Preview</span>
+      <div className="page">
+        <header className="page-header">
+          <div>
+            <h1 className="page-title">{board.project.name}</h1>
+            <p className="page-lede">{board.project.description}</p>
           </div>
-          <pre className="code-block" data-testid="board-session-facts" style={{ margin: 0 }}>
-            {board.sessionFactsMarkdown}
-          </pre>
-        </div>
-      )}
-
-      <section className="board-section" data-testid="needs-you-section">
-        <div className="board-section-header">
-          <div className="board-section-title">
-            <Sparkles size={14} color="#f59e0b" />
-            <span>Needs You</span>
-            <span className="badge badge-urgent" data-testid="needs-you-count">
-              {board.needsYou.length}
-            </span>
+          <div className="btn-row">
+            <button
+              type="button"
+              data-testid="toggle-session-facts-btn"
+              className="btn btn-quiet"
+              aria-expanded={showFacts}
+              onClick={() => setShowFacts((v) => !v)}
+            >
+              <Code size={15} aria-hidden="true" /> Session facts
+            </button>
+            <button type="button" data-testid="new-task-btn" className="btn" onClick={onOpenNewTaskModal}>
+              <Plus size={15} aria-hidden="true" /> New workstream
+            </button>
+            <button
+              type="button"
+              data-testid="new-artifact-btn"
+              className="btn btn-primary"
+              onClick={onOpenNewArtifactModal}
+            >
+              <Plus size={15} aria-hidden="true" /> New artifact
+            </button>
           </div>
-          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            Derived strictly from Artifact(review=requested) + Session(status=blocked)
-          </span>
-        </div>
+        </header>
 
-        {board.needsYou.length === 0 ? (
-          <div className="card" style={{ alignItems: "center", padding: 24, color: "var(--text-secondary)" }}>
-            <CheckCircle2 size={22} color="#10b981" />
-            <div>All clear — zero pending review gates or blocked sessions.</div>
+        {showFacts && (
+          <section className="facts" aria-labelledby="board-facts-title">
+            <div className="facts-head">
+              <h2 className="facts-title" id="board-facts-title">
+                Session facts injected into every prompt
+              </h2>
+            </div>
+            <pre className="code-block" data-testid="board-session-facts">
+              {board.sessionFactsMarkdown}
+            </pre>
+          </section>
+        )}
+
+        <section className="section" data-testid="needs-you-section" aria-labelledby="needs-you-title">
+          <div className="section-head">
+            <h2 className="section-title" id="needs-you-title">
+              Needs you
+              <span
+                className={`section-count ${board.needsYou.length > 0 ? "attention" : ""}`}
+                data-testid="needs-you-count"
+              >
+                {board.needsYou.length}
+              </span>
+            </h2>
+            <span className="section-note">Requested reviews and blocked sessions</span>
           </div>
-        ) : (
-          <div className="cards-grid">
-            {board.needsYou.map((item) => {
-              if (item.itemType === "artifact_review") {
-                const art = item.artifact
+
+          {board.needsYou.length === 0 ? (
+            <p className="empty-note">Nothing is waiting on you. New review requests and blocked sessions land here.</p>
+          ) : (
+            <ul className="ledger">
+              {board.needsYou.map((item) => {
+                if (item.itemType === "artifact_review") {
+                  const art = item.artifact
+                  const open = () => onOpenArtifact(art.id)
+
+                  return (
+                    <li
+                      key={item.id}
+                      data-testid={`needs-you-card-${art.id}`}
+                      className="ledger-row is-link"
+                      role="link"
+                      tabIndex={0}
+                      onClick={open}
+                      onKeyDown={activateOnKey(open)}
+                    >
+                      <KindLabel kind={art.kind} />
+                      <div className="row-main">
+                        <h3 className="row-title">{art.title}</h3>
+                        <p className="row-desc">{art.summary}</p>
+                        <div className="row-meta">
+                          <span>{item.taskTitle ?? "Standalone"}</span>
+                          <span className="mono">v{art.version}</span>
+                          {item.unansweredQuestionCount > 0 && (
+                            <span>{plural(item.unansweredQuestionCount, "open decision")}</span>
+                          )}
+                          <span>
+                            <MessageSquare size={12} aria-hidden="true" /> {plural(item.openCommentCount, "comment")}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="row-side">
+                        <ReviewStatusText status={art.reviewStatus} />
+                      </div>
+                    </li>
+                  )
+                }
+
+                const ses = item.session
 
                 return (
-                  <div
-                    key={item.id}
-                    data-testid={`needs-you-card-${art.id}`}
-                    className="card card-clickable card-urgent"
-                    onClick={() => onOpenArtifact(art.id)}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                      {kindBadge(art.kind)}
-                      <span className="badge badge-urgent">v{art.version} · Review Requested</span>
-                    </div>
-                    <h3 className="card-title">{art.title}</h3>
-                    <p className="card-desc">{art.summary}</p>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        marginTop: "auto",
-                        paddingTop: 6,
-                        fontSize: 12,
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      <span>{item.taskTitle ?? "Standalone Deliverable"}</span>
-                      <div className="btn-row">
-                        {item.unansweredQuestionCount > 0 && (
-                          <span className="badge badge-purple">{item.unansweredQuestionCount} decision(s)</span>
-                        )}
-                        <span className="badge badge-neutral">
-                          <MessageSquare size={11} /> {item.openCommentCount}
+                  <li key={item.id} data-testid={`needs-you-session-${ses.id}`} className="ledger-row">
+                    <span className="row-kind">Session</span>
+                    <div className="row-main">
+                      <h3 className="row-title">{ses.name}</h3>
+                      <p className="row-desc">{ses.blockedReason ?? "Waiting for your confirmation."}</p>
+                      <div className="row-meta">
+                        <span>{item.taskTitle ?? "Unassigned"}</span>
+                        <span className="mono">
+                          {ses.harness} · {ses.model ?? ses.agent}
                         </span>
                       </div>
                     </div>
-                  </div>
+                    <div className="row-side">
+                      <span className="status status-attention">Blocked</span>
+                      <button
+                        type="button"
+                        data-testid={`unblock-session-${ses.id}`}
+                        className="btn btn-sm btn-primary"
+                        onClick={async () => {
+                          await hubApi.updateSessionStatus(ses.id, "running")
+                          await onBoardMutated()
+                        }}
+                      >
+                        <Play size={12} aria-hidden="true" /> Unblock and resume
+                      </button>
+                    </div>
+                  </li>
                 )
-              }
+              })}
+            </ul>
+          )}
+        </section>
 
-              const ses = item.session
-
-              return (
-                <div key={item.id} data-testid={`needs-you-session-${ses.id}`} className="card card-blocked">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span className="badge badge-red">
-                      <AlertOctagon size={11} /> Blocked Session
-                    </span>
-                    <span className="badge badge-neutral">
-                      {ses.harness} · {ses.model ?? ses.agent}
-                    </span>
-                  </div>
-                  <h3 className="card-title">{ses.name}</h3>
-                  <p className="card-desc">{ses.blockedReason ?? "Session awaiting user confirmation"}</p>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginTop: "auto",
-                    }}
-                  >
-                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{item.taskTitle ?? ses.id}</span>
-                    <button
-                      type="button"
-                      data-testid={`unblock-session-${ses.id}`}
-                      className="btn btn-sm btn-primary"
-                      onClick={async () => {
-                        await hubApi.updateSessionStatus(ses.id, "running")
-                        await onBoardMutated()
-                      }}
-                    >
-                      <Play size={12} /> Unblock &amp; Resume
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
+        <section className="section" data-testid="in-progress-section" aria-labelledby="in-progress-title">
+          <div className="section-head">
+            <h2 className="section-title" id="in-progress-title">
+              In progress
+              <span className="section-count">{board.inProgress.length}</span>
+            </h2>
           </div>
-        )}
-      </section>
 
-      <section className="board-section" data-testid="in-progress-section">
-        <div className="board-section-header">
-          <div className="board-section-title">
-            <span>In Progress Workstreams</span>
-            <span className="badge badge-blue">{board.inProgress.length}</span>
-          </div>
-        </div>
+          {board.inProgress.length === 0 && (
+            <p className="empty-note">No active workstreams. Start one with New workstream.</p>
+          )}
 
-        <div className="cards-grid">
           {board.inProgress.map((lane) => (
-            <div key={lane.task.id} className="card" data-testid={`task-card-${lane.task.id}`}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                <div className="btn-row">
+            <article key={lane.task.id} className="stream" data-testid={`task-card-${lane.task.id}`}>
+              <div className="row-main">
+                <h3 className="row-title">{lane.task.title}</h3>
+                <p className="row-desc">{lane.task.summary}</p>
+                <div className="row-meta">
                   {lane.task.branch && (
-                    <span className="badge badge-neutral">
-                      <GitBranch size={11} /> {lane.task.branch}
+                    <span className="mono">
+                      <GitBranch size={12} aria-hidden="true" /> {lane.task.branch}
                     </span>
                   )}
+                  <span>{plural(lane.sessions.length, "linked session")}</span>
                 </div>
+              </div>
+              <div>
                 <button
                   type="button"
                   className="btn btn-sm"
@@ -237,79 +200,92 @@ export function BoardView(props: {
                     await onBoardMutated()
                   }}
                 >
-                  Mark Done
+                  Mark done
                 </button>
               </div>
-              <h3 className="card-title">{lane.task.title}</h3>
-              <p className="card-desc">{lane.task.summary}</p>
 
               {lane.artifacts.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 4 }}>
+                <ul className="stream-artifacts">
                   {lane.artifacts.map((art) => (
-                    <button
-                      key={art.id}
-                      type="button"
-                      className="option-choice"
-                      style={{ justifyContent: "space-between", padding: "6px 9px" }}
-                      onClick={() => onOpenArtifact(art.id)}
-                    >
-                      <span style={{ fontWeight: 600, fontSize: 12 }}>{art.title}</span>
-                      <span className={`badge ${REVIEW_BADGE_MAP[art.reviewStatus]}`}>
-                        {art.kind} · {art.reviewStatus}
-                      </span>
-                    </button>
+                    <li key={art.id}>
+                      <button type="button" className="stream-artifact" onClick={() => onOpenArtifact(art.id)}>
+                        <span className="stream-artifact-title">{art.title}</span>
+                        <span className="row-kind">{kindText(art.kind)}</span>
+                        <ReviewStatusText status={art.reviewStatus} />
+                      </button>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
-
-              <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: "auto" }}>
-                {lane.sessions.length} linked session(s)
-              </div>
-            </div>
+            </article>
           ))}
-        </div>
-      </section>
+        </section>
 
-      <section className="board-section" data-testid="done-section">
-        <div className="board-section-header">
-          <div className="board-section-title">
-            <span>Done &amp; Approved</span>
-            <span className="badge badge-green">{board.doneTasks.length + board.doneStandaloneArtifacts.length}</span>
+        <section className="section" data-testid="done-section" aria-labelledby="done-title">
+          <div className="section-head">
+            <h2 className="section-title" id="done-title">
+              Done
+              <span className="section-count">{doneCount}</span>
+            </h2>
           </div>
-        </div>
 
-        <div className="cards-grid">
-          {board.doneTasks.map((lane) => (
-            <div key={lane.task.id} className="card" style={{ opacity: 0.88 }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span className="badge badge-green">Task Done</span>
-                {lane.task.branch && <span className="badge badge-neutral">{lane.task.branch}</span>}
-              </div>
-              <h3 className="card-title">{lane.task.title}</h3>
-              <p className="card-desc">{lane.task.summary}</p>
-            </div>
-          ))}
+          <ul className="ledger">
+            {board.doneTasks.map((lane) => (
+              <li key={lane.task.id} className="ledger-row is-muted">
+                <span className="row-kind">Workstream</span>
+                <div className="row-main">
+                  <h3 className="row-title">{lane.task.title}</h3>
+                  <p className="row-desc">{lane.task.summary}</p>
+                  {lane.task.branch && (
+                    <div className="row-meta">
+                      <span className="mono">{lane.task.branch}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="row-side">
+                  <span className="status status-ok">Done</span>
+                </div>
+              </li>
+            ))}
 
-          {board.doneStandaloneArtifacts.map((art) => (
-            <div
-              key={art.id}
-              className="card card-clickable"
-              style={{ opacity: 0.9 }}
-              onClick={() => onOpenArtifact(art.id)}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                {kindBadge(art.kind)}
-                <span className="badge badge-green">Approved v{art.version}</span>
-              </div>
-              <h3 className="card-title">{art.title}</h3>
-              <p className="card-desc">{art.summary}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+            {board.doneStandaloneArtifacts.map((art) => {
+              const open = () => onOpenArtifact(art.id)
+
+              return (
+                <li
+                  key={art.id}
+                  className="ledger-row is-link is-muted"
+                  role="link"
+                  tabIndex={0}
+                  onClick={open}
+                  onKeyDown={activateOnKey(open)}
+                >
+                  <KindLabel kind={art.kind} />
+                  <div className="row-main">
+                    <h3 className="row-title">{art.title}</h3>
+                    <p className="row-desc">{art.summary}</p>
+                  </div>
+                  <div className="row-side">
+                    <span className="status status-ok">Approved v{art.version}</span>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      </div>
     </div>
   )
 }
+
+const GALLERY_FILTERS: ReadonlyArray<readonly ["all" | "requested" | ArtifactKind, string]> = [
+  ["all", "All"],
+  ["requested", "Needs review"],
+  ["markdown", "Specs"],
+  ["html", "HTML prototypes"],
+  ["whiteboard", "Whiteboards"],
+  ["verify", "Verify cards"],
+]
 
 export function ArtifactsGalleryView(props: {
   artifacts: ArtifactWithCount[]
@@ -329,72 +305,81 @@ export function ArtifactsGalleryView(props: {
 
   return (
     <div className="page-scroll">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Artifacts Studio</h1>
-          <p className="page-subtitle">
-            Versioned specs, multi-variant HTML prototypes, Excalidraw whiteboards, and PR verify gates
-          </p>
-        </div>
-        <button type="button" className="btn btn-primary" onClick={onOpenNewArtifactModal}>
-          <Plus size={14} /> New Artifact
-        </button>
-      </div>
-
-      <div style={{ marginBottom: 18 }}>
-        <div className="segmented">
-          {(
-            [
-              ["all", "All"],
-              ["requested", "Needs Review"],
-              ["markdown", "Specs"],
-              ["html", "HTML Prototypes"],
-              ["whiteboard", "Whiteboards"],
-              ["verify", "Verify Cards"],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={`segmented-btn ${filter === key ? "active" : ""}`}
-              onClick={() => setFilter(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="cards-grid">
-        {filtered.map((art) => (
-          <div
-            key={art.id}
-            data-testid={`gallery-artifact-${art.id}`}
-            className={`card card-clickable ${art.reviewStatus === "requested" ? "card-urgent" : ""}`}
-            onClick={() => onOpenArtifact(art.id)}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              {kindBadge(art.kind)}
-              <span className={`badge ${REVIEW_BADGE_MAP[art.reviewStatus]}`}>
-                v{art.version} · {art.reviewStatus}
-              </span>
-            </div>
-            <h3 className="card-title">{art.title}</h3>
-            <p className="card-desc">{art.summary}</p>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                marginTop: "auto",
-                fontSize: 12,
-                color: "var(--text-secondary)",
-              }}
-            >
-              <code>{art.slug}</code>
-              <span>{art.openCommentCount} open pin(s)</span>
-            </div>
+      <div className="page">
+        <header className="page-header">
+          <div>
+            <h1 className="page-title">Artifacts</h1>
+            <p className="page-lede">
+              Specs, HTML prototypes, whiteboards, and verify cards, each versioned with its review.
+            </p>
           </div>
-        ))}
+          <button type="button" className="btn btn-primary" onClick={onOpenNewArtifactModal}>
+            <Plus size={15} aria-hidden="true" /> New artifact
+          </button>
+        </header>
+
+        <div className="filter-bar">
+          <div className="segmented" role="group" aria-label="Filter artifacts">
+            {GALLERY_FILTERS.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={filter === key}
+                className={`segmented-btn ${filter === key ? "active" : ""}`}
+                onClick={() => setFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <table className="table">
+          <thead>
+            <tr>
+              <th scope="col">Artifact</th>
+              <th scope="col">Kind</th>
+              <th scope="col">Review</th>
+              <th scope="col" className="num">
+                Version
+              </th>
+              <th scope="col" className="num">
+                Open pins
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((art) => {
+              const open = () => onOpenArtifact(art.id)
+
+              return (
+                <tr
+                  key={art.id}
+                  data-testid={`gallery-artifact-${art.id}`}
+                  className="is-link"
+                  tabIndex={0}
+                  onClick={open}
+                  onKeyDown={activateOnKey(open)}
+                >
+                  <td>
+                    <div className="cell-title">{art.title}</div>
+                    <div className="cell-sub">{art.summary}</div>
+                    <div className="cell-sub mono">{art.slug}</div>
+                  </td>
+                  <td>
+                    <KindLabel kind={art.kind} />
+                  </td>
+                  <td>
+                    <ReviewStatusText status={art.reviewStatus} />
+                  </td>
+                  <td className="num mono">v{art.version}</td>
+                  <td className="num">{art.openCommentCount}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {filtered.length === 0 && <p className="empty-note">No artifacts match this filter.</p>}
       </div>
     </div>
   )

@@ -384,11 +384,11 @@ export function formatSessionFactsMarkdown(
   for (const item of needsYou) {
     if (item.itemType === "artifact_review") {
       lines.push(
-        `  - [Review Requested] \`${item.artifact.slug}\` v${item.artifact.version} (${item.artifact.kind}) — ${item.artifact.title} (${item.openCommentCount} open comments, ${item.unansweredQuestionCount} unanswered questions)`,
+        `  - [Review Requested] \`${item.artifact.slug}\` v${item.artifact.version} (${item.artifact.kind}): ${item.artifact.title} (${item.openCommentCount} open comments, ${item.unansweredQuestionCount} unanswered questions)`,
       )
     } else {
       lines.push(
-        `  - [Blocked Session] \`${item.session.id}\` (${item.session.name} / ${item.session.harness}) — ${item.session.blockedReason ?? "awaiting user action"}`,
+        `  - [Blocked Session] \`${item.session.id}\` (${item.session.name} / ${item.session.harness}): ${item.session.blockedReason ?? "awaiting user action"}`,
       )
     }
   }
@@ -398,7 +398,7 @@ export function formatSessionFactsMarkdown(
   for (const card of inProgress) {
     const branchTag = card.task.branch ? ` [${card.task.branch}]` : ""
     const prTag = card.task.prUrl ? ` (${card.task.prUrl})` : ""
-    lines.push(`  - \`${card.task.id}\`: **${card.task.title}**${branchTag}${prTag} — ${card.task.summary}`)
+    lines.push(`  - \`${card.task.id}\`: **${card.task.title}**${branchTag}${prTag}: ${card.task.summary}`)
   }
 
   lines.push(

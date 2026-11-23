@@ -1,29 +1,10 @@
-import {
-  ArrowLeft,
-  Check,
-  CheckCircle2,
-  Code2,
-  Copy,
-  GitPullRequest,
-  MessageSquare,
-  RotateCcw,
-  Send,
-  Sparkles,
-  XCircle,
-} from "lucide-react"
+import { ArrowLeft, Check, CheckCircle2, Code2, Copy, GitPullRequest, RotateCcw, Send, XCircle } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
-import type { CommentAnchor, CommentThread, ReviewStatus, ReviewVerdict } from "../schema.ts"
-
-const STUDIO_BADGE_MAP: Record<ReviewStatus, string> = {
-  approved: "badge-green",
-  requested: "badge-urgent",
-  changes_requested: "badge-red",
-  none: "badge-neutral",
-}
-
+import type { CommentAnchor, CommentThread, ReviewVerdict } from "../schema.ts"
 import { hubApi, type ArtifactDetailResponse } from "./api.ts"
 import { HtmlAnnotator, type HtmlAnnotationMode } from "./HtmlAnnotator.tsx"
+import { ReviewStatusText } from "./labels.tsx"
 import { MarkdownViewer } from "./MarkdownViewer.tsx"
 import { VerifyCardView } from "./VerifyCardView.tsx"
 import { WhiteboardStage } from "./WhiteboardStage.tsx"
@@ -31,15 +12,15 @@ import { WhiteboardStage } from "./WhiteboardStage.tsx"
 function describeAnchorChip(anchor: CommentAnchor): string {
   switch (anchor.kind) {
     case "dom":
-      return `DOM [${anchor.variantId}] ${anchor.tagName}${anchor.selector}`
+      return `${anchor.variantId} · ${anchor.tagName}${anchor.selector.startsWith("#") ? "" : " "}${anchor.selector}`
     case "region":
-      return `Region [${anchor.variantId}] ${anchor.regionStyle} (${Math.round(anchor.xRatio * 100)}%, ${Math.round(anchor.yRatio * 100)}%)`
+      return `${anchor.variantId} · ${anchor.regionStyle} at ${Math.round(anchor.xRatio * 100)}%, ${Math.round(anchor.yRatio * 100)}%`
     case "whiteboard":
-      return `Excalidraw [${anchor.elementLabels.join(", ") || anchor.elementIds.join(", ")}]`
+      return `Whiteboard · ${anchor.elementLabels.join(", ") || anchor.elementIds.join(", ")}`
     case "quote":
       return `Quote "${anchor.quote.slice(0, 44)}${anchor.quote.length > 44 ? "…" : ""}"`
     case "verify":
-      return `Verify Gate: ${anchor.section}`
+      return `Gate · ${anchor.section}`
   }
 }
 
@@ -93,7 +74,7 @@ export function ArtifactStudio(props: {
   if (!detail) {
     return (
       <div className="page-scroll">
-        <p style={{ color: "var(--text-secondary)" }}>Loading artifact studio...</p>
+        <p className="muted-note">Loading artifact…</p>
       </div>
     )
   }
@@ -164,8 +145,8 @@ export function ArtifactStudio(props: {
       setShowPayloadDrawer(true)
       setVerdictFeedback(
         verdict === "approved"
-          ? `Approved v${res.artifact.version} — removed from Needs You and generated agent payload.`
-          : `Requested changes on v${res.artifact.version} — routed to ${res.targetSessionId ?? "author"}.`,
+          ? `Approved v${res.artifact.version}. It left Needs you and the agent payload is ready.`
+          : `Requested changes on v${res.artifact.version}. Routed to ${res.targetSessionId ?? "the author"}.`,
       )
       onReviewSubmitted()
     } finally {
@@ -177,29 +158,27 @@ export function ArtifactStudio(props: {
 
   return (
     <div className="studio-shell">
-      <div className="studio-topbar">
-        <div className="btn-row">
-          <button type="button" data-testid="studio-back-btn" className="btn btn-sm" onClick={onBack}>
-            <ArrowLeft size={14} /> Board
+      <header className="studio-topbar">
+        <div className="studio-heading">
+          <button type="button" data-testid="studio-back-btn" className="btn btn-quiet btn-sm" onClick={onBack}>
+            <ArrowLeft size={14} aria-hidden="true" /> Board
           </button>
-          <span style={{ fontWeight: 700, fontSize: 15 }}>{artifact.title}</span>
-          <span className="badge badge-neutral">v{selectedVersion ?? artifact.version}</span>
-          <span data-testid="studio-review-status" className={`badge ${STUDIO_BADGE_MAP[artifact.reviewStatus]}`}>
-            {artifact.reviewStatus.replace("_", " ")}
-          </span>
+          <h1 className="studio-title">{artifact.title}</h1>
+          <span className="mono studio-version">v{selectedVersion ?? artifact.version}</span>
+          <ReviewStatusText status={artifact.reviewStatus} testId="studio-review-status" />
         </div>
 
         <div className="btn-row">
           {artifact.versions.length > 1 && (
             <select
-              className="input"
-              style={{ width: 110, padding: "4px 8px" }}
+              className="select status-select"
+              aria-label="Version"
               value={selectedVersion ?? artifact.version}
               onChange={(ev) => setSelectedVersion(Number(ev.target.value))}
             >
               {artifact.versions.map((v) => (
                 <option key={v.version} value={v.version}>
-                  Version v{v.version}
+                  Version {v.version}
                 </option>
               ))}
             </select>
@@ -208,76 +187,61 @@ export function ArtifactStudio(props: {
           <button
             type="button"
             data-testid="toggle-agent-payload-btn"
-            className="btn btn-sm"
+            className="btn btn-quiet"
+            aria-expanded={showPayloadDrawer}
             onClick={() => setShowPayloadDrawer((v) => !v)}
           >
-            <Code2 size={13} /> Agent Payload
+            <Code2 size={15} aria-hidden="true" /> Agent payload
           </button>
 
           <button
             type="button"
             data-testid="verdict-request-changes-btn"
-            className="btn btn-changes"
+            className="btn btn-outline"
             disabled={submittingVerdict}
             onClick={() => void handleVerdict("changes_requested")}
           >
-            <XCircle size={14} /> Request Changes
+            <XCircle size={15} aria-hidden="true" /> Request changes
           </button>
 
           <button
             type="button"
             data-testid="verdict-approve-btn"
-            className="btn btn-approve"
+            className="btn btn-primary"
             disabled={submittingVerdict}
             onClick={() => void handleVerdict("approved")}
           >
-            <CheckCircle2 size={14} /> Approve
+            <CheckCircle2 size={15} aria-hidden="true" /> Approve
           </button>
         </div>
-      </div>
+      </header>
 
       {variants.length > 0 && (
         <div className="studio-subbar">
-          <div className="btn-row">
-            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)" }}>Compare Variants:</span>
-            <div className="segmented">
-              {variants.map((variant) => (
-                <button
-                  key={variant.id}
-                  type="button"
-                  data-testid={`variant-tab-${variant.id}`}
-                  className={`segmented-btn ${currentVariant === variant.id ? "active" : ""}`}
-                  onClick={() => {
-                    setSelectedVariantId(variant.id)
-                    void hubApi.selectVariant(artifact.id, variant.id)
-                  }}
-                >
-                  {variant.label}
-                </button>
-              ))}
-            </div>
+          <span className="subbar-label">Variant</span>
+          <div className="segmented" role="group" aria-label="Variant">
+            {variants.map((variant) => (
+              <button
+                key={variant.id}
+                type="button"
+                data-testid={`variant-tab-${variant.id}`}
+                aria-pressed={currentVariant === variant.id}
+                className={`segmented-btn ${currentVariant === variant.id ? "active" : ""}`}
+                onClick={() => {
+                  setSelectedVariantId(variant.id)
+                  void hubApi.selectVariant(artifact.id, variant.id)
+                }}
+              >
+                {variant.label}
+              </button>
+            ))}
           </div>
-          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-            {variants.find((v) => v.id === currentVariant)?.description}
-          </span>
+          <span className="subbar-note">{variants.find((v) => v.id === currentVariant)?.description}</span>
         </div>
       )}
 
       {verdictFeedback && (
-        <div
-          data-testid="verdict-feedback-banner"
-          style={{
-            padding: "8px 18px",
-            background: "var(--accent-green-soft)",
-            borderBottom: "1px solid rgba(16, 185, 129, 0.35)",
-            color: "var(--accent-green)",
-            fontSize: 12.5,
-            fontWeight: 600,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
+        <div data-testid="verdict-feedback-banner" className="banner" role="status">
           <span>{verdictFeedback}</span>
           <button type="button" className="btn btn-sm" onClick={() => setVerdictFeedback(null)}>
             Dismiss
@@ -286,39 +250,20 @@ export function ArtifactStudio(props: {
       )}
 
       {showPayloadDrawer && (
-        <div
-          data-testid="agent-payload-drawer"
-          style={{
-            padding: "12px 18px",
-            background: "var(--bg-surface)",
-            borderBottom: "1px solid var(--border-strong)",
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            maxHeight: 230,
-            overflowY: "auto",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
+        <div data-testid="agent-payload-drawer" className="payload-drawer">
+          <div className="payload-bar">
             <div className="btn-row">
-              <span className="badge badge-purple">
-                <GitPullRequest size={11} /> Target Session: {targetSessionId ?? "entry-session"}
+              <span className="payload-target">
+                <GitPullRequest size={13} aria-hidden="true" /> Goes to{" "}
+                <span className="mono">{targetSessionId ?? "entry-session"}</span>
               </span>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer" }}>
+              <label className="check-label">
                 <input
                   type="checkbox"
                   checked={optInVibestSend}
                   onChange={(ev) => setOptInVibestSend(ev.target.checked)}
                 />
-                Deliver live via <code>vibest send</code> on verdict
+                Deliver live with <code>vibest send</code> on verdict
               </label>
             </div>
 
@@ -332,10 +277,10 @@ export function ArtifactStudio(props: {
                 setTimeout(() => setCopiedPayload(false), 1500)
               }}
             >
-              <Copy size={12} /> {copiedPayload ? "Copied XML!" : "Copy <vibest-artifact-review>"}
+              <Copy size={12} aria-hidden="true" /> {copiedPayload ? "Copied" : "Copy payload"}
             </button>
           </div>
-          <pre className="code-block" data-testid="agent-payload-xml" style={{ margin: 0 }}>
+          <pre className="code-block" data-testid="agent-payload-xml">
             {agentPayloadPreview}
           </pre>
         </div>
@@ -383,34 +328,35 @@ export function ArtifactStudio(props: {
           )}
         </div>
 
-        <aside className="studio-drawer">
-          <div className="drawer-section">
-            <div className="drawer-section-title">
-              <span>Summary Verdict Note (Optional)</span>
-            </div>
+        <aside className="studio-drawer" aria-label="Review">
+          <section className="drawer-section">
+            <h2 className="drawer-heading">
+              <label htmlFor="verdict-note">Verdict note</label>
+            </h2>
             <input
+              id="verdict-note"
               className="input"
-              placeholder="High-level guidance included with verdict..."
+              placeholder="Optional guidance sent with the verdict"
               value={reviewerNote}
               onChange={(ev) => setReviewerNote(ev.target.value)}
             />
-          </div>
+          </section>
 
           {artifact.questions.length > 0 && (
-            <div className="drawer-section" data-testid="questions-section">
-              <div className="drawer-section-title">
-                <span>Decisions Required ({artifact.questions.length})</span>
-                <Sparkles size={13} />
-              </div>
+            <section className="drawer-section" data-testid="questions-section">
+              <h2 className="drawer-heading">
+                Decisions
+                <span className="section-count">{artifact.questions.length}</span>
+              </h2>
 
               {artifact.questions.map((q) => {
                 const chosen = artifact.answers[q.id] ?? []
 
                 return (
-                  <div key={q.id} className="question-box" data-testid={`question-${q.id}`}>
-                    <div style={{ fontWeight: 650, fontSize: 13 }}>{q.question}</div>
-                    {q.context && <div style={{ fontSize: 11.5, color: "var(--text-secondary)" }}>{q.context}</div>}
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div key={q.id} className="question" data-testid={`question-${q.id}`}>
+                    <h3 className="question-title">{q.question}</h3>
+                    {q.context && <p className="question-context">{q.context}</p>}
+                    <div className="option-list" role={q.multiSelect ? "group" : "radiogroup"} aria-label={q.question}>
                       {q.options.map((opt) => {
                         const isPicked = chosen.includes(opt.id)
 
@@ -418,42 +364,20 @@ export function ArtifactStudio(props: {
                           <button
                             key={opt.id}
                             type="button"
+                            role={q.multiSelect ? "checkbox" : "radio"}
+                            aria-checked={isPicked}
                             data-testid={`option-${q.id}-${opt.id}`}
                             className={`option-choice ${isPicked ? "selected" : ""}`}
                             onClick={() => void handleToggleOption(q.id, opt.id, q.multiSelect)}
                           >
-                            <span
-                              style={{
-                                width: 16,
-                                height: 16,
-                                borderRadius: q.multiSelect ? 4 : 999,
-                                border: "1.5px solid var(--border-strong)",
-                                background: isPicked ? "var(--accent-blue)" : "transparent",
-                                color: "#fff",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                flexShrink: 0,
-                                marginTop: 2,
-                              }}
-                            >
-                              {isPicked && <Check size={11} />}
+                            <span className={`option-mark ${q.multiSelect ? "is-multi" : ""}`}>
+                              {isPicked && <Check size={11} strokeWidth={3} aria-hidden="true" />}
                             </span>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                <span style={{ fontWeight: 600, fontSize: 12.5 }}>{opt.label}</span>
-                                {opt.recommended && (
-                                  <span className="badge badge-green" style={{ fontSize: 10 }}>
-                                    Recommended
-                                  </span>
-                                )}
-                              </div>
-                              {opt.description && (
-                                <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginTop: 2 }}>
-                                  {opt.description}
-                                </div>
-                              )}
-                            </div>
+                            <span className="option-body">
+                              <span className="option-label">{opt.label}</span>
+                              {opt.description && <span className="option-note">{opt.description}</span>}
+                              {opt.recommended && <span className="option-recommended">Recommended</span>}
+                            </span>
                           </button>
                         )
                       })}
@@ -461,101 +385,97 @@ export function ArtifactStudio(props: {
                   </div>
                 )
               })}
-            </div>
+            </section>
           )}
 
-          <div className="drawer-section" data-testid="threads-section">
-            <div className="drawer-section-title">
-              <span>
-                <MessageSquare size={12} style={{ verticalAlign: "middle", marginRight: 5 }} />
-                Anchored Comments ({openThreadsCount} open / {threads.length})
+          <section className="drawer-section" data-testid="threads-section">
+            <h2 className="drawer-heading">
+              Comments
+              <span className="section-count">
+                {openThreadsCount} open of {threads.length}
               </span>
-            </div>
+            </h2>
 
             {threads.length === 0 && (
-              <div style={{ fontSize: 12.5, color: "var(--text-muted)", padding: "8px 0" }}>
-                No pins yet — pick a DOM element, drag a box region, select an Excalidraw node, or highlight spec text.
-              </div>
+              <p className="muted-note">
+                No comments yet. Pick an element, draw a region, select a whiteboard shape, or highlight spec text.
+              </p>
             )}
 
-            {threads.map((thread) => {
-              const isSelected = activeThreadId === thread.id
+            <div className="thread-list">
+              {threads.map((thread) => {
+                const isSelected = activeThreadId === thread.id
 
-              return (
-                <div
-                  key={thread.id}
-                  data-testid={`drawer-thread-${thread.pinNumber}`}
-                  className={`thread-item ${isSelected ? "active" : ""}`}
-                  style={{ opacity: thread.resolved ? 0.62 : 1 }}
-                  onClick={() => handleSelectThread(thread)}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-                    <span className="badge badge-red">#{thread.pinNumber}</span>
-                    <div className="btn-row">
-                      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{thread.author}</span>
+                return (
+                  <article
+                    key={thread.id}
+                    data-testid={`drawer-thread-${thread.pinNumber}`}
+                    className={`thread-item ${isSelected ? "active" : ""} ${thread.resolved ? "resolved" : ""}`}
+                    onClick={() => handleSelectThread(thread)}
+                  >
+                    <div className="thread-head">
+                      <span className="thread-who">
+                        <span className="pin-badge">{thread.pinNumber}</span>
+                        {thread.author}
+                      </span>
                       <button
                         type="button"
-                        className="btn btn-sm"
-                        style={{ padding: "2px 6px", fontSize: 11 }}
+                        className="btn btn-quiet btn-sm"
                         onClick={(ev) => {
                           ev.stopPropagation()
                           void hubApi.setCommentResolved(thread.id, !thread.resolved).then(() => loadDetail())
                         }}
                       >
-                        {thread.resolved ? <RotateCcw size={11} /> : <Check size={11} />}
+                        {thread.resolved ? (
+                          <RotateCcw size={12} aria-hidden="true" />
+                        ) : (
+                          <Check size={12} aria-hidden="true" />
+                        )}
                         {thread.resolved ? "Reopen" : "Resolve"}
                       </button>
                     </div>
-                  </div>
 
-                  <div className="thread-anchor-chip">{describeAnchorChip(thread.anchor)}</div>
+                    <div className="thread-anchor-chip">{describeAnchorChip(thread.anchor)}</div>
 
-                  <div style={{ fontSize: 13 }}>{thread.body}</div>
+                    <div className="thread-body">{thread.body}</div>
 
-                  {thread.replies.length > 0 && (
-                    <div
-                      style={{
-                        borderTop: "1px solid var(--border-subtle)",
-                        paddingTop: 6,
-                        marginTop: 4,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
-                      {thread.replies.map((r) => (
-                        <div key={r.id} style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                          <strong>{r.author}:</strong> {r.body}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                    {thread.replies.length > 0 && (
+                      <div className="thread-replies">
+                        {thread.replies.map((r) => (
+                          <div key={r.id}>
+                            <strong>{r.author}</strong> {r.body}
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
-                  {isSelected && (
-                    <div style={{ display: "flex", gap: 6, marginTop: 6 }} onClick={(ev) => ev.stopPropagation()}>
-                      <input
-                        className="input"
-                        style={{ padding: "4px 8px", fontSize: 12 }}
-                        placeholder="Reply to thread..."
-                        value={replyDrafts[thread.id] ?? ""}
-                        onChange={(ev) => setReplyDrafts((prev) => ({ ...prev, [thread.id]: ev.target.value }))}
-                        onKeyDown={(ev) => {
-                          if (ev.key === "Enter") void handleReplySubmit(thread.id)
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm"
-                        onClick={() => void handleReplySubmit(thread.id)}
-                      >
-                        <Send size={11} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+                    {isSelected && (
+                      <div className="reply-row" onClick={(ev) => ev.stopPropagation()}>
+                        <input
+                          className="input"
+                          aria-label="Reply"
+                          placeholder="Reply"
+                          value={replyDrafts[thread.id] ?? ""}
+                          onChange={(ev) => setReplyDrafts((prev) => ({ ...prev, [thread.id]: ev.target.value }))}
+                          onKeyDown={(ev) => {
+                            if (ev.key === "Enter") void handleReplySubmit(thread.id)
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          aria-label="Send reply"
+                          onClick={() => void handleReplySubmit(thread.id)}
+                        >
+                          <Send size={13} aria-hidden="true" />
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
+            </div>
+          </section>
         </aside>
       </div>
     </div>

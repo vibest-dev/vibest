@@ -66,7 +66,7 @@ function makeBoxElements(spec: DiagramBoxSpec, seedBase: number) {
       width: spec.width - 24,
       height: textHeight,
       angle: 0,
-      strokeColor: "#0f172a",
+      strokeColor: "#1a1917",
       backgroundColor: "transparent",
       fillStyle: "solid",
       strokeWidth: 1,
@@ -146,8 +146,8 @@ function makeArrowElements(spec: DiagramArrowSpec, seedBase: number) {
             width: 130,
             height: 22,
             angle: 0,
-            strokeColor: "#334155",
-            backgroundColor: "#ffffff",
+            strokeColor: "#4d4a44",
+            backgroundColor: "#fdfdfb",
             fillStyle: "solid",
             strokeWidth: 1,
             strokeStyle: "solid",
@@ -189,8 +189,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 160,
           width: 220,
           height: 92,
-          backgroundColor: "#dbeafe",
-          strokeColor: "#2563eb",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
         {
           id: "node-ledger",
@@ -199,8 +199,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 160,
           width: 240,
           height: 92,
-          backgroundColor: "#fef3c7",
-          strokeColor: "#d97706",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
         {
           id: "node-readmodel",
@@ -209,8 +209,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 90,
           width: 230,
           height: 88,
-          backgroundColor: "#dcfce7",
-          strokeColor: "#16a34a",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
         {
           id: "node-ws",
@@ -219,8 +219,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 230,
           width: 230,
           height: 88,
-          backgroundColor: "#f3e8ff",
-          strokeColor: "#9333ea",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
       ]
     case "multi-agent-review":
@@ -232,8 +232,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 170,
           width: 230,
           height: 90,
-          backgroundColor: "#e0e7ff",
-          strokeColor: "#4f46e5",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
         {
           id: "node-worker",
@@ -242,8 +242,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 80,
           width: 240,
           height: 90,
-          backgroundColor: "#dbeafe",
-          strokeColor: "#0284c7",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
         {
           id: "node-artifact-gate",
@@ -252,8 +252,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 250,
           width: 240,
           height: 94,
-          backgroundColor: "#fef3c7",
-          strokeColor: "#d97706",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
         {
           id: "node-owner",
@@ -262,8 +262,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 165,
           width: 245,
           height: 96,
-          backgroundColor: "#dcfce7",
-          strokeColor: "#15803d",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
       ]
     case "vibest-architecture":
@@ -275,8 +275,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 80,
           width: 280,
           height: 94,
-          backgroundColor: "#e0f2fe",
-          strokeColor: "#0284c7",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
         {
           id: "node-vibestd",
@@ -285,8 +285,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 255,
           width: 280,
           height: 94,
-          backgroundColor: "#ede9fe",
-          strokeColor: "#7c3aed",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
         {
           id: "node-ledger",
@@ -295,8 +295,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 168,
           width: 300,
           height: 100,
-          backgroundColor: "#fef3c7",
-          strokeColor: "#d97706",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
         {
           id: "node-hub",
@@ -305,8 +305,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 80,
           width: 295,
           height: 94,
-          backgroundColor: "#dcfce7",
-          strokeColor: "#16a34a",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
         {
           id: "node-browser",
@@ -315,8 +315,8 @@ function boxesForPreset(preset: ArchitecturePreset): DiagramBoxSpec[] {
           y: 255,
           width: 295,
           height: 96,
-          backgroundColor: "#ffe4e6",
-          strokeColor: "#e11d48",
+          backgroundColor: "#ededea",
+          strokeColor: "#4d4a44",
         },
       ]
   }
@@ -335,7 +335,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 206,
           dx: 82,
           dy: 0,
-          strokeColor: "#2563eb",
+          strokeColor: "#4d4a44",
         },
         {
           id: "arrow-ledger-rm",
@@ -346,7 +346,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 192,
           dx: 82,
           dy: -54,
-          strokeColor: "#16a34a",
+          strokeColor: "#4d4a44",
         },
         {
           id: "arrow-ledger-ws",
@@ -357,7 +357,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 220,
           dx: 82,
           dy: 52,
-          strokeColor: "#9333ea",
+          strokeColor: "#4d4a44",
         },
       ]
     case "multi-agent-review":
@@ -371,7 +371,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 195,
           dx: 82,
           dy: -65,
-          strokeColor: "#4f46e5",
+          strokeColor: "#4d4a44",
         },
         {
           id: "arrow-worker-gate",
@@ -382,7 +382,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 174,
           dx: 0,
           dy: 72,
-          strokeColor: "#0284c7",
+          strokeColor: "#4d4a44",
         },
         {
           id: "arrow-gate-owner",
@@ -393,7 +393,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 285,
           dx: 82,
           dy: -62,
-          strokeColor: "#d97706",
+          strokeColor: "#4d4a44",
         },
         {
           id: "arrow-owner-entry",
@@ -404,7 +404,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 195,
           dx: -412,
           dy: 15,
-          strokeColor: "#15803d",
+          strokeColor: "#4d4a44",
         },
       ]
     case "vibest-architecture":
@@ -418,7 +418,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 178,
           dx: 0,
           dy: 72,
-          strokeColor: "#0284c7",
+          strokeColor: "#4d4a44",
         },
         {
           id: "arrow-vibestd-ledger",
@@ -429,7 +429,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 290,
           dx: 82,
           dy: -60,
-          strokeColor: "#7c3aed",
+          strokeColor: "#4d4a44",
         },
         {
           id: "arrow-ledger-hub",
@@ -440,7 +440,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 205,
           dx: 82,
           dy: -68,
-          strokeColor: "#d97706",
+          strokeColor: "#4d4a44",
         },
         {
           id: "arrow-hub-browser",
@@ -451,7 +451,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 178,
           dx: 0,
           dy: 72,
-          strokeColor: "#16a34a",
+          strokeColor: "#4d4a44",
         },
         {
           id: "arrow-browser-vibestd",
@@ -462,7 +462,7 @@ function arrowsForPreset(preset: ArchitecturePreset): DiagramArrowSpec[] {
           startY: 325,
           dx: -472,
           dy: 10,
-          strokeColor: "#e11d48",
+          strokeColor: "#4d4a44",
         },
       ]
   }
@@ -484,7 +484,7 @@ export function generateArchitectureScene(preset: ArchitecturePreset): string {
       source: "https://vibest.local/project-hub",
       elements,
       appState: {
-        viewBackgroundColor: "#ffffff",
+        viewBackgroundColor: "#fdfdfb",
         gridSize: 20,
       },
       files: {},

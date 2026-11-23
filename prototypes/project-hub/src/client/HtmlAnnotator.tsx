@@ -63,11 +63,11 @@ interface PendingDraftAnchor {
 function modeHintText(mode: HtmlAnnotationMode, count: number, variantId: string): string {
   switch (mode) {
     case "pick":
-      return "Hover any element in the HTML preview and click to drop a numbered pin."
+      return "Hover an element and click to pin a comment to it."
     case "region":
-      return "Click and drag across any visual area to draw a region annotation."
+      return "Drag across the preview to mark a region."
     case "interact":
-      return `${count} pin(s) on ${variantId} — switch to Pick Element or Region Select to annotate.`
+      return `${count} ${count === 1 ? "pin" : "pins"} on ${variantId}. Choose Pick or Region to comment.`
   }
 }
 
@@ -375,7 +375,7 @@ export function HtmlAnnotator(props: {
       },
       popoverLeft: popLeft,
       popoverTop: popTop,
-      summaryLabel: `${regionStyle === "circle" ? "Circle Callout" : "Region Box"} (${Math.round(width)}×${Math.round(height)}px)`,
+      summaryLabel: `${regionStyle === "circle" ? "Circle" : "Rectangle"} ${Math.round(width)}×${Math.round(height)}px`,
     })
     setCommentText("")
   }
@@ -404,24 +404,14 @@ export function HtmlAnnotator(props: {
       : null
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "8px 16px",
-          borderBottom: "1px solid var(--border-subtle)",
-          background: "var(--bg-elevated)",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
+    <div className="stage-column">
+      <div className="stage-toolbar">
         <div className="btn-row">
-          <div className="segmented" role="group" aria-label="HTML Annotation Mode">
+          <div className="segmented" role="group" aria-label="Annotation mode">
             <button
               type="button"
               data-testid="mode-interact"
+              aria-pressed={mode === "interact"}
               className={`segmented-btn ${mode === "interact" ? "active" : ""}`}
               onClick={() => {
                 setHoverInfo(null)
@@ -429,22 +419,24 @@ export function HtmlAnnotator(props: {
                 onModeChange("interact")
               }}
             >
-              <Hand size={14} /> Interact
+              <Hand size={14} aria-hidden="true" /> Interact
             </button>
             <button
               type="button"
               data-testid="mode-pick-element"
+              aria-pressed={mode === "pick"}
               className={`segmented-btn ${mode === "pick" ? "active" : ""}`}
               onClick={() => {
                 setDraft(null)
                 onModeChange("pick")
               }}
             >
-              <MousePointerClick size={14} /> 点选元素评论 (Pick Element)
+              <MousePointerClick size={14} aria-hidden="true" /> Pick element 点选
             </button>
             <button
               type="button"
               data-testid="mode-box-select"
+              aria-pressed={mode === "region"}
               className={`segmented-btn ${mode === "region" ? "active" : ""}`}
               onClick={() => {
                 setHoverInfo(null)
@@ -452,23 +444,25 @@ export function HtmlAnnotator(props: {
                 onModeChange("region")
               }}
             >
-              <SquareDashedMousePointer size={14} /> 框选/圈选评论 (Region Select)
+              <SquareDashedMousePointer size={14} aria-hidden="true" /> Region 框选
             </button>
           </div>
 
           {mode === "region" && (
-            <div className="segmented" role="group" aria-label="Region Callout Style">
+            <div className="segmented" role="group" aria-label="Region shape">
               <button
                 type="button"
                 data-testid="region-style-box"
+                aria-pressed={regionStyle === "box"}
                 className={`segmented-btn ${regionStyle === "box" ? "active" : ""}`}
                 onClick={() => setRegionStyle("box")}
               >
-                Rectangle 框选
+                Rectangle
               </button>
               <button
                 type="button"
                 data-testid="region-style-circle"
+                aria-pressed={regionStyle === "circle"}
                 className={`segmented-btn ${regionStyle === "circle" ? "active" : ""}`}
                 onClick={() => setRegionStyle("circle")}
               >
@@ -478,8 +472,8 @@ export function HtmlAnnotator(props: {
           )}
         </div>
 
-        <span style={{ fontSize: 12, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 6 }}>
-          <Crosshair size={13} />
+        <span className="stage-hint">
+          <Crosshair size={13} aria-hidden="true" />
           {modeHintText(mode, visibleThreads.length, variantId)}
         </span>
       </div>
@@ -542,19 +536,19 @@ export function HtmlAnnotator(props: {
 
             if (!box) return null
             const isSelected = activeThreadId === thread.id
+            const pinClass = `annotation-pin ${isSelected ? "active" : ""} ${thread.resolved ? "resolved" : ""}`
 
             if (thread.anchor.kind === "region") {
               return (
                 <div key={thread.id}>
                   <div
                     data-testid={`region-callout-${thread.pinNumber}`}
-                    className={`annotation-region ${thread.anchor.regionStyle === "circle" ? "circle" : ""} ${isSelected ? "active" : ""}`}
+                    className={`annotation-region ${thread.anchor.regionStyle === "circle" ? "circle" : ""} ${isSelected ? "active" : ""} ${thread.resolved ? "resolved" : ""}`}
                     style={{
                       left: box.left,
                       top: box.top,
                       width: box.width,
                       height: box.height,
-                      opacity: thread.resolved ? 0.45 : 1,
                     }}
                     onClick={(ev) => {
                       ev.stopPropagation()
@@ -564,7 +558,7 @@ export function HtmlAnnotator(props: {
                   <button
                     type="button"
                     data-testid={`stage-pin-${thread.pinNumber}`}
-                    className={`annotation-pin ${isSelected ? "active" : ""} ${thread.resolved ? "resolved" : ""}`}
+                    className={pinClass}
                     style={{
                       left: box.left + box.width,
                       top: box.top,
@@ -585,23 +579,19 @@ export function HtmlAnnotator(props: {
               <div key={thread.id}>
                 {isSelected && (
                   <div
+                    className="dom-focus-ring"
                     style={{
-                      position: "absolute",
                       left: box.left - 3,
                       top: box.top - 3,
                       width: box.width + 6,
                       height: box.height + 6,
-                      border: "2px solid #2563eb",
-                      borderRadius: 6,
-                      background: "rgba(37, 99, 235, 0.12)",
-                      pointerEvents: "none",
                     }}
                   />
                 )}
                 <button
                   type="button"
                   data-testid={`stage-pin-${thread.pinNumber}`}
-                  className={`annotation-pin ${isSelected ? "active" : ""} ${thread.resolved ? "resolved" : ""}`}
+                  className={pinClass}
                   style={{
                     left: Math.min(box.left + box.width - 4, box.left + Math.min(box.width, 180)),
                     top: Math.max(14, box.top + 4),
@@ -629,19 +619,21 @@ export function HtmlAnnotator(props: {
               onClick={(ev) => ev.stopPropagation()}
               onMouseDown={(ev) => ev.stopPropagation()}
             >
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--accent-blue)" }}>
-                Pin #{threads.length + 1} · {draft.summaryLabel}
+              <div className="composer-label">
+                <span className="pin-badge">{threads.length + 1}</span>
+                <span className="mono">{draft.summaryLabel}</span>
               </div>
               <textarea
                 data-testid="annotation-composer-input"
                 className="textarea"
-                placeholder="Write actionable feedback for the agent..."
+                aria-label="Comment"
+                placeholder="What should the agent change here?"
                 value={commentText}
                 onChange={(ev) => setCommentText(ev.target.value)}
                 autoFocus
               />
-              <div className="btn-row" style={{ justifyContent: "flex-end" }}>
-                <button type="button" className="btn btn-sm" onClick={() => setDraft(null)}>
+              <div className="form-actions">
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => setDraft(null)}>
                   Cancel
                 </button>
                 <button
@@ -651,7 +643,7 @@ export function HtmlAnnotator(props: {
                   disabled={submitting || commentText.trim().length === 0}
                   onClick={() => void handleSaveDraft()}
                 >
-                  {submitting ? "Saving..." : "Pin Comment"}
+                  {submitting ? "Saving…" : "Pin comment"}
                 </button>
               </div>
             </div>

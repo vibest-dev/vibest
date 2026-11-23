@@ -59,8 +59,26 @@ function MermaidBlock(props: { chart: string; index: number }) {
     let cancelled = false
     mermaid.initialize({
       startOnLoad: false,
-      theme: "default",
+      theme: "base",
       securityLevel: "strict",
+      fontFamily: "IBM Plex Sans, Helvetica Neue, Arial, sans-serif",
+      themeVariables: {
+        background: "#fdfdfb",
+        primaryColor: "#ededea",
+        primaryBorderColor: "#4d4a44",
+        primaryTextColor: "#1a1917",
+        lineColor: "#4d4a44",
+        textColor: "#1a1917",
+        actorBkg: "#ededea",
+        actorBorder: "#4d4a44",
+        actorTextColor: "#1a1917",
+        signalColor: "#1a1917",
+        signalTextColor: "#1a1917",
+        noteBkgColor: "#f7e3da",
+        noteBorderColor: "#b3401d",
+        noteTextColor: "#1a1917",
+        fontSize: "14px",
+      },
     })
     const diagramId = `mermaid-svg-${props.index}-${Date.now().toString(36)}`
     mermaid
@@ -186,23 +204,10 @@ export function MarkdownViewer(props: {
 
   return (
     <div className="markdown-container" ref={containerRef} onMouseUp={captureCurrentSelection}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "8px 12px",
-          marginBottom: 18,
-          borderRadius: 8,
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border-subtle)",
-          gap: 10,
-          flexWrap: "wrap",
-        }}
-      >
-        <span style={{ fontSize: 12.5, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 6 }}>
-          <MessageSquareQuote size={14} />
-          Highlight any phrase in the spec below to attach an inline quote comment.
+      <div className="quote-bar">
+        <span className="stage-hint">
+          <MessageSquareQuote size={14} aria-hidden="true" />
+          Select any phrase to comment on that exact quote.
         </span>
         <button
           type="button"
@@ -222,46 +227,28 @@ export function MarkdownViewer(props: {
             }
           }}
         >
-          + Quote Comment
+          Comment on selection
         </button>
       </div>
 
       {selectedQuote && (
-        <div
-          data-testid="md-quote-composer"
-          className="card"
-          style={{
-            marginBottom: 20,
-            borderColor: "var(--accent-blue)",
-            background: "var(--bg-surface)",
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--accent-blue)" }}>
-            Inline Quote Pin #{threads.length + 1}
-            {selectedQuote.blockHeading ? ` · § ${selectedQuote.blockHeading}` : ""}
+        <div data-testid="md-quote-composer" className="quote-composer">
+          <div className="composer-label">
+            <span className="pin-badge">{threads.length + 1}</span>
+            {selectedQuote.blockHeading ? <span>{selectedQuote.blockHeading}</span> : null}
           </div>
-          <blockquote
-            style={{
-              margin: 0,
-              padding: "6px 10px",
-              borderLeft: "3px solid var(--accent-amber)",
-              background: "var(--bg-app)",
-              fontSize: 12.5,
-              color: "var(--text-secondary)",
-            }}
-          >
-            “{selectedQuote.quote}”
-          </blockquote>
+          <blockquote className="quote-excerpt">“{selectedQuote.quote}”</blockquote>
           <textarea
             data-testid="md-quote-input"
             className="textarea"
-            placeholder="Add review note anchored to this exact quote..."
+            aria-label="Comment on quote"
+            placeholder="What should change in this passage?"
             value={commentBody}
             onChange={(ev) => setCommentBody(ev.target.value)}
             autoFocus
           />
-          <div className="btn-row" style={{ justifyContent: "flex-end" }}>
-            <button type="button" className="btn btn-sm" onClick={() => setSelectedQuote(null)}>
+          <div className="form-actions">
+            <button type="button" className="btn btn-quiet btn-sm" onClick={() => setSelectedQuote(null)}>
               Cancel
             </button>
             <button
@@ -271,7 +258,7 @@ export function MarkdownViewer(props: {
               disabled={saving || commentBody.trim().length === 0}
               onClick={() => void handleSubmitQuoteComment()}
             >
-              {saving ? "Saving..." : "Attach Quote Comment"}
+              {saving ? "Saving…" : "Pin comment"}
             </button>
           </div>
         </div>

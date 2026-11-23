@@ -1,16 +1,9 @@
-import { Copy, Terminal } from "lucide-react"
+import { Copy } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import type { SessionRecord, SessionStatus, Task } from "../schema.ts"
-
-const SESSION_BADGE_MAP: Record<SessionStatus, string> = {
-  running: "badge-green",
-  blocked: "badge-red",
-  idle: "badge-neutral",
-  ended: "badge-neutral",
-}
-
 import { hubApi } from "./api.ts"
+import { SessionStatusText } from "./labels.tsx"
 
 export function SessionsView(props: { projectId: string; refreshSignal: number; onMutated: () => Promise<void> }) {
   const { projectId, refreshSignal, onMutated } = props
@@ -45,99 +38,99 @@ export function SessionsView(props: { projectId: string; refreshSignal: number; 
 
   return (
     <div className="page-scroll" data-testid="sessions-view">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Sessions &amp; Prompt Snapshot</h1>
-          <p className="page-subtitle">
-            Live harness sessions grouped by Task + compaction-proof Session Facts markdown block
-          </p>
-        </div>
-      </div>
+      <div className="page">
+        <header className="page-header">
+          <div>
+            <h1 className="page-title">Sessions</h1>
+            <p className="page-lede">
+              Harness sessions by workstream, and the session facts block every prompt carries through compaction.
+            </p>
+          </div>
+        </header>
 
-      <div className="card" style={{ marginBottom: 22 }}>
-        <div className="drawer-section-title">
-          <span>
-            <Terminal size={13} style={{ verticalAlign: "middle", marginRight: 6 }} />
-            Compaction-Proof Session Facts Block
-          </span>
-          <button
-            type="button"
-            data-testid="copy-session-facts-btn"
-            className="btn btn-sm"
-            onClick={() => {
-              void navigator.clipboard?.writeText(factsMarkdown)
-              setCopied(true)
-              setTimeout(() => setCopied(false), 1500)
-            }}
-          >
-            <Copy size={12} /> {copied ? "Copied!" : "Copy Block"}
-          </button>
-        </div>
-        <pre className="code-block" data-testid="sessions-facts-markdown" style={{ margin: 0 }}>
-          {factsMarkdown}
-        </pre>
-      </div>
+        <section className="section" aria-labelledby="sessions-table-title">
+          <div className="section-head">
+            <h2 className="section-title" id="sessions-table-title">
+              Registered sessions
+              <span className="section-count">{sessions.length}</span>
+            </h2>
+          </div>
+          <table className="table">
+            <thead>
+              <tr>
+                <th scope="col">Session</th>
+                <th scope="col">Harness</th>
+                <th scope="col">Workstream</th>
+                <th scope="col">Directory</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((s) => (
+                <tr key={s.id} data-testid={`session-row-${s.id}`}>
+                  <td>
+                    <div className="session-name">{s.name}</div>
+                    <div className="session-id mono">{s.id}</div>
+                    {s.blockedReason && <div className="session-reason">{s.blockedReason}</div>}
+                  </td>
+                  <td>
+                    <div>{s.harness}</div>
+                    {s.model && <div className="session-id mono">{s.model}</div>}
+                  </td>
+                  <td>{s.taskId ? (taskTitleById.get(s.taskId) ?? s.taskId) : "Unassigned"}</td>
+                  <td>
+                    <span className="session-dir mono">{s.directory}</span>
+                  </td>
+                  <td>
+                    <div className="btn-row">
+                      <SessionStatusText status={s.status} />
+                      <select
+                        className="select status-select"
+                        aria-label={`Status of ${s.name}`}
+                        value={s.status}
+                        onChange={(ev) => {
+                          const val = ev.target.value
 
-      <div className="card">
-        <div className="drawer-section-title">
-          <span>Registered Project Sessions ({sessions.length})</span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              data-testid={`session-row-${s.id}`}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "12px 14px",
-                borderRadius: 8,
-                background: "var(--bg-elevated)",
-                border: "1px solid var(--border-subtle)",
-                gap: 14,
-                flexWrap: "wrap",
+                          if (val === "running" || val === "idle" || val === "blocked" || val === "ended") {
+                            void handleStatusChange(s.id, val)
+                          }
+                        }}
+                      >
+                        <option value="running">running</option>
+                        <option value="idle">idle</option>
+                        <option value="blocked">blocked</option>
+                        <option value="ended">ended</option>
+                      </select>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+
+        <section className="facts" aria-labelledby="sessions-facts-title">
+          <div className="facts-head">
+            <h2 className="facts-title" id="sessions-facts-title">
+              Session facts block
+            </h2>
+            <button
+              type="button"
+              data-testid="copy-session-facts-btn"
+              className="btn btn-sm"
+              onClick={() => {
+                void navigator.clipboard?.writeText(factsMarkdown)
+                setCopied(true)
+                setTimeout(() => setCopied(false), 1500)
               }}
             >
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                <div className="btn-row">
-                  <strong style={{ fontSize: 14 }}>{s.name}</strong>
-                  <code>{s.id}</code>
-                  <span className="badge badge-blue">{s.harness}</span>
-                  {s.model && <span className="badge badge-neutral">{s.model}</span>}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                  Workstream: {s.taskId ? (taskTitleById.get(s.taskId) ?? s.taskId) : "Unassigned"} · Dir:{" "}
-                  <code>{s.directory}</code>
-                </div>
-                {s.blockedReason && (
-                  <div style={{ fontSize: 12, color: "var(--accent-red)" }}>Blocked: {s.blockedReason}</div>
-                )}
-              </div>
-
-              <div className="btn-row">
-                <span className={`badge ${SESSION_BADGE_MAP[s.status]}`}>{s.status}</span>
-                <select
-                  className="input"
-                  style={{ width: 120, padding: "4px 8px" }}
-                  value={s.status}
-                  onChange={(ev) => {
-                    const val = ev.target.value
-
-                    if (val === "running" || val === "idle" || val === "blocked" || val === "ended") {
-                      void handleStatusChange(s.id, val)
-                    }
-                  }}
-                >
-                  <option value="running">running</option>
-                  <option value="idle">idle</option>
-                  <option value="blocked">blocked</option>
-                  <option value="ended">ended</option>
-                </select>
-              </div>
-            </div>
-          ))}
-        </div>
+              <Copy size={12} aria-hidden="true" /> {copied ? "Copied" : "Copy block"}
+            </button>
+          </div>
+          <pre className="code-block" data-testid="sessions-facts-markdown">
+            {factsMarkdown}
+          </pre>
+        </section>
       </div>
     </div>
   )

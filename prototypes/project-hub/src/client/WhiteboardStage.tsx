@@ -1,5 +1,5 @@
 import { Excalidraw, convertToExcalidrawElements, restoreElements } from "@excalidraw/excalidraw"
-import { CheckCircle2, Layers, MessageSquarePlus, PlusCircle, Sparkles } from "lucide-react"
+import { Layers, MessageSquarePlus, Network, PlusCircle, Repeat } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { Artifact, CommentAnchor, CommentThread } from "../schema.ts"
@@ -26,9 +26,9 @@ interface RestoredSceneState {
 function saveStatusText(saveState: WhiteboardSaveStatus): string {
   switch (saveState) {
     case "saved":
-      return "Auto-saved (.excalidraw)"
+      return "Saved"
     case "saving":
-      return "Saving scene..."
+      return "Saving…"
     case "dirty":
       return "Unsaved edits"
   }
@@ -193,7 +193,7 @@ export function WhiteboardStage(props: {
     const current = apiRef.current.getSceneElements()
     const index = sceneNodes.length + 1
     const boxId = `node-custom-${Date.now().toString(36)}`
-    const labelText = `Review Gate #${index}`
+    const labelText = `Review gate ${index}`
     const x = 435
     const y = 390 + ((index - 1) % 3) * 96
 
@@ -205,8 +205,8 @@ export function WhiteboardStage(props: {
         y,
         width: 270,
         height: 82,
-        backgroundColor: "#e0f2fe",
-        strokeColor: "#0284c7",
+        backgroundColor: "#ededea",
+        strokeColor: "#1a1917",
         fillStyle: "solid",
         label: {
           text: labelText,
@@ -295,19 +295,8 @@ export function WhiteboardStage(props: {
   )
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "8px 16px",
-          background: "var(--bg-elevated)",
-          borderBottom: "1px solid var(--border-subtle)",
-          gap: 10,
-          flexWrap: "wrap",
-        }}
-      >
+    <div className="stage-column">
+      <div className="stage-toolbar">
         <div className="btn-row">
           <button
             type="button"
@@ -315,13 +304,14 @@ export function WhiteboardStage(props: {
             className="btn btn-sm"
             onClick={() => handleAddDiagramNode()}
           >
-            <PlusCircle size={13} /> Add Architecture Node
+            <PlusCircle size={14} aria-hidden="true" /> Add node
           </button>
 
           <button
             type="button"
             data-testid="wb-pin-comment-btn"
             className="btn btn-primary btn-sm"
+            aria-expanded={showPinComposer}
             onClick={() => {
               if (selectedIds.length === 0 && !manualNodeId && sceneNodes[0]) {
                 setManualNodeId(sceneNodes[0].id)
@@ -330,67 +320,55 @@ export function WhiteboardStage(props: {
               setShowPinComposer((v) => !v)
             }}
           >
-            <MessageSquarePlus size={13} />
-            {selectedIds.length > 0
-              ? `Pin Comment to ${selectedIds.length} Selected Element(s)`
-              : "Pin Comment to Element"}
+            <MessageSquarePlus size={14} aria-hidden="true" />
+            {selectedIds.length > 0 ? `Comment on ${selectedIds.length} selected` : "Comment on a shape"}
           </button>
 
-          <div className="segmented" role="group" aria-label="Diagram Generator Templates">
+          <div className="segmented" role="group" aria-label="Replace with a preset diagram">
             <button
               type="button"
               className="segmented-btn"
               onClick={() => void handleApplyTemplate("vibest-architecture")}
-              title="Generate full Vibest + Hub topology"
+              title="Replace the canvas with the Vibest and Hub topology"
             >
-              <Sparkles size={12} /> Topology
+              <Network size={13} aria-hidden="true" /> Topology
             </button>
             <button
               type="button"
               className="segmented-btn"
               onClick={() => void handleApplyTemplate("event-pipeline")}
-              title="Generate Append-Only Event Pipeline diagram"
+              title="Replace the canvas with the append-only event pipeline"
             >
-              <Layers size={12} /> Ledger Flow
+              <Layers size={13} aria-hidden="true" /> Ledger flow
             </button>
             <button
               type="button"
               className="segmented-btn"
               onClick={() => void handleApplyTemplate("multi-agent-review")}
-              title="Generate Multi-Agent Review Loop diagram"
+              title="Replace the canvas with the multi-agent review loop"
             >
-              Review Loop
+              <Repeat size={13} aria-hidden="true" /> Review loop
             </button>
           </div>
         </div>
 
         <span
           data-testid="wb-save-indicator"
-          className={`badge ${saveState === "saved" ? "badge-green" : "badge-urgent"}`}
+          className={`save-state ${saveState === "saved" ? "" : "is-pending"}`}
+          role="status"
         >
-          <CheckCircle2 size={12} />
           {saveStatusText(saveState)}
         </span>
       </div>
 
       {showPinComposer && (
-        <div
-          data-testid="wb-comment-composer"
-          style={{
-            padding: "10px 16px",
-            background: "var(--bg-surface)",
-            borderBottom: "1px solid var(--accent-blue)",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
-          <label style={{ fontSize: 12, fontWeight: 600 }}>Target Element:</label>
+        <div data-testid="wb-comment-composer" className="inline-composer">
+          <label htmlFor="wb-element-select">Shape</label>
           <select
+            id="wb-element-select"
             data-testid="wb-element-select"
-            className="input"
-            style={{ width: 260, padding: "5px 8px" }}
+            className="select"
+            style={{ width: 260 }}
             value={selectedIds[0] ?? manualNodeId}
             onChange={(ev) => {
               const chosen = ev.target.value
@@ -406,7 +384,7 @@ export function WhiteboardStage(props: {
           >
             {sceneNodes.map((n) => (
               <option key={n.id} value={n.id}>
-                {n.label} ({n.id})
+                {n.label}
               </option>
             ))}
           </select>
@@ -414,8 +392,9 @@ export function WhiteboardStage(props: {
           <input
             data-testid="wb-comment-input"
             className="input"
-            style={{ flex: 1, minWidth: 220, padding: "6px 10px" }}
-            placeholder="Comment anchored to selected Excalidraw element..."
+            aria-label="Comment"
+            style={{ flex: 1, minWidth: 220, width: "auto" }}
+            placeholder="Comment on the selected shape"
             value={pinBody}
             onChange={(ev) => setPinBody(ev.target.value)}
           />
@@ -426,9 +405,9 @@ export function WhiteboardStage(props: {
             disabled={pinBody.trim().length === 0 || effectiveTargetIds.length === 0}
             onClick={() => void handleSubmitElementComment()}
           >
-            Attach Element Pin
+            Pin comment
           </button>
-          <button type="button" className="btn btn-sm" onClick={() => setShowPinComposer(false)}>
+          <button type="button" className="btn btn-quiet btn-sm" onClick={() => setShowPinComposer(false)}>
             Cancel
           </button>
         </div>

@@ -1,4 +1,4 @@
-import { BookOpen, Eye, FilePlus2, Save } from "lucide-react"
+import { FilePlus2, Save } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { renderSafeMarkdownHtml } from "../markdown-safe.ts"
@@ -45,7 +45,7 @@ export function KnowledgeView(props: { projectId: string; refreshSignal: number 
 
     try {
       await hubApi.saveKnowledgeFile(projectId, selectedPath, content)
-      setSavedBanner(`Saved ${selectedPath}`)
+      setSavedBanner("Saved")
       await loadFiles()
       setTimeout(() => setSavedBanner(null), 2000)
     } finally {
@@ -77,113 +77,117 @@ export function KnowledgeView(props: { projectId: string; refreshSignal: number 
 
   return (
     <div className="page-scroll" data-testid="knowledge-view">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Project Knowledge</h1>
-          <p className="page-subtitle">Browse and edit isolated project preferences.md, memories/, and docs/</p>
-        </div>
-        <button
-          type="button"
-          data-testid="new-knowledge-file-btn"
-          className="btn"
-          onClick={() => setShowNewInput((v) => !v)}
-        >
-          <FilePlus2 size={14} /> New Memory / Doc
-        </button>
-      </div>
-
-      {showNewInput && (
-        <div className="card" style={{ marginBottom: 16, flexDirection: "row", alignItems: "center" }}>
-          <input
-            className="input"
-            placeholder="memories/new-note.md or docs/design/topic.md"
-            value={newPathInput}
-            onChange={(ev) => setNewPathInput(ev.target.value)}
-          />
-          <button type="button" className="btn btn-primary" onClick={() => void handleCreateFile()}>
-            Create
-          </button>
-        </div>
-      )}
-
-      <div className="knowledge-layout">
-        <div className="card" style={{ gap: 6, alignContent: "flex-start" }}>
-          <div className="drawer-section-title">
-            <span>Files ({files.length})</span>
+      <div className="page">
+        <header className="page-header">
+          <div>
+            <h1 className="page-title">Knowledge</h1>
+            <p className="page-lede">This project’s preferences.md, memories/, and docs/. Edits stay inside the hub.</p>
           </div>
-          {files.map((file) => (
-            <button
-              key={file.relativePath}
-              type="button"
-              data-testid={`knowledge-file-${file.relativePath}`}
-              className={`rail-nav-btn ${selectedPath === file.relativePath ? "active" : ""}`}
-              onClick={() => setSelectedPath(file.relativePath)}
-            >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{file.relativePath}</span>
-              <span className="badge badge-neutral">{file.category}</span>
+          <button
+            type="button"
+            data-testid="new-knowledge-file-btn"
+            className="btn"
+            aria-expanded={showNewInput}
+            onClick={() => setShowNewInput((v) => !v)}
+          >
+            <FilePlus2 size={15} aria-hidden="true" /> New file
+          </button>
+        </header>
+
+        {showNewInput && (
+          <div className="new-file-row">
+            <input
+              className="input"
+              aria-label="New file path"
+              placeholder="memories/new-note.md or docs/design/topic.md"
+              value={newPathInput}
+              onChange={(ev) => setNewPathInput(ev.target.value)}
+            />
+            <button type="button" className="btn btn-primary" onClick={() => void handleCreateFile()}>
+              Create
             </button>
-          ))}
-        </div>
+          </div>
+        )}
 
-        <div className="card" style={{ flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-            <div className="btn-row">
-              <BookOpen size={15} />
-              <strong>{selectedPath}</strong>
-              {savedBanner && <span className="badge badge-green">{savedBanner}</span>}
-            </div>
+        <div className="knowledge-layout">
+          <nav className="file-list" aria-labelledby="knowledge-files-title">
+            <h2 className="file-list-title" id="knowledge-files-title">
+              Files <span className="section-count">{files.length}</span>
+            </h2>
+            {files.map((file) => (
+              <button
+                key={file.relativePath}
+                type="button"
+                data-testid={`knowledge-file-${file.relativePath}`}
+                aria-current={selectedPath === file.relativePath ? "true" : undefined}
+                className={`file-btn ${selectedPath === file.relativePath ? "active" : ""}`}
+                onClick={() => setSelectedPath(file.relativePath)}
+              >
+                <span className="file-path">{file.relativePath}</span>
+                <span className="file-category">{file.category}</span>
+              </button>
+            ))}
+          </nav>
 
-            <div className="btn-row">
-              <div className="segmented">
+          <section className="editor-pane" aria-labelledby="knowledge-editor-title">
+            <div className="editor-head">
+              <h2 className="editor-title" id="knowledge-editor-title">
+                {selectedPath}
+                {savedBanner && (
+                  <span className="status status-ok" role="status">
+                    {savedBanner}
+                  </span>
+                )}
+              </h2>
+
+              <div className="btn-row">
+                <div className="segmented" role="group" aria-label="Editor mode">
+                  <button
+                    type="button"
+                    aria-pressed={mode === "edit"}
+                    className={`segmented-btn ${mode === "edit" ? "active" : ""}`}
+                    onClick={() => setMode("edit")}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={mode === "preview"}
+                    className={`segmented-btn ${mode === "preview" ? "active" : ""}`}
+                    onClick={() => setMode("preview")}
+                  >
+                    Preview
+                  </button>
+                </div>
                 <button
                   type="button"
-                  className={`segmented-btn ${mode === "edit" ? "active" : ""}`}
-                  onClick={() => setMode("edit")}
+                  data-testid="save-knowledge-btn"
+                  className="btn btn-primary btn-sm"
+                  disabled={saving}
+                  onClick={() => void handleSave()}
                 >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  className={`segmented-btn ${mode === "preview" ? "active" : ""}`}
-                  onClick={() => setMode("preview")}
-                >
-                  <Eye size={12} /> Preview
+                  <Save size={13} aria-hidden="true" /> {saving ? "Saving…" : "Save"}
                 </button>
               </div>
-              <button
-                type="button"
-                data-testid="save-knowledge-btn"
-                className="btn btn-primary btn-sm"
-                disabled={saving}
-                onClick={() => void handleSave()}
-              >
-                <Save size={13} /> {saving ? "Saving..." : "Save File"}
-              </button>
             </div>
-          </div>
 
-          {mode === "edit" ? (
-            <textarea
-              data-testid="knowledge-editor-textarea"
-              className="textarea"
-              style={{
-                flex: 1,
-                minHeight: 440,
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                fontSize: 12.5,
-              }}
-              value={content}
-              onChange={(ev) => setContent(ev.target.value)}
-            />
-          ) : (
-            <div
-              className="markdown-body"
-              style={{ padding: "8px 4px" }}
-              dangerouslySetInnerHTML={{
-                __html: renderSafeMarkdownHtml(content),
-              }}
-            />
-          )}
+            {mode === "edit" ? (
+              <textarea
+                data-testid="knowledge-editor-textarea"
+                className="textarea editor-textarea"
+                aria-label={`Contents of ${selectedPath}`}
+                value={content}
+                onChange={(ev) => setContent(ev.target.value)}
+              />
+            ) : (
+              <div
+                className="markdown-body"
+                dangerouslySetInnerHTML={{
+                  __html: renderSafeMarkdownHtml(content),
+                }}
+              />
+            )}
+          </section>
         </div>
       </div>
     </div>

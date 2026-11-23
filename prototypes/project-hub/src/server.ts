@@ -736,6 +736,7 @@ export async function createHubServer(options?: {
             headers: {
               "content-type": contentTypeForPath(candidateDistPath),
               "cache-control": "no-store",
+              ...(requestedDistFile.startsWith("fonts/") && { "access-control-allow-origin": "*" }),
             },
           })
         }

@@ -49,88 +49,150 @@ const DEMO_HTML_VARIANT_A = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Option A — Compact Sidebar Triage</title>
+  <title>Option A: Split queue</title>
   <style>
-    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; }
-    body { margin: 0; background: #0f172a; color: #f8fafc; display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
-    aside { background: #1e293b; border-right: 1px solid #334155; padding: 20px 16px; display: flex; flex-direction: column; gap: 14px; }
-    .brand { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; }
-    .pill { background: #ef4444; color: white; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
-    .nav-item { padding: 9px 12px; border-radius: 8px; font-size: 13px; color: #cbd5e1; background: rgba(255,255,255,0.03); cursor: pointer; display: flex; justify-content: space-between; }
-    .nav-item.active { background: #2563eb; color: white; font-weight: 600; }
-    main { padding: 28px 32px; display: flex; flex-direction: column; gap: 22px; }
-    .header-bar { display: flex; justify-content: space-between; align-items: center; }
-    .header-bar h1 { margin: 0; font-size: 20px; }
-    .btn-row { display: flex; gap: 10px; }
-    button { border: none; border-radius: 8px; padding: 9px 15px; font-size: 13px; font-weight: 600; cursor: pointer; }
-    .btn-secondary { background: #334155; color: #e2e8f0; }
-    .btn-primary { background: #10b981; color: #052e16; }
-    .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-    .metric-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
-    .metric-label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; }
-    .metric-value { font-size: 26px; font-weight: 700; margin-top: 6px; color: #f1f5f9; }
-    .queue-card { background: #1e293b; border: 1px solid #475569; border-radius: 12px; padding: 18px; display: flex; justify-content: space-between; align-items: center; }
-    .queue-meta { display: flex; flex-direction: column; gap: 4px; }
-    .queue-tag { font-size: 11px; color: #fbbf24; font-weight: 600; }
-    .chart-box { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px dashed #475569; border-radius: 12px; padding: 20px; height: 150px; display: flex; align-items: flex-end; gap: 14px; }
-    .bar { flex: 1; background: linear-gradient(180deg, #38bdf8, #2563eb); border-radius: 6px 6px 0 0; position: relative; }
+    @font-face { font-family: "IBM Plex Sans"; font-weight: 400 700; font-display: swap; src: url("/fonts/ibm-plex-sans-latin.woff2") format("woff2"); }
+    @font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: url("/fonts/ibm-plex-mono-400-latin.woff2") format("woff2"); }
+    :root { --ground: #f6f6f3; --rail: #ededea; --sheet: #fdfdfb; --hover: #e6e6e2; --rule: #deddd8; --rule-strong: #c4c2bb; --ink: #1a1917; --ink-2: #4d4a44; --ink-3: #66625a; --signal: #b3401d; --signal-wash: #f7e3da; --ok: #2d6a3e; --warn: #8a5800; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body { background: var(--ground); color: var(--ink); font: 14px/1.5 "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+    h1, h2, h3 { margin: 0; text-wrap: balance; }
+    p { margin: 0; text-wrap: pretty; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 12px; }
+    ::selection { background: var(--signal-wash); }
+    button { font: inherit; cursor: pointer; border-radius: 6px; padding: 7px 14px; font-weight: 600; border: 1px solid var(--rule-strong); background: var(--sheet); color: var(--ink); }
+    button:hover { background: var(--hover); }
+    button:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+    .primary { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+    .primary:hover { background: var(--ink-2); }
+    .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .attention { color: var(--signal); }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .muted { color: var(--ink-3); }
+    body { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+    aside { background: var(--rail); border-right: 1px solid var(--rule); padding: 20px 12px; display: flex; flex-direction: column; gap: 20px; }
+    .brand { display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font-weight: 700; }
+    .needs { color: var(--signal); font-size: 12px; font-weight: 700; }
+    nav { display: flex; flex-direction: column; gap: 2px; }
+    .nav-item { display: flex; justify-content: space-between; padding: 8px 10px; border-radius: 6px; color: var(--ink-2); cursor: pointer; }
+    .nav-item:hover { background: var(--hover); color: var(--ink); }
+    .nav-item.active { background: var(--sheet); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgb(26 25 23 / 0.06); }
+    .nav-item .count { color: var(--ink-3); font-size: 12px; }
+    main { padding: 32px 40px 48px; display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+    header { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--ink); flex-wrap: wrap; }
+    header h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.015em; }
+    header p { margin-top: 4px; color: var(--ink-2); }
+    .actions { display: flex; gap: 8px; }
+    #telemetry-strip { display: flex; gap: 32px; margin: 0; flex-wrap: wrap; }
+    #telemetry-strip div { display: flex; flex-direction: column-reverse; gap: 2px; }
+    #telemetry-strip dt { color: var(--ink-2); font-size: 12px; }
+    #telemetry-strip dd { margin: 0; font-size: 18px; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 12px; font-weight: 600; color: var(--ink-2); padding: 8px 10px; border-bottom: 1px solid var(--ink); }
+    td { padding: 12px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+    td.mono, td.num, td .status { white-space: nowrap; }
+    tbody tr { cursor: pointer; }
+    tbody tr:hover td { background: var(--sheet); }
+    tbody tr.selected td { background: var(--sheet); }
+    tbody tr.selected td:first-child { color: var(--signal); font-weight: 700; }
+    .key { width: 40px; color: var(--ink-3); }
+    .item-title { font-weight: 600; }
+    .item-sub { color: var(--ink-2); margin-top: 2px; }
+    .num { text-align: right; }
+    .detail { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 32px; }
+    .detail h2 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+    .diff { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+    .diff li { display: grid; grid-template-columns: minmax(0, 1fr) 56px 56px; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--rule); }
+    .add { color: var(--ok); text-align: right; }
+    .del { color: var(--signal); text-align: right; }
+    .verdicts { list-style: none; margin: 0; padding: 0; }
+    .verdicts li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--rule); }
+    .hint { color: var(--ink-3); font-size: 12px; }
   </style>
 </head>
 <body>
   <aside id="compact-sidebar">
     <div class="brand">
-      <span>vibest mod</span>
-      <span class="pill" id="sidebar-needs-badge">3 Needs You</span>
+      <span>vibest</span>
+      <span class="needs" id="sidebar-needs-badge">3 need you</span>
     </div>
-    <div class="nav-item active" data-nav="triage"><span>Needs You Queue</span><span>3</span></div>
-    <div class="nav-item" data-nav="workstreams"><span>Active Workstreams</span><span>3</span></div>
-    <div class="nav-item" data-nav="sessions"><span>Live Harnesses</span><span>4</span></div>
-    <div class="nav-item" data-nav="knowledge"><span>Project Memory</span><span>6</span></div>
+    <nav>
+      <div class="nav-item active" data-nav="triage"><span>Needs you</span><span class="count">3</span></div>
+      <div class="nav-item" data-nav="workstreams"><span>Workstreams</span><span class="count">3</span></div>
+      <div class="nav-item" data-nav="sessions"><span>Sessions</span><span class="count">4</span></div>
+      <div class="nav-item" data-nav="knowledge"><span>Memory</span><span class="count">6</span></div>
+    </nav>
   </aside>
   <main>
-    <div class="header-bar">
+    <header>
       <div>
-        <h1>Option A: Compact Sidebar Triage</h1>
-        <p style="margin:4px 0 0;color:#94a3b8;font-size:13px;">Single-column queue optimized for rapid keyboard j/k sign-off</p>
+        <h1>Needs you</h1>
+        <p>Move with j and k, open with Enter. Gates and the head commit sit beside each item.</p>
       </div>
-      <div class="btn-row">
-        <button class="btn-secondary" id="batch-defer-btn">Defer Non-Blocking</button>
-        <button class="btn-primary" id="approve-merge-btn">Approve &amp; Merge Ready</button>
+      <div class="actions">
+        <button id="batch-defer-btn">Defer non-blocking</button>
+        <button class="primary" id="approve-merge-btn">Approve and merge</button>
       </div>
-    </div>
+    </header>
 
-    <section class="metrics-grid" id="telemetry-strip">
-      <div class="metric-card">
-        <div class="metric-label">Running Harnesses</div>
-        <div class="metric-value">3 / 3 max</div>
+    <dl id="telemetry-strip">
+      <div><dt>Harness slots in use</dt><dd>3 of 3</dd></div>
+      <div><dt>Waiting on review</dt><dd>3</dd></div>
+      <div><dt>Median turn</dt><dd>42 s</dd></div>
+    </dl>
+
+    <table id="triage-queue">
+      <thead>
+        <tr><th class="key">Key</th><th>Item</th><th>Head</th><th>Gates</th><th class="num">Waiting</th></tr>
+      </thead>
+      <tbody>
+        <tr class="selected" id="pr-613-gate-card">
+          <td class="key mono">1</td>
+          <td><div class="item-title">Team CLI roster and slot guard</div><div class="item-sub">PR #613 · ready to merge into main</div><div class="item-sub mono">feat/team-cli-roster</div></td>
+          <td class="mono">8f41c92b</td>
+          <td><span class="status ok">4 of 4 passed</span></td>
+          <td class="num">18 min</td>
+        </tr>
+        <tr id="queue-row-spec">
+          <td class="key mono">2</td>
+          <td><div class="item-title">Artifact hub contract</div><div class="item-sub">Spec · 2 open decisions</div><div class="item-sub mono">feat/project-hub-prototype</div></td>
+          <td class="mono">4c07e1aa</td>
+          <td><span class="status muted">No gates</span></td>
+          <td class="num">1 h 05</td>
+        </tr>
+        <tr id="queue-row-racknerd">
+          <td class="key mono">3</td>
+          <td><div class="item-title">racknerd-outbox-probe is blocked</div><div class="item-sub">Asks to add a known_hosts entry for 198.51.100.42</div><div class="item-sub mono">feat/outbox-reconnect</div></td>
+          <td class="mono">b19d3f60</td>
+          <td><span class="status attention">Blocked</span></td>
+          <td class="num">2 h 40</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <section class="detail">
+      <div>
+        <h2>feat/team-cli-roster at 8f41c92b</h2>
+        <ul class="diff" id="diff-summary">
+          <li><span class="mono">packages/cli/src/commands/run.ts</span><span class="mono add">+142</span><span class="mono del">−38</span></li>
+          <li><span class="mono">packages/core/src/session/slots.ts</span><span class="mono add">+96</span><span class="mono del">−4</span></li>
+          <li><span class="mono">tools/e2e/checks/team.ts</span><span class="mono add">+210</span><span class="mono del">−0</span></li>
+        </ul>
+        <p class="hint" style="margin-top:10px">Sign-off records the verdict and runs gh pr merge 613 with --match-head-commit 8f41c92b.</p>
+        <p style="margin-top:14px"><button id="card-signoff-btn">Sign off PR #613</button></p>
       </div>
-      <div class="metric-card">
-        <div class="metric-label">Pending Reviews</div>
-        <div class="metric-value" style="color:#fbbf24;">3 Artifacts</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Median Turn Latency</div>
-        <div class="metric-value" style="color:#34d399;">42s</div>
+      <div>
+        <h2>Recent verdicts</h2>
+        <ul class="verdicts" id="verdict-log">
+          <li><span>Memory index cleanup</span><span class="status ok">Approved</span></li>
+          <li><span>Hook re-entry guard</span><span class="status warn">Changes</span></li>
+          <li><span>Plugin rescan loop</span><span class="status ok">Approved</span></li>
+        </ul>
       </div>
     </section>
-
-    <div class="queue-card" id="pr-613-gate-card">
-      <div class="queue-meta">
-        <span class="queue-tag">VERIFY GATE · PR #613</span>
-        <strong style="font-size:15px;">Team CLI Roster &amp; Concurrency Slot Guard</strong>
-        <span style="font-size:13px;color:#94a3b8;">All 4 deterministic gates green · Ready for merge into main</span>
-      </div>
-      <button class="btn-primary" id="card-signoff-btn">Sign Off PR #613</button>
-    </div>
-
-    <div class="chart-box" id="throughput-chart">
-      <div class="bar" style="height:45%" title="Mon"></div>
-      <div class="bar" style="height:68%" title="Tue"></div>
-      <div class="bar" style="height:52%" title="Wed"></div>
-      <div class="bar" style="height:88%" title="Thu"></div>
-      <div class="bar" style="height:95%" title="Fri"></div>
-      <div class="bar" style="height:74%" title="Sat"></div>
-    </div>
   </main>
   <script>
     document.querySelectorAll('.nav-item').forEach((el) => {
@@ -138,6 +200,14 @@ const DEMO_HTML_VARIANT_A = `<!DOCTYPE html>
         document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
         el.classList.add('active');
       });
+    });
+    const rows = Array.from(document.querySelectorAll('#triage-queue tbody tr'));
+    const select = (row) => { rows.forEach((r) => r.classList.remove('selected')); row.classList.add('selected'); };
+    rows.forEach((row) => row.addEventListener('click', () => select(row)));
+    document.addEventListener('keydown', (ev) => {
+      const index = rows.findIndex((r) => r.classList.contains('selected'));
+      if (ev.key === 'j' && rows[index + 1]) select(rows[index + 1]);
+      if (ev.key === 'k' && rows[index - 1]) select(rows[index - 1]);
     });
   </script>
 </body>
@@ -147,55 +217,119 @@ const DEMO_HTML_VARIANT_B = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Option B — Split Inspector Drawer</title>
+  <title>Option B: Ledger stream</title>
   <style>
-    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; }
-    body { margin: 0; background: #f8fafc; color: #0f172a; display: grid; grid-template-rows: 56px 1fr; min-height: 100vh; }
-    header { background: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; }
-    .tabs { display: flex; gap: 8px; }
-    .tab { padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; background: #f1f5f9; color: #475569; cursor: pointer; }
-    .tab.active { background: #0f172a; color: #ffffff; }
-    .workspace { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; padding: 24px; }
-    .panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 14px; padding: 20px; box-shadow: 0 1px 3px rgba(15,23,42,0.05); }
-    .lane-item { padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px; margin-top: 12px; display: flex; justify-content: space-between; align-items: center; }
-    .badge-warn { background: #fef3c7; color: #b45309; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
-    .cta-approve { background: #2563eb; color: white; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    @font-face { font-family: "IBM Plex Sans"; font-weight: 400 700; font-display: swap; src: url("/fonts/ibm-plex-sans-latin.woff2") format("woff2"); }
+    @font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: url("/fonts/ibm-plex-mono-400-latin.woff2") format("woff2"); }
+    :root { --ground: #f6f6f3; --rail: #ededea; --sheet: #fdfdfb; --hover: #e6e6e2; --rule: #deddd8; --rule-strong: #c4c2bb; --ink: #1a1917; --ink-2: #4d4a44; --ink-3: #66625a; --signal: #b3401d; --signal-wash: #f7e3da; --ok: #2d6a3e; --warn: #8a5800; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body { background: var(--ground); color: var(--ink); font: 14px/1.5 "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+    h1, h2, h3 { margin: 0; text-wrap: balance; }
+    p { margin: 0; text-wrap: pretty; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 12px; }
+    ::selection { background: var(--signal-wash); }
+    button { font: inherit; cursor: pointer; border-radius: 6px; padding: 7px 14px; font-weight: 600; border: 1px solid var(--rule-strong); background: var(--sheet); color: var(--ink); }
+    button:hover { background: var(--hover); }
+    button:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+    .primary { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+    .primary:hover { background: var(--ink-2); }
+    .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .attention { color: var(--signal); }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .muted { color: var(--ink-3); }
+    body { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
+    .topbar { display: flex; align-items: center; gap: 20px; padding: 12px 24px; border-bottom: 1px solid var(--rule); background: var(--sheet); flex-wrap: wrap; }
+    .topbar strong { font-size: 15px; }
+    .command { flex: 1; max-width: 420px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule-strong); border-radius: 6px; padding: 6px 10px; background: var(--ground); }
+    .command input { flex: 1; border: none; background: transparent; font: inherit; color: var(--ink); outline: none; caret-color: var(--signal); }
+    .command input::placeholder { color: var(--ink-3); }
+    .command kbd { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 12px; color: var(--ink-2); border: 1px solid var(--rule); border-radius: 4px; padding: 0 5px; }
+    .tabs { display: flex; gap: 2px; background: var(--rail); border: 1px solid var(--rule); border-radius: 8px; padding: 3px; }
+    .tab { border: 1px solid transparent; background: transparent; padding: 5px 11px; border-radius: 5px; font-size: 12px; color: var(--ink-2); }
+    .tab.active { background: var(--sheet); border-color: var(--rule); color: var(--ink); }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 340px; min-height: 0; }
+    #left-lane-list { padding: 28px 32px; }
+    #left-lane-list h2 { font-size: 18px; font-weight: 600; padding-bottom: 10px; border-bottom: 1px solid var(--ink); }
+    .event { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 16px; align-items: baseline; padding: 14px 8px; border-bottom: 1px solid var(--rule); cursor: pointer; }
+    .event:hover { background: var(--sheet); }
+    .event.selected { background: var(--sheet); }
+    .event.selected .seq { color: var(--signal); font-weight: 600; }
+    .stamp { display: flex; flex-direction: column; color: var(--ink-3); }
+    .event-title { font-weight: 600; }
+    .event-sub { color: var(--ink-2); margin-top: 2px; }
+    #right-quick-preview { border-left: 1px solid var(--rule); background: var(--rail); padding: 28px 24px; display: flex; flex-direction: column; gap: 16px; }
+    #right-quick-preview h2 { font-size: 15px; font-weight: 600; }
+    #right-quick-preview h3 { font-size: 14px; font-weight: 600; margin-top: 8px; }
+    .facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; }
+    .facts dt { color: var(--ink-2); font-size: 12px; }
+    .facts dd { margin: 0; }
+    .choice { display: flex; gap: 10px; align-items: flex-start; padding: 9px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); }
+    .choice input { accent-color: var(--ink); margin-top: 3px; }
+    .choice .rec { display: block; color: var(--ok); font-size: 12px; font-weight: 600; }
   </style>
 </head>
 <body>
-  <header>
-    <strong>Option B: Split Triage Drawer (Light Surface)</strong>
-    <div class="tabs">
-      <span class="tab active" id="tab-needs-you">Needs You (3)</span>
-      <span class="tab" id="tab-active-lanes">In Progress Lanes (3)</span>
+  <div class="topbar">
+    <strong>vibest-core</strong>
+    <label class="command"><input id="command-input" placeholder="Jump to a session, artifact, or branch" aria-label="Command" /><kbd>⌘K</kbd></label>
+    <div class="tabs" role="tablist">
+      <button class="tab active" id="tab-needs-you" role="tab" aria-selected="true">Needs you · 3</button>
+      <button class="tab" id="tab-active-lanes" role="tab" aria-selected="false">In progress · 3</button>
     </div>
-  </header>
+  </div>
   <div class="workspace">
-    <section class="panel" id="left-lane-list">
-      <h2 style="margin:0;font-size:16px;">Pending Deliverables</h2>
-      <div class="lane-item" id="split-item-spec">
-        <div>
-          <div style="font-weight:600;">Inbox + Execution Ledger Spec v1</div>
-          <div style="font-size:12px;color:#64748b;">2 open decision questions · Author: claude-opus</div>
-        </div>
-        <span class="badge-warn">Needs Decision</span>
+    <section id="left-lane-list">
+      <h2>Ledger, newest first</h2>
+      <div class="event selected" id="split-item-spec">
+        <span class="mono stamp"><span class="seq">#1284</span><span>14:32</span></span>
+        <div><div class="event-title">Artifact hub contract v1 asks for review</div><div class="event-sub">2 open decisions · from artifact-hub-author on agy</div></div>
+        <span class="status attention">Decision</span>
       </div>
-      <div class="lane-item" id="split-item-whiteboard">
-        <div>
-          <div style="font-weight:600;">Service Topology Excalidraw Scene</div>
-          <div style="font-size:12px;color:#64748b;">5 architecture nodes · Auto-saved</div>
-        </div>
-        <span class="badge-warn">Review</span>
+      <div class="event" id="split-item-whiteboard">
+        <span class="mono stamp"><span class="seq">#1279</span><span>14:05</span></span>
+        <div><div class="event-title">Service topology whiteboard saved</div><div class="event-sub">5 nodes · 1 comment on the event ledger node</div></div>
+        <span class="status attention">Review</span>
+      </div>
+      <div class="event" id="split-item-verify">
+        <span class="mono stamp"><span class="seq">#1271</span><span>13:48</span></span>
+        <div><div class="event-title">PR #613 gates finished at 8f41c92b</div><div class="event-sub">build, typecheck, unit, and e2e passed in 58.6 s</div></div>
+        <span class="status ok">Passed</span>
+      </div>
+      <div class="event" id="split-item-blocked">
+        <span class="mono stamp"><span class="seq">#1266</span><span>13:20</span></span>
+        <div><div class="event-title">racknerd-outbox-probe stopped for confirmation</div><div class="event-sub">Wants a known_hosts entry for 198.51.100.42</div></div>
+        <span class="status attention">Blocked</span>
       </div>
     </section>
-    <aside class="panel" id="right-quick-preview">
-      <h2 style="margin:0 0 10px;font-size:16px;">Inline Quick Sign-Off</h2>
-      <p style="font-size:13px;color:#475569;line-height:1.5;">
-        Previewing <strong>Inbox + Execution Ledger Spec</strong> right beside the queue without leaving the board.
-      </p>
-      <button class="cta-approve" id="split-drawer-approve-btn">Approve Selected Deliverable</button>
+    <aside id="right-quick-preview">
+      <h2>Artifact hub contract</h2>
+      <dl class="facts">
+        <dt>Version</dt><dd class="mono">v1</dd>
+        <dt>Author</dt><dd>artifact-hub-author</dd>
+        <dt>Branch</dt><dd class="mono">feat/project-hub-prototype</dd>
+      </dl>
+      <h3>How should a verdict reach the session?</h3>
+      <label class="choice"><input type="radio" name="delivery" checked /><span>Preview, then send when I opt in<span class="rec">Recommended</span></span></label>
+      <label class="choice"><input type="radio" name="delivery" /><span>Send as soon as I decide</span></label>
+      <button class="primary" id="split-drawer-approve-btn">Approve v1</button>
     </aside>
   </div>
+  <script>
+    const events = Array.from(document.querySelectorAll('.event'));
+    events.forEach((el) => el.addEventListener('click', () => {
+      events.forEach((n) => n.classList.remove('selected'));
+      el.classList.add('selected');
+    }));
+    const tabs = Array.from(document.querySelectorAll('.tab'));
+    tabs.forEach((tab) => tab.addEventListener('click', () => {
+      tabs.forEach((t) => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+      tab.classList.add('active');
+      tab.setAttribute('aria-selected', 'true');
+    }));
+  </script>
 </body>
 </html>`
 
@@ -480,7 +614,8 @@ export function seedDefaultDemoProject(hubDb: HubDatabase): Project {
     slug: "triage-ui-prototype",
     title: "Triage Workspace Prototype (Option A vs Option B)",
     kind: "html",
-    summary: "Interactive HTML comparison between Compact Dark Sidebar (Option A) and Light Split Drawer (Option B).",
+    summary:
+      "Two triage layouts to compare: a keyboard split queue (Option A) and a ledger stream with an inspector (Option B).",
     content: DEMO_HTML_VARIANT_A,
     reviewStatus: "requested",
     authorSessionId: "ses-ui-worker",
@@ -493,14 +628,14 @@ export function seedDefaultDemoProject(hubDb: HubDatabase): Project {
       variants: [
         {
           id: "option-a",
-          label: "Option A: Compact Dark Sidebar",
-          description: "High-density dark surface with keyboard triage queue and telemetry strip",
+          label: "Option A: Split queue",
+          description: "Dense keyboard queue with head commits, gate results, and the selected diff",
           fileName: "variant-a.html",
         },
         {
           id: "option-b",
-          label: "Option B: Light Split Drawer",
-          description: "Two-column light surface with side-by-side quick sign-off panel",
+          label: "Option B: Ledger stream",
+          description: "Command bar over the event ledger, with an inspector for the selected item",
           fileName: "variant-b.html",
         },
       ],
@@ -513,14 +648,14 @@ export function seedDefaultDemoProject(hubDb: HubDatabase): Project {
         options: [
           {
             id: "option-a",
-            label: "Option A: Compact Dark Sidebar",
-            description: "Matches developer terminal ergonomics and fits wide diagrams.",
+            label: "Option A: Split queue",
+            description: "Fastest sign-off: j and k through the queue with gates and diff in view.",
             recommended: true,
           },
           {
             id: "option-b",
-            label: "Option B: Light Split Drawer",
-            description: "Side-by-side preview directly on the board.",
+            label: "Option B: Ledger stream",
+            description: "Every fact in order, with decisions answered in the inspector.",
           },
         ],
       },
@@ -530,13 +665,13 @@ export function seedDefaultDemoProject(hubDb: HubDatabase): Project {
   hubDb.addCommentThread({
     artifactId: htmlArtifact.id,
     author: "owner-preview",
-    body: "Keep this green primary CTA high-contrast, and show commit SHA tooltip before merge.",
+    body: "Name the PR and head commit on this button before it merges, e.g. Approve and merge #613 at 8f41c92b.",
     anchor: {
       kind: "dom",
       variantId: "option-a",
       selector: "#approve-merge-btn",
       tagName: "button",
-      textPreview: "Approve & Merge Ready",
+      textPreview: "Approve and merge",
       xRatio: 0.84,
       yRatio: 0.08,
       wRatio: 0.13,
@@ -575,7 +710,7 @@ export function seedDefaultDemoProject(hubDb: HubDatabase): Project {
     projectId: project.id,
     taskId: taskPr613.id,
     slug: "pr-613-merge-verify",
-    title: "PR #613 Merge Sign-Off — Team CLI & Slot Guard",
+    title: "PR #613 merge sign-off: team CLI and slot guard",
     kind: "verify",
     summary: "All build, typecheck, unit, and live E2E gates green on head 8f41c92b.",
     content: DEMO_VERIFY_MARKDOWN,

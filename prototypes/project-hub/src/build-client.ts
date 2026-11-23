@@ -40,6 +40,8 @@ export async function buildClientAssets(): Promise<string> {
     fs.copyFileSync(excalidrawCssSrc, path.join(distDir, "excalidraw.css"))
   }
 
+  fs.cpSync(path.join(MODULE_DIR, "client", "fonts"), path.join(distDir, "fonts"), { recursive: true })
+
   const appCssSrc = path.join(MODULE_DIR, "client", "styles.css")
 
   if (fs.existsSync(appCssSrc)) {
@@ -51,7 +53,8 @@ export async function buildClientAssets(): Promise<string> {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Vibest Project &amp; Artifact Hub</title>
+  <title>Vibest Hub</title>
+  <link rel="preload" href="/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/excalidraw.css" />
   <link rel="stylesheet" href="/styles.css" />
   <script>

@@ -1,4 +1,4 @@
-import { FolderInput, Plus, X } from "lucide-react"
+import { X } from "lucide-react"
 import { useState } from "react"
 
 import type { ArtifactKind, Project, Task } from "../schema.ts"
@@ -46,52 +46,65 @@ export function AddProjectModal(props: {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(ev) => ev.stopPropagation()} data-testid="add-project-modal">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <strong style={{ fontSize: 16 }}>Add or Import Vibest Project</strong>
-          <button type="button" className="btn btn-sm" onClick={onClose}>
-            <X size={14} />
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-project-title"
+        onClick={(ev) => ev.stopPropagation()}
+        data-testid="add-project-modal"
+      >
+        <div className="modal-head">
+          <h2 className="modal-title" id="add-project-title">
+            Add a project
+          </h2>
+          <button type="button" className="btn btn-quiet icon-btn" aria-label="Close" onClick={onClose}>
+            <X size={16} />
           </button>
         </div>
 
-        <div className="segmented">
+        <div className="segmented" role="group" aria-label="Source">
           <button
             type="button"
             data-testid="modal-tab-import"
+            aria-pressed={tab === "import"}
             className={`segmented-btn ${tab === "import" ? "active" : ""}`}
             onClick={() => setTab("import")}
           >
-            <FolderInput size={13} /> Read-Only Import Vibest Folder
+            Import a Vibest folder
           </button>
           <button
             type="button"
             data-testid="modal-tab-create"
+            aria-pressed={tab === "create"}
             className={`segmented-btn ${tab === "create" ? "active" : ""}`}
             onClick={() => setTab("create")}
           >
-            <Plus size={13} /> Blank Project
+            Blank project
           </button>
         </div>
 
         {tab === "import" ? (
           <>
-            <div style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
-              Safely snapshots <code>preferences.md</code>, <code>memories/</code>, <code>docs/</code>, and live
-              sessions from <code>vibest.db</code> using <code>readonly: true</code> without modifying external files.
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Vibest Project Directory</label>
+            <p className="help-text">
+              Copies <code>preferences.md</code>, <code>memories/</code>, <code>docs/</code>, and sessions from{" "}
+              <code>vibest.db</code>. The database opens read-only; nothing in the folder changes.
+            </p>
+            <div className="field">
+              <label htmlFor="import-dir">Vibest project folder</label>
               <input
+                id="import-dir"
                 data-testid="import-vibest-dir-input"
                 className="input"
-                placeholder="/Users/.../.vibest/projects/<uuid>"
+                placeholder="/Users/you/.vibest/projects/<uuid>"
                 value={vibestDir}
                 onChange={(ev) => setVibestDir(ev.target.value)}
               />
             </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Display Name (Optional)</label>
+            <div className="field">
+              <label htmlFor="import-name">Display name (optional)</label>
               <input
+                id="import-name"
                 data-testid="import-project-name-input"
                 className="input"
                 placeholder="vibest-live-snapshot"
@@ -102,9 +115,10 @@ export function AddProjectModal(props: {
           </>
         ) : (
           <>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Project Name</label>
+            <div className="field">
+              <label htmlFor="create-name">Project name</label>
               <input
+                id="create-name"
                 data-testid="create-project-name-input"
                 className="input"
                 placeholder="my-service"
@@ -112,17 +126,26 @@ export function AddProjectModal(props: {
                 onChange={(ev) => setName(ev.target.value)}
               />
             </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Description</label>
-              <input className="input" value={description} onChange={(ev) => setDescription(ev.target.value)} />
+            <div className="field">
+              <label htmlFor="create-description">Description</label>
+              <input
+                id="create-description"
+                className="input"
+                value={description}
+                onChange={(ev) => setDescription(ev.target.value)}
+              />
             </div>
           </>
         )}
 
-        {error && <div style={{ color: "var(--accent-red)", fontSize: 12.5 }}>{error}</div>}
+        {error && (
+          <p className="error-text" role="alert">
+            {error}
+          </p>
+        )}
 
-        <div className="btn-row" style={{ justifyContent: "flex-end" }}>
-          <button type="button" className="btn" onClick={onClose}>
+        <div className="form-actions">
+          <button type="button" className="btn btn-quiet" onClick={onClose}>
             Cancel
           </button>
           <button
@@ -132,7 +155,7 @@ export function AddProjectModal(props: {
             disabled={busy || (tab === "import" ? vibestDir.trim().length === 0 : name.trim().length === 0)}
             onClick={() => void handleSubmit()}
           >
-            {busy ? "Working..." : tab === "import" ? "Import Snapshot" : "Create Project"}
+            {busy ? "Working…" : tab === "import" ? "Import" : "Create project"}
           </button>
         </div>
       </div>
@@ -165,33 +188,53 @@ export function NewTaskModal(props: { projectId: string; onClose: () => void; on
 
   return (
     <div className="modal-backdrop" onClick={props.onClose}>
-      <div className="modal-card" onClick={(ev) => ev.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <strong style={{ fontSize: 16 }}>New Parallel Workstream Task</strong>
-          <button type="button" className="btn btn-sm" onClick={props.onClose}>
-            <X size={14} />
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-task-title"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <div className="modal-head">
+          <h2 className="modal-title" id="new-task-title">
+            New workstream
+          </h2>
+          <button type="button" className="btn btn-quiet icon-btn" aria-label="Close" onClick={props.onClose}>
+            <X size={16} />
           </button>
         </div>
-        <input
-          className="input"
-          placeholder="Task title (e.g., Implement WebSocket Resume Cursor)"
-          value={title}
-          onChange={(ev) => setTitle(ev.target.value)}
-        />
-        <input
-          className="input"
-          placeholder="1-line current status summary"
-          value={summary}
-          onChange={(ev) => setSummary(ev.target.value)}
-        />
-        <input
-          className="input"
-          placeholder="Git branch (optional, e.g., feat/ws-cursor)"
-          value={branch}
-          onChange={(ev) => setBranch(ev.target.value)}
-        />
-        <div className="btn-row" style={{ justifyContent: "flex-end" }}>
-          <button type="button" className="btn" onClick={props.onClose}>
+        <div className="field">
+          <label htmlFor="task-title">Title</label>
+          <input
+            id="task-title"
+            className="input"
+            placeholder="Implement WebSocket resume cursor"
+            value={title}
+            onChange={(ev) => setTitle(ev.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="task-summary">Current status</label>
+          <input
+            id="task-summary"
+            className="input"
+            placeholder="One line on where it stands"
+            value={summary}
+            onChange={(ev) => setSummary(ev.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="task-branch">Branch (optional)</label>
+          <input
+            id="task-branch"
+            className="input"
+            placeholder="feat/ws-cursor"
+            value={branch}
+            onChange={(ev) => setBranch(ev.target.value)}
+          />
+        </div>
+        <div className="form-actions">
+          <button type="button" className="btn btn-quiet" onClick={props.onClose}>
             Cancel
           </button>
           <button
@@ -200,7 +243,7 @@ export function NewTaskModal(props: { projectId: string; onClose: () => void; on
             disabled={busy || title.trim().length === 0}
             onClick={() => void handleSave()}
           >
-            Create Task
+            Create workstream
           </button>
         </div>
       </div>
@@ -254,26 +297,35 @@ export function NewArtifactModal(props: {
 
   return (
     <div className="modal-backdrop" onClick={props.onClose}>
-      <div className="modal-card" onClick={(ev) => ev.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <strong style={{ fontSize: 16 }}>Create Deliverable Artifact</strong>
-          <button type="button" className="btn btn-sm" onClick={props.onClose}>
-            <X size={14} />
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-artifact-title"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <div className="modal-head">
+          <h2 className="modal-title" id="new-artifact-title">
+            New artifact
+          </h2>
+          <button type="button" className="btn btn-quiet icon-btn" aria-label="Close" onClick={props.onClose}>
+            <X size={16} />
           </button>
         </div>
 
-        <div className="segmented">
+        <div className="segmented" role="group" aria-label="Kind">
           {(
             [
-              ["whiteboard", "Excalidraw 画图"],
-              ["html", "HTML Prototype"],
-              ["markdown", "Markdown Spec"],
-              ["verify", "Verify Card"],
+              ["whiteboard", "Whiteboard"],
+              ["html", "HTML prototype"],
+              ["markdown", "Spec"],
+              ["verify", "Verify card"],
             ] as const
           ).map(([k, label]) => (
             <button
               key={k}
               type="button"
+              aria-pressed={kind === k}
               className={`segmented-btn ${kind === k ? "active" : ""}`}
               onClick={() => setKind(k)}
             >
@@ -282,45 +334,53 @@ export function NewArtifactModal(props: {
           ))}
         </div>
 
-        <input
-          className="input"
-          placeholder="Artifact title"
-          value={title}
-          onChange={(ev) => setTitle(ev.target.value)}
-        />
+        <div className="field">
+          <label htmlFor="artifact-title">Title</label>
+          <input id="artifact-title" className="input" value={title} onChange={(ev) => setTitle(ev.target.value)} />
+        </div>
 
-        <select className="input" value={taskId} onChange={(ev) => setTaskId(ev.target.value)}>
-          <option value="">Standalone (no linked Task)</option>
-          {props.tasks.map((t) => (
-            <option key={t.id} value={t.id}>
-              Task: {t.title}
-            </option>
-          ))}
-        </select>
+        <div className="field">
+          <label htmlFor="artifact-task">Workstream</label>
+          <select id="artifact-task" className="select" value={taskId} onChange={(ev) => setTaskId(ev.target.value)}>
+            <option value="">None (standalone)</option>
+            {props.tasks.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        <input
-          className="input"
-          placeholder="1-line summary"
-          value={summary}
-          onChange={(ev) => setSummary(ev.target.value)}
-        />
+        <div className="field">
+          <label htmlFor="artifact-summary">Summary</label>
+          <input
+            id="artifact-summary"
+            className="input"
+            placeholder="One line on what to review"
+            value={summary}
+            onChange={(ev) => setSummary(ev.target.value)}
+          />
+        </div>
 
         {kind !== "whiteboard" && (
-          <textarea
-            className="textarea"
-            placeholder={kind === "html" ? "Paste HTML markup..." : "Markdown content..."}
-            value={content}
-            onChange={(ev) => setContent(ev.target.value)}
-          />
+          <div className="field">
+            <label htmlFor="artifact-content">{kind === "html" ? "HTML" : "Markdown"}</label>
+            <textarea
+              id="artifact-content"
+              className="textarea"
+              value={content}
+              onChange={(ev) => setContent(ev.target.value)}
+            />
+          </div>
         )}
 
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+        <label className="check-label">
           <input type="checkbox" checked={requestReview} onChange={(ev) => setRequestReview(ev.target.checked)} />
-          Request owner review immediately (appears in Needs You)
+          Request my review now (shows in Needs you)
         </label>
 
-        <div className="btn-row" style={{ justifyContent: "flex-end" }}>
-          <button type="button" className="btn" onClick={props.onClose}>
+        <div className="form-actions">
+          <button type="button" className="btn btn-quiet" onClick={props.onClose}>
             Cancel
           </button>
           <button
@@ -329,7 +389,7 @@ export function NewArtifactModal(props: {
             disabled={busy || title.trim().length === 0}
             onClick={() => void handleSave()}
           >
-            Create &amp; Open
+            Create and open
           </button>
         </div>
       </div>

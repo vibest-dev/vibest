@@ -12,7 +12,7 @@ import { SessionsView } from "./SessionsView.tsx"
 
 export function App() {
   const initialRoute = parseWorkspaceHash(window.location.hash)
-  const [theme, setTheme] = useState<"dark" | "light">("dark")
+  const [theme, setTheme] = useState<"dark" | "light">("light")
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [detectedVibestDir, setDetectedVibestDir] = useState<string | null>(null)
   const [activeProjectId, setActiveProjectId] = useState<string>(() => initialRoute.projectId ?? "")
@@ -108,28 +108,25 @@ export function App() {
     <div className="app-shell">
       <aside className="left-rail">
         <div className="rail-brand">
-          <div className="rail-brand-title">
-            <span className="live-dot" style={{ opacity: wsConnected ? 1 : 0.35 }} />
-            <span>Vibest Hub</span>
-          </div>
+          <span className="brand-name">Vibest Hub</span>
           <button
             type="button"
             data-testid="theme-toggle-btn"
-            className="btn btn-sm"
+            className="btn btn-quiet icon-btn"
             onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-            title="Toggle Dark / Light Theme"
+            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
           >
-            {theme === "dark" ? <Sun size={13} /> : <Moon size={13} />}
+            {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </div>
 
-        <div className="project-switcher-box">
-          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" }}>
-            Project Workspace
-          </label>
+        <div className="rail-field">
+          <label htmlFor="project-switcher">Project</label>
           <select
+            id="project-switcher"
             data-testid="project-switcher-select"
-            className="project-select"
+            className="select"
             value={activeProjectId}
             onChange={(ev) => {
               const nextId = ev.target.value
@@ -140,36 +137,37 @@ export function App() {
           >
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name} ({p.needsYouCount} Needs You)
+                {p.name} · {p.needsYouCount} need you
               </option>
             ))}
           </select>
           <button
             type="button"
             data-testid="open-add-project-btn"
-            className="btn btn-sm"
-            style={{ width: "100%" }}
+            className="text-link"
             onClick={() => setShowAddProject(true)}
           >
-            <FolderPlus size={13} /> + Add / Import Vibest
+            <FolderPlus size={14} aria-hidden="true" /> Add or import a project
           </button>
         </div>
 
-        <nav className="rail-nav" aria-label="Workspace Navigation">
+        <nav className="rail-nav" aria-label="Workspace">
           <button
             type="button"
             data-testid="nav-board"
             className={`rail-nav-btn ${activeTab === "board" && !openArtifactId ? "active" : ""}`}
+            aria-current={activeTab === "board" && !openArtifactId ? "page" : undefined}
             onClick={() => {
               setOpenArtifactId(null)
               setActiveTab("board")
             }}
           >
             <span className="rail-nav-left">
-              <Kanban size={15} /> Board
+              <Kanban size={15} aria-hidden="true" />
+              <span>Board</span>
             </span>
             {needsYouCount > 0 && (
-              <span className="badge badge-urgent" data-testid="rail-needs-you-badge">
+              <span className="rail-count attention" data-testid="rail-needs-you-badge">
                 {needsYouCount}
               </span>
             )}
@@ -178,29 +176,33 @@ export function App() {
           <button
             type="button"
             data-testid="nav-artifacts"
-            className={`rail-nav-btn ${activeTab === "artifacts" || openArtifactId ? "active" : ""}`}
+            className={`rail-nav-btn ${activeTab === "artifacts" || Boolean(openArtifactId) ? "active" : ""}`}
+            aria-current={activeTab === "artifacts" || Boolean(openArtifactId) ? "page" : undefined}
             onClick={() => {
               setOpenArtifactId(null)
               setActiveTab("artifacts")
             }}
           >
             <span className="rail-nav-left">
-              <Layers size={15} /> Artifacts Studio
+              <Layers size={15} aria-hidden="true" />
+              <span>Artifacts</span>
             </span>
-            <span className="badge badge-neutral">{artifacts.length}</span>
+            <span className="rail-count">{artifacts.length}</span>
           </button>
 
           <button
             type="button"
             data-testid="nav-sessions"
             className={`rail-nav-btn ${activeTab === "sessions" && !openArtifactId ? "active" : ""}`}
+            aria-current={activeTab === "sessions" && !openArtifactId ? "page" : undefined}
             onClick={() => {
               setOpenArtifactId(null)
               setActiveTab("sessions")
             }}
           >
             <span className="rail-nav-left">
-              <TerminalSquare size={15} /> Sessions &amp; Facts
+              <TerminalSquare size={15} aria-hidden="true" />
+              <span>Sessions</span>
             </span>
           </button>
 
@@ -208,32 +210,23 @@ export function App() {
             type="button"
             data-testid="nav-knowledge"
             className={`rail-nav-btn ${activeTab === "knowledge" && !openArtifactId ? "active" : ""}`}
+            aria-current={activeTab === "knowledge" && !openArtifactId ? "page" : undefined}
             onClick={() => {
               setOpenArtifactId(null)
               setActiveTab("knowledge")
             }}
           >
             <span className="rail-nav-left">
-              <BookOpen size={15} /> Project Knowledge
+              <BookOpen size={15} aria-hidden="true" />
+              <span>Knowledge</span>
             </span>
           </button>
         </nav>
 
-        <div
-          style={{
-            marginTop: "auto",
-            padding: "10px",
-            borderRadius: 8,
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-subtle)",
-            fontSize: 11.5,
-            color: "var(--text-secondary)",
-          }}
-        >
-          <div style={{ fontWeight: 700, color: "var(--text-primary)", marginBottom: 4 }}>Interactive Surfaces</div>
-          <div>• HTML: 点选元素 + 框选/圈选</div>
-          <div>• Excalidraw: 画图 + 节点评论</div>
-          <div>• Spec: 划词引用 + 决策单多选</div>
+        <div className="rail-foot">
+          <span className={`connection ${wsConnected ? "is-live" : ""}`}>
+            {wsConnected ? "Live updates on" : "Offline, reload to reconnect"}
+          </span>
         </div>
       </aside>
 
@@ -268,7 +261,9 @@ export function App() {
         ) : activeTab === "knowledge" && activeProjectId ? (
           <KnowledgeView projectId={activeProjectId} refreshSignal={refreshSignal} />
         ) : (
-          <div className="page-scroll">Loading workspace...</div>
+          <div className="page-scroll">
+            <p className="muted-note">Loading workspace…</p>
+          </div>
         )}
       </main>
 
