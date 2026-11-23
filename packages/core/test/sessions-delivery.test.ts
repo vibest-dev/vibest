@@ -3,6 +3,7 @@ import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, terminalOf } from "@vibest/core/database/db-rows"
 import { Harnesses } from "@vibest/core/harnesses"
 import { Integration } from "@vibest/core/integration"
+import type { HarnessDefinition } from "@vibest/core/plugin/domains"
 import { unwrapped } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
 import { Clock, Deferred, Effect, Exit, Fiber, PubSub, Ref, Scope } from "effect"
@@ -17,7 +18,35 @@ import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd, yieldToIo 
 import { makeRepository } from "./lib/session.ts"
 import { harnessArgv, spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
+const TRUST_DIALOG_IN_ARGV: HarnessDefinition = {
+  ...FIRST_IN_ARGV,
+  id: "trust-dialog",
+  startup: Effect.succeed((pane) => pane.sendKeys(["enter"])),
+}
+
 describe.concurrent("Session", () => {
+  test(
+    "a harness that reports blocked on its startup dialog right after launch gets the dialog answered, and its execution waits for working",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const db = yield* Db.Service
+      const started = yield* Deferred.make<string>()
+      yield* Ref.set(herdr.onStarted, (session) =>
+        herdr
+          .updateAgent(session, (a) => ({ ...a, status: "blocked", registerPrompt: false }))
+          .pipe(Effect.andThen(Deferred.succeed(started, session))),
+      )
+      yield* Effect.forkChild(sessions.spawn(yield* spawnInput(yield* makeRepository, TRUST_DIALOG_IN_ARGV.id)))
+      const id = yield* Deferred.await(started)
+      yield* untilVirtual(herdr.callsTo("send"), (calls) => calls.some((c) => c.keys?.includes("enter") === true))
+      assert.isDefined(yield* db.session.openExecution(id))
+      yield* herdr.updateAgent(id, (a) => ({ ...a, status: "working", seq: a.seq + 1 }))
+      yield* untilVirtual(db.session.getSession(id), (row) => row?.status === "working")
+    }),
+    { harnesses: [PI, TRUST_DIALOG_IN_ARGV] },
+  )
+
   test(
     "send while an execution runs is queued, then delivered merged once the session is idle",
     Effect.gen(function* () {
