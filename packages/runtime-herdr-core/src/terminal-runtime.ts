@@ -3,7 +3,7 @@ import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { launchLine, typedLine } from "@vibest/plugin/effect/launch"
 import { Host } from "@vibest/plugin/host"
-import { ID, shortId } from "@vibest/schema/id"
+import { ID } from "@vibest/schema/id"
 import {
   Clock,
   Config,
@@ -110,14 +110,9 @@ export const terminalName = (input: Parameters<Runtime["open"]>[0], attempt = 0)
   const id = input.launch.env["VIBEST_SESSION_ID"]
   const session = id !== undefined && ID.test(id) ? id : undefined
 
-  const title =
-    session !== undefined && input.label.startsWith(`${shortId(session)} `)
-      ? input.label.slice(shortId(session).length + 1)
-      : input.label
-
   const base =
     session !== undefined
-      ? slug(title) || slug(input.launch.env["VIBEST_HARNESS"] ?? "") || "agent"
+      ? slug(input.label) || slug(input.launch.env["VIBEST_HARNESS"] ?? "") || "agent"
       : slug(
           input.project
             .replace(/[\\/]+$/, "")

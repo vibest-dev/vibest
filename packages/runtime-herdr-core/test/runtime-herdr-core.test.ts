@@ -118,7 +118,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             input,
             ...Array.from({ length: 2 }, () => ({
               ...input,
-              label: "a09e0000 修复登录",
+              label: "修复登录",
               launch: {
                 argv: [],
                 env: { VIBEST_SESSION_ID: "a09e0000-0000-4000-8000-000000000000", VIBEST_HARNESS: "pi" },

@@ -1,3 +1,5 @@
+import path from "node:path"
+
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { EntrySession } from "@vibest/core/session/entry"
@@ -62,6 +64,7 @@ describe.concurrent("Placement project near-terminal", () => {
 
       const opensAfter1 = yield* fake.callsTo("open")
       assert.isUndefined(opensAfter1.at(-1)?.near)
+      assert.strictEqual(opensAfter1.at(-1)?.label, "first")
 
       const s2 = yield* insertTopLevel(projectA, "second", repoA)
       yield* placement.openTerminal(fake.runtime, undefined, s2, {
@@ -123,6 +126,7 @@ describe.concurrent("Placement project near-terminal", () => {
 
       const lastOpen = (yield* fake.callsTo("open")).at(-1)
       assert.isUndefined(lastOpen?.near)
+      assert.strictEqual(lastOpen?.label, "targeted")
       assert.strictEqual(lastOpen?.target, "other-session")
     }),
   )
@@ -240,6 +244,8 @@ describe.concurrent("Placement project near-terminal", () => {
       })
 
       const entryRow = (yield* db.session.entryOf(projectId))!
+      assert.strictEqual(entryRow.name, `Vibest/${path.basename(repo)}`)
+      assert.strictEqual((yield* fake.callsTo("open")).at(-1)?.label, entryRow.name)
       yield* db.session.endProcess(entryRow.id, "exited")
 
       yield* entry.launch({

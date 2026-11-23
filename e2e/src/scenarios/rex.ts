@@ -321,6 +321,13 @@ const lifecycle = async (
   await until("Pi reported its conversation", () => processesOf(w, id).at(-1)?.conversation != null, 30_000)
   const first = processesOf(w, id).at(-1)!
   expect(runtimeOf(w, id).kind === "rex", `the session runs at ${JSON.stringify(runtimeOf(w, id))}`)
+  const shownLabels = JSON.stringify(await rex.view(projectSession!))
+  expect(
+    shownLabels.includes(`"Vibest/${path.basename(repo)}"`) &&
+      shownLabels.includes('"Remember a codeword"') &&
+      !shownLabels.includes(id.slice(0, 8)),
+    `Rex shows the entry as Vibest/<project> and the worker by its title alone: ${shownLabels}`,
+  )
 
   await w.ok(["stop", id], { cwd: repo, env: rex.env })
   expect(processesOf(w, id).at(-1)?.reason === "stopped", `the process ended ${processesOf(w, id).at(-1)?.reason}`)

@@ -1,6 +1,6 @@
 import { Harness as PluginHarness } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
-import { sessionLabel, shortId } from "@vibest/schema/id"
+import { entryLabel, sessionLabel } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { NoSuchSession } from "@vibest/schema/session"
 import { Cause, Clock, Context, Effect, Exit, FileSystem, Layer, Path, Ref } from "effect"
@@ -245,7 +245,7 @@ export const make = Effect.gen(function* () {
       yield* h.present(terminal, {
         agent: session.agent,
         harness: harnessIdOf(session),
-        title: session.name,
+        title: session.entry ? entryLabel(root) : session.name,
         definition: session.agent,
         session: session.id,
         project: yield* projectName(root),
@@ -346,7 +346,7 @@ export const make = Effect.gen(function* () {
         project: input.project,
         cwd: input.cwd,
         launch: { ...launch, env: { ...input.env, ...launch.env } },
-        label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
+        label: (session.entry ? entryLabel(input.project) : session.name).slice(0, 60),
         ...(near !== undefined && { near }),
         ...(input.split === true && { split: true }),
         ...(remote && { remote: true }),

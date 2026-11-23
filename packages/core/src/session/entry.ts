@@ -1,3 +1,4 @@
+import { entryLabel } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import type { Routing } from "@vibest/schema/plugin"
 import {
@@ -262,7 +263,7 @@ const make = Effect.gen(function* () {
 
               const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
                 root,
-                label: "vibest",
+                label: entryLabel(root),
                 home: layout.home,
                 focus: input.focus,
                 near,
@@ -439,7 +440,7 @@ const make = Effect.gen(function* () {
 
         if (rt?.present !== undefined)
           yield* rt
-            .present(address, { entrySession: claimed.sessionId, projectId })
+            .present(address, { entrySession: claimed.sessionId, projectId, title: entryLabel(directory) })
             .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
 
         const typed = yield* Launch.launchLine(command).pipe(
