@@ -81,8 +81,8 @@ defaults:
 env:
   HERDR_VERSION: 0.9.5
   HERDR_SHA256: 14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d # herdr-linux-x86_64
-  HC_VERSION: 0.1.19
-  HC_SHA256: 4adcfb423d52f24c5cc4a1e2cd2fcad1f62d28bb77876ac472c29082a3eaa424 # herdr-core-linux-x86_64.tar.gz
+  HC_VERSION: 0.1.22
+  HC_SHA256: 3054ec3992ce80c5715d721caa9dcefa6056721d15dc113f4750afce763ba5df # herdr-core-linux-x86_64.tar.gz
   PI_VERSION: 1.5.0 # @earendil-works/pi-coding-agent
   CLAUDE_VERSION: 2.1.322 # @anthropic-ai/claude-code
   CURSOR_VERSION: 2026.11.05-86047df

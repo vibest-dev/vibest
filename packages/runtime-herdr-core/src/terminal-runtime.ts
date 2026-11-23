@@ -140,6 +140,15 @@ export const parseTerminalId = (id: string, fallbackSocket: string) => {
 
 const NOT_FOUND_KINDS = new Set(["not_found", "finished", "machine_unknown"])
 
+const codeOf = (kind: string): RuntimeApi.RuntimeError["code"] =>
+  NOT_FOUND_KINDS.has(kind)
+    ? "not_found"
+    : kind === "blocked" || kind === "cancelled"
+      ? "busy"
+      : kind === "unavailable"
+        ? "unreachable"
+        : "failed"
+
 export const failure = (
   error: HcFailure | { readonly _tag?: undefined; readonly message: string },
 ): RuntimeApi.RuntimeError => {
@@ -148,9 +157,8 @@ export const failure = (
 
   if (Predicate.isTagged(error, "HcError")) {
     const { kind, method } = error
-    const code = NOT_FOUND_KINDS.has(kind) ? "not_found" : kind === "blocked" ? "busy" : "failed"
 
-    return new RuntimeApi.RuntimeError({ code, message: `${method}: ${error.message}` })
+    return new RuntimeApi.RuntimeError({ code: codeOf(kind), message: `${method}: ${error.message}` })
   }
 
   return new RuntimeApi.RuntimeError({ code: "failed", message: error.message })
@@ -272,7 +280,7 @@ export const make = (deps: {
         let failures = 0
         let step = yield* Schedule.toStep(FOLLOW_BACKOFF)
 
-        while (failures < FOLLOW_ATTEMPTS) {
+        while (socket === deps.socket || failures < FOLLOW_ATTEMPTS) {
           let subscribed = false
           yield* core.hc.subscribe({ labels: { [LABEL.runtime]: KIND } }).pipe(
             Stream.runForEach((notice) =>
@@ -345,6 +353,25 @@ export const make = (deps: {
             status: "offline" as const,
             reason: `no herdr-core answers at ${home.socketPath} (start one with hc server start)`,
           }),
+        ),
+      )
+
+    const doctor: NonNullable<Runtime["doctor"]> = () =>
+      home.hello.pipe(
+        Effect.map((hello): VibestPlugin.Runtime.RuntimeReport => ({
+          name: `herdr-core ${hello.version}`,
+          checks: [],
+        })),
+        Effect.catch(() =>
+          status().pipe(
+            Effect.map((shown): VibestPlugin.Runtime.RuntimeReport => ({
+              name: "herdr-core",
+              checks:
+                shown.status === "offline"
+                  ? [{ ok: false, text: "herdr-core is not running", fix: "hc server start" }]
+                  : [],
+            })),
+          ),
         ),
       )
 
@@ -558,6 +585,7 @@ export const make = (deps: {
       close,
       run,
       present,
+      doctor,
       seen,
       see,
       events: RuntimeApi.eventsFrom(events),
