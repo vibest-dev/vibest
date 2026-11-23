@@ -27,6 +27,7 @@ import project from "./scenarios/project.ts"
 import restartEntry from "./scenarios/restart-entry.ts"
 import restartHc from "./scenarios/restart-hc.ts"
 import restart from "./scenarios/restart.ts"
+import rex from "./scenarios/rex.ts"
 import routing from "./scenarios/routing.ts"
 import sessions from "./scenarios/sessions.ts"
 import start from "./scenarios/start.ts"
@@ -62,6 +63,7 @@ const areas = {
   exits,
   restart: [...restart, ...restartEntry, ...restartHc],
   hc: [...hc, ...hcTerminals],
+  rex,
   sessions,
   delivery: [...delivery, ...teams],
   routing,

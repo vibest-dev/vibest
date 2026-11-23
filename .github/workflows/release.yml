@@ -331,7 +331,7 @@ jobs:
         suite:
           - { name: sessions, areas: start entry sessions }
           - { name: delivery-inbox, areas: delivery inbox }
-          - { name: exits-hc, areas: exits hc terminal-status }
+          - { name: exits-hc, areas: exits hc rex terminal-status }
           - { name: machines, areas: machines }
           - { name: agents-plugins, areas: agents plugins }
           - { name: harnesses, areas: harness integration routing agy }
@@ -353,7 +353,7 @@ jobs:
 
       - uses: ./.github/actions/e2e-tools
       - run: >-
-          pnpm run verify --no-cache --elsewhere H4 --stage e2e
+          pnpm run verify --no-cache --elsewhere H4,RX1,RX2 --stage e2e
           --leg curl --jobs 1
           --keep-archive "$RUNNER_TEMP/release/github" --packs "$RUNNER_TEMP/release/npm"
           ${{ matrix.suite.areas }}
