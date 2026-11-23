@@ -1,5 +1,5 @@
 import { Harness as PluginHarness, type Launch } from "@vibest/plugin/effect"
-import { launchLine } from "@vibest/plugin/effect/launch"
+import { launchLine, SHELL_HANDOFF } from "@vibest/plugin/effect/launch"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { LaunchFailed, HarnessUnavailable, type HarnessId } from "@vibest/schema/session"
 import { Effect, FileSystem } from "effect"
@@ -153,7 +153,7 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
       project: input.root,
       cwd: input.root,
       launch: {
-        argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh"],
+        argv: SHELL_HANDOFF,
         env: { ...input.env, VIBEST_HOME: input.home },
       },
       label: input.label,

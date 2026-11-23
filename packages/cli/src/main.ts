@@ -6,6 +6,7 @@ import { Effect } from "effect"
 
 import * as Platform from "#platform"
 
+import { TypedAhead } from "./ask.ts"
 import { userOnly } from "./caller.ts"
 import * as Cli from "./cli.ts"
 import { clients } from "./client.ts"
@@ -82,7 +83,13 @@ Runtime.run(Commands, Handlers, {
   Effect.provide(Layout.layer),
   Effect.provide(Logging.layer),
   Effect.provideService(VibestCommand, Platform.selfCommand),
-  Effect.provideService(Host, { daemon: Platform.daemon, replacements, exec: Platform.exec }),
+  Effect.provideService(Host, {
+    daemon: Platform.daemon,
+    replacements,
+    exec: Platform.exec,
+    parseJsonc: Platform.parseJsonc,
+  }),
+  Effect.provide(TypedAhead.layer),
   Effect.provide(Platform.services),
   (program) => Platform.runMain(program, { disableErrorReporting: true, teardown: Cli.teardown }),
 )

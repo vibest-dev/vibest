@@ -790,8 +790,9 @@ crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin
 
 **Default harness.** No builtin chooses or refuses a harness by quota. A new agent without a harness inherits its
 caller's harness, provider and model in core, before `agent.start.before` (§9); subscriptions are data in the hook
-events for a plugin that wants to route by quota. The builtin `vibest.harness-default` (last of `pre`) returns claude from
-`start.before` when the harness is still unset and claude is available; remove it with `"-vibest.harness-default"` in
+events for a plugin that wants to route by quota. The builtin `vibest.harness-default` (last of `pre`) returns, from
+`start.before` when the harness is still unset, vibest.json's `defaultHarness` when that harness is available, else claude
+when claude is available, so `decidedBy` names it; remove it with `"-vibest.harness-default"` in
 `vibest.json` and choose in a plugin of your own.
 
 **Plugin API facts** (`@vibest/plugin`): vibestd maps this module and `effect` to its own instances when it loads a
@@ -905,7 +906,9 @@ export default Plugin.define({
 })
 ```
 
-`vibest.json` has one key, `plugins`. Machines are not configuration: `vibest machine add` and `vibest machine rm`
+`vibest.json` keys: `plugins`, `concurrency`, `cloneDirectory`, `defaultRuntime` (the CLI's runtime for a `vibest` from a
+plain terminal, runtime-port §4) and `defaultHarness` (read by `vibest.harness-default`). `vibest onboard` and the
+plain-terminal onboarding write the last two, keeping the other keys; a file with comments is never rewritten. Machines are not configuration: `vibest machine add` and `vibest machine rm`
 record them in the ledger (`machine.added`, `machine.removed`). There are no agent definitions and no user skills to
 configure (skills are builtin, §4.2).
 
@@ -1249,7 +1252,7 @@ npm in its prefix. Its own entries:
 
 ```
 ~/.vibest/                   (VIBEST_HOME overrides)
-  vibest.json                the plugin list (§7), read only
+  vibest.json                the plugin list and defaults (§7); only the CLI's onboarding writes it
   plugins/                   plugin files and directories (§7), read only
   vibest.db                  the ledger and read model (with its -wal and -shm files)
   identity.json              this machine's id, name and machine_id; created or rewritten at every vibestd start

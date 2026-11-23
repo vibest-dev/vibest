@@ -10,8 +10,9 @@ import { ConfigProvider, Effect, Exit, Layer, Option, Schema, Sink, Stdio, Strea
 
 import * as Platform from "#platform"
 
-import { askChoice } from "../src/ask.ts"
-import { chooseHarness, chooseRuntime } from "../src/onboard.ts"
+import { askChoice, TypedAhead } from "../src/ask.ts"
+import { Host } from "../src/host.ts"
+import { attachCommand, chooseHarness, chooseRuntime, savedSetting } from "../src/onboard.ts"
 
 const FAKE_INSTALL_SH = `#!/bin/sh
 set -eu
@@ -56,6 +57,13 @@ const world = (o: {
       stdout: () => Sink.drain,
     }),
     Layer.effect(Layout, Layout.make(path.join(home, ".vibest"))),
+    Layer.succeed(Host, {
+      daemon: Platform.daemon,
+      replacements: [],
+      exec: Platform.exec,
+      parseJsonc: Platform.parseJsonc,
+    }),
+    TypedAhead.layer,
     ConfigProvider.layer(
       ConfigProvider.fromUnknown({
         HOME: home,
@@ -221,6 +229,54 @@ describe("onboarding in a plain terminal", () => {
       const picked = yield* askChoice("Pick", ["a", "b"]).pipe(Effect.provide(w.layer))
 
       assert.strictEqual(Option.getOrUndefined(picked), 1)
+    }),
+  )
+
+  it.live("answers pasted in one chunk reach consecutive questions", () =>
+    Effect.gen(function* () {
+      const w = world({ terminal: true, stdin: Stream.make(new TextEncoder().encode("1\ny\n2\ny\n")) })
+
+      const online = runtimes(() => [
+        { kind: "hc", status: "online" },
+        { kind: "rex", status: "online" },
+      ])
+
+      const [runtime, harness] = yield* Effect.all([
+        chooseRuntime(online, { reuse: true, saveWithoutAsking: false }),
+        chooseHarness(fakeClient({ harnesses: ["claude", "pi"] }), { saveWithoutAsking: false }),
+      ]).pipe(Effect.provide(w.layer))
+
+      assert.strictEqual(runtime, "hc")
+      assert.strictEqual(harness, "pi")
+      assert.deepStrictEqual(w.saved(), { defaultRuntime: "hc", defaultHarness: "pi" })
+    }),
+  )
+
+  it.live("defaults are read from a vibest.json with comments", () =>
+    Effect.gen(function* () {
+      const w = world({ terminal: false, stdin: Stream.empty })
+      fs.mkdirSync(path.dirname(w.config), { recursive: true })
+      fs.writeFileSync(w.config, '// mine\n{ "defaultRuntime": "rex", /* agent */ "defaultHarness": "pi", }\n')
+
+      const saved = yield* Effect.all([savedSetting("defaultRuntime"), savedSetting("defaultHarness")]).pipe(
+        Effect.provide(w.layer),
+      )
+
+      assert.deepStrictEqual(saved, ["rex", "pi"])
+    }),
+  )
+
+  it.live("hc attach runs the installed hc after the HC_SOCKET assignment", () =>
+    Effect.gen(function* () {
+      const w = world({ terminal: false, stdin: Stream.empty })
+      fs.mkdirSync(w.bin, { recursive: true })
+      fs.writeFileSync(path.join(w.bin, "hc"), "", { mode: 0o755 })
+
+      const argv = yield* attachCommand(["env", "HC_SOCKET=/s.sock", "hc", "attach", "t1"]).pipe(
+        Effect.provide(w.layer),
+      )
+
+      assert.deepStrictEqual(argv, ["env", "HC_SOCKET=/s.sock", path.join(w.bin, "hc"), "attach", "t1"])
     }),
   )
 })

@@ -303,7 +303,9 @@ export const openSources = Effect.fnUntraced(function* (
 
           if (!configured || warnedConfiguredRuntime) return
           warnedConfiguredRuntime = true
-          yield* warn(`${layout.config}: "runtime" is ignored; run vibest in the runtime's terminal, or pass --runtime`)
+          yield* warn(
+            `${layout.config}: "runtime" is ignored; run vibest in the runtime's terminal, pass --runtime, or set "defaultRuntime" with vibest onboard`,
+          )
         }),
       ),
       Effect.flatMap(Schema.decodeUnknownEffect(ConfigFile)),

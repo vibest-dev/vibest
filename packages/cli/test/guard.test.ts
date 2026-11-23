@@ -741,6 +741,7 @@ describe("wizard entry", () => {
             exec: () => {
               touched.exec = true
             },
+            parseJsonc: JSON.parse,
           }),
           Effect.provideService(Terminal.Terminal, terminal),
           Effect.provideService(
@@ -826,6 +827,7 @@ describe("vibest --session inside herdr", () => {
             exec: () => {
               touched.exec = true
             },
+            parseJsonc: JSON.parse,
           }),
           Effect.provideService(SocketConnector, () => {
             touched.socket = true
@@ -879,7 +881,7 @@ describe("vibest --session inside herdr", () => {
         extra: { after: "daemon", commands: [] },
       }).pipe(
         Effect.provide(Stdio.layerTest({ args: Effect.succeed(["--harness", "pi", "--env", "MAIN_PROBE=" + secret]) })),
-        Effect.provideService(CliHost, { daemon: host, replacements: [], exec: () => {} }),
+        Effect.provideService(CliHost, { daemon: host, replacements: [], exec: () => {}, parseJsonc: JSON.parse }),
         Effect.provideService(SocketConnector, () => {
           herdr.push("connect")
 

@@ -165,6 +165,8 @@ const provided = new Map<string, ModuleExports>([
 
 const providedPackages: ReadonlySet<string> = new Set(provided.keys().map(packageName))
 
+export const parseJsonc = (text: string) => Schema.decodeUnknownSync(Schema.Json)(Bun.JSONC.parse(text))
+
 export const makePluginLoader = (): PluginLoader["Service"] => {
   const { keyLocalImports, load } = pluginLoads()
   let mapped = false
@@ -183,7 +185,7 @@ export const makePluginLoader = (): PluginLoader["Service"] => {
         },
       })
     }),
-    parseJsonc: (text) => Schema.decodeUnknownSync(Schema.Json)(Bun.JSONC.parse(text)),
+    parseJsonc,
     graph: (entry) => graph(entry, providedPackages),
     load,
     watch,
@@ -397,7 +399,7 @@ export const replacements: LayerNode.Replacements = [
       name: "vibest/Builtins",
       layer: Layer.effect(
         Builtins,
-        Effect.flatMap(Layout, (layout) => pre(layout.home)),
+        Effect.flatMap(Layout, (layout) => pre(layout.home, parseJsonc)),
       ),
       deps: [
         PlatformNode.fileSystem,

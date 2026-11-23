@@ -46,17 +46,17 @@ session `default` and ignores `near`); each is the runtime's to honor as it can.
 
 `name` is optional: the word a place uses for this runtime. A place reads `<name> <address>`, or `<name> (not placed)` when the address is empty, and a remote address keeps its `@machine`. With no `name`, the place uses `id`. herdr leaves `name` unset, so a place says `herdr`. herdr-core sets `herdr-core` and keeps id `hc` (`--runtime hc`, and the id stored on a row, do not change).
 
-| Optional                  | herdr                                                                                                            | rex                        | tern                   | Core's fallback when absent              |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------- | ---------------------------------------- |
-| `state(terminal)`         | detected                                                                                                         | OSC 7501 the program wrote | OSC 7501 (window side) | harness integration only                 |
-| `session(terminal)`       | the agent record's conversation id                                                                               | —                          | —                      | the harness's reports only               |
-| `events` (required)       | `events.subscribe`                                                                                               | `session.attach_all`       | `tern events`          | none: required                           |
-| `present(terminal, info)` | `pane.report_metadata`                                                                                           | block/window labels        | `rename`               | the `label` given to `open`              |
-| `seen`, `see`             | —                                                                                                                | —                          | —                      | never `done` in Watch                    |
-| `attach(target)`          | `herdr --session vibest`                                                                                         | — (Rex.app)                | `tern`                 | none                                     |
-| `link()`                  | `{session, version}`: `default`, where remote agents open; `ping` on its socket                                  | —                          | —                      | other machines cannot show its terminals |
-| `locate(peer, sessions)`  | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                    | —                          | —                      | remote rows: "cannot be shown here"      |
-| `doctor(harnesses)`       | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs             | what tern needs        | `vibest doctor` shows `status` only      |
+| Optional                    | herdr                                                                                                                          | rex                        | tern                   | Core's fallback when absent              |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ---------------------- | ---------------------------------------- |
+| `state(terminal)`           | detected                                                                                                                       | OSC 7501 the program wrote | OSC 7501 (window side) | harness integration only                 |
+| `session(terminal)`         | the agent record's conversation id                                                                                             | —                          | —                      | the harness's reports only               |
+| `events` (required)         | `events.subscribe`                                                                                                             | `session.attach_all`       | `tern events`          | none: required                           |
+| `present(terminal, info)`   | `pane.report_metadata`                                                                                                         | block/window labels        | `rename`               | the `label` given to `open`              |
+| `seen`, `see`               | —                                                                                                                              | —                          | —                      | never `done` in Watch                    |
+| `attach(target, terminal?)` | `herdr session attach <session>` (the caller's session, else the terminal's); hc: `env HC_SOCKET=<socket> hc attach <address>` | — (Rex.app)                | `tern`                 | none                                     |
+| `link()`                    | `{session, version}`: `default`, where remote agents open; `ping` on its socket                                                | —                          | —                      | other machines cannot show its terminals |
+| `locate(peer, sessions)`    | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                                  | —                          | —                      | remote rows: "cannot be shown here"      |
+| `doctor(harnesses)`         | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>`               | what rex needs             | what tern needs        | `vibest doctor` shows `status` only      |
 
 How the required members map: herdr `tab.create` (env) + `pane.send_text`, `pane.send_*`, `pane.read`,
 `pane.process_info`, `pane.close`; rex `session.new_split` (`command`, env via `/usr/bin/env K=V`), `block.event`,
@@ -112,8 +112,12 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   inherit a runtime's variables. A plugin cannot read its own caller variables inside vibestd, because those are
   removed; it connects through another variable, as hc uses `HC_SOCKET` rather than `HC_TERMINAL_SOCKET`.
 - The entry session (`vibest`) starts in that terminal. `vibest --runtime <id>` overrides the detection and, when this
-  terminal is not that runtime's, opens one there. None detected and no `--runtime`: refused, saying to pass
-  `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over
+  terminal is not that runtime's, opens one there. None detected and no `--runtime`: vibestd refuses, saying to pass
+  `--runtime`. The CLI then tries `defaultRuntime` from vibest.json (written by `vibest onboard` or by the
+  plain-terminal onboarding), and on an interactive terminal without one it offers the runtimes found (or, with none,
+  to install herdr-core after a `[y/N]`) and asks vibestd again with that `--runtime`. So the order is `--runtime`,
+  the caller's terminal, `defaultRuntime`, the interactive choice. The prompts and the install run in the CLI only;
+  vibestd never asks or installs. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over
   another runtime's variables the shell inherited.
 - A subagent (`vibest run`) takes `--runtime <id>` on `Spawn`. Without it, it runs in its parent's runtime. With
   `--share` and no `--runtime`, it runs in the shared session's runtime on its machine instead: it shares that session's
@@ -123,9 +127,9 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   runtime's reason. No other fallback. A user plugin on `agent.start.before` may still return a `runtime`. A runtime
   already set stands.
 - vibest.json's `runtime` key is not a choice. The first time vibestd reads a file that still has it, it warns once
-  and ignores the key.
+  and ignores the key, pointing at `--runtime` and `defaultRuntime`.
 - Core checks after the chain: the chosen runtime online on that machine, else refuses with the reason. vibest never
-  installs a runtime locally.
+  installs a runtime; only the CLI's onboarding does, after the user answers y.
 
 ## 5. Agent state, one direction
 

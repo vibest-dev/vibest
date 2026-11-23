@@ -38,7 +38,7 @@ inherit; otherwise the default applies (H7).
 ## H6. `vibest` reuses the entry session's last harness
 
 `vibest` without `--harness` starts the harness the project's entry session last used. A project's first start without
-`--harness` runs on Claude when Claude is available, and fails asking for `--harness` when it is not or when
+`--harness` runs on `defaultHarness` from `vibest.json` when that harness is available, else on Claude when Claude is available, and fails asking for `--harness` when it is not or when
 `"-vibest.harness-default"` is in `vibest.json`'s `plugins`.
 
 Entering a project checks only that a harness can start there (its binary on `PATH`, vibest's plugin folder for it) and

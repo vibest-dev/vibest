@@ -115,14 +115,13 @@ export default Runtime.handler(Commands, (o) =>
         )
 
         const entryHarness = yield* Effect.gen(function* () {
-          if (harness !== undefined) return harness
-          const saved = yield* savedSetting("defaultHarness")
+          if (harness !== undefined || agentNamed || !placed.onboarded) return harness
 
-          if (saved === undefined && !placed.onboarded) return undefined
+          if ((yield* savedSetting("defaultHarness")) !== undefined) return undefined
 
           if (!o.fresh && (yield* hasEntrySession(client, project.projectId))) return undefined
 
-          return saved ?? (yield* chooseHarness(client, { saveWithoutAsking: false }))
+          return yield* chooseHarness(client, { saveWithoutAsking: false })
         })
 
         if (placed.place.in === "launch") {

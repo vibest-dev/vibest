@@ -6,6 +6,7 @@ import { Config, Console, Effect, FileSystem, Option, Path, Predicate, Schedule,
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { askChoice, askYesNo, interactive } from "./ask.ts"
+import { Host } from "./host.ts"
 
 export const HC_INSTALL_VERSION = "0.1.22"
 
@@ -50,20 +51,27 @@ const decodeDefaults = Schema.decodeUnknownOption(
   }),
 )
 
-const readSettings = Effect.gen(function* () {
+const readConfig = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const layout = yield* Layout
-  const text = yield* fs.readFileString(layout.config).pipe(Effect.option)
 
-  return Option.isNone(text) ? Option.some<Readonly<Record<string, Schema.Json>>>({}) : decodeSettings(text.value)
+  return yield* fs.readFileString(layout.config).pipe(Effect.option)
 })
 
+const readSettings = Effect.map(readConfig, (text) =>
+  Option.isNone(text) ? Option.some<Readonly<Record<string, Schema.Json>>>({}) : decodeSettings(text.value),
+)
+
 export const savedSetting = (key: Setting) =>
-  Effect.map(readSettings, (settings) =>
-    Option.getOrUndefined(
-      Option.flatMap(Option.flatMap(settings, decodeDefaults), (all) => Option.fromNullishOr(all[key])),
-    ),
-  )
+  Effect.gen(function* () {
+    const { parseJsonc } = yield* Host
+    const text = yield* readConfig
+
+    if (Option.isNone(text)) return undefined
+    const settings = yield* Effect.try(() => parseJsonc(text.value)).pipe(Effect.option)
+
+    return Option.getOrUndefined(Option.flatMapNullishOr(Option.flatMap(settings, decodeDefaults), (all) => all[key]))
+  })
 
 export const saveSetting = (key: Setting, value: string) =>
   Effect.gen(function* () {
@@ -307,9 +315,10 @@ export const hasEntrySession = (client: Pick<VibestClient, "Watch">, projectId: 
 
 export const attachCommand = (argv: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const [file, ...args] = argv
+    const at = argv[0] === "env" ? argv.findIndex((arg, i) => i > 0 && !arg.includes("=")) : 0
 
-    if (file !== HC) return argv
+    if (argv[at] !== HC) return argv
+    const hc = yield* findHc
 
-    return [(yield* findHc) ?? file, ...args]
+    return hc === undefined ? argv : argv.with(at, hc)
   })
