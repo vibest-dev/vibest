@@ -221,6 +221,7 @@ describe("caller runtimes", () => {
     const seen: Array<Record<string, string | undefined>> = []
 
     const herdr = {
+      id: "herdr",
       env: ["HERDR_SOCKET_PATH"],
       target: (env: Readonly<Record<string, string | undefined>>, named?: string) => {
         seen.push({ ...env })
@@ -232,11 +233,31 @@ describe("caller runtimes", () => {
     }
 
     const env = { HERDR_SOCKET_PATH: "/h.sock", HERDR_PANE_ID: "p1", OTHER: "x" }
-    assert.strictEqual(callerTarget([herdr], env), "socket:/h.sock")
+    assert.deepStrictEqual(callerTarget([herdr], env, undefined), { target: "socket:/h.sock" })
     assert.deepStrictEqual(seen, [{ HERDR_SOCKET_PATH: "/h.sock" }])
-    assert.strictEqual(callerTarget([herdr], env, "other"), "session:other")
-    assert.strictEqual(callerTarget([herdr], {}), undefined)
-    assert.strictEqual(callerTarget([{ env: ["REX_PANE"] }], env), undefined)
+    assert.deepStrictEqual(callerTarget([herdr], env, "herdr", "other"), { target: "session:other" })
+    assert.deepStrictEqual(callerTarget([herdr], {}, "herdr"), {})
+    assert.deepStrictEqual(callerTarget([{ id: "rex", env: ["REX_PANE"] }], env, undefined), {})
+  })
+
+  it("callerTarget asks only the chosen runtime, so --runtime hc --session never gets herdr's target", () => {
+    const herdr = {
+      id: "herdr",
+      env: ["HERDR_SOCKET_PATH"],
+      target: (_env: Readonly<Record<string, string | undefined>>, named?: string) => named ?? "herdr",
+    }
+
+    const hc = { id: "hc", env: ["HC_TERMINAL_ID"] }
+    const env = { HERDR_SOCKET_PATH: "/h.sock" }
+
+    assert.deepStrictEqual(callerTarget([herdr, hc], env, "hc"), {})
+    assert.deepStrictEqual(callerTarget([herdr, hc], env, "hc", "foo"), {
+      refused: "--runtime hc does not take --session",
+    })
+    assert.deepStrictEqual(callerTarget([herdr, hc], {}, undefined, "foo"), {
+      refused: "--session names a runtime's session; pass --runtime (herdr, hc)",
+    })
+    assert.deepStrictEqual(callerTarget([herdr, hc], env, "herdr", "foo"), { target: "foo" })
   })
 
   it.live("a user runtime env key does not reach a process vibestd starts", () =>

@@ -69,15 +69,21 @@ export const make = Effect.gen(function* () {
 
   const scope = (method: MethodOf<"agent">) => agent(method).pipe(Effect.flatMap((c) => projectOf(c, method)))
 
-  const machineFromCaller = (input: {
-    readonly callerEnv: Readonly<Record<string, string>>
-    readonly runtimeSession?: string | undefined
-  }) =>
+  const machineFromCaller = (
+    method: "Launch" | "Spawn",
+    input: {
+      readonly callerEnv: Readonly<Record<string, string>>
+      readonly runtime?: string | undefined
+      readonly runtimeSession?: string | undefined
+    },
+  ) =>
     Effect.gen(function* () {
       const specs = yield* runtimes.callers
-      const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv), input.runtimeSession)
+      const at = callerTarget(specs, filterCallerEnv(specs, input.callerEnv), input.runtime, input.runtimeSession)
 
-      return { id: "local", ...(target !== undefined && { target }) }
+      if ("refused" in at) return yield* new Forbidden({ method, message: at.refused })
+
+      return { id: "local", ...at }
     })
 
   const cliOnly = (method: MethodOf<"cli">) =>
