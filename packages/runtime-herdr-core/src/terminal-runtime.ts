@@ -583,6 +583,13 @@ export const make = (deps: {
       )
     }
 
+    const attach: NonNullable<Runtime["attach"]> = (_target, terminal) => {
+      if (terminal === undefined || terminal.id === "") return []
+      const { socket, address } = parseTerminalId(terminal.id, deps.socket)
+
+      return socket === deps.socket ? ["hc", "attach", address] : ["hc", "--socket", socket, "attach", address]
+    }
+
     return {
       id: KIND,
       status,
@@ -595,6 +602,7 @@ export const make = (deps: {
       run,
       present,
       doctor,
+      attach,
       seen,
       see,
       events: RuntimeApi.eventsFrom(events),

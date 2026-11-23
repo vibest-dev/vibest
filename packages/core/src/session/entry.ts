@@ -328,7 +328,7 @@ const make = Effect.gen(function* () {
         runtime: rt.id,
         terminal: pane.id,
         place: placeOf(rt, pane),
-        attach: rt.attach?.(at.target) ?? null,
+        attach: rt.attach?.(at.target, pane) ?? null,
         ...(routing !== undefined && { routing }),
       }
     }).pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeLaunched)))

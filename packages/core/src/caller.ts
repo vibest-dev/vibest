@@ -1,3 +1,4 @@
+import { NO_RUNTIME_DETECTED } from "@vibest/schema/session"
 import { Effect, Predicate } from "effect"
 
 import type { Caller } from "./plugin/domains.ts"
@@ -37,7 +38,7 @@ export const entryPlace = (o: {
   if (chosen === undefined)
     return {
       in: "refused",
-      message: `no runtime was detected in this environment; pass --runtime${o.loaded === undefined || o.loaded.length === 0 ? "" : ` (${o.loaded.join(", ")})`}`,
+      message: `${NO_RUNTIME_DETECTED}; pass --runtime${o.loaded === undefined || o.loaded.length === 0 ? "" : ` (${o.loaded.join(", ")})`}`,
     }
 
   return chosen.terminal === undefined

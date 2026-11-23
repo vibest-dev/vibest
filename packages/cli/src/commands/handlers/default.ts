@@ -1,6 +1,6 @@
 import { type VibestClient } from "@vibest/client/client"
 import { VibestCommand } from "@vibest/schema/layout"
-import { describeSpawn, LaunchFailed } from "@vibest/schema/session"
+import { describeSpawn, LaunchFailed, NO_RUNTIME_DETECTED } from "@vibest/schema/session"
 import { Console, Effect, FileSystem, Option, Path } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
@@ -9,6 +9,7 @@ import { callerEnvOf, caller, userOnly } from "../../caller.ts"
 import { withVibest } from "../../client.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { Host } from "../../host.ts"
+import { attachCommand, chooseHarness, chooseRuntime, hasEntrySession, savedSetting } from "../../onboard.ts"
 import { noticeFrom } from "../../update.ts"
 import { Commands } from "../commands.ts"
 
@@ -58,8 +59,10 @@ export default Runtime.handler(Commands, (o) =>
     const agent = Option.getOrElse(o.agent, () => ENTRY_AGENT)
     const agentNamed = Option.isSome(o.agent)
 
-    const again = [
-      ...(yield* VibestCommand),
+    const vibestCommand = yield* VibestCommand
+
+    const again = (harness: string | undefined) => [
+      ...vibestCommand,
       ...(harness ? ["--harness", harness] : []),
       ...(provider ? ["--provider", provider] : []),
       ...(model ? ["--model", model] : []),
@@ -80,20 +83,51 @@ export default Runtime.handler(Commands, (o) =>
         if (agentNamed && ping.capabilities?.agents !== true)
           return yield* new LaunchFailed({ message: "this vibestd does not take --agent; run vibest update" })
 
-        const [, placed] = yield* Effect.all(
+        const placeEntry = (runtime: string | undefined) =>
+          client["Project.EntryPlace"]({
+            callerEnv: callerEnvOf(),
+            ...(runtime !== undefined && { runtime }),
+          })
+
+        const inPlainTerminal = (refused: LaunchFailed) =>
+          Effect.gen(function* () {
+            const chosen = yield* chooseRuntime(client, { reuse: true, saveWithoutAsking: false })
+
+            if (chosen === undefined)
+              return yield* new LaunchFailed({ message: `${refused.message}; or run vibest onboard` })
+
+            return { ...(yield* placeEntry(chosen)), onboarded: true }
+          })
+
+        const [project, placed] = yield* Effect.all(
           [
             client["Project.Open"]({}),
-            client["Project.EntryPlace"]({
-              callerEnv: callerEnvOf(),
-              ...(runtimeKind !== undefined && { runtime: runtimeKind }),
-            }),
+            placeEntry(runtimeKind).pipe(
+              Effect.map((found) => ({ ...found, onboarded: false })),
+              Effect.catchTag("LaunchFailed", (refused) =>
+                runtimeKind === undefined && refused.message.startsWith(NO_RUNTIME_DETECTED)
+                  ? inPlainTerminal(refused)
+                  : Effect.fail(refused),
+              ),
+            ),
           ],
           { concurrency: "unbounded" },
         )
 
+        const entryHarness = yield* Effect.gen(function* () {
+          if (harness !== undefined) return harness
+          const saved = yield* savedSetting("defaultHarness")
+
+          if (saved === undefined && !placed.onboarded) return undefined
+
+          if (!o.fresh && (yield* hasEntrySession(client, project.projectId))) return undefined
+
+          return saved ?? (yield* chooseHarness(client, { saveWithoutAsking: false }))
+        })
+
         if (placed.place.in === "launch") {
           const opened = yield* client.Launch({
-            argv: again,
+            argv: again(entryHarness),
             agent,
             agentNamed,
             focus: !o.headless,
@@ -116,7 +150,7 @@ export default Runtime.handler(Commands, (o) =>
         const [chosen, running] = yield* Effect.all(
           [
             client["Project.StartEntry"]({
-              harness,
+              harness: entryHarness,
               agent,
               agentNamed,
               fresh: o.fresh,
@@ -165,7 +199,7 @@ export default Runtime.handler(Commands, (o) =>
 
     if (o.headless || !opened.attach) return
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const [file, ...args] = opened.attach
+    const [file, ...args] = yield* attachCommand(opened.attach)
     yield* spawner.exitCode(ChildProcess.make(file!, args, { stdin: "inherit", stdout: "inherit", stderr: "inherit" }))
   }),
 )

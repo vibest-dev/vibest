@@ -60,6 +60,7 @@ const Handlers = Runtime.handlers(Commands, {
     stop: () => import("./commands/handlers/integration/stop.ts"),
     ready: () => import("./commands/handlers/integration/ready.ts"),
   },
+  onboard: () => import("./commands/handlers/onboard.ts"),
   doctor: () => import("./commands/handlers/doctor.ts"),
   update: () => import("./commands/handlers/update.ts"),
   connect: () => import("./commands/handlers/connect.ts"),
