@@ -133,7 +133,7 @@ const checks: ReadonlyArray<Check> = [
               model.seen.some(
                 (m) =>
                   m.includes("<vibest-agent-message>") &&
-                  !m.includes(`<agent-id>${entryId}</agent-id>`) &&
+                  !m.includes(`<session-id>${entryId}</session-id>`) &&
                   m.includes(marker),
               ),
             180_000,
