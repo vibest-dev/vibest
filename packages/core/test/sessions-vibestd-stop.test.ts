@@ -44,7 +44,7 @@ describe.concurrent("after a vibestd stop", () => {
         false,
         {
           runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
+          target: { id: "test/coord" },
         },
         { agent: "coordinator" },
       )

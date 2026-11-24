@@ -294,7 +294,7 @@ describe("multi-repository isolated workspace", () => {
         false,
         {
           runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
+          target: { id: "test/coord" },
         },
         { agent: "coordinator" },
       )
@@ -346,7 +346,7 @@ describe("multi-repository isolated workspace", () => {
       const kept = (yield* sessions.archive(id))!
       assert.strictEqual(kept.worktree, "kept")
       assert.match(kept.reasons.join("\n"), /app: worktree kept: uncommitted changes/)
-      assert.strictEqual(kept.branch, "sdk=feat/sdk")
+      assert.deepStrictEqual(kept.branches, [{ repository: "sdk", branch: "feat/sdk" }])
       assert.isTrue(yield* fs.exists(appWt))
       assert.isFalse(yield* fs.exists(sdkWt))
 
@@ -375,7 +375,7 @@ describe("multi-repository isolated workspace", () => {
         agent: "coordinator",
         harness: "pi",
         fresh: false,
-        terminal: "coord",
+        terminal: { id: "coord" },
       })
 
       const { id } = yield* authed(
@@ -417,7 +417,7 @@ describe("multi-repository isolated workspace", () => {
         agent: "coordinator",
         harness: "pi",
         fresh: false,
-        terminal: "coord",
+        terminal: { id: "coord" },
       })
 
       const { id } = yield* authed(

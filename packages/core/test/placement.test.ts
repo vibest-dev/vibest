@@ -23,7 +23,7 @@ const insertTopLevel = (projectId: string, name: string, cwd: string) =>
         harnessId: "pi",
         harnessSessionId: null,
         runtime: "herdr",
-        address: { machine: "local", id: "" },
+        terminal: null,
         name,
         provider: null,
         model: null,
@@ -147,7 +147,7 @@ describe.concurrent("Placement project near-terminal", () => {
           harnessId: "pi",
           harnessSessionId: null,
           runtime: "rex",
-          address: { machine: "local", id: "session:live/block:1" },
+          terminal: { session: "session:live", block: "block:1" },
           name: "live",
           provider: null,
           model: null,
@@ -171,7 +171,7 @@ describe.concurrent("Placement project near-terminal", () => {
           harnessId: "pi",
           harnessSessionId: null,
           runtime: "rex",
-          address: { machine: "local", id: "session:ended/block:2" },
+          terminal: { session: "session:ended", block: "block:2" },
           name: "ended",
           provider: null,
           model: null,
@@ -195,7 +195,7 @@ describe.concurrent("Placement project near-terminal", () => {
           harnessId: "pi",
           harnessSessionId: null,
           runtime: "rex",
-          address: { machine: "local", id: "session:remote/block:3" },
+          terminal: { session: "session:remote", block: "block:3" },
           name: "remote",
           provider: null,
           model: null,
@@ -212,15 +212,15 @@ describe.concurrent("Placement project near-terminal", () => {
       )
 
       assert.deepStrictEqual(yield* db.session.lastProjectTerminal(projectId, "rex"), {
-        machine: "local",
-        id: "session:live/block:1",
+        session: "session:live",
+        block: "block:1",
       })
 
       yield* db.session.endProcess(liveId, "exited")
 
       assert.deepStrictEqual(yield* db.session.lastProjectTerminal(projectId, "rex"), {
-        machine: "local",
-        id: "session:ended/block:2",
+        session: "session:ended",
+        block: "block:2",
       })
     }),
   )
@@ -260,7 +260,7 @@ describe.concurrent("Placement project near-terminal", () => {
       })
 
       const secondOpen = (yield* fake.callsTo("open")).at(-1)
-      assert.strictEqual(secondOpen?.near, first.terminal)
+      assert.strictEqual(secondOpen?.near, first.terminal["id"])
       assert.isUndefined(secondOpen?.parent)
 
       const secondEntryRow = (yield* db.session.entryOf(projectId))!
@@ -308,7 +308,7 @@ describe.concurrent("Placement project near-terminal", () => {
           harnessId: "pi",
           harnessSessionId: null,
           runtime: "herdr",
-          address: { machine: "local", id: "" },
+          terminal: null,
           name: "child",
           provider: null,
           model: null,

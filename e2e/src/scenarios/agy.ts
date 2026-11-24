@@ -221,9 +221,9 @@ const checks: ReadonlyArray<Check> = [
         await untilShown(w, id, evidence, "the second execution completed", () => completed(w, id) === 2)
         expect((await w.ok(["peek", id])).includes("PONG-AGY-2"), "agy's screen after the send")
 
-        const pane = (await w.json<{ sessions: Array<{ id: string; address?: { id: string } }> }>(["ls"])).sessions
-          .find((s) => s.id === id)
-          ?.address?.id.split("/")[1]
+        const pane = (
+          await w.json<{ sessions: Array<{ id: string; terminal?: { target: { pane?: string } } | null }> }>(["ls"])
+        ).sessions.find((s) => s.id === id)?.terminal?.target.pane
 
         await herdr(socket, "pane.close", { pane_id: pane ?? "" })
         await until(

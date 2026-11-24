@@ -124,7 +124,7 @@ export const peerSession = {
   model: null,
   harnessSessionId: null,
   runtime: "fake",
-  address: { machine: "local", id: "" },
+  terminal: null,
   status: "unknown" as const,
   startedAt: null,
   exitedAt: null,
@@ -141,6 +141,7 @@ export const fakeSpawns =
         spawns.push(input)
         const id = randomId()
         const at = yield* Clock.currentTimeMillis
+        const t = terminal(input, id)
 
         const inserted = yield* db.session.insertSession(
           {
@@ -150,7 +151,7 @@ export const fakeSpawns =
             createdAt: at,
             lastActive: at,
             runtime: input.runtime ?? peerSession.runtime,
-            address: { machine: "local", id: terminal(input, id) },
+            terminal: t === "" ? null : { id: t },
           },
           input.projectId,
           {
@@ -228,7 +229,7 @@ export const entryOn = (stack: Effect.Success<ReturnType<typeof repoStack>>) =>
       false,
       {
         runtime: "fake",
-        address: { machine: "local", id: "main-pane" },
+        target: { id: "main-pane" },
       },
       { agent: "coordinator" },
     )

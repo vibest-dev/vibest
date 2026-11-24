@@ -42,7 +42,7 @@ const project = Effect.gen(function* () {
     false,
     {
       runtime: RUNTIME,
-      address: { machine: "local", id: "test/coord" },
+      target: { id: "test/coord" },
     },
     { agent: "coordinator" },
   )

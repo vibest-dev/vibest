@@ -169,7 +169,7 @@ describe("sends from sessions", () => {
           assert.deepStrictEqual(targets.map((t) => t.id).sort(), [A, B].sort())
 
           const edges = yield* db.session.sessionEdges([A, B, X])
-          assert.deepStrictEqual([...(edges.get(X) ?? [])].sort(), [A, B, entryId].sort())
+          assert.deepStrictEqual([...(edges.get(X) ?? [])].map((e) => e.id).sort(), [A, B, entryId].sort())
 
           yield* db.session.linkSessions([{ from: B, to: X }])
           assert.isTrue(yield* db.inbox.maySend(B, X))

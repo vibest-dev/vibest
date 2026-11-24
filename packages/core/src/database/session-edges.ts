@@ -1,4 +1,5 @@
 import { SessionLinked, SessionUnlinked } from "@vibest/schema/event"
+import type { SessionRef } from "@vibest/schema/terminal"
 import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -18,14 +19,14 @@ export interface SpawnLinks {
   readonly with?: ReadonlyArray<string> | undefined
 }
 
-export type EdgeSpec =
-  | { readonly _tag: "Mutual"; readonly ids: ReadonlyArray<string> }
-  | { readonly _tag: "Directed"; readonly from: ReadonlyArray<string>; readonly to: ReadonlyArray<string> }
-  | { readonly _tag: "Chain"; readonly ids: ReadonlyArray<string> }
+export type EdgeSpec<R = SessionRef> =
+  | { readonly _tag: "Mutual"; readonly ids: ReadonlyArray<R> }
+  | { readonly _tag: "Directed"; readonly from: ReadonlyArray<R>; readonly to: ReadonlyArray<R> }
+  | { readonly _tag: "Chain"; readonly ids: ReadonlyArray<R> }
 
-export const expandEdgeSpec = <T, E1, E2, R>(
-  spec: EdgeSpec,
-  resolve: (ref: string) => Effect.Effect<T, E1, R>,
+export const expandEdgeSpec = <Ref, T, E1, E2, R>(
+  spec: EdgeSpec<Ref>,
+  resolve: (ref: Ref) => Effect.Effect<T, E1, R>,
   keyOf: (item: T) => string,
   fail: (message: string) => Effect.Effect<never, E2>,
 ): Effect.Effect<ReadonlyArray<readonly [T, T]>, E1 | E2, R> =>
@@ -156,18 +157,25 @@ export const make = Effect.gen(function* () {
 
     sessionEdges: Effect.fn("Db.session.sessionEdges")((ids: ReadonlyArray<string>) =>
       (ids.length === 0
-        ? Effect.succeed<ReadonlyArray<{ fromSessionId: string; toSessionId: string }>>([])
-        : sql<{ fromSessionId: string; toSessionId: string }>`SELECT from_session_id, to_session_id
-            FROM session_edge WHERE ${sql.in("from_session_id", ids)} ORDER BY to_session_id`
+        ? Effect.succeed<ReadonlyArray<{ fromSessionId: string; toRemoteId: string; toSessionId: string }>>([])
+        : sql<{
+            fromSessionId: string
+            toRemoteId: string
+            toSessionId: string
+          }>`SELECT from_session_id, to_remote_id, to_session_id
+            FROM session_edge WHERE ${sql.in("from_session_id", ids)} ORDER BY to_remote_id, to_session_id`
       ).pipe(
         Effect.map((rows) => {
-          const byFrom = new Map<string, Array<string>>()
+          const byFrom = new Map<string, Array<{ readonly id: string; readonly remote?: string }>>()
 
           for (const row of rows) {
+            const target =
+              row.toRemoteId === "" ? { id: row.toSessionId } : { id: row.toSessionId, remote: row.toRemoteId }
+
             const list = byFrom.get(row.fromSessionId)
 
-            if (list === undefined) byFrom.set(row.fromSessionId, [row.toSessionId])
-            else list.push(row.toSessionId)
+            if (list === undefined) byFrom.set(row.fromSessionId, [target])
+            else list.push(target)
           }
 
           return byFrom

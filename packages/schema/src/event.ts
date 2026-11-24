@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 
 import { factOf } from "./event-fact.ts"
 import { Routing } from "./plugin.ts"
+import { TerminalTarget } from "./terminal.ts"
 
 export type Aggregate = "project" | "session" | "ledger"
 
@@ -61,11 +62,15 @@ export const ProcessStarted = fact("process.started", "session", {
   routing: optional(Routing),
   resume: optional(Text),
   runtime: Text,
-  terminal: optional(Text),
+  terminal: optional(TerminalTarget),
   pid: optional(Pid),
 })
 
-export const ProcessPlaced = fact("process.placed", "session", { process: Seq, terminal: Text, pid: optional(Pid) })
+export const ProcessPlaced = fact("process.placed", "session", {
+  process: Seq,
+  terminal: TerminalTarget,
+  pid: optional(Pid),
+})
 
 export const ProcessReady = fact("process.ready", "session", {
   process: Seq,
@@ -293,7 +298,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 13
+export const CATALOG_VERSION = 14
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

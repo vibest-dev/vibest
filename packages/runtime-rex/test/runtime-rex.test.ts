@@ -11,7 +11,7 @@ import { Effect, Ref, Stream } from "effect"
 
 import { alive, commandOf, note } from "../../../tools/reap.ts"
 import { connect } from "../src/client.ts"
-import { make, MIN_API_REVISION, parseTerminalId } from "../src/terminal-runtime.ts"
+import { make, MIN_API_REVISION } from "../src/terminal-runtime.ts"
 
 const REX_CANDIDATES = [
   process.env.REX_BIN,
@@ -221,7 +221,13 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
           yield* until(
             Ref.get(seen),
             (events) =>
-              events.some((e) => e.type === "state" && e.terminal.id === terminal.id && e.state === "blocked"),
+              events.some(
+                (e) =>
+                  e.type === "state" &&
+                  e.terminal["session"] === terminal["session"] &&
+                  e.terminal["block"] === terminal["block"] &&
+                  e.state === "blocked",
+              ),
             "no blocked state event",
           )
           yield* runtime.send(terminal, { text: "printf '\\033]7501;state=done\\007'" })
@@ -249,10 +255,8 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
             split: true,
           })
 
-          const a = parseTerminalId(near.id)
-          const b = parseTerminalId(beside.id)
-          assert.strictEqual(b?.sessionId, a?.sessionId)
-          const view = rexCli("api", "call", "session.view", JSON.stringify({ session_id: a?.sessionId }))
+          assert.strictEqual(beside["session"], near["session"])
+          const view = rexCli("api", "call", "session.view", JSON.stringify({ session_id: near["session"] }))
           assert.strictEqual(view.status, 0, view.stderr)
 
           const windows = (
@@ -260,11 +264,11 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
           ).windows
 
           const holding = windows.filter((w) =>
-            w.layers.some((l) => l.blocks.some((block) => block.block_id === b?.blockId)),
+            w.layers.some((l) => l.blocks.some((block) => block.block_id === beside["block"])),
           )
 
           assert.strictEqual(holding.length, 1)
-          assert.isTrue(holding[0]?.layers.some((l) => l.blocks.some((block) => block.block_id === a?.blockId)))
+          assert.isTrue(holding[0]?.layers.some((l) => l.blocks.some((block) => block.block_id === near["block"])))
           yield* runtime.close(beside)
           yield* runtime.close(near)
         }),
@@ -358,7 +362,7 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
           }
 
           const sessionId = parsed.session_id
-          const anchor = { id: `${sessionId}/${parsed.initial_windows[0]!.block_ids[0]!}` }
+          const anchor = { session: sessionId, block: parsed.initial_windows[0]!.block_ids[0]! }
 
           const keeper = yield* runtime.open({
             project: cwd,
@@ -368,7 +372,7 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
             near: anchor,
           })
 
-          assert.strictEqual(parseTerminalId(keeper.id)?.sessionId, sessionId)
+          assert.strictEqual(keeper["session"], sessionId)
 
           yield* runtime.close(anchor)
 
@@ -380,7 +384,7 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
             near: anchor,
           })
 
-          assert.strictEqual(parseTerminalId(afterClose.id)?.sessionId, sessionId)
+          assert.strictEqual(afterClose["session"], sessionId)
 
           yield* runtime.close(afterClose)
           yield* runtime.close(keeper)
@@ -402,12 +406,11 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
             cwd,
             launch: { argv: [], env: {} },
             label: "fallback",
-            near: { id: `${deadSession}/block:22222222-2222-4222-8222-222222222222` },
+            near: { session: deadSession, block: "block:22222222-2222-4222-8222-222222222222" },
           })
 
-          const parsed = parseTerminalId(opened.id)
-          assert.isDefined(parsed)
-          assert.notStrictEqual(parsed?.sessionId, deadSession)
+          assert.isDefined(opened["session"])
+          assert.notStrictEqual(opened["session"], deadSession)
           yield* runtime.close(opened)
         }),
       ),

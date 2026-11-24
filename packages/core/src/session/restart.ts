@@ -127,7 +127,7 @@ export const make = Effect.gen(function* () {
           harnessSessionId:
             savedId !== null && (yield* db.session.canResumeConversation(entry.id, savedId)) ? savedId : null,
           projectId: entry.projectId,
-          ...(place !== undefined && { runtime: runtimeEnv(place.runtime, place.address) }),
+          ...(place !== undefined && { runtime: runtimeEnv(place.runtime, place.target) }),
         }),
         message: continuing(interrupted),
       })
@@ -271,6 +271,10 @@ export const make = Effect.gen(function* () {
 
       if (session === undefined)
         return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
+      const terminal = terminalOf(session)?.target
+
+      if (terminal === undefined)
+        return { id, projectId: session.projectId, ok: false, message: `${id} not restarted: it has no terminal` }
       const interrupted = executionStateOf(session) === "open"
 
       return yield* inPlace({
@@ -279,7 +283,7 @@ export const make = Effect.gen(function* () {
         label: id,
         adapter: harnesses.find(harnessIdOf(session)),
         h: yield* routed(runtimeOf(session)),
-        terminal: terminalOf(session),
+        terminal,
         pid: pidOf(session),
         harnessSessionId: session.process?.harnessSessionId ?? null,
         argv: againArgv(session, interrupted),
@@ -302,7 +306,7 @@ export const make = Effect.gen(function* () {
       const seen =
         h === undefined
           ? "unknown"
-          : yield* agentState(h, place.address).pipe(Effect.orElseSucceed((): AgentSeen => "unknown"))
+          : yield* agentState(h, place.target).pipe(Effect.orElseSucceed((): AgentSeen => "unknown"))
 
       const interrupted = wasWorking || stateOf(seen) === "working"
 
@@ -312,7 +316,7 @@ export const make = Effect.gen(function* () {
         label,
         adapter: harnesses.find(harnessIdOf(entry)),
         h,
-        terminal: place.address,
+        terminal: place.target,
         pid: pidOf(entry),
         harnessSessionId: entry.process?.harnessSessionId ?? null,
         argv: entryArgv(entry, interrupted),
@@ -334,7 +338,7 @@ export const make = Effect.gen(function* () {
       const h = yield* routed(place.runtime)
 
       if (h === undefined) return undefined
-      const seen = yield* agentState(h, place.address).pipe(Effect.option)
+      const seen = yield* agentState(h, place.target).pipe(Effect.option)
 
       return Option.isNone(seen) || seen.value === "absent" ? undefined : seen.value
     })
@@ -350,7 +354,7 @@ export const make = Effect.gen(function* () {
           !current(row.process?.integration ?? undefined) &&
           !archived(row) &&
           (row.process?.placedAt ?? null) !== null &&
-          terminalOf(row).id !== "",
+          terminalOf(row) !== null,
       )
       .map((row) => ({
         id: row.id,

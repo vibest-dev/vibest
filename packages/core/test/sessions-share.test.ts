@@ -242,7 +242,7 @@ describe.concurrent("Session", () => {
       const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
       yield* until(
         owner.db.session.getSession(id),
-        (w) => w !== undefined && exitedAt(w) === null && terminalOf(w).id !== "",
+        (w) => w !== undefined && exitedAt(w) === null && terminalOf(w) !== null,
       )
       assert.strictEqual(yield* owner.db.session.currentProcessId(id), reporter)
       assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)

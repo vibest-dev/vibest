@@ -173,11 +173,13 @@ const move = (harness: "claude" | "pi"): Check => ({
       )
 
       const entryRows = (
-        await w.json<{ sessions: Array<{ agent: string; address: { id: string } }> }>(["ls"]).then((l) => l.sessions)
+        await w
+          .json<{ sessions: Array<{ agent: string; terminal: { target: { pane?: string } } | null }> }>(["ls"])
+          .then((l) => l.sessions)
       ).filter((e) => e.agent === "coordinator")
 
       expect(
-        entryRows.length === 1 && entryRows[0]!.address.id.endsWith(b),
+        entryRows.length === 1 && entryRows[0]!.terminal?.target.pane === b,
         `entry sessions: ${JSON.stringify(entryRows)}`,
       )
     } finally {

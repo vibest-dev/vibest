@@ -23,7 +23,12 @@ describe("vibest.sock", () => {
       )
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
       assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
-      yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "claude", fresh: false, terminal: "test/p1" })
+      yield* c["Project.EntrySession"]({
+        agent: "coordinator",
+        harness: "claude",
+        fresh: false,
+        terminal: { id: "test/p1" },
+      })
       assert.strictEqual((yield* c["Project.StartEntry"]({ agent: "general", runtime: "herdr" })).harness, "claude")
     }),
     {
@@ -49,7 +54,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const pane = "w1:coord"
       yield* herdr.seedAgent(pane)
-      yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: pane })
+      yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: { id: pane } })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "working" }))
       yield* until(c.List({}), (list) => list.sessions[0]?.status === "working")
       assert.deepInclude((yield* c.List({})).sessions[0], { agent: "coordinator", status: "working" })
@@ -93,7 +98,7 @@ describe("vibest.sock", () => {
         false,
         {
           runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
+          target: { id: "test/main" },
         },
         { agent: "coordinator" },
       )
@@ -120,7 +125,7 @@ describe("vibest.sock", () => {
         false,
         {
           runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
+          target: { id: "test/main" },
         },
         { agent: "coordinator" },
       )
@@ -144,7 +149,7 @@ describe("vibest.sock", () => {
         false,
         {
           runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
+          target: { id: "test/main" },
         },
         { agent: "coordinator" },
       )

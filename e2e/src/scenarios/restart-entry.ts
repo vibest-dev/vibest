@@ -42,9 +42,9 @@ const checks: ReadonlyArray<Check> = [
         const address = async () =>
           (
             await w
-              .json<{ sessions: Array<{ id: string; address: unknown }> }>(["ls"], { cwd: c!.repo, env: install.env })
+              .json<{ sessions: Array<{ id: string; terminal: unknown }> }>(["ls"], { cwd: c!.repo, env: install.env })
               .then((l) => l.sessions)
-          ).find((e) => e.id === before.id)?.address
+          ).find((e) => e.id === before.id)?.terminal
 
         const addressBefore = await address()
         expect(addressBefore != null, "the entry session has no terminal address before the restart")

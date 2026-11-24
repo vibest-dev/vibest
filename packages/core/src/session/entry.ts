@@ -7,16 +7,16 @@ import {
   LaunchFailed,
   NoRuntime,
   type RuntimeMachine,
-  type RuntimeAddress,
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
+import { canonicalTarget, type TerminalTarget } from "@vibest/schema/terminal"
 import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 
 import { definitionLaunch } from "../agent-launch.ts"
 import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
-import { AddressJson, encodeAddress, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
+import { harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
@@ -27,7 +27,7 @@ import { entryIdle } from "../inbox.ts"
 import * as Launch from "../launch.ts"
 import { Plugins } from "../plugin.ts"
 import { Processes } from "../processes.ts"
-import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
+import { formatTerminal, machinesListing, type Runtime, Runtimes, type Terminal } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks, terminalLock } from "./locks.ts"
 import { runtimeEnv } from "./placement.ts"
@@ -42,16 +42,16 @@ export class EntryRunning extends Schema.TaggedError<EntryRunning>()("EntryRunni
   place: Schema.String,
 }) {}
 
-const placeOf = (runtime: { readonly id: string; readonly name?: string }, address: RuntimeAddress) => {
+const placeOf = (runtime: Pick<Runtime, "id" | "name" | "format">, target: TerminalTarget) => {
   const name = runtime.name ?? runtime.id
 
-  return address.id !== "" ? `${name} ${address.id}` : `${name} (not placed)`
+  return `${name} ${formatTerminal(runtime, target)}`
 }
 
-export const sameEntry = (current: SessionRow | undefined, runtime: string, address: string) => {
+export const sameEntry = (current: SessionRow | undefined, runtime: string, target: TerminalTarget) => {
   const place = current === undefined ? undefined : placedTerminal(current)
 
-  return place !== undefined && place.runtime === runtime && encodeAddress(place.address) === address
+  return place !== undefined && place.runtime === runtime && canonicalTarget(place.target) === canonicalTarget(target)
 }
 
 const ENTRY_FIRST_INPUT =
@@ -150,31 +150,39 @@ const make = Effect.gen(function* () {
       )
     })
 
-  const running = Effect.fn("EntrySession.running")(function* (projectId: string, terminal: string) {
+  const running = Effect.fn("EntrySession.running")(function* (
+    projectId: string,
+    terminal: TerminalTarget | undefined,
+  ) {
     const entry = yield* db.session.entryOf(projectId)
     const place = entry === undefined ? undefined : placedTerminal(entry)
 
-    if (entry === undefined || place === undefined || place.address.id === terminal) return null
+    if (
+      entry === undefined ||
+      place === undefined ||
+      (terminal !== undefined && canonicalTarget(place.target) === canonicalTarget(terminal))
+    )
+      return null
     const found = runtimes.find(place.runtime)
 
     if (!(yield* restarting.has(entry.id))) {
       if (found === undefined) return null
-      const presence = yield* entryIdle(found, place.address).pipe(Effect.option)
+      const presence = yield* entryIdle(found, place.target).pipe(Effect.option)
 
       if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
     }
 
     return {
       harness: harnessIdOf(entry),
-      place: placeOf(found ?? { id: place.runtime }, place.address),
+      place: placeOf(found ?? { id: place.runtime }, place.target),
       runtime: place.runtime,
-      address: encodeAddress(place.address),
+      target: place.target,
     }
   })
 
   const onlyRuntime = Effect.map(runtimes.all, (all) => (all.length === 1 ? all[0]?.id : undefined))
 
-  const notRunning = (projectId: string, terminal: string) =>
+  const notRunning = (projectId: string, terminal: TerminalTarget | undefined) =>
     Effect.flatMap(running(projectId, terminal), (found) =>
       found ? Effect.fail(new EntryRunning({ harness: found.harness, place: found.place })) : Effect.void,
     )
@@ -250,7 +258,7 @@ const make = Effect.gen(function* () {
           model: decision.model ?? null,
           session: projectLocked.withLock(id)(
             Effect.gen(function* () {
-              yield* notRunning(id, "")
+              yield* notRunning(id, undefined)
               const existing = yield* db.session.entryOf(id)
 
               const sessionId =
@@ -281,7 +289,7 @@ const make = Effect.gen(function* () {
                   id,
                   chosen,
                   fresh,
-                  { runtime: rt.id, address: pane },
+                  { runtime: rt.id, target: pane },
                   {
                     provider: decision.provider,
                     model: decision.model,
@@ -326,7 +334,7 @@ const make = Effect.gen(function* () {
 
       return {
         runtime: rt.id,
-        terminal: pane.id,
+        terminal: pane,
         place: placeOf(rt, pane),
         attach: rt.attach?.(at.target, pane) ?? null,
         ...(routing !== undefined && { routing }),
@@ -369,7 +377,7 @@ const make = Effect.gen(function* () {
     readonly directory: string
     readonly harness: HarnessId
     readonly fresh: boolean
-    readonly terminal: string
+    readonly terminal: TerminalTarget
     readonly runtime: string | undefined
     readonly provider: string | undefined
     readonly model: string | undefined
@@ -386,7 +394,6 @@ const make = Effect.gen(function* () {
     return yield* projectLocked.withLock(projectId)(
       Effect.gen(function* () {
         yield* notRunning(projectId, terminal)
-        const address = { machine: "local", id: terminal }
 
         let claimed:
           | {
@@ -406,12 +413,12 @@ const make = Effect.gen(function* () {
             provider: input.provider ?? null,
             model: input.model ?? null,
             session: Effect.gen(function* () {
-              const saved = yield* locks.withLock(terminalLock(kind, address))(
+              const saved = yield* locks.withLock(terminalLock(kind, terminal))(
                 db.session.startEntry(
                   projectId,
                   input.harness,
                   input.fresh,
-                  { runtime: kind, address },
+                  { runtime: kind, target: terminal },
                   {
                     provider: input.provider,
                     model: input.model,
@@ -424,7 +431,7 @@ const make = Effect.gen(function* () {
                 ),
               )
 
-              claimed = { ...saved, runtime: runtimeEnv(kind, address) }
+              claimed = { ...saved, runtime: runtimeEnv(kind, terminal) }
 
               return claimed
             }),
@@ -440,7 +447,7 @@ const make = Effect.gen(function* () {
 
         if (rt?.present !== undefined)
           yield* rt
-            .present(address, { entrySession: claimed.sessionId, projectId, title: entryLabel(directory) })
+            .present(terminal, { entrySession: claimed.sessionId, projectId, title: entryLabel(directory) })
             .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
 
         const typed = yield* Launch.launchLine(command).pipe(
@@ -481,25 +488,24 @@ const make = Effect.gen(function* () {
   })
 
   const focus = Effect.fn("EntrySession.focus")(function* (projectId: string) {
-    const found = yield* running(projectId, "")
+    const found = yield* running(projectId, undefined)
 
     if (found === null) return null
     const runtime = runtimes.find(found.runtime)
 
     if (runtime?.focus === undefined) return { place: found.place, focused: false }
-    const address = yield* Schema.decodeUnknownEffect(AddressJson)(found.address).pipe(Effect.orDie)
-    const focused = yield* runtime.focus(address).pipe(Effect.exit)
+    const focused = yield* runtime.focus(found.target).pipe(Effect.exit)
 
     return { place: found.place, focused: Exit.isSuccess(focused) }
   })
 
-  const stop = Effect.fn("EntrySession.stop")(function* (projectId: string, runtime: string, address: string) {
+  const stop = Effect.fn("EntrySession.stop")(function* (projectId: string, runtime: string, target: TerminalTarget) {
     return yield* projectLocked.withLock(projectId)(
       Effect.gen(function* () {
         const entry = yield* db.session.entryOf(projectId)
         const place = entry === undefined ? undefined : placedTerminal(entry)
 
-        if (entry === undefined || place === undefined || !sameEntry(entry, runtime, address))
+        if (entry === undefined || place === undefined || !sameEntry(entry, runtime, target))
           return { result: "moved" as const }
 
         if (yield* restarting.has(entry.id))
@@ -509,10 +515,10 @@ const make = Effect.gen(function* () {
           }
         const h = yield* runtimes.route(runtime)
 
-        return yield* stopAgent(h, place.address, {
+        return yield* stopAgent(h, place.target, {
           pid: pidOf(entry),
-          detach: db.session.detachEntry(projectId, runtime, place.address),
-          reattach: db.session.reattachEntry(projectId, runtime, place.address),
+          detach: db.session.detachEntry(projectId, runtime, place.target),
+          reattach: db.session.reattachEntry(projectId, runtime, place.target),
           wait: HARNESS_EXIT_WAIT,
         }).pipe(Effect.provideService(Bus.Service, bus), Effect.provideService(Processes.Service, processes))
       }),

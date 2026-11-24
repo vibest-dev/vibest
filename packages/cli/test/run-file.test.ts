@@ -64,7 +64,7 @@ describe("vibest run --file", () => {
           yield* projectOf(repo),
           "pi",
           false,
-          { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
+          { runtime: RUNTIME, target: { id: "test/coord" } },
           { agent: "coordinator" },
         )
 

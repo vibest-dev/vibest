@@ -292,7 +292,7 @@ layer(Platform.services)(
                 harnessId: "pi",
                 harnessSessionId: null,
                 runtime: RUNTIME,
-                address: { machine: "local", id: "nowhere/p1" },
+                terminal: { id: "nowhere/p1" },
                 name: "seeded",
                 provider: null,
                 model: null,

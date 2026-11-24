@@ -8,7 +8,7 @@ import { VibestCommand } from "@vibest/schema/layout"
 import { Config, Console, Effect, Option, Predicate, Schema } from "effect"
 import { Command } from "effect/cli"
 
-import { agentName, KIND, parseTerminal } from "./terminal-runtime.ts"
+import { agentName, KIND } from "./terminal-runtime.ts"
 
 export class BadPluginContext extends Schema.TaggedError<BadPluginContext>()("BadPluginContext", {
   message: Schema.String,
@@ -232,7 +232,7 @@ const toLive = (session: SessionInfo): LiveSession => ({
   agent: session.agent,
   harness: session.harness,
   status: session.status,
-  paneId: parseTerminal(session.address)?.paneId,
+  paneId: session.terminal?.runtime === KIND ? session.terminal.target.pane : undefined,
 })
 
 const daemonOn = ({ withVibest }: VibestClients) => {

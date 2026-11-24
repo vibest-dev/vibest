@@ -302,7 +302,7 @@ describe("vibest.sock", () => {
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       }).pipe(Effect.forkChild)
 
       yield* held.reached
@@ -314,7 +314,7 @@ describe("vibest.sock", () => {
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       }).pipe(Effect.forkChild)
 
       yield* TestClock.adjust(PRESENT_TIMEOUT)
@@ -329,7 +329,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, yield* makeRepository)
 
       const enter = (harness: "pi" | "claude") =>
-        c["Project.EntrySession"]({ agent: "coordinator", harness, fresh: false, terminal: "test/p1" })
+        c["Project.EntrySession"]({ agent: "coordinator", harness, fresh: false, terminal: { id: "test/p1" } })
 
       const first = yield* enter("pi")
       assert.strictEqual(first.command.env.VIBEST_PROCESS, String(yield* db.session.currentProcessId(first.sessionId)))
@@ -359,7 +359,7 @@ describe("vibest.sock", () => {
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })
 
       yield* raw["Session.Ready"](
@@ -475,7 +475,7 @@ describe("vibest.sock", () => {
           agent: "coordinator",
           harness: "claude",
           fresh: false,
-          terminal: "test/p1",
+          terminal: { id: "test/p1" },
         })).harnessSessionId,
         "s2",
         "a conversation reported by another harness than the session's is ignored",
@@ -507,7 +507,7 @@ describe("vibest.sock", () => {
             agent: "coordinator",
             harness: "pi",
             fresh: false,
-            terminal: `test/${paneId}`,
+            terminal: { id: `test/${paneId}` },
           })
 
           return yield* asSession(raw, launched.sessionId, root)
@@ -582,7 +582,7 @@ describe("vibest.sock", () => {
             agent: "coordinator",
             harness: "pi",
             fresh: false,
-            terminal: `test/${paneId}`,
+            terminal: { id: `test/${paneId}` },
           })
 
           return yield* asSession(raw, launched.sessionId, root)
@@ -607,8 +607,8 @@ describe("vibest.sock", () => {
         ["Project.Move", c["Project.Move"]({ from: "x" })],
         ["Project.EntryPlace", c["Project.EntryPlace"]({ callerEnv: {} })],
         ["List", c.List({ stopped: true })],
-        ["Session.Link", c["Session.Link"]({ spec: EdgeMutual.make({ ids: [id, id] }) })],
-        ["Session.Unlink", c["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [id, id] }) })],
+        ["Session.Link", c["Session.Link"]({ spec: EdgeMutual.make({ ids: [{ id }, { id }] }) })],
+        ["Session.Unlink", c["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [{ id }, { id }] }) })],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         ["Inbox.Take", c["Inbox.Take"](undefined)],
@@ -617,12 +617,12 @@ describe("vibest.sock", () => {
         ["Session.Seen", c["Session.Seen"]({ id: "x", finished: 0 })],
         [
           "Project.EntrySession",
-          c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: "test/p1" }),
+          c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: { id: "test/p1" } }),
         ],
         ["Project.Create", c["Project.Create"]({ directory: "x", from: ["y"] })],
         ["Project.FocusEntry", c["Project.FocusEntry"]({})],
-        ["Project.RunningEntry", c["Project.RunningEntry"]({ terminal: "test/p1" })],
-        ["Project.StopEntry", c["Project.StopEntry"]({ runtime: "herdr", address: "{}" })],
+        ["Project.RunningEntry", c["Project.RunningEntry"]({ terminal: { id: "test/p1" } })],
+        ["Project.StopEntry", c["Project.StopEntry"]({ runtime: "herdr", target: { id: "x" } })],
         ["Project.Info", c["Project.Info"]()],
         ["Project.Search", c["Project.Search"]({ query: "x" })],
         ["Send", c.Send({ id, message: "x" })],
@@ -668,8 +668,8 @@ describe("vibest.sock", () => {
       const entryBefore = yield* db.session.entryOf((yield* db.session.getSession(id))!.projectId)
 
       const entryCalls: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
-        w["Project.StopEntry"]({ runtime: "herdr", address: "{}" }),
-        w["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: true, terminal: "test/p1" }),
+        w["Project.StopEntry"]({ runtime: "herdr", target: { id: "x" } }),
+        w["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: true, terminal: { id: "test/p1" } }),
         w["Project.StartEntry"]({ agent: "coordinator", runtime: "herdr" }),
         w.Launch({ agent: "coordinator", callerEnv: {}, argv: [], focus: false }),
       ]
@@ -739,7 +739,7 @@ describe("vibest.sock", () => {
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })).sessionId
 
       yield* session.Send({ id: entry, message: "first" })

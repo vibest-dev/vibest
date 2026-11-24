@@ -17,8 +17,6 @@ import {
 } from "./db-rows.ts"
 import type { MachineRow, OutboxRow } from "./remote.ts"
 
-export const LOCAL_MACHINE = "local"
-
 export type SessionColumns = {
   readonly id: string
   readonly project: string
@@ -82,8 +80,7 @@ const processOf = (row: SessionColumns, integration: Integration | undefined) =>
         model: row.model,
         routing: row.routing === null ? null : decodeUnknownJson(row.routing),
         runtime: row.runtime ?? "",
-        machine: LOCAL_MACHINE,
-        terminal: row.terminal,
+        terminal: row.terminal === null ? null : decodeUnknownJson(row.terminal),
         pid: row.pid,
         harnessSessionId: row.harnessSessionId,
         placedAt: row.placedAt,

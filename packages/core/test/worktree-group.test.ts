@@ -53,7 +53,7 @@ const storedRow = (
   model: null,
   harnessSessionId: null,
   runtime: RUNTIME,
-  address: { machine: "local", id: "test/" },
+  terminal: { id: "test/" },
   status: "idle",
   startedAt: 1,
   exitedAt: null,

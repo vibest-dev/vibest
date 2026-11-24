@@ -21,13 +21,22 @@ import {
 import { API_REVISION, type Connection, type Pushed, type RexError } from "./client.ts"
 import { keyEvents } from "./keys.ts"
 
-export type Terminal = VibestPlugin.Runtime.Terminal
+export const RexTerminal = Schema.Struct({
+  session: Schema.NonEmptyString,
+  block: Schema.NonEmptyString,
+})
+
+export type RexTerminal = typeof RexTerminal.Type
+
+export type Terminal = RexTerminal
 
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 
-export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
+export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent<RexTerminal>
 
 export type AgentState = VibestPlugin.Runtime.AgentState
+
+export const formatRexTerminal = (terminal: RexTerminal): string => `${terminal.session}/${terminal.block}`
 
 export const KIND = "rex"
 
@@ -45,15 +54,7 @@ const SHELL_WAIT = Duration.seconds(30)
 
 const FOLLOW_BACKOFF = Host.reconnectSchedule({ first: Duration.millis(500), max: Duration.seconds(30) })
 
-export const terminalId = (sessionId: string, blockId: string) => `${sessionId}/${blockId}`
-
-export const parseTerminalId = (id: string) => {
-  const slash = id.indexOf("/")
-
-  return slash <= 0 || slash === id.length - 1
-    ? undefined
-    : { sessionId: id.slice(0, slash), blockId: id.slice(slash + 1) }
-}
+const keyOf = (terminal: RexTerminal) => `${terminal.session}\0${terminal.block}`
 
 export const agentStateOf = (state: string | undefined): AgentState =>
   state === undefined ? "unknown" : state === "working" || state === "blocked" ? state : "idle"
@@ -208,12 +209,13 @@ export const make = (deps: {
   readonly scope: Scope.Scope
   readonly shell: string
   readonly typedLaunch?: Duration.Input
+  readonly caller?: VibestPlugin.Runtime.RuntimeCaller<RexTerminal>
 }): Effect.Effect<Runtime> =>
   Effect.gen(function* () {
     const typedLaunchMs = Duration.toMillis(deps.typedLaunch ?? Duration.millis(TYPED_LAUNCH_MS))
     const events = yield* PubSub.unbounded<RuntimeEvent>()
     const busy = new Set<string>()
-    const known = new Set<string>()
+    const known = new Map<string, RexTerminal>()
     const typedAt = new Map<string, number>()
     const waiting = new Map<string, Set<Deferred.Deferred<void>>>()
     let following = false
@@ -230,40 +232,42 @@ export const make = (deps: {
       return connection
     })
 
-    const wake = (id: string) =>
-      Effect.forEach(waiting.get(id) ?? [], (waiter) => Deferred.succeed(waiter, undefined), { discard: true })
+    const wake = (key: string) =>
+      Effect.forEach(waiting.get(key) ?? [], (waiter) => Deferred.succeed(waiter, undefined), { discard: true })
 
-    const exited = (id: string) => {
-      busy.delete(id)
-      typedAt.delete(id)
+    const exited = (terminal: RexTerminal) => {
+      const key = keyOf(terminal)
+      busy.delete(key)
+      typedAt.delete(key)
 
-      return wake(id).pipe(Effect.andThen(PubSub.publish(events, { type: "exited", terminal: { id } })))
+      return wake(key).pipe(Effect.andThen(PubSub.publish(events, { type: "exited", terminal })))
     }
 
-    const foregroundChanged = (id: string, foreground: Foreground | null | undefined) => {
+    const foregroundChanged = (terminal: RexTerminal, foreground: Foreground | null | undefined) => {
       if (beforeTheProgram(foreground)) return Effect.void
+      const key = keyOf(terminal)
 
       if (!atShell(foreground)) {
-        busy.add(id)
-        typedAt.delete(id)
+        busy.add(key)
+        typedAt.delete(key)
 
         return Effect.void
       }
 
-      return busy.has(id) ? exited(id) : wake(id)
+      return busy.has(key) ? exited(terminal) : wake(key)
     }
 
     const onBlockEvent = (sessionId: string, event: typeof BlockEvent.Type) => {
-      const id = terminalId(sessionId, event.block_id)
-      known.add(id)
+      const terminal: RexTerminal = { session: sessionId, block: event.block_id }
+      known.set(keyOf(terminal), terminal)
 
       if (event.name === "process_changed") {
         const changed = Schema.decodeUnknownOption(ProcessChanged)(event.payload)
 
-        return Option.isSome(changed) ? foregroundChanged(id, changed.value.foreground) : Effect.void
+        return Option.isSome(changed) ? foregroundChanged(terminal, changed.value.foreground) : Effect.void
       }
 
-      if (event.name === "child_exited") return exited(id)
+      if (event.name === "child_exited") return exited(terminal)
 
       if (event.name === "program_status_changed") {
         const changed = Schema.decodeUnknownOption(StatusChanged)(event.payload)
@@ -272,7 +276,7 @@ export const make = (deps: {
 
         return PubSub.publish(events, {
           type: "state",
-          terminal: { id },
+          terminal,
           state: agentStateOf(changed.value.record.state),
         })
       }
@@ -289,14 +293,13 @@ export const make = (deps: {
         const destroyed = Schema.decodeUnknownOption(Destroyed)(event.value.payload)
 
         if (Option.isNone(destroyed)) return Effect.void
-        const prefix = `${destroyed.value.session_id}/`
 
         return Effect.forEach(
-          [...known].filter((id) => id.startsWith(prefix)),
-          (id) => {
-            known.delete(id)
+          [...known.entries()].filter(([, t]) => t.session === destroyed.value.session_id),
+          ([key, t]) => {
+            known.delete(key)
 
-            return exited(id)
+            return exited(t)
           },
           { discard: true },
         )
@@ -312,10 +315,10 @@ export const make = (deps: {
         const closed = Schema.decodeUnknownOption(Schema.Struct({ block_id: Schema.String }))(inner.payload)
 
         if (Option.isNone(closed)) return Effect.void
-        const id = terminalId(sessionId, closed.value.block_id)
-        known.delete(id)
+        const terminal: RexTerminal = { session: sessionId, block: closed.value.block_id }
+        known.delete(keyOf(terminal))
 
-        return exited(id)
+        return exited(terminal)
       }
 
       if (inner.type !== "block_event") return Effect.void
@@ -372,22 +375,8 @@ export const make = (deps: {
 
     const rpc = (method: string, payload: Schema.JsonObject) => withConnection((c) => call(c, method, payload))
 
-    const place = (
-      terminal: Terminal,
-    ): Effect.Effect<{ readonly sessionId: string; readonly blockId: string }, RuntimeApi.RuntimeError> => {
-      const parsed = parseTerminalId(terminal.id)
-
-      return parsed === undefined
-        ? Effect.fail(new RuntimeApi.RuntimeError({ code: "not_found", message: `${terminal.id} is not a Rex block` }))
-        : Effect.succeed(parsed)
-    }
-
-    const blockMethod = (connection: Connection, terminal: Terminal, method: string, args: Schema.JsonObject = {}) =>
-      place(terminal).pipe(
-        Effect.flatMap(({ sessionId, blockId }) =>
-          call(connection, "block.method", { session_id: sessionId, block_id: blockId, method, args }),
-        ),
-      )
+    const blockMethod = (connection: Connection, terminal: RexTerminal, method: string, args: Schema.JsonObject = {}) =>
+      call(connection, "block.method", { session_id: terminal.session, block_id: terminal.block, method, args })
 
     const status: Runtime["status"] = () =>
       Effect.scoped(deps.connect).pipe(
@@ -444,7 +433,7 @@ export const make = (deps: {
 
     const isMissing = (e: RuntimeApi.RuntimeError) => e.code === "not_found"
 
-    const open: Runtime["open"] = (input) =>
+    const open: VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["open"] = (input) =>
       withConnection((connection) =>
         Effect.gen(function* () {
           const command = yield* commandOf(input.launch)
@@ -467,16 +456,16 @@ export const make = (deps: {
             }).pipe(
               decoded(Opened),
               Effect.flatMap((r) => firstBlock(r.block_ids)),
-              Effect.map((blockId) => terminalId(sessionId, blockId)),
+              Effect.map((blockId): RexTerminal => ({ session: sessionId, block: blockId })),
             )
 
-          const near = input.near === undefined ? undefined : parseTerminalId(input.near.id)
+          const near = input.near
 
           const beside =
             near !== undefined && input.split === true
               ? call(connection, "session.new_split", {
-                  session_id: near.sessionId,
-                  anchor_id: near.blockId,
+                  session_id: near.session,
+                  anchor_id: near.block,
                   direction: "horizontal",
                   side: "after",
                   focus,
@@ -484,10 +473,10 @@ export const make = (deps: {
                 }).pipe(
                   decoded(Opened),
                   Effect.flatMap((r) => firstBlock(r.block_ids)),
-                  Effect.map((blockId) => terminalId(near.sessionId, blockId)),
+                  Effect.map((blockId): RexTerminal => ({ session: near.session, block: blockId })),
                 )
               : near !== undefined
-                ? inWindow(near.sessionId)
+                ? inWindow(near.session)
                 : !input.remote && input.target !== undefined && input.target !== ""
                   ? sessionNamed(connection, input.target).pipe(
                       Effect.flatMap((sessionId) =>
@@ -511,26 +500,26 @@ export const make = (deps: {
                     decoded(Created),
                     Effect.flatMap((r) =>
                       firstBlock(r.initial_windows?.[0]?.block_ids ?? null).pipe(
-                        Effect.map((blockId) => terminalId(r.session_id, blockId)),
+                        Effect.map((blockId): RexTerminal => ({ session: r.session_id, block: blockId })),
                       ),
                     ),
                   ),
             ),
           )
 
-          const id = yield* beside.pipe(Effect.catchIf(isMissing, () => ownSession))
-          known.add(id)
+          const terminal = yield* beside.pipe(Effect.catchIf(isMissing, () => ownSession))
+          known.set(keyOf(terminal), terminal)
 
-          return { id } satisfies Terminal
+          return terminal
         }),
       )
 
-    const event = (connection: Connection, terminal: Terminal, type: string, payload: Schema.JsonObject) =>
-      place(terminal).pipe(
-        Effect.flatMap(({ sessionId, blockId }) =>
-          call(connection, "block.event", { session_id: sessionId, block_id: blockId, event: { type, payload } }),
-        ),
-      )
+    const event = (connection: Connection, terminal: RexTerminal, type: string, payload: Schema.JsonObject) =>
+      call(connection, "block.event", {
+        session_id: terminal.session,
+        block_id: terminal.block,
+        event: { type, payload },
+      })
 
     const pressKeys = (connection: Connection, terminal: Terminal, keys: ReadonlyArray<string>) =>
       Effect.forEach(
@@ -550,14 +539,14 @@ export const make = (deps: {
         Effect.andThen(pressKeys(connection, terminal, ["enter", ...keys])),
       )
 
-    const send: Runtime["send"] = (terminal, { text, keys }) =>
+    const send: VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["send"] = (terminal, { text, keys }) =>
       withConnection((connection) =>
         text === undefined
           ? pressKeys(connection, terminal, keys ?? [])
           : typeText(connection, terminal, text, keys ?? []),
       )
 
-    const read: Runtime["read"] = (terminal, lines) =>
+    const read: VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["read"] = (terminal, lines) =>
       withConnection((connection) =>
         Effect.gen(function* () {
           const first = yield* blockMethod(connection, terminal, "format", {
@@ -593,7 +582,7 @@ export const make = (deps: {
     const processOf = (connection: Connection, terminal: Terminal) =>
       blockMethod(connection, terminal, "process").pipe(decoded(Process))
 
-    const process: Runtime["process"] = (terminal) =>
+    const process: VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["process"] = (terminal) =>
       withConnection((connection) =>
         processOf(connection, terminal).pipe(
           Effect.flatMap((p) =>
@@ -602,16 +591,17 @@ export const make = (deps: {
                 if (p.last_exit !== null) return { running: false, exitCode: p.last_exit.exit_code }
 
                 if (beforeTheProgram(p.foreground)) return { running: true }
+                const key = keyOf(terminal)
 
                 if (!atShell(p.foreground)) {
-                  busy.add(terminal.id)
-                  known.add(terminal.id)
-                  typedAt.delete(terminal.id)
+                  busy.add(key)
+                  known.set(key, terminal)
+                  typedAt.delete(key)
 
                   return { running: true }
                 }
 
-                const typed = typedAt.get(terminal.id)
+                const typed = typedAt.get(key)
 
                 return { running: typed !== undefined && now - typed < typedLaunchMs }
               }),
@@ -620,7 +610,7 @@ export const make = (deps: {
         ),
       )
 
-    const state: NonNullable<Runtime["state"]> = (terminal) =>
+    const state: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["state"]> = (terminal) =>
       withConnection((connection) =>
         blockMethod(connection, terminal, "program_status").pipe(
           decoded(Status),
@@ -628,18 +618,18 @@ export const make = (deps: {
         ),
       )
 
-    const close: Runtime["close"] = (terminal) =>
-      place(terminal).pipe(
-        Effect.flatMap(({ sessionId, blockId }) => rpc("block.close", { session_id: sessionId, block_id: blockId })),
+    const close: VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["close"] = (terminal) =>
+      rpc("block.close", { session_id: terminal.session, block_id: terminal.block }).pipe(
         Effect.asVoid,
         Effect.catchIf(isMissing, () => Effect.void),
       )
 
-    const backToShell = (connection: Connection, terminal: Terminal) =>
+    const backToShell = (connection: Connection, terminal: RexTerminal) =>
       Deferred.make<void>().pipe(
         Effect.flatMap((back) => {
-          const waiters = waiting.get(terminal.id) ?? new Set()
-          waiting.set(terminal.id, waiters.add(back))
+          const key = keyOf(terminal)
+          const waiters = waiting.get(key) ?? new Set()
+          waiting.set(key, waiters.add(back))
 
           return Effect.gen(function* () {
             const p = yield* processOf(connection, terminal)
@@ -647,7 +637,7 @@ export const make = (deps: {
             if (p.last_exit !== null)
               return yield* new RuntimeApi.RuntimeError({
                 code: "not_found",
-                message: `the program of ${terminal.id} has ended and left no shell`,
+                message: `the program of ${formatRexTerminal(terminal)} has ended and left no shell`,
               })
 
             if (atShell(p.foreground)) return
@@ -658,7 +648,7 @@ export const make = (deps: {
                   Effect.fail(
                     new RuntimeApi.RuntimeError({
                       code: "busy",
-                      message: `terminal ${terminal.id} did not come back to its shell within ${Duration.format(SHELL_WAIT)}`,
+                      message: `terminal ${formatRexTerminal(terminal)} did not come back to its shell within ${Duration.format(SHELL_WAIT)}`,
                     }),
                   ),
               }),
@@ -668,47 +658,42 @@ export const make = (deps: {
               Effect.sync(() => {
                 waiters.delete(back)
 
-                if (waiters.size === 0 && waiting.get(terminal.id) === waiters) waiting.delete(terminal.id)
+                if (waiters.size === 0 && waiting.get(key) === waiters) waiting.delete(key)
               }),
             ),
           )
         }),
       )
 
-    const run: NonNullable<Runtime["run"]> = (terminal, launch) =>
+    const run: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["run"]> = (terminal, launch) =>
       withConnection((connection) =>
         Effect.gen(function* () {
           yield* backToShell(connection, terminal)
           const line = yield* written(typedLine(launch))
-          typedAt.set(terminal.id, yield* Clock.currentTimeMillis)
+          const key = keyOf(terminal)
+          typedAt.set(key, yield* Clock.currentTimeMillis)
           yield* typeText(connection, terminal, line, []).pipe(
-            Effect.tapError(() => Effect.sync(() => typedAt.delete(terminal.id))),
+            Effect.tapError(() => Effect.sync(() => typedAt.delete(key))),
           )
         }),
       )
 
-    const focus: NonNullable<Runtime["focus"]> = (terminal) =>
-      place(terminal).pipe(
-        Effect.flatMap(({ sessionId, blockId }) =>
-          rpc("session.focus_block", { session_id: sessionId, block_id: blockId }),
-        ),
-        Effect.asVoid,
-      )
+    const focus: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["focus"]> = (terminal) =>
+      rpc("session.focus_block", { session_id: terminal.session, block_id: terminal.block }).pipe(Effect.asVoid)
 
-    const present: NonNullable<Runtime["present"]> = (terminal, info) => {
+    const present: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["present"]> = (terminal, info) => {
       const label = info["title"] || info["agent"]
 
       if (label === undefined || label === "") return Effect.void
 
-      return place(terminal).pipe(
-        Effect.flatMap(({ sessionId, blockId }) =>
-          rpc("session.set_block_label", { session_id: sessionId, block_id: blockId, label: clip(label) }),
-        ),
-        Effect.asVoid,
-      )
+      return rpc("session.set_block_label", {
+        session_id: terminal.session,
+        block_id: terminal.block,
+        label: clip(label),
+      }).pipe(Effect.asVoid)
     }
 
-    const doctor: NonNullable<Runtime["doctor"]> = () =>
+    const doctor: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["doctor"]> = () =>
       Effect.gen(function* () {
         const connection = yield* deps.connect
 
@@ -753,12 +738,12 @@ export const make = (deps: {
         Effect.orElseSucceed(() => undefined),
       )
 
-    const NONE: ReadonlyMap<string, Terminal> = new Map()
+    const NONE: ReadonlyMap<string, RexTerminal> = new Map()
 
-    const locate: NonNullable<Runtime["locate"]> = (remote) =>
+    const locate: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<RexTerminal>["locate"]> = (remote) =>
       rpc("hosts.list", {}).pipe(
         decoded(Hosts),
-        Effect.map((r): VibestPlugin.Runtime.Located => {
+        Effect.map((r): VibestPlugin.Runtime.Located<RexTerminal> => {
           const host = r.hosts?.find((h) => h.host_id !== undefined && h.host_id === remote.link["host"])
 
           return host === undefined
@@ -781,8 +766,11 @@ export const make = (deps: {
         })),
       )
 
-    return {
+    return RuntimeApi.define({
       id: KIND,
+      ...(deps.caller !== undefined && { caller: deps.caller }),
+      terminal: RexTerminal,
+      format: formatRexTerminal,
       status,
       open,
       send,
@@ -797,5 +785,5 @@ export const make = (deps: {
       link,
       locate,
       events: RuntimeApi.eventsFrom(events),
-    } satisfies Runtime
+    })
   })

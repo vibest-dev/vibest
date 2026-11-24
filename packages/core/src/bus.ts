@@ -10,7 +10,7 @@ import {
   type Row,
   UnknownFact,
 } from "@vibest/schema/event"
-import type { RuntimeAddress } from "@vibest/schema/session"
+import type { TerminalTarget } from "@vibest/schema/terminal"
 import { Clock, Context, type Duration, Effect, Layer, Option, PubSub, Queue, Schema, type Scope, Stream } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
@@ -32,18 +32,18 @@ export type Signal =
   | {
       readonly type: "terminal.state"
       readonly runtime: string
-      readonly terminal: RuntimeAddress
+      readonly terminal: TerminalTarget
       readonly state: Runtime.AgentState
       readonly processes: ReadonlyArray<BoundProcess>
     }
   | {
       readonly type: "terminal.exited"
       readonly runtime: string
-      readonly terminal: RuntimeAddress
+      readonly terminal: TerminalTarget
       readonly processes: ReadonlyArray<BoundProcess>
     }
-  | { readonly type: "terminal.seen"; readonly runtime: string; readonly terminal: RuntimeAddress }
-  | { readonly type: "runtime.reset"; readonly runtime: string; readonly machine: string }
+  | { readonly type: "terminal.seen"; readonly runtime: string; readonly terminal: TerminalTarget }
+  | { readonly type: "runtime.reset"; readonly runtime: string }
   | { readonly type: "drain.released" }
   | { readonly type: "session.changed"; readonly sessionId: string }
   | { readonly type: "project.changed"; readonly projectId: string }

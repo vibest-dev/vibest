@@ -4,7 +4,7 @@ import { Duration, Effect, Option, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import type { HerdrPool } from "./pool.ts"
-import { parseTerminal, REMOTE_SESSION } from "./terminal-runtime.ts"
+import { type HerdrTerminal, REMOTE_SESSION } from "./terminal-runtime.ts"
 
 export interface Ran {
   readonly code: number
@@ -14,7 +14,7 @@ export interface Ran {
 
 export type Cli = (args: ReadonlyArray<string>) => Effect.Effect<Ran>
 
-type Terminal = VibestPlugin.Runtime.Terminal
+type Terminal = HerdrTerminal
 
 const CLI_TIMEOUT = Duration.seconds(25)
 
@@ -77,8 +77,8 @@ const NONE: ReadonlyMap<string, Terminal> = new Map()
 export const locate = (
   cli: Cli,
   remote: VibestPlugin.Runtime.Remote,
-  sessions: ReadonlyMap<string, string>,
-): Effect.Effect<VibestPlugin.Runtime.Located> =>
+  sessions: ReadonlyMap<string, HerdrTerminal>,
+): Effect.Effect<VibestPlugin.Runtime.Located<HerdrTerminal>> =>
   Effect.gen(function* () {
     const session = remote.link.session
     const target = remote.target
@@ -96,13 +96,12 @@ export const locate = (
         as: profile.label,
         note: `herdr here has ${profile.label} disabled; fix: herdr machine enable ${profile.id}`,
       }
-    const terminals = new Map<string, Terminal>()
+    const terminals = new Map<string, HerdrTerminal>()
 
     for (const [id, there] of sessions) {
-      const parsed = parseTerminal({ id: there })
-      const shown = parsed === undefined ? undefined : mirrorOf(rows, target, parsed.session)
+      const shown = there.machine === undefined ? mirrorOf(rows, target, there.session) : undefined
 
-      if (shown?.enabled === true) terminals.set(id, { id: `${there}@${shown.label}` })
+      if (shown?.enabled === true) terminals.set(id, { ...there, machine: shown.label })
     }
 
     return {

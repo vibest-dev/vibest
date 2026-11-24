@@ -2,7 +2,7 @@ import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Clock, Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 
 import { Agents } from "./agents.ts"
-import { runtimeOf, terminalOf } from "./database/db-rows.ts"
+import { terminalOf } from "./database/db-rows.ts"
 import { Db } from "./database/db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
@@ -47,16 +47,17 @@ const make = Effect.gen(function* () {
   const terminalClosed = (who: HookCaller) =>
     Effect.gen(function* () {
       const session = yield* db.session.getSession(who.id)
+      const terminal = session === undefined ? null : terminalOf(session)
 
       if (
         session === undefined ||
-        terminalOf(session).id === "" ||
+        terminal === null ||
         (who.process !== undefined && who.process !== session.process?.id)
       )
         return false
-      const runtime = yield* runtimes.route(runtimeOf(session)).pipe(Effect.option)
+      const runtime = yield* runtimes.route(terminal.runtime).pipe(Effect.option)
 
-      return Option.isSome(runtime) && !(yield* alive(runtime.value, terminalOf(session)))
+      return Option.isSome(runtime) && !(yield* alive(runtime.value, terminal.target))
     })
 
   const withReset = (who: HookCaller, end: ObservedEnd) =>

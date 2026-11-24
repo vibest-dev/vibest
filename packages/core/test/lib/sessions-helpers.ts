@@ -37,7 +37,7 @@ export const entryOfProject = (repo: string) =>
       false,
       {
         runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
+        target: { id: "test/coord" },
       },
       { agent: "coordinator" },
     )).sessionId

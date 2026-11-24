@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect"
 import { Herdr } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { encodeTarget } from "./terminal-runtime.ts"
+import { encodeTarget, type HerdrTerminal, terminalOf } from "./terminal-runtime.ts"
 
 export const targetFrom = (env: Readonly<Record<string, string | undefined>>, named?: string): string | undefined => {
   if (named !== undefined) return encodeTarget({ session: named })
@@ -36,7 +36,7 @@ export const terminalFrom = (env: Readonly<Record<string, string | undefined>>) 
     const list = yield* SessionList(out)
     const session = list.sessions.find((s) => s.socket_path === socketPath)
 
-    return session === undefined ? undefined : `${session.name}/${paneId}`
+    return session === undefined ? undefined : (terminalOf(session.name, paneId) satisfies HerdrTerminal)
   })
 
 export const readyFrom = (env: Readonly<Record<string, string | undefined>>) =>

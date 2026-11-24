@@ -4,7 +4,6 @@ import os from "node:os"
 import { afterAll, assert, describe, it } from "@effect/vitest"
 import { runtimeContract } from "@vibest/plugin/testing"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
-import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { ConfigProvider, Effect, Option } from "effect"
 
 import { herdrOnPath, stopStartedSessions, layer, waitFor, withSession, withRuntime } from "./runtime-herdr-live.ts"
@@ -46,9 +45,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               })
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
 
-            const seen = TerminalRuntime.parseTerminal(opened)
-            assert.isDefined(seen)
-            assert.strictEqual(seen!.session, name)
+            assert.strictEqual(opened.session, name)
             yield* waitFor(runtime.read(opened, 40), (value) => value.includes("VBT_TYPED"), "the typed argv ran")
             yield* runtime.send(opened, { text: "printf 'VBT_%s\\n' OPENED" })
             const text = yield* waitFor(runtime.read(opened, 40), (value) => value.includes("VBT_OPENED"), "pane text")
@@ -78,7 +75,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 live: "2",
               })
             const herdr = yield* (yield* HerdrPool).client(name)
-            const pane = (yield* herdr.call("pane.get", { pane_id: seen!.paneId })).pane
+            const pane = (yield* herdr.call("pane.get", { pane_id: opened.pane! })).pane
             assert.strictEqual(pane.display_agent, "general \u00b7 pi")
             assert.strictEqual(pane.title, "task")
             assert.strictEqual(pane.tokens?.definition, "general")
@@ -99,12 +96,12 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 title: "n".repeat(90),
                 definition: "g".repeat(90),
               })
-              const limited = (yield* herdr.call("pane.get", { pane_id: seen!.paneId })).pane
+              const limited = (yield* herdr.call("pane.get", { pane_id: opened.pane! })).pane
               assert.strictEqual(limited.display_agent?.length, 80)
               assert.strictEqual(limited.title?.length, 80)
               assert.strictEqual(limited.tokens?.definition?.length, 80)
               yield* runtime.present(opened, { agent: "reviewer", harness: "pi", title: "later" })
-              const again = (yield* herdr.call("pane.get", { pane_id: seen!.paneId })).pane
+              const again = (yield* herdr.call("pane.get", { pane_id: opened.pane! })).pane
               assert.strictEqual(again.display_agent, "reviewer \u00b7 pi")
               assert.strictEqual(
                 again.title,
@@ -126,7 +123,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
 
             const besidePane = (yield* herdr.call("pane.get", {
-              pane_id: TerminalRuntime.parseTerminal(beside)!.paneId,
+              pane_id: beside.pane!,
             })).pane
 
             assert.strictEqual(besidePane.workspace_id, pane.workspace_id)
@@ -153,7 +150,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
 
             const groupedPane = (yield* herdr.call("pane.get", {
-              pane_id: TerminalRuntime.parseTerminal(grouped)!.paneId,
+              pane_id: grouped.pane!,
             })).pane
 
             assert.strictEqual(

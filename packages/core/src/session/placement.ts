@@ -37,7 +37,7 @@ import {
   projectRoot,
 } from "../project/create.ts"
 import { isUsageLimitError } from "../replies.ts"
-import { addressOf, Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
+import { Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
 import { limitSeen, Subscriptions } from "../subscriptions/service.ts"
 import { projectText, removeSystemPrompt, systemPrompt, withTask, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
@@ -46,8 +46,8 @@ import { SessionLocks, terminalLock } from "./locks.ts"
 
 export * as Placement from "./placement.ts"
 
-export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
-  JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" && { terminal: address.id }) })
+export const runtimeEnv = (runtime: string, target?: Terminal) =>
+  JSON.stringify({ runtime, ...(target !== undefined && { target }) })
 
 export interface FirstInput {
   readonly text: string
@@ -117,7 +117,7 @@ export const make = Effect.gen(function* () {
     VIBEST_PROJECT_ID: session.projectId,
     VIBEST_PROJECT_DIR: layout.project(session.projectId),
     VIBEST_HARNESS: harnessIdOf(session),
-    VIBEST_RUNTIME: runtimeEnv(runtimeOf(session), { machine: terminalOf(session).machine, id: "" }),
+    VIBEST_RUNTIME: runtimeEnv(runtimeOf(session)),
     VIBEST_HOME: layout.home,
   })
 
@@ -273,28 +273,30 @@ export const make = Effect.gen(function* () {
       const parent =
         creator !== undefined && "local" in creator ? yield* db.session.getSession(creator.local) : undefined
 
-      return parent !== undefined &&
-        runtimeOf(parent) === kind &&
-        exitedAt(parent) === null &&
-        terminalOf(parent).id !== ""
-        ? terminalOf(parent)
+      const terminal = parent === undefined ? null : terminalOf(parent)
+
+      return parent !== undefined && runtimeOf(parent) === kind && exitedAt(parent) === null && terminal !== null
+        ? terminal.target
         : undefined
     })
 
   const ownTerminal = Effect.fn("Placement.ownTerminal")(function* (session: SessionRow) {
     const recorded = terminalOf(session)
 
-    if (recorded.id === "") return undefined
+    if (recorded === null) return undefined
 
-    return (yield* db.session.lastSessionAt(runtimeOf(session), recorded)) === session.id ? recorded : undefined
+    return (yield* db.session.lastSessionAt(recorded.runtime, recorded.target)) === session.id
+      ? recorded.target
+      : undefined
   })
 
   const terminalLocked =
     (session: SessionRow) =>
-    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      terminalOf(session).id === ""
-        ? effect
-        : locks.withLock(terminalLock(runtimeOf(session), terminalOf(session)))(effect)
+    <A, E, R>(effect: Effect.Effect<A, E, R>) => {
+      const recorded = terminalOf(session)
+
+      return recorded === null ? effect : locks.withLock(terminalLock(recorded.runtime, recorded.target))(effect)
+    }
 
   const closeLeftTerminal = Effect.fn("Placement.closeLeftTerminal")(function* (session: SessionRow) {
     if (exitedAt(session) === null) return
@@ -363,10 +365,9 @@ export const make = Effect.gen(function* () {
         Effect.onError(() => (input.endedByCaller ? Effect.void : db.session.endProcess(session.id, "launch_failed"))),
       )
 
-    const terminal = addressOf(opened)
-    yield* db.session.placeProcess(session.id, terminal.id)
+    yield* db.session.placeProcess(session.id, opened)
 
-    return terminal
+    return opened
   }, provided)
 
   const shareRow = (session: SessionRow, splitFrom: string) =>
@@ -376,7 +377,7 @@ export const make = Effect.gen(function* () {
       if (sharedFrom === undefined)
         return yield* new NoSuchSession({ id: splitFrom, message: `--share ${splitFrom}: no session ${splitFrom}` })
 
-      if (terminalOf(sharedFrom).id === "")
+      if (terminalOf(sharedFrom) === null)
         return yield* new NoSuchSession({
           id: splitFrom,
           message: `--share ${splitFrom}: it has no terminal in the runtime to open beside`,
@@ -395,7 +396,7 @@ export const make = Effect.gen(function* () {
   ) {
     const folders = pinned ?? (yield* listProjectRepositories(root))
     const sharedFrom = splitFrom !== undefined ? yield* shareRow(session, splitFrom) : undefined
-    const near = sharedFrom === undefined ? undefined : terminalOf(sharedFrom)
+    const near = sharedFrom === undefined ? undefined : terminalOf(sharedFrom)?.target
     yield* fs.makeDirectory(layout.artifacts(session.projectId), { recursive: true })
 
     const worktree = yield* worktreeOf(session)
@@ -489,8 +490,10 @@ export const make = Effect.gen(function* () {
     let shown = false
 
     for (const session of rows) {
-      if (terminalOf(session).id === "") continue
-      yield* show(h, session, terminalOf(session), stored ?? (yield* projectRoot(yield* worktreeOf(session))).root)
+      const terminal = terminalOf(session)
+
+      if (terminal === null) continue
+      yield* show(h, session, terminal.target, stored ?? (yield* projectRoot(yield* worktreeOf(session))).root)
       shown = true
     }
 
@@ -502,7 +505,7 @@ export const make = Effect.gen(function* () {
 
     if (h.present === undefined) return
     yield* h
-      .present(place.address, {
+      .present(place.target, {
         agent: "",
         harness: "",
         title: "",
@@ -548,17 +551,20 @@ export const make = Effect.gen(function* () {
 
   const republish = Effect.fn("Placement.republish")(function* () {
     const rows = (yield* db.session.listSessions()).filter(
-      (row) => !row.entry && !archived(row) && terminalOf(row).id !== "",
+      (row) => !row.entry && !archived(row) && terminalOf(row) !== null,
     )
 
     const labelled = yield* Effect.forEach(rows, (session) =>
       Effect.gen(function* () {
-        const h = runtimes.find(runtimeOf(session))
+        const terminal = terminalOf(session)
+
+        if (terminal === null) return 0
+        const h = runtimes.find(terminal.runtime)
 
         if (h === undefined) return 0
         const stored = yield* storedDirectory(session.projectId)
         const root = stored ?? (yield* projectRoot(yield* worktreeOf(session))).root
-        yield* show(h, session, terminalOf(session), root)
+        yield* show(h, session, terminal.target, root)
 
         return 1
       }).pipe(Effect.orElseSucceed(() => 0)),

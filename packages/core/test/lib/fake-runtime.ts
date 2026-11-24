@@ -1,13 +1,17 @@
 import { type Launch, Runtime as R } from "@vibest/plugin/effect"
-import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref } from "effect"
+import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref, Schema } from "effect"
 
 type Runtime = R.RuntimeDefinition
+
+const FakeTerminal = Schema.Struct({ id: Schema.NonEmptyString })
+
+type FakeTerminal = typeof FakeTerminal.Type
 
 type Terminal = R.Terminal
 
 type RuntimeError = R.RuntimeError
 
-type RuntimeEvent = R.RuntimeEvent
+type RuntimeEvent = R.RuntimeEvent<FakeTerminal>
 
 type AgentState = R.AgentState
 
@@ -321,7 +325,7 @@ export class FakeRuntime extends Context.Service<
           return inside
         })
 
-      const agentOf = (method: keyof RuntimeCalls, terminal: Terminal) =>
+      const agentOf = (method: keyof RuntimeCalls, terminal: FakeTerminal) =>
         Effect.gen(function* () {
           const map = yield* Ref.get(agents)
 
@@ -337,7 +341,7 @@ export class FakeRuntime extends Context.Service<
           return agent
         })
 
-      const run: NonNullable<Runtime["run"]> = (terminal, launch) =>
+      const run: NonNullable<R.RuntimeDefinition<FakeTerminal>["run"]> = (terminal, launch) =>
         call(
           "run",
           { terminal: terminal.id, argv: launch.argv, env: envPairs(launch.env) },
@@ -360,8 +364,10 @@ export class FakeRuntime extends Context.Service<
           }),
         )
 
-      const runtime: Runtime = {
+      const runtime: Runtime = R.define({
         id: KIND,
+        terminal: FakeTerminal,
+        format: (t) => t.id,
         ...(!options.noRun && { run }),
         status: () =>
           Effect.succeed(
@@ -442,9 +448,8 @@ export class FakeRuntime extends Context.Service<
               })
 
               if (session !== undefined) yield* (yield* Ref.get(onStarted))(session, { env: input.launch.env, working })
-              const terminal: Terminal = { id: paneId }
 
-              return terminal
+              return { id: paneId }
             }),
           ),
         send: (terminal, input) =>
@@ -571,10 +576,9 @@ export class FakeRuntime extends Context.Service<
           ),
         attach: () => ["fake", "attach"],
         ...(!options.noFocus && {
-          focus: (terminal: { readonly id: string }) =>
-            call("focus", { terminal: terminal.id }, terminal.id, Effect.void),
+          focus: (terminal: FakeTerminal) => call("focus", { terminal: terminal.id }, terminal.id, Effect.void),
         }),
-      }
+      })
 
       return FakeRuntime.of({
         runtime,
@@ -588,7 +592,7 @@ export class FakeRuntime extends Context.Service<
         terminalOf: (session) =>
           Ref.get(agents).pipe(
             Effect.map((map) => HashMap.toEntries(map).find(([, agent]) => agent.vibestSession === session)?.[0]),
-            Effect.map((id) => (id === undefined ? undefined : { machine: "local", id })),
+            Effect.map((id) => (id === undefined ? undefined : { id })),
           ),
         agent: (target) =>
           Ref.get(agents).pipe(

@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import type { Runtime } from "@vibest/plugin/effect"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
@@ -157,19 +158,15 @@ describe("pane events", () => {
   )
 })
 
-describe("terminal ids", () => {
-  it("a terminal is `<session>/<pane>[/<name>]`, the parts non-empty, the agent name telling a pane id herdr reused apart; the caller's location is the machine target", () => {
+describe("terminal targets", () => {
+  it("a terminal is structured { session, pane, name? }, and target encoding round-trips", () => {
     const terminal = TerminalRuntime.terminalOf("s1", "w1:p1")
-    assert.deepStrictEqual(terminal, { id: "s1/w1:p1" })
-    assert.deepStrictEqual(TerminalRuntime.parseTerminal(terminal), { session: "s1", paneId: "w1:p1", name: undefined })
-    assert.deepStrictEqual(
-      TerminalRuntime.parseTerminal(TerminalRuntime.terminalOf("s1", "w1:p1", "vbt-w1:p1-ab12cd34")),
-      { session: "s1", paneId: "w1:p1", name: "vbt-w1:p1-ab12cd34" },
-    )
-    assert.isUndefined(TerminalRuntime.parseTerminal({ id: "/p" }))
-    assert.isUndefined(TerminalRuntime.parseTerminal({ id: "s/" }))
-    assert.isUndefined(TerminalRuntime.parseTerminal({ id: "pane" }))
-    assert.isUndefined(TerminalRuntime.parseTerminal({ id: "s/p/" }))
+    assert.deepStrictEqual(terminal, { session: "s1", pane: "w1:p1" })
+    assert.deepStrictEqual(TerminalRuntime.terminalOf("s1", "w1:p1", "vbt-w1:p1-ab12cd34"), {
+      session: "s1",
+      pane: "w1:p1",
+      name: "vbt-w1:p1-ab12cd34",
+    })
     assert.deepStrictEqual(TerminalRuntime.decodeTarget(TerminalRuntime.encodeTarget({ session: "other" })), {
       session: "other",
     })
@@ -203,7 +200,7 @@ describe("herdr event stream", () => {
         scope: yield* Effect.scope,
       })
 
-      const seen = yield* Queue.unbounded<TerminalRuntime.RuntimeEvent>()
+      const seen = yield* Queue.unbounded<Runtime.RuntimeEvent>()
       yield* runtime.events.pipe(
         Stream.runForEach((event) => Queue.offer(seen, event)),
         Effect.forkScoped,

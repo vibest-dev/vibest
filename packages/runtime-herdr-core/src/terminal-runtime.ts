@@ -22,13 +22,26 @@ import {
 } from "effect"
 import { api, type HcFailure, type HcClient, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
-export type Terminal = VibestPlugin.Runtime.Terminal
+export const HcTerminal = Schema.Struct({
+  address: Schema.NonEmptyString,
+  socket: Schema.optionalKey(Schema.NonEmptyString),
+})
+
+export type HcTerminal = typeof HcTerminal.Type
+
+export type Terminal = HcTerminal
 
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 
-export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
+export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent<HcTerminal>
 
 export type AgentState = VibestPlugin.Runtime.AgentState
+
+export const hcTerminal = (socket: string, address: string, defaultSocket?: string): HcTerminal =>
+  socket === defaultSocket ? { address } : { address, socket }
+
+export const formatHcTerminal = (terminal: HcTerminal): string =>
+  terminal.socket === undefined ? terminal.address : `${terminal.address}@${terminal.socket}`
 
 export const agentStateOf = (status: api.Status | null | undefined): AgentState =>
   status === null || status === undefined
@@ -104,7 +117,7 @@ const slug = (text: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
 
-export const terminalName = (input: Parameters<Runtime["open"]>[0], attempt = 0) => {
+export const terminalName = (input: VibestPlugin.Runtime.OpenInput<HcTerminal>, attempt = 0) => {
   const id = input.launch.env["VIBEST_SESSION_ID"]
   const session = id !== undefined && ID.test(id) ? id : undefined
 
@@ -121,15 +134,6 @@ export const terminalName = (input: Parameters<Runtime["open"]>[0], attempt = 0)
   const suffix = `${session?.slice(0, 4) ?? "main"}${attempt === 0 ? "" : `-${attempt + 1}`}`
 
   return `${base ? `${base.slice(0, 31 - suffix.length).replace(/-+$/, "")}-` : ""}${suffix}`
-}
-
-export const terminalId = (socket: string, address: string, defaultSocket?: string) =>
-  socket === defaultSocket ? address : `${address}@${socket}`
-
-export const parseTerminalId = (id: string, fallbackSocket: string) => {
-  const at = id.indexOf("@")
-
-  return at < 0 ? { socket: fallbackSocket, address: id } : { socket: id.slice(at + 1), address: id.slice(0, at) }
 }
 
 const NOT_FOUND_KINDS = new Set(["not_found", "finished", "machine_unknown"])
@@ -182,6 +186,10 @@ export const make = (deps: {
   readonly socket: string
   readonly scope: Scope.Scope
   readonly typedLaunch?: Duration.Input
+  readonly name?: string
+  readonly caller?: VibestPlugin.Runtime.RuntimeCaller<HcTerminal>
+  readonly link?: VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["link"]
+  readonly locate?: VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["locate"]
 }): Effect.Effect<Runtime> =>
   Effect.gen(function* () {
     const { connect, scope } = deps
@@ -202,9 +210,7 @@ export const make = (deps: {
       core.busy.delete(address)
 
       return wake(core, address).pipe(
-        Effect.andThen(
-          PubSub.publish(events, { type: "exited", terminal: { id: terminalId(socket, address, deps.socket) } }),
-        ),
+        Effect.andThen(PubSub.publish(events, { type: "exited", terminal: hcTerminal(socket, address, deps.socket) })),
       )
     }
 
@@ -245,7 +251,7 @@ export const make = (deps: {
           ? Effect.void
           : PubSub.publish(events, {
               type: "state",
-              terminal: { id: terminalId(socket, terminal, deps.socket) },
+              terminal: hcTerminal(socket, terminal, deps.socket),
               state,
             })
       }
@@ -253,7 +259,7 @@ export const make = (deps: {
       if (SEEN_EVENTS.has(type))
         return PubSub.publish(events, {
           type: "seen",
-          terminal: { id: terminalId(socket, terminal, deps.socket) },
+          terminal: hcTerminal(socket, terminal, deps.socket),
         })
 
       if (type === "foreground") {
@@ -320,12 +326,12 @@ export const make = (deps: {
         return core
       })
 
-    const reach = (terminal: Terminal) =>
+    const reach = (terminal: HcTerminal) =>
       Effect.gen(function* () {
-        const { socket, address } = parseTerminalId(terminal.id, deps.socket)
+        const socket = terminal.socket ?? deps.socket
         const core = yield* coreAt(socket)
 
-        return { hc: core.hc, core, socket, address }
+        return { hc: core.hc, core, socket, address: terminal.address }
       })
 
     const get = (terminal: Terminal) =>
@@ -391,12 +397,10 @@ export const make = (deps: {
         ? Effect.succeed([])
         : written(launchLine(launch)).pipe(Effect.map((argv) => inLoginShell(shell, argv)))
 
-    const open: Runtime["open"] = (input) =>
+    const open: VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["open"] = (input) =>
       Effect.gen(function* () {
-        const parent = input.parent !== undefined ? parseTerminalId(input.parent.id, deps.socket) : undefined
-        const near = input.near !== undefined ? parseTerminalId(input.near.id, deps.socket) : undefined
-        const targetSocket = parent?.socket ?? near?.socket ?? deps.socket
-        const parentAddress = parent?.address
+        const targetSocket = input.parent?.socket ?? input.near?.socket ?? deps.socket
+        const parentAddress = input.parent?.address
         const project = input.launch.env["VIBEST_PROJECT_ID"]
         const session = input.launch.env["VIBEST_SESSION_ID"]
         const argv = yield* argvOf(input.launch)
@@ -432,7 +436,7 @@ export const make = (deps: {
               ),
             )
 
-            return { id: terminalId(socket, started.address, deps.socket) } satisfies Terminal
+            return hcTerminal(socket, started.address, deps.socket)
           })
 
         if (parentAddress === undefined && targetSocket === deps.socket) return yield* runOn(deps.socket, undefined)
@@ -447,7 +451,7 @@ export const make = (deps: {
         )
       })
 
-    const send: Runtime["send"] = (terminal, { text, keys }) =>
+    const send: VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["send"] = (terminal, { text, keys }) =>
       Effect.gen(function* () {
         const { hc, address } = yield* reach(terminal)
 
@@ -457,24 +461,27 @@ export const make = (deps: {
           yield* failWith(hc.call("terminal.keys", { terminal: address, keys: [...keys] }))
       })
 
-    const read: Runtime["read"] = (terminal, lines) =>
+    const read: VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["read"] = (terminal, lines) =>
       reach(terminal).pipe(
         Effect.flatMap(({ hc, address }) => failWith(hc.call("terminal.read", { terminal: address, lines }))),
         Effect.map((r) => r.text),
       )
 
-    const state: NonNullable<Runtime["state"]> = (terminal) =>
+    const state: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["state"]> = (terminal) =>
       get(terminal).pipe(
         Effect.flatMap((t) =>
           t.state === "live"
             ? Effect.succeed(agentStateOf(t.status))
             : Effect.fail(
-                new RuntimeApi.RuntimeError({ code: "not_found", message: `terminal ${terminal.id} has finished` }),
+                new RuntimeApi.RuntimeError({
+                  code: "not_found",
+                  message: `terminal ${formatHcTerminal(terminal)} has finished`,
+                }),
               ),
         ),
       )
 
-    const process: Runtime["process"] = (terminal) =>
+    const process: VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["process"] = (terminal) =>
       get(terminal).pipe(
         Effect.map((t) => {
           if (t.state !== "live")
@@ -488,7 +495,7 @@ export const make = (deps: {
         }),
       )
 
-    const close: Runtime["close"] = (terminal) =>
+    const close: VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["close"] = (terminal) =>
       Effect.gen(function* () {
         const { hc, address } = yield* reach(terminal)
         const t = yield* failWith(hc.call("terminal.get", { terminal: address }))
@@ -502,7 +509,7 @@ export const make = (deps: {
         ),
       )
 
-    const backToShell = (core: Core, address: string, terminal: Terminal) =>
+    const backToShell = (core: Core, address: string, terminal: HcTerminal) =>
       Deferred.make<void>().pipe(
         Effect.flatMap((back) => {
           const waiters = core.waiting.get(address) ?? new Set()
@@ -514,7 +521,7 @@ export const make = (deps: {
             if (t.state !== "live")
               return yield* new RuntimeApi.RuntimeError({
                 code: "not_found",
-                message: `terminal ${terminal.id} has finished`,
+                message: `terminal ${formatHcTerminal(terminal)} has finished`,
               })
 
             if (atShell(t.foreground)) return
@@ -525,7 +532,7 @@ export const make = (deps: {
                   Effect.fail(
                     new RuntimeApi.RuntimeError({
                       code: "busy",
-                      message: `terminal ${terminal.id} did not come back to its shell within ${Duration.format(SHELL_WAIT)}`,
+                      message: `terminal ${formatHcTerminal(terminal)} did not come back to its shell within ${Duration.format(SHELL_WAIT)}`,
                     }),
                   ),
               }),
@@ -542,7 +549,7 @@ export const make = (deps: {
         }),
       )
 
-    const run: NonNullable<Runtime["run"]> = (terminal, launch) =>
+    const run: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["run"]> = (terminal, launch) =>
       Effect.gen(function* () {
         const { hc, core, address } = yield* reach(terminal)
         yield* backToShell(core, address, terminal)
@@ -552,9 +559,10 @@ export const make = (deps: {
         ).pipe(Effect.asVoid)
       })
 
-    const seen: NonNullable<Runtime["seen"]> = (terminal) => get(terminal).pipe(Effect.map(seenOf))
+    const seen: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["seen"]> = (terminal) =>
+      get(terminal).pipe(Effect.map(seenOf))
 
-    const see: NonNullable<Runtime["see"]> = (terminal, finished) =>
+    const see: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["see"]> = (terminal, finished) =>
       reach(terminal).pipe(
         Effect.flatMap(({ hc, address }) =>
           failWith(hc.call("terminal.label", { terminal: address, labels: { [LABEL.seen]: String(finished) } })),
@@ -562,7 +570,7 @@ export const make = (deps: {
         Effect.asVoid,
       )
 
-    const present: Runtime["present"] = (terminal, info) => {
+    const present: VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["present"] = (terminal, info) => {
       const entrySession = info[PRESENT_ENTRY_SESSION]
       const project = info[PRESENT_PROJECT_ID]
 
@@ -589,15 +597,21 @@ export const make = (deps: {
       )
     }
 
-    const attach: NonNullable<Runtime["attach"]> = (_target, terminal) => {
-      if (terminal === undefined || terminal.id === "") return []
-      const { socket, address } = parseTerminalId(terminal.id, deps.socket)
+    const attach: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<HcTerminal>["attach"]> = (_target, terminal) => {
+      if (terminal === undefined) return []
+      const socket = terminal.socket ?? deps.socket
 
-      return ["env", `HC_SOCKET=${socket}`, "hc", "attach", address]
+      return ["env", `HC_SOCKET=${socket}`, "hc", "attach", terminal.address]
     }
 
-    return {
+    return RuntimeApi.define({
       id: KIND,
+      ...(deps.name !== undefined && { name: deps.name }),
+      ...(deps.caller !== undefined && { caller: deps.caller }),
+      ...(deps.link !== undefined && { link: deps.link }),
+      ...(deps.locate !== undefined && { locate: deps.locate }),
+      terminal: HcTerminal,
+      format: formatHcTerminal,
       status,
       open,
       send,
@@ -612,5 +626,5 @@ export const make = (deps: {
       seen,
       see,
       events: RuntimeApi.eventsFrom(events),
-    } satisfies Runtime
+    })
   })

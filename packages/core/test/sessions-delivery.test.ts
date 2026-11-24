@@ -183,7 +183,7 @@ describe.concurrent("Session", () => {
         false,
         {
           runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
+          target: { id: "test/coord" },
         },
         { agent: "coordinator" },
       )
@@ -227,7 +227,7 @@ describe.concurrent("Session", () => {
       const sessions = yield* Session.Service
       const { id } = yield* sessions.spawn(yield* spawnInput(yield* makeRepository))
       yield* until(runtime.callsTo("process"), (calls) => calls.length > 0)
-      const terminal = terminalOf((yield* db.session.getSession(id))!).id
+      const terminal = terminalOf((yield* db.session.getSession(id))!)!.target["id"]!
       yield* runtime.updateAgent(id, (agent) => ({ ...agent, alive: false }))
       yield* PubSub.publish(runtime.events, { type: "exited", terminal: { id: terminal } })
 
@@ -505,7 +505,7 @@ describe.concurrent("Session", () => {
         yield* projectOf(repo),
         "cursor",
         false,
-        { runtime: RUNTIME, address: { machine: "local", id: "test/cursor-entry" } },
+        { runtime: RUNTIME, target: { id: "test/cursor-entry" } },
         { agent: "coordinator" },
       )
 

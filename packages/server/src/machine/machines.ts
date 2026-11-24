@@ -24,7 +24,7 @@ import {
   type RuntimeView,
   UnknownMachine,
 } from "@vibest/schema/machine"
-import type { RuntimeAddress } from "@vibest/schema/session"
+import type { Terminal, TerminalTarget } from "@vibest/schema/terminal"
 import { PROTOCOL } from "@vibest/schema/version"
 import {
   Clock,
@@ -246,7 +246,7 @@ const make = Effect.gen(function* () {
     )
 
   const ensure = Effect.fn("Machines.ensure")(
-    (name: string, kind: string, sessions: ReadonlyMap<string, string>, always = false) =>
+    (name: string, kind: string, sessions: ReadonlyMap<string, TerminalTarget>, always = false) =>
       lock.withLock(name)(
         Effect.gen(function* (): Effect.fn.Return<View> {
           const row = yield* db.remote.machineNamed(name)
@@ -634,13 +634,15 @@ const make = Effect.gen(function* () {
     }),
   )
 
-  const viewSessions = <R extends { readonly id: string; readonly runtime: string; readonly address: RuntimeAddress }>(
+  const viewSessions = <
+    R extends { readonly id: string; readonly runtime: string; readonly terminal: Terminal | null },
+  >(
     name: string,
     rows: ReadonlyArray<R>,
   ) =>
     Effect.gen(function* () {
-      const shown = rows.filter((row) => row.address.id !== "")
-      const kinds = [...new Set(shown.map((row) => row.runtime))]
+      const shown = rows.filter((row) => row.terminal !== null)
+      const kinds = [...new Set(shown.map((row) => row.terminal!.runtime))]
 
       const views = new Map(
         yield* Effect.forEach(
@@ -649,21 +651,32 @@ const make = Effect.gen(function* () {
             ensure(
               name,
               kind,
-              new Map(shown.flatMap((row) => (row.runtime === kind ? [[row.id, row.address.id] as const] : []))),
+              new Map(
+                shown.flatMap((row) =>
+                  row.terminal !== null && row.terminal.runtime === kind
+                    ? [[row.id, row.terminal.target] as const]
+                    : [],
+                ),
+              ),
             ).pipe(Effect.map((found) => [kind, found] as const)),
           { concurrency: "unbounded" },
         ),
       )
 
       return rows.map((row): R => {
-        const found = row.address.id === "" ? undefined : views.get(row.runtime)
-        const terminal = found?.terminals.get(row.id)
+        const found = row.terminal === null ? undefined : views.get(row.terminal.runtime)
+        const target = found?.terminals.get(row.id)
 
         return {
           ...row,
           machine: name,
-          address: terminal === undefined ? { machine: name, id: "" } : { machine: "local", id: terminal.id },
-          ...(terminal === undefined && found?.note !== undefined && { view: found.note }),
+          terminal:
+            row.terminal === null
+              ? null
+              : target !== undefined
+                ? { runtime: row.terminal.runtime, target }
+                : { runtime: row.terminal.runtime, machine: name, target: row.terminal.target },
+          ...(target === undefined && found?.note !== undefined && { view: found.note }),
         }
       })
     })

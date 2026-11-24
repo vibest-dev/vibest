@@ -145,7 +145,7 @@ describe("Db", () => {
   it.effect("reopening projection 22 replays a known harness session id and a null one", () =>
     Effect.gen(function* () {
       const file = yield* fileAt(yield* tempDirectory("vibest-projection-harness-session-"), "vibest.db")
-      const quietPlace = { ...place, address: { ...place.address, id: "test/p2" } }
+      const quietPlace = { ...place, target: { id: "test/p2" } }
 
       const ids = yield* Effect.gen(function* () {
         const db = yield* Db.Service

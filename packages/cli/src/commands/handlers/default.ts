@@ -28,7 +28,7 @@ export const soleEntry = <A, E, R>(
         return yield* new LaunchFailed({
           message: `not starting: ${where}, and a project has one entry session. Exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
         })
-      const stopped = yield* client["Project.StopEntry"]({ runtime: running.runtime, address: running.address })
+      const stopped = yield* client["Project.StopEntry"]({ runtime: running.runtime, target: running.target })
 
       if (stopped.result === "moved")
         return yield* new LaunchFailed({ message: "not starting: the entry session moved meanwhile; run vibest again" })

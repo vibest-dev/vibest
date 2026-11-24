@@ -17,7 +17,7 @@ const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 const recordingClient = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped") => {
   const calls: Array<string> = []
 
-  const running = { harness: "claude", place: "herdr w1:p1", runtime: "herdr", address: "{}" }
+  const running = { harness: "claude", place: "herdr w1:p1", runtime: "herdr", target: { id: "w1:p1" } }
 
   const client = {
     "Project.StopEntry": () =>

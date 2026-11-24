@@ -167,7 +167,7 @@ describe("a vibestd restart", () => {
 
       const id = yield* Effect.gen(function* () {
         const db = yield* Db.Service
-        const place = { runtime: "fake", address: { machine: "local", id: "a" } }
+        const place = { runtime: "fake", target: { id: "a" } }
 
         const { sessionId } = yield* db.session.startEntry(yield* projectOf("a"), "claude", false, place, {
           agent: "coordinator",

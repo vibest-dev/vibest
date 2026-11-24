@@ -14,7 +14,15 @@ describe("Machine.Load", () => {
       const cli = <A, E, R>(effect: Effect.Effect<A, E, R>) => RpcClient.withHeaders(effect, cliHeaders(x.directory))
 
       const enter = (harness: string, fresh: boolean) =>
-        cli(x.raw["Project.EntrySession"]({ agent: "coordinator", harness, fresh, terminal: "t1", runtime: "herdr" }))
+        cli(
+          x.raw["Project.EntrySession"]({
+            agent: "coordinator",
+            harness,
+            fresh,
+            terminal: { id: "t1" },
+            runtime: "herdr",
+          }),
+        )
 
       yield* enter("cursor", false)
       yield* enter("pi", true)

@@ -41,7 +41,7 @@ export const make = Effect.gen(function* () {
 
   const lastScreen = (h: Runtime, session: SessionRow, execution: number | undefined) =>
     Effect.gen(function* () {
-      const tail = shownTail(yield* paneTail(h, terminalOf(session), TAIL_LINES))
+      const tail = shownTail(yield* paneTail(h, terminalOf(session)?.target, TAIL_LINES))
       const output = tail === "" ? "" : `\n\nIts terminal shows:\n\n${tail}`
       const beforeWork = execution !== undefined && !(yield* db.session.executionTaken(session.id))
 

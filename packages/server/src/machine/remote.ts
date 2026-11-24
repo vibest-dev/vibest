@@ -24,21 +24,10 @@ import { Machines } from "./machines.ts"
 
 export * as Remote from "./remote.ts"
 
-type Address =
-  | { readonly _tag: "Local"; readonly id: string }
-  | { readonly _tag: "Remote"; readonly machine: string; readonly id: string }
-
-const Address = Data.taggedEnum<Address>()
-
-export const address = (input: string): Address => {
-  const at = input.indexOf("/")
-
-  return at <= 0
-    ? Address.Local({ id: input })
-    : Address.Remote({ machine: input.slice(0, at), id: input.slice(at + 1) })
+export type At = {
+  readonly machine: string
+  readonly id: string
 }
-
-export type At = Extract<Address, { readonly _tag: "Remote" }>
 
 export type ListScope =
   | { readonly _tag: "All" }
@@ -53,8 +42,6 @@ type Forwarded<A, E> = (
   at: At,
   options: { readonly headers: Record<string, string> },
 ) => Effect.Effect<A, E>
-
-const addressed = (machine: string, id: string) => `${machine}/${id}`
 
 const REFUSED = [
   ["env", "--env"],
@@ -82,10 +69,7 @@ const make = Effect.gen(function* () {
       Effect.provideService(Git.Service, git),
     )
 
-  const view = <R extends SessionInfo>(name: string, rows: ReadonlyArray<R>) =>
-    Effect.map(machines.viewSessions(name, rows), (mapped) =>
-      mapped.map((row): R => ({ ...row, id: addressed(name, row.id) })),
-    )
+  const view = <R extends SessionInfo>(name: string, rows: ReadonlyArray<R>) => machines.viewSessions(name, rows)
 
   const call = <A, E>(
     machine: string,
@@ -102,10 +86,12 @@ const make = Effect.gen(function* () {
     relay,
 
     forward: Effect.fn("Remote.forward")(
-      <A extends { readonly id: string } | null, E>(at: At, project: string, by: string, f: Forwarded<A, E>) =>
-        Effect.map(relay(at, project, by, f), (row): A =>
-          row === null ? row : { ...row, id: addressed(at.machine, row.id) },
-        ),
+      <A extends { readonly id: string; readonly machine?: string | undefined } | null, E>(
+        at: At,
+        project: string,
+        by: string,
+        f: Forwarded<A, E>,
+      ) => Effect.map(relay(at, project, by, f), (row): A => (row === null ? row : { ...row, machine: at.machine })),
     ),
 
     link: Effect.fn("Remote.link")(
@@ -253,14 +239,16 @@ const make = Effect.gen(function* () {
         .sessions
     }),
 
-    get: Effect.fn("Remote.get")((at: At, project: string, by: string, p: PayloadOf<"Get">) =>
-      relay(at, project, by, (c, { id }, o) => c.Get({ ...p, id }, o)).pipe(
+    get: Effect.fn("Remote.get")((at: At, project: string, by: string, _p: PayloadOf<"Get">) =>
+      relay(at, project, by, (c, { id }, o) => c.Get({ id }, o)).pipe(
         Effect.flatMap((row) => Effect.map(view(at.machine, [row]), (rows) => rows[0]!)),
       ),
     ),
 
     peek: Effect.fn("Remote.peek")(function* (at: At, project: string, by: string, p: PayloadOf<"Peek">) {
-      const { text } = yield* relay(at, project, by, (c, { id }, o) => c.Peek({ ...p, id }, o))
+      const { text } = yield* relay(at, project, by, (c, { id }, o) =>
+        c.Peek({ id, ...(p.lines !== undefined && { lines: p.lines }) }, o),
+      )
 
       const row = yield* relay(at, project, by, (c, { id }, o) => c.Get({ id }, o)).pipe(
         Effect.flatMap((row) => view(at.machine, [row])),
@@ -270,7 +258,7 @@ const make = Effect.gen(function* () {
 
       return {
         text,
-        ...(row !== undefined && row.address.id !== "" && { terminal: row.address.id }),
+        ...(row?.terminal !== null && row?.terminal !== undefined && { terminal: row.terminal }),
         ...(row?.view !== undefined && { view: row.view }),
       }
     }),
@@ -384,7 +372,8 @@ const make = Effect.gen(function* () {
         yield* db.session.linkSessions([{ from: from.session, to: spawned.session, remote: machineRow.remoteId }])
 
       return {
-        id: addressed(machine, spawned.session),
+        id: spawned.session,
+        machine,
         harness: spawned.harness,
         ...(spawned.provider !== undefined && { provider: spawned.provider }),
         ...(spawned.model !== undefined && { model: spawned.model }),

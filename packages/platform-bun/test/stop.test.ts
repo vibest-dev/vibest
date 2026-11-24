@@ -92,7 +92,7 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
       agent: "coordinator",
       harness,
       fresh: true,
-      terminal: "wC:p1",
+      terminal: { id: "wC:p1" },
     })
 
     if (harness === "claude") yield* db.session.noteConversation(sessionId, "claude-session")
@@ -134,7 +134,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
               agent: "coordinator",
               harness: "claude",
               fresh: true,
-              terminal: "test/late",
+              terminal: { id: "test/late" },
             }),
           ),
         ),

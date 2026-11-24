@@ -28,7 +28,7 @@ describe.concurrent("Session", () => {
       const { id, sessions } = yield* idleSession(yield* makeRepository)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
-      const left = terminalOf((yield* (yield* Db.Service).session.getSession(id))!).id
+      const left = terminalOf((yield* (yield* Db.Service).session.getSession(id))!)!.target["id"]!
       const placed = (yield* herdr.callsTo("open")).length
       const held = yield* herdr.hold("open", id)
       yield* sessions.send(id, "again")
@@ -49,7 +49,7 @@ describe.concurrent("Session", () => {
       assert.strictEqual(yield* db.session.currentProcessId(id), reporter)
       yield* until(
         db.session.getSession(id),
-        (row) => row !== undefined && exitedAt(row) === null && terminalOf(row).id !== "",
+        (row) => row !== undefined && exitedAt(row) === null && terminalOf(row) !== null,
       )
       assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
     }),
@@ -67,7 +67,7 @@ describe.concurrent("Session", () => {
       const left = (yield* db.session.getSession(id))!
       const placed = (yield* herdr.callsTo("open")).length
       const notices = (yield* sqlNotices(id)).length
-      const refused = yield* herdr.hold("close", terminalOf(left).id)
+      const refused = yield* herdr.hold("close", terminalOf(left)!.target["id"]!)
       yield* sessions.send(id, "again")
       yield* refused.reached
       yield* refused.release("failed")
@@ -75,7 +75,7 @@ describe.concurrent("Session", () => {
       assert.strictEqual((yield* herdr.callsTo("open")).length, placed)
       assert.strictEqual(yield* db.session.currentProcessId(id), left.process!.id)
 
-      const gone = yield* herdr.hold("close", terminalOf(left).id)
+      const gone = yield* herdr.hold("close", terminalOf(left)!.target["id"]!)
       yield* sessions.send(id, "once more")
       yield* gone.reached
       yield* gone.release("not_found")

@@ -61,7 +61,7 @@ const busyPiSubagent = Effect.gen(function* () {
     key,
     "pi",
     false,
-    { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
+    { runtime: RUNTIME, target: { id: "test/coord" } },
     { agent: "coordinator" },
   )
 
@@ -207,7 +207,7 @@ describe("restart in place", () => {
         false,
         {
           runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
+          target: { id: "test/coord" },
         },
         { agent: "coordinator" },
       )
@@ -323,7 +323,7 @@ describe("restart in place", () => {
         false,
         {
           runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
+          target: { id: "test/coord" },
         },
         { agent: "coordinator" },
       )
@@ -357,7 +357,7 @@ describe("restart in place", () => {
         false,
         {
           runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
+          target: { id: "test/coord" },
         },
         { agent: "coordinator" },
       )

@@ -17,9 +17,9 @@ import {
   AmbiguousSession,
   type ExecutionState,
   NoSuchSession,
-  RuntimeAddress,
   type HarnessId,
 } from "@vibest/schema/session"
+import type { TerminalTarget } from "@vibest/schema/terminal"
 import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -101,9 +101,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ? Effect.succeed(true)
         : sql.unsafe<{ n: number }>(LIVE_PROCESS_COUNT).pipe(Effect.map((rows) => (rows[0]?.n ?? 0) < max))
 
-    const clearEntryAt = (runtime: string, address: RuntimeAddress, except?: string) =>
+    const clearEntryAt = (runtime: string, target: TerminalTarget, except?: string) =>
       Effect.gen(function* () {
-        for (const entry of yield* entrySessionsAt(runtime, address, except)) {
+        for (const entry of yield* entrySessionsAt(runtime, target, except)) {
           yield* endProcess(entry.id, "exited")
           yield* dropWaiting(entry.id)
         }
@@ -312,7 +312,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       ...(row.model && { model: row.model }),
                       ...(row.routing !== undefined && { routing: row.routing }),
                       runtime: row.runtime,
-                      terminal: row.address.id,
+                      ...(row.terminal !== null && { terminal: row.terminal }),
                       ...(row.harnessSessionId && { resume: row.harnessSessionId }),
                     },
                     processAt,
@@ -416,8 +416,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ),
       ),
 
-      entryAt: Effect.fn("Db.session.entryAt")((runtime: string, address: RuntimeAddress) =>
-        entrySessionsAt(runtime, address).pipe(
+      entryAt: Effect.fn("Db.session.entryAt")((runtime: string, target: TerminalTarget) =>
+        entrySessionsAt(runtime, target).pipe(
           Effect.map((rows) => rows[0]?.project),
           Effect.orDie,
         ),
@@ -428,7 +428,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           project: string,
           harness: HarnessId,
           fresh: boolean,
-          location: { readonly runtime: string; readonly address: RuntimeAddress },
+          location: { readonly runtime: string; readonly target: TerminalTarget },
           start: {
             readonly provider?: string | undefined
             readonly model?: string | undefined
@@ -445,7 +445,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
             return yield* tx(
               Effect.gen(function* () {
-                yield* clearEntryAt(location.runtime, location.address, project)
+                yield* clearEntryAt(location.runtime, location.target, project)
                 const movingHere = moving.has(project)
 
                 const [existing] = yield* sql<{
@@ -522,7 +522,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     ...(start.model && { model: start.model }),
                     ...(start.routing && { routing: start.routing }),
                     runtime: location.runtime,
-                    terminal: location.address.id,
+                    terminal: location.target,
                     ...(resume !== undefined && { resume }),
                     ...(start.pid !== undefined && { pid: start.pid }),
                   },
@@ -579,7 +579,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(setStatus(id, status)).pipe(Effect.orDie),
       ),
 
-      placeProcess: Effect.fn("Db.session.placeProcess")((id: string, terminal: string, pid?: number) =>
+      placeProcess: Effect.fn("Db.session.placeProcess")((id: string, terminal: TerminalTarget, pid?: number) =>
         tx(session.placeProcess(id, terminal, pid)).pipe(Effect.orDie),
       ),
 
@@ -701,9 +701,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       detachEntry: Effect.fn("Db.session.detachEntry")(
-        (projectIdValue: string, runtime: string, address: RuntimeAddress) =>
+        (projectIdValue: string, runtime: string, target: TerminalTarget) =>
           Effect.gen(function* () {
-            const here = (yield* entrySessionsAt(runtime, address)).some((m) => m.project === projectIdValue)
+            const here = (yield* entrySessionsAt(runtime, target)).some((m) => m.project === projectIdValue)
 
             if (here) moving.add(projectIdValue)
 
@@ -712,22 +712,22 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       reattachEntry: Effect.fn("Db.session.reattachEntry")(
-        (projectIdValue: string, _runtime: string, _address: RuntimeAddress) =>
+        (projectIdValue: string, _runtime: string, _target: TerminalTarget) =>
           Effect.sync(() => {
             moving.delete(projectIdValue)
           }),
       ),
 
-      lastSessionAt: Effect.fn("Db.session.lastSessionAt")((runtime: string, address: RuntimeAddress) =>
-        session.lastSessionAt(runtime, address).pipe(Effect.orDie),
+      lastSessionAt: Effect.fn("Db.session.lastSessionAt")((runtime: string, target: TerminalTarget) =>
+        session.lastSessionAt(runtime, target).pipe(Effect.orDie),
       ),
 
       lastProjectTerminal: Effect.fn("Db.session.lastProjectTerminal")((projectId: string, runtime: string) =>
         session.lastProjectTerminal(projectId, runtime).pipe(Effect.orDie),
       ),
 
-      processesAt: Effect.fn("Db.session.processesAt")((runtime: string, address: RuntimeAddress) =>
-        session.processesAt(runtime, address).pipe(Effect.orDie),
+      processesAt: Effect.fn("Db.session.processesAt")((runtime: string, target: TerminalTarget) =>
+        session.processesAt(runtime, target).pipe(Effect.orDie),
       ),
 
       entryMoving: Effect.fn("Db.session.entryMoving")((projectIdValue: string) =>

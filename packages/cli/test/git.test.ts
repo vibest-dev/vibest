@@ -131,7 +131,7 @@ const session = (id: string): Omit<NewSession, "projectId"> => ({
   model: null,
   harnessSessionId: null,
   runtime: RUNTIME,
-  address: { machine: "local", id: "default" },
+  terminal: { id: "default" },
   status: "unknown",
   startedAt: null,
   exitedAt: null,

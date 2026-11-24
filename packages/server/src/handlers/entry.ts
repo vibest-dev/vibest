@@ -105,12 +105,12 @@ export const make = Effect.gen(function* () {
     "Project.RunningEntry": ({ terminal }) =>
       scope("Project.RunningEntry").pipe(Effect.flatMap(({ id }) => entrySession.running(id, terminal))),
 
-    "Project.StopEntry": ({ runtime, address }) =>
+    "Project.StopEntry": ({ runtime, target }) =>
       Effect.gen(function* () {
         const { id } = yield* cliOnly("Project.StopEntry").pipe(Effect.flatMap((c) => resolveAt(c.repositoryRoot)))
 
         return yield* entrySession
-          .stop(id, runtime, address)
+          .stop(id, runtime, target)
           .pipe(
             Effect.catchTag("NoRuntime", (e) =>
               Effect.fail(new InvalidCaller({ method: "Project.StopEntry", message: e.message })),

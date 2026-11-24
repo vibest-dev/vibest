@@ -756,7 +756,19 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "keepWorktree": {
             "anyOf": [
@@ -782,6 +794,17 @@
             "properties": {
               "id": {
                 "type": "string"
+              },
+              "machine": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "processes": {
                 "type": "string",
@@ -818,15 +841,26 @@
               "path": {
                 "type": "string"
               },
-              "branch": {
-                "anyOf": [
-                  {
-                    "type": "string"
+              "branches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "repository": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "branch": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   },
-                  {
-                    "type": "null"
-                  }
-                ]
+                  "required": [
+                    "repository",
+                    "branch"
+                  ],
+                  "additionalProperties": true
+                }
               },
               "reasons": {
                 "type": "array",
@@ -842,7 +876,7 @@
               "workspace",
               "worktree",
               "path",
-              "branch",
+              "branches",
               "reasons"
             ],
             "additionalProperties": true
@@ -2341,7 +2375,19 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2449,21 +2495,41 @@
           "runtime": {
             "type": "string"
           },
-          "address": {
-            "type": "object",
-            "properties": {
-              "machine": {
-                "type": "string"
+          "terminal": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "runtime": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "machine": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "target": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "runtime",
+                  "target"
+                ],
+                "additionalProperties": true
               },
-              "id": {
-                "type": "string"
+              {
+                "type": "null"
               }
-            },
-            "required": [
-              "machine",
-              "id"
-            ],
-            "additionalProperties": true
+            ]
           },
           "worktree": {
             "type": "string"
@@ -2755,7 +2821,8 @@
           "machine": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -2793,7 +2860,14 @@
                     ]
                   },
                   "status": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "failed",
+                      "interrupted",
+                      "lost",
+                      "not_started"
+                    ]
                   },
                   "text": {
                     "anyOf": [
@@ -2862,7 +2936,7 @@
           "executionState",
           "projectId",
           "runtime",
-          "address",
+          "terminal",
           "worktree",
           "repositoryRoot",
           "git",
@@ -4153,7 +4227,19 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -4166,7 +4252,19 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "message": {
             "type": "string"
@@ -4618,7 +4716,8 @@
             "type": "string"
           },
           "terminal": {
-            "type": "string"
+            "type": "object",
+            "additionalProperties": true
           },
           "place": {
             "type": "string"
@@ -5146,21 +5245,41 @@
                 "runtime": {
                   "type": "string"
                 },
-                "address": {
-                  "type": "object",
-                  "properties": {
-                    "machine": {
-                      "type": "string"
+                "terminal": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "runtime": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "machine": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "target": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      },
+                      "required": [
+                        "runtime",
+                        "target"
+                      ],
+                      "additionalProperties": true
                     },
-                    "id": {
-                      "type": "string"
+                    {
+                      "type": "null"
                     }
-                  },
-                  "required": [
-                    "machine",
-                    "id"
-                  ],
-                  "additionalProperties": true
+                  ]
                 },
                 "worktree": {
                   "type": "string"
@@ -5452,7 +5571,8 @@
                 "machine": {
                   "anyOf": [
                     {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1
                     },
                     {
                       "type": "null"
@@ -5483,7 +5603,7 @@
                 "executionState",
                 "projectId",
                 "runtime",
-                "address",
+                "terminal",
                 "worktree",
                 "repositoryRoot",
                 "git",
@@ -7098,7 +7218,19 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "lines": {
             "anyOf": [
@@ -7134,7 +7266,33 @@
           "terminal": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "object",
+                "properties": {
+                  "runtime": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "machine": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "target": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "runtime",
+                  "target"
+                ],
+                "additionalProperties": true
               },
               {
                 "type": "null"
@@ -8621,7 +8779,8 @@
                     "type": "string"
                   },
                   "terminal": {
-                    "type": "string"
+                    "type": "object",
+                    "additionalProperties": true
                   }
                 },
                 "required": [
@@ -8896,7 +9055,8 @@
             "type": "boolean"
           },
           "terminal": {
-            "type": "string"
+            "type": "object",
+            "additionalProperties": true
           },
           "runtime": {
             "anyOf": [
@@ -10408,7 +10568,8 @@
         "type": "object",
         "properties": {
           "terminal": {
-            "type": "string"
+            "type": "object",
+            "additionalProperties": true
           }
         },
         "required": [
@@ -10431,15 +10592,16 @@
               "runtime": {
                 "type": "string"
               },
-              "address": {
-                "type": "string"
+              "target": {
+                "type": "object",
+                "additionalProperties": true
               }
             },
             "required": [
               "harness",
               "place",
               "runtime",
-              "address"
+              "target"
             ],
             "additionalProperties": true
           },
@@ -11523,13 +11685,14 @@
           "runtime": {
             "type": "string"
           },
-          "address": {
-            "type": "string"
+          "target": {
+            "type": "object",
+            "additionalProperties": true
           }
         },
         "required": [
           "runtime",
-          "address"
+          "target"
         ],
         "additionalProperties": true
       },
@@ -14376,7 +14539,19 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "message": {
             "type": "string"
@@ -14433,7 +14608,19 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -14756,7 +14943,28 @@
                   "ids": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "machine": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": true
                     }
                   }
                 },
@@ -14778,13 +14986,55 @@
                   "from": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "machine": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": true
                     }
                   },
                   "to": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "machine": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": true
                     }
                   }
                 },
@@ -14807,7 +15057,28 @@
                   "ids": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "machine": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": true
                     }
                   }
                 },
@@ -14835,10 +15106,52 @@
               "type": "object",
               "properties": {
                 "from": {
-                  "type": "string"
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "machine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": true
                 },
                 "to": {
-                  "type": "string"
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "machine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": true
                 }
               },
               "required": [
@@ -15659,7 +15972,28 @@
                   "ids": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "machine": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": true
                     }
                   }
                 },
@@ -15681,13 +16015,55 @@
                   "from": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "machine": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": true
                     }
                   },
                   "to": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "machine": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": true
                     }
                   }
                 },
@@ -15710,7 +16086,28 @@
                   "ids": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "machine": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": true
                     }
                   }
                 },
@@ -15738,10 +16135,52 @@
               "type": "object",
               "properties": {
                 "from": {
-                  "type": "string"
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "machine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": true
                 },
                 "to": {
-                  "type": "string"
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "machine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": true
                 }
               },
               "required": [
@@ -16166,7 +16605,8 @@
           "machine": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -16216,7 +16656,28 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "machine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": true
                 }
               },
               {
@@ -16229,7 +16690,28 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "machine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": true
                 }
               },
               {
@@ -16242,7 +16724,28 @@
               {
                 "type": "array",
                 "items": {
-                  "type": "string"
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "machine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "additionalProperties": true
                 }
               },
               {
@@ -16264,6 +16767,17 @@
         "properties": {
           "id": {
             "type": "string"
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "harness": {
             "type": "string"
@@ -17150,7 +17664,19 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -17163,7 +17689,19 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "message": {
             "type": "string"
@@ -17869,7 +18407,8 @@
                     "machine": {
                       "anyOf": [
                         {
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1
                         },
                         {
                           "type": "null"
@@ -17988,21 +18527,41 @@
                     "runtime": {
                       "type": "string"
                     },
-                    "address": {
-                      "type": "object",
-                      "properties": {
-                        "machine": {
-                          "type": "string"
+                    "terminal": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "runtime": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "machine": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "target": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          },
+                          "required": [
+                            "runtime",
+                            "target"
+                          ],
+                          "additionalProperties": true
                         },
-                        "id": {
-                          "type": "string"
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "machine",
-                        "id"
-                      ],
-                      "additionalProperties": true
+                      ]
                     },
                     "worktree": {
                       "type": "string"
@@ -18294,7 +18853,8 @@
                     "machine": {
                       "anyOf": [
                         {
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1
                         },
                         {
                           "type": "null"
@@ -18342,7 +18902,28 @@
                     "to": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "machine": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id"
+                        ],
+                        "additionalProperties": true
                       }
                     }
                   },
@@ -18359,7 +18940,7 @@
                     "executionState",
                     "projectId",
                     "runtime",
-                    "address",
+                    "terminal",
                     "worktree",
                     "repositoryRoot",
                     "git",
@@ -18508,7 +19089,8 @@
                   "machine": {
                     "anyOf": [
                       {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       },
                       {
                         "type": "null"
@@ -18640,21 +19222,41 @@
                   "runtime": {
                     "type": "string"
                   },
-                  "address": {
-                    "type": "object",
-                    "properties": {
-                      "machine": {
-                        "type": "string"
+                  "terminal": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "runtime": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "machine": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "target": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "required": [
+                          "runtime",
+                          "target"
+                        ],
+                        "additionalProperties": true
                       },
-                      "id": {
-                        "type": "string"
+                      {
+                        "type": "null"
                       }
-                    },
-                    "required": [
-                      "machine",
-                      "id"
-                    ],
-                    "additionalProperties": true
+                    ]
                   },
                   "worktree": {
                     "type": "string"
@@ -18946,7 +19548,8 @@
                   "machine": {
                     "anyOf": [
                       {
-                        "type": "string"
+                        "type": "string",
+                        "minLength": 1
                       },
                       {
                         "type": "null"
@@ -18994,7 +19597,28 @@
                   "to": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "machine": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "additionalProperties": true
                     }
                   }
                 },
@@ -19011,7 +19635,7 @@
                   "executionState",
                   "projectId",
                   "runtime",
-                  "address",
+                  "terminal",
                   "worktree",
                   "repositoryRoot",
                   "git",
@@ -19050,7 +19674,8 @@
               "machine": {
                 "anyOf": [
                   {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   {
                     "type": "null"
