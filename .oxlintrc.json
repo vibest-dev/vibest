@@ -177,6 +177,7 @@
     }
   ],
   "ignorePatterns": [
+    "apps/vibest-herdr-app/types",
     "dist",
     "node_modules",
     ".cache",
