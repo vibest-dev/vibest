@@ -6,6 +6,7 @@ export default defineConfig({
     globalSetup: ["./vitest.globalSetup.ts"],
     setupFiles: ["./vitest.setup.ts"],
     include: [
+      "apps/vibest-web/test/**/*.test.ts",
       "packages/cli/test/**/*.test.ts",
       "packages/platform-bun/test/**/*.test.ts",
       "packages/integration/claude/test/**/*.test.ts",

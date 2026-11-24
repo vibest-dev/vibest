@@ -1,0 +1,32 @@
+{
+  "name": "@vibest/web",
+  "version": "0.0.2-dev",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "bun src/build-client.ts",
+    "start": "bun src/server.ts",
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run apps/vibest-web"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@excalidraw/excalidraw": "^0.18.0",
+    "@vibest/client": "workspace:*",
+    "@vibest/protocol": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "@wterm/dom": "0.6.0",
+    "effect": "catalog:",
+    "lucide-react": "^0.475.0",
+    "marked": "^15.0.7",
+    "mermaid": "^11.4.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vibest/tsconfig": "workspace:*"
+  }
+}
