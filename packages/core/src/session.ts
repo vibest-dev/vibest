@@ -56,6 +56,8 @@ export { HOOK_GRACE, START_TIMEOUT } from "./session/reconcile.ts"
 
 export { defaultSessionName, type SpawnInput, type Spawned } from "./session/spawn.ts"
 
+const LIST_CONCURRENCY = 8
+
 const SESSION_DEPS = [
   Archive.node,
   Db.node,
@@ -263,8 +265,10 @@ export const make = Effect.gen(function* () {
       .listSessions(filter)
       .pipe(
         Effect.flatMap((rows) =>
-          Effect.forEach(rows, (row) =>
-            view(row).pipe(Effect.catchTag("NoSuchSession", () => Effect.succeed(unlocated(row)))),
+          Effect.forEach(
+            rows,
+            (row) => view(row).pipe(Effect.catchTag("NoSuchSession", () => Effect.succeed(unlocated(row)))),
+            { concurrency: LIST_CONCURRENCY },
           ),
         ),
       ),
