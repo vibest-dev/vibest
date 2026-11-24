@@ -282,7 +282,7 @@ describe("git, the live layer: project copies", () => {
       assert.isFalse(yield* fs.exists(path.join(copy, ".git/objects/info/alternates")))
       const head = yield* sh(copy, "rev-parse", "HEAD")
       const headObject = path.join(copy, ".git/objects", head.slice(0, 2), head.slice(2))
-      assert.strictEqual(Option.getOrUndefined((yield* fs.stat(headObject)).nlink), 1)
+      assert.strictEqual(Option.getOrUndefined((yield* fs.stat(headObject)).nlink), 1n)
 
       const plain = path.join(directory, "sdk")
       assert.strictEqual(yield* sh(plain, "remote"), "")

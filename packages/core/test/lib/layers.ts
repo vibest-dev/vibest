@@ -57,7 +57,8 @@ export const checkedSqlite = replayChecked.pipe(Layer.provideMerge(memorySqlite)
 export const base: LayerNode.Replacements = [
   PlatformNode.fileSystem.replace(platform),
   PlatformNode.path.replace(platform),
-  PlatformNode.crypto.replace(platform),
+  PlatformNode.digest.replace(platform),
+  PlatformNode.secureRandom.replace(platform),
   PlatformNode.childProcessSpawner.replace(platform),
   PlatformNode.sqlClient.replace(checkedSqlite),
   Git.node.replace(fakeGit),

@@ -30,7 +30,6 @@ import {
   Clock,
   ConfigProvider,
   Context,
-  Crypto,
   Deferred,
   type Duration,
   Effect,
@@ -41,6 +40,7 @@ import {
   type Schema,
   Stream,
 } from "effect"
+import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
@@ -210,11 +210,13 @@ export const dbReplacement = (decorate: (db: Db.Interface) => Db.Interface) =>
     Db.node.mapLayer((layer) => Layer.effect(Db.Service, Effect.map(Db.Service, decorate)).pipe(Layer.provide(layer))),
   )
 
-export const cryptoReplacement = (decorate: (crypto: Crypto.Crypto) => Crypto.Crypto) =>
+type SecureRandomService = Effect.Success<typeof SecureRandom.SecureRandom>
+
+export const cryptoReplacement = (decorate: (crypto: SecureRandomService) => SecureRandomService) =>
   platform.replace(
     LayerNode.make({
       name: "test/Platform",
-      layer: Layer.effect(Crypto.Crypto, Effect.map(Crypto.Crypto, decorate)).pipe(
+      layer: Layer.effect(SecureRandom.SecureRandom, Effect.map(SecureRandom.SecureRandom, decorate)).pipe(
         Layer.provideMerge(platformServices),
       ),
       deps: [],
@@ -224,7 +226,7 @@ export const cryptoReplacement = (decorate: (crypto: Crypto.Crypto) => Crypto.Cr
 export const scriptedLeaves = (leaves: ReadonlyArray<string>) => {
   let drawn = 0
 
-  return (crypto: Crypto.Crypto): Crypto.Crypto => ({
+  return (crypto: SecureRandomService): SecureRandomService => ({
     ...crypto,
     randomBytes: (size) =>
       size === 2
@@ -313,7 +315,7 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly pluginTimeout?: Duration.Input
   readonly activateLate?: boolean
   readonly db?: (db: Db.Interface) => Db.Interface
-  readonly crypto?: (crypto: Crypto.Crypto) => Crypto.Crypto
+  readonly crypto?: (crypto: SecureRandomService) => SecureRandomService
   readonly missingBinary?: ReadonlyArray<string>
   readonly harnesses?: ReadonlyArray<HarnessDefinition>
   readonly sshHosts?: Readonly<Record<string, string>>
@@ -404,7 +406,7 @@ export const restartSessions = Effect.gen(function* () {
     PlatformNode.childProcessSpawner.replace(
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, yield* ChildProcessSpawner.ChildProcessSpawner),
     ),
-    PlatformNode.crypto.replace(Layer.succeed(Crypto.Crypto, yield* Crypto.Crypto)),
+    PlatformNode.secureRandom.replace(Layer.succeed(SecureRandom.SecureRandom, yield* SecureRandom.SecureRandom)),
     PlatformNode.fileSystem.replace(Layer.succeed(FileSystem.FileSystem, yield* FileSystem.FileSystem)),
     PlatformNode.layout.replace(Layer.succeed(Layout, yield* Layout)),
     App.node.replace(Layer.succeed(App.Service, yield* App.Service)),

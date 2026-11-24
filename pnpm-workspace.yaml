@@ -9,11 +9,11 @@ packages:
   - e2e
 catalog:
   # Effect v4 moves in lockstep: every `effect` / `@effect/*` package on one version, or two runtimes meet. Exact pins.
-  effect: 4.0.2
-  "@effect/platform-bun": 4.0.2
-  "@effect/platform-node-shared": 4.0.2
-  "@effect/sql-sqlite-bun": 4.0.2
-  "@effect/vitest": 4.0.2
+  effect: 4.1.5
+  "@effect/platform-bun": 4.1.5
+  "@effect/platform-node-shared": 4.1.5
+  "@effect/sql-sqlite-bun": 4.1.5
+  "@effect/vitest": 4.1.5
   "@earendil-works/pi-coding-agent": 1.1.0
 overrides:
   # The catalog governs our package.json entries; this forces transitive copies (peers of @effect/*) onto it too.

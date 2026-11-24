@@ -607,7 +607,6 @@ export const node = LayerNode.make({
     SessionLocks.node,
     Subscriptions.node,
     PlatformNode.childProcessSpawner,
-    PlatformNode.crypto,
     PlatformNode.fileSystem,
     PlatformNode.layout,
     PlatformNode.path,
