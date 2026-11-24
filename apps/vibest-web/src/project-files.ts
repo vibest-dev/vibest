@@ -4,6 +4,59 @@ import path from "node:path"
 import type { KnowledgeCategory, ProjectFileEntry } from "./types.ts"
 
 const CATEGORIES: ReadonlyArray<Exclude<KnowledgeCategory, "preferences">> = ["artifacts", "docs", "memories"]
+const VALID_PROJECT_ID = /^[a-zA-Z0-9._-]+$/
+
+export function isValidProjectId(projectId: string): boolean {
+  if (projectId.length === 0 || projectId === "." || projectId === "..") return false
+
+  return VALID_PROJECT_ID.test(projectId)
+}
+
+function realPathOrAncestor(targetPath: string): string | null {
+  let current = targetPath
+
+  while (true) {
+    if (fs.existsSync(current)) {
+      try {
+        const realBase = fs.realpathSync(current)
+        const suffix = path.relative(current, targetPath)
+
+        return suffix.length === 0 ? realBase : path.join(realBase, suffix)
+      } catch {
+        return null
+      }
+    }
+
+    const parent = path.dirname(current)
+
+    if (parent === current) return null
+    current = parent
+  }
+}
+
+export function resolveSafeProjectDir(vibestHome: string, projectId: string): string | null {
+  if (!isValidProjectId(projectId)) return null
+
+  const projectsRoot = path.resolve(vibestHome, "projects")
+  const projectDir = path.resolve(projectsRoot, projectId)
+
+  if (!projectDir.startsWith(`${projectsRoot}${path.sep}`)) return null
+
+  if (fs.existsSync(projectsRoot) && fs.existsSync(projectDir)) {
+    try {
+      const realRoot = fs.realpathSync(projectsRoot)
+      const realDir = fs.realpathSync(projectDir)
+
+      if (!realDir.startsWith(`${realRoot}${path.sep}`)) return null
+
+      return realDir
+    } catch {
+      return null
+    }
+  }
+
+  return projectDir
+}
 
 function detectFileKind(fileName: string): ProjectFileEntry["kind"] {
   const lower = fileName.toLowerCase()
@@ -38,7 +91,7 @@ function extensionOf(fileName: string): string {
 
 function walkCategoryFiles(
   projectId: string,
-  projectDir: string,
+  realProjectDir: string,
   category: Exclude<KnowledgeCategory, "preferences">,
   currentDir: string,
   out: ProjectFileEntry[],
@@ -57,16 +110,21 @@ function walkCategoryFiles(
     if (entry.name.startsWith(".")) continue
     const absPath = path.join(currentDir, entry.name)
 
+    if (entry.isSymbolicLink()) continue
+
     if (entry.isDirectory()) {
-      walkCategoryFiles(projectId, projectDir, category, absPath, out)
+      walkCategoryFiles(projectId, realProjectDir, category, absPath, out)
       continue
     }
 
     if (!entry.isFile()) continue
 
     try {
-      const stat = fs.statSync(absPath)
-      const relativePath = path.relative(projectDir, absPath).replaceAll("\\", "/")
+      const realFile = fs.realpathSync(absPath)
+
+      if (!realFile.startsWith(`${realProjectDir}${path.sep}`)) continue
+      const stat = fs.statSync(realFile)
+      const relativePath = path.relative(realProjectDir, realFile).replaceAll("\\", "/")
       out.push({
         id: `${projectId}:${relativePath}`,
         projectId,
@@ -85,9 +143,9 @@ function walkCategoryFiles(
 }
 
 export function scanProjectFiles(vibestHome: string, projectId: string): ReadonlyArray<ProjectFileEntry> {
-  const projectDir = path.join(vibestHome, "projects", projectId)
+  const projectDir = resolveSafeProjectDir(vibestHome, projectId)
 
-  if (!fs.existsSync(projectDir)) return []
+  if (projectDir === null || !fs.existsSync(projectDir)) return []
 
   const results: ProjectFileEntry[] = []
 
@@ -95,9 +153,9 @@ export function scanProjectFiles(vibestHome: string, projectId: string): Readonl
 
   if (fs.existsSync(prefPath)) {
     try {
-      const stat = fs.statSync(prefPath)
+      const lstat = fs.lstatSync(prefPath)
 
-      if (stat.isFile()) {
+      if (!lstat.isSymbolicLink() && lstat.isFile()) {
         results.push({
           id: `${projectId}:preferences.md`,
           projectId,
@@ -105,8 +163,8 @@ export function scanProjectFiles(vibestHome: string, projectId: string): Readonl
           name: "preferences.md",
           relativePath: "preferences.md",
           extension: ".md",
-          size: stat.size,
-          updatedAt: Math.round(stat.mtimeMs),
+          size: lstat.size,
+          updatedAt: Math.round(lstat.mtimeMs),
           kind: "markdown",
         })
       }
@@ -126,6 +184,10 @@ export function scanProjectFiles(vibestHome: string, projectId: string): Readonl
 
 export function resolveSafeProjectFilePath(vibestHome: string, projectId: string, relativePath: string): string | null {
   if (relativePath.length === 0 || relativePath.includes("\0")) return null
+  const projectDir = resolveSafeProjectDir(vibestHome, projectId)
+
+  if (projectDir === null) return null
+
   const normalized = path.posix.normalize(relativePath.replaceAll("\\", "/"))
 
   if (normalized.startsWith("..") || path.posix.isAbsolute(normalized)) return null
@@ -138,12 +200,21 @@ export function resolveSafeProjectFilePath(vibestHome: string, projectId: string
 
   if (!allowedRoot) return null
 
-  const projectDir = path.resolve(vibestHome, "projects", projectId)
   const resolved = path.resolve(projectDir, normalized)
 
   if (!resolved.startsWith(`${projectDir}${path.sep}`)) return null
 
-  return resolved
+  const realProjectDir = realPathOrAncestor(projectDir)
+
+  if (realProjectDir === null) return null
+
+  const realTarget = realPathOrAncestor(resolved)
+
+  if (realTarget === null) return null
+
+  if (!realTarget.startsWith(`${realProjectDir}${path.sep}`)) return null
+
+  return realTarget
 }
 
 export function readProjectTextFile(vibestHome: string, projectId: string, relativePath: string): string | null {
@@ -178,15 +249,16 @@ export function watchProjectDirectories(
   const watchers: fs.FSWatcher[] = []
 
   for (const projectId of projectIds) {
-    const projectDir = path.join(vibestHome, "projects", projectId)
+    const projectDir = resolveSafeProjectDir(vibestHome, projectId)
 
-    if (!fs.existsSync(projectDir)) continue
+    if (projectDir === null || !fs.existsSync(projectDir)) continue
 
     try {
       const watcher = fs.watch(projectDir, { recursive: true }, () => {
         onChanged(projectId)
       })
 
+      watcher.on("error", () => {})
       watchers.push(watcher)
     } catch {
       continue

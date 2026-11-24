@@ -460,7 +460,7 @@ function HtmlPreviewStage(props: {
           ref={iframeRef}
           src={previewUrl}
           title={file.name}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts"
           className="html-preview-iframe"
         />
 
@@ -617,8 +617,12 @@ function ExcalidrawStage(props: {
       2,
     )
 
-    await webApi.saveFileContent(file.projectId, file.relativePath, payload)
-    setSaveLabel("Saved")
+    try {
+      await webApi.saveFileContent(file.projectId, file.relativePath, payload)
+      setSaveLabel("Saved")
+    } catch {
+      setSaveLabel("Save failed")
+    }
   }
 
   const handleAddNode = () => {

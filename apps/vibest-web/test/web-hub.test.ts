@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import net from "node:net"
 import os from "node:os"
 import path from "node:path"
 
@@ -13,6 +14,7 @@ import {
   writeProjectTextFile,
 } from "../src/project-files.ts"
 import { createWebServer, type RunningWebServer } from "../src/server.ts"
+import { createVibestBridge } from "../src/vibest-bridge.ts"
 import { hasStructuredVibestTags, parseVibestMessageBlocks } from "../src/xml-parser.ts"
 
 describe("vibest-web xml-parser", () => {
@@ -229,7 +231,7 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
 
     const sendRes = await fetch(`${server.url}/api/sessions/entry-1/send`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: server.url },
       body: JSON.stringify({ message: "Ship it", attachments: ["artifacts/demo.html"] }),
     })
 
@@ -237,17 +239,227 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
 
     const saveRes = await fetch(`${server.url}/api/projects/${projectId}/file`, {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: server.url },
       body: JSON.stringify({ path: "artifacts/saved.excalidraw", content: '{"elements":[]}' }),
     })
 
     expect(saveRes.status).toBe(200)
     expect(readProjectTextFile(home, projectId, "artifacts/saved.excalidraw")).toBe('{"elements":[]}')
 
-    const intRes = await fetch(`${server.url}/api/sessions/sub-1/interrupt`, { method: "POST" })
+    const intRes = await fetch(`${server.url}/api/sessions/sub-1/interrupt`, {
+      method: "POST",
+      headers: { origin: server.url },
+    })
+
     expect(intRes.status).toBe(200)
 
-    const archRes = await fetch(`${server.url}/api/sessions/sub-1/archive`, { method: "POST" })
+    const archRes = await fetch(`${server.url}/api/sessions/sub-1/archive`, {
+      method: "POST",
+      headers: { origin: server.url },
+    })
+
     expect(archRes.status).toBe(200)
+  })
+
+  it("B1: blocks projectId path traversal and symlink escape on read and write", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-b1-"))
+    tempDirs.push(tmp)
+    const vibestHome = path.join(tmp, "vibest-home")
+    const outsideDir = path.join(tmp, "outside-secret")
+    fs.mkdirSync(path.join(vibestHome, "projects", "legit", "artifacts"), { recursive: true })
+    fs.mkdirSync(path.join(outsideDir, "docs"), { recursive: true })
+    fs.writeFileSync(path.join(outsideDir, "docs", "secret.txt"), "TOP_SECRET_DATA", "utf8")
+    fs.symlinkSync(
+      path.join(outsideDir, "docs", "secret.txt"),
+      path.join(vibestHome, "projects", "legit", "artifacts", "link.txt"),
+    )
+
+    expect(resolveSafeProjectFilePath(vibestHome, "../../outside-secret", "docs/secret.txt")).toBeNull()
+    expect(resolveSafeProjectFilePath(vibestHome, "legit", "artifacts/link.txt")).toBeNull()
+
+    const server = createWebServer({ port: 0, vibestHome, demoMode: true, safeActions: true })
+    servers.push(server)
+
+    const escapedId = encodeURIComponent("../../outside-secret")
+    const getRes = await fetch(`${server.url}/api/projects/${escapedId}/file?path=docs/secret.txt`)
+    expect(getRes.status).toBe(400)
+
+    const putRes = await fetch(`${server.url}/api/projects/${escapedId}/file`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: server.url },
+      body: JSON.stringify({ path: "artifacts/pwned.txt", content: "WRITTEN_OUTSIDE" }),
+    })
+
+    expect(putRes.status).toBe(400)
+    expect(fs.existsSync(path.join(outsideDir, "artifacts", "pwned.txt"))).toBe(false)
+  })
+
+  it("B2: rejects non-loopback Host, cross-origin Origin, and non-JSON Content-Type on mutations", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-b2-"))
+    tempDirs.push(home)
+    const server = createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
+    servers.push(server)
+
+    const badHost = await fetch(`${server.url}/api/state`, {
+      headers: { host: "evil.attacker.com" },
+    })
+
+    expect(badHost.status).toBe(403)
+
+    const badOrigin = await fetch(`${server.url}/api/sessions/any-session/send`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://evil.example" },
+      body: JSON.stringify({ message: "CSRF injected prompt" }),
+    })
+
+    expect(badOrigin.status).toBe(403)
+
+    const badContentType = await fetch(`${server.url}/api/sessions/any-session/send`, {
+      method: "POST",
+      headers: { "content-type": "text/plain", origin: server.url },
+      body: JSON.stringify({ message: "text/plain CSRF" }),
+    })
+
+    expect(badContentType.status).toBe(415)
+
+    const crossSiteInterrupt = await fetch(`${server.url}/api/sessions/any-session/interrupt`, {
+      method: "POST",
+      headers: { origin: "https://evil.example" },
+    })
+
+    expect(crossSiteInterrupt.status).toBe(403)
+  })
+
+  it("B3: serves preview and raw files with sandbox CSP and nosniff headers", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-b3-"))
+    tempDirs.push(home)
+    const projectId = "proj-b3"
+    const base = path.join(home, "projects", projectId)
+    fs.mkdirSync(path.join(base, "artifacts"), { recursive: true })
+    fs.writeFileSync(path.join(base, "artifacts", "demo.html"), "<html><body><h1>Hi</h1></body></html>", "utf8")
+    fs.writeFileSync(path.join(base, "artifacts", "pic.svg"), "<svg><script>alert(1)</script></svg>", "utf8")
+
+    const server = createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
+    servers.push(server)
+
+    const previewRes = await fetch(`${server.url}/api/projects/${projectId}/preview?path=artifacts/demo.html`)
+    expect(previewRes.status).toBe(200)
+    expect(previewRes.headers.get("content-security-policy")).toBe("sandbox allow-scripts")
+    expect(previewRes.headers.get("x-content-type-options")).toBe("nosniff")
+
+    const rawSvgRes = await fetch(`${server.url}/api/projects/${projectId}/file?path=artifacts/pic.svg&raw=1`)
+    expect(rawSvgRes.status).toBe(200)
+    expect(rawSvgRes.headers.get("content-security-policy")).toBe("sandbox")
+    expect(rawSvgRes.headers.get("x-content-type-options")).toBe("nosniff")
+  })
+
+  it("B4: closes live vibestd Unix socket cleanly when bridge.stop() is called", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-b4-"))
+    tempDirs.push(tmp)
+    const sockPath = path.join(tmp, "vibest.sock")
+    let open = 0
+    let closed = 0
+
+    const netSrv = net.createServer((socket) => {
+      open += 1
+      socket.on("close", () => {
+        closed += 1
+      })
+    })
+
+    await new Promise<void>((resolve) => {
+      netSrv.listen(sockPath, resolve)
+    })
+
+    const bridge = createVibestBridge({ vibestHome: tmp, repositoryRoot: tmp, demoMode: false, safeActions: true })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    bridge.stop()
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    netSrv.close()
+
+    expect(open).toBeGreaterThanOrEqual(1)
+    expect(closed).toBe(open)
+  })
+
+  it("B5: preserves original session.task after sendToSession instead of shadowing timeline", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-b5-"))
+    tempDirs.push(home)
+
+    const demoState = {
+      version: "0.0.2-dev",
+      load: {
+        sampledAt: Date.now(),
+        cpuCount: 8,
+        cpuUtilization: 0.1,
+        memoryTotalBytes: 16 * 1024 ** 3,
+        memoryAvailableBytes: 8 * 1024 ** 3,
+        workingExecutions: 0,
+      },
+      projects: [
+        {
+          id: "p1",
+          name: "proj",
+          directory: "/tmp/proj",
+          entrySessionId: "s1",
+          activity: "idle",
+          machine: "local",
+          branch: "main",
+        },
+      ],
+      sessions: [
+        {
+          id: "s1",
+          name: "coordinator",
+          agent: "coordinator",
+          harness: "claude",
+          provider: null,
+          model: null,
+          status: "idle",
+          executionState: "completed",
+          projectId: "p1",
+          parentId: null,
+          runtime: "hc",
+          machine: "local",
+          worktree: "/tmp/proj",
+          repositoryRoot: "/tmp/proj",
+          git: { branch: "main", pushed: true, saved: true, why: "" },
+          createdAt: Date.now() - 60_000,
+          lastActive: Date.now() - 10_000,
+          startedAt: Date.now() - 60_000,
+          exitedAt: null,
+          task: "ORIGINAL_TASK_PROMPT",
+          summary: "Ready",
+          isEntry: true,
+          needsYou: false,
+        },
+      ],
+      timelines: [],
+      peeks: {},
+    }
+
+    fs.writeFileSync(path.join(home, "web-demo-state.json"), JSON.stringify(demoState), "utf8")
+
+    const bridge = createVibestBridge({ vibestHome: home, repositoryRoot: home, demoMode: true, safeActions: true })
+
+    try {
+      const before = await bridge.getTimeline("p1", "s1")
+      expect(before.map((e) => e.content)).toEqual(["ORIGINAL_TASK_PROMPT"])
+
+      await bridge.sendToSession("s1", "follow up", [])
+      const after = await bridge.getTimeline("p1", "s1")
+      expect(after.map((e) => e.content)).toEqual(["ORIGINAL_TASK_PROMPT", "follow up"])
+    } finally {
+      bridge.stop()
+    }
+  })
+
+  it("B6: returns HTTP 400 instead of 500 on malformed percent-encoding in route params", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-b6-"))
+    tempDirs.push(home)
+    const server = createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
+    servers.push(server)
+
+    const badUri = await fetch(`${server.url}/api/projects/%E0%A4%A/files`)
+    expect(badUri.status).toBe(400)
   })
 })

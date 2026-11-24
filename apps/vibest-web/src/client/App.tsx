@@ -53,6 +53,8 @@ export function App() {
   const [rightSplitPercent, setRightSplitPercent] = useState(52)
 
   const rightColumnRef = useRef<HTMLDivElement | null>(null)
+  const activeSessionIdRef = useRef<string | null>(activeSessionId)
+  activeSessionIdRef.current = activeSessionId
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme)
@@ -151,6 +153,8 @@ export function App() {
     source.addEventListener("timeline-entry", (ev: MessageEvent) => {
       try {
         const entry: TimelineEntry = JSON.parse(String(ev.data))
+
+        if (entry.sessionId !== activeSessionIdRef.current) return
         setTimeline((prev) => (prev.some((t) => t.id === entry.id) ? prev : [...prev, entry]))
       } catch {
         return

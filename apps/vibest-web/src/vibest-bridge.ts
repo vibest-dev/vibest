@@ -221,6 +221,8 @@ function summarizeProject(
 interface BridgeMutableState {
   daemon: DaemonStatus
   stopWatchers: () => void
+  watchAbort: AbortController | null
+  reconnectTimer: ReturnType<typeof setTimeout> | null
   closed: boolean
 }
 
@@ -257,6 +259,8 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
       load: null,
     },
     stopWatchers: () => {},
+    watchAbort: null,
+    reconnectTimer: null,
     closed: false,
   }
 
@@ -403,7 +407,13 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
       emit({ type: "snapshot", data: snapshot() })
     }),
     Match.tag("Project", (ev) => {
+      const isNew = !rawProjects.has(ev.project.id)
       rawProjects.set(ev.project.id, ev.project)
+
+      if (isNew) {
+        attachFileWatchers()
+      }
+
       const summary = summarizeProject(ev.project, Array.from(sessionsMap.values()))
       emit({ type: "project", data: summary })
     }),
@@ -426,7 +436,14 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
     }),
     Match.tag("SessionEnded", (ev) => {
       sessionsMap.delete(ev.id)
+      timelinesBySession.delete(ev.id)
       emit({ type: "session-ended", data: { id: ev.id, projectId: ev.projectId } })
+
+      const projRow = rawProjects.get(ev.projectId)
+
+      if (projRow) {
+        emit({ type: "project", data: summarizeProject(projRow, Array.from(sessionsMap.values())) })
+      }
     }),
     Match.exhaustive,
   )
@@ -443,8 +460,28 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
     return Effect.runPromise(program)
   }
 
+  const scheduleWatchReconnect = () => {
+    if (state.closed || options.demoMode || state.reconnectTimer !== null) return
+
+    state.reconnectTimer = setTimeout(() => {
+      state.reconnectTimer = null
+
+      if (!state.closed) startLiveWatch()
+    }, 2_000)
+  }
+
   const startLiveWatch = () => {
-    if (options.demoMode || !fs.existsSync(socketPath)) return
+    if (state.closed || options.demoMode) return
+
+    if (!fs.existsSync(socketPath)) {
+      scheduleWatchReconnect()
+
+      return
+    }
+
+    state.watchAbort?.abort()
+    const controller = new AbortController()
+    state.watchAbort = controller
 
     const watchProgram = Effect.gen(function* () {
       const client = yield* connect(socketPath)
@@ -483,12 +520,21 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
       )
     }).pipe(Effect.scoped, Effect.provide(socketLayer))
 
-    void Effect.runPromise(watchProgram).catch(() => {
-      if (!state.closed) {
-        state.daemon = { ...state.daemon, connected: false }
-        emit({ type: "daemon", data: state.daemon })
-      }
-    })
+    void Effect.runPromise(watchProgram, { signal: controller.signal })
+      .then(() => {
+        if (!state.closed) {
+          state.daemon = { ...state.daemon, connected: false }
+          emit({ type: "daemon", data: state.daemon })
+          scheduleWatchReconnect()
+        }
+      })
+      .catch(() => {
+        if (!state.closed) {
+          state.daemon = { ...state.daemon, connected: false }
+          emit({ type: "daemon", data: state.daemon })
+          scheduleWatchReconnect()
+        }
+      })
   }
 
   const loadedDemo = loadDemoFixturesIfPresent()
@@ -506,17 +552,14 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
   })
 
   const getTimeline = async (projectId: string, sessionId: string): Promise<ReadonlyArray<TimelineEntry>> => {
-    const existing = timelinesBySession.get(sessionId)
-
-    if (existing && existing.length > 0) {
-      return existing
-    }
-
+    const stored = timelinesBySession.get(sessionId) ?? []
     const session = sessionsMap.get(sessionId)
-    const fallbackEntries: TimelineEntry[] = []
+    const entries: TimelineEntry[] = []
 
-    if (session?.task) {
-      fallbackEntries.push({
+    const hasSeededFixture = stored.some((entry) => !entry.id.startsWith("msg-"))
+
+    if (session?.task && !hasSeededFixture) {
+      entries.push({
         id: `${sessionId}-task`,
         sessionId,
         projectId,
@@ -535,7 +578,7 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
         const detail = await runLiveRpc((client) => client.Get({ id: sessionId }))
 
         if (detail.reply?.text) {
-          fallbackEntries.push({
+          entries.push({
             id: `${sessionId}-reply-${detail.reply.execution}`,
             sessionId,
             projectId,
@@ -549,11 +592,19 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
           })
         }
       } catch {
-        return fallbackEntries
+        return entries
+      }
+
+      return entries
+    }
+
+    for (const item of stored) {
+      if (!entries.some((existing) => existing.id === item.id)) {
+        entries.push(item)
       }
     }
 
-    return fallbackEntries
+    return entries
   }
 
   const peekSession = async (sessionId: string): Promise<PeekResult> => {
@@ -621,6 +672,8 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
     if (state.daemon.mode === "live" && state.daemon.connected && !options.safeActions) {
       try {
         await runLiveRpc((client) => client.Send({ id: sessionId, message: formattedMessage }))
+
+        return { ok: true, entry: null }
       } catch (err) {
         return { ok: false, entry: null, error: err instanceof Error ? err.message : String(err) }
       }
@@ -644,7 +697,7 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
     timelinesBySession.set(sessionId, list)
     emit({ type: "timeline-entry", data: entry })
 
-    if (session) {
+    if (session && state.daemon.mode === "isolated") {
       const updated: SessionItem = {
         ...session,
         status: "working",
@@ -725,6 +778,14 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
     refreshFiles,
     stop: () => {
       state.closed = true
+
+      if (state.reconnectTimer !== null) {
+        clearTimeout(state.reconnectTimer)
+        state.reconnectTimer = null
+      }
+
+      state.watchAbort?.abort()
+      state.watchAbort = null
       state.stopWatchers()
       listeners.clear()
     },

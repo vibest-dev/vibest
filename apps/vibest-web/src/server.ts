@@ -6,7 +6,12 @@ import url from "node:url"
 import { Option, Schema } from "effect"
 
 import { injectHtmlPreviewBridge } from "./preview-bridge.ts"
-import { readProjectTextFile, resolveSafeProjectFilePath, writeProjectTextFile } from "./project-files.ts"
+import {
+  isValidProjectId,
+  readProjectTextFile,
+  resolveSafeProjectFilePath,
+  writeProjectTextFile,
+} from "./project-files.ts"
 import type { StreamPayload } from "./types.ts"
 import { createVibestBridge } from "./vibest-bridge.ts"
 
@@ -79,8 +84,54 @@ function contentTypeFor(filePath: string): string {
 function jsonResponse<T>(payload: T, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    },
   })
+}
+
+function decodeRouteParam(raw: string | undefined): string | null {
+  if (raw === undefined) return null
+
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return null
+  }
+}
+
+function allowedLoopbackHosts(boundPort: number): ReadonlySet<string> {
+  return new Set([`127.0.0.1:${boundPort}`, `localhost:${boundPort}`, `[::1]:${boundPort}`])
+}
+
+function allowedLoopbackOrigins(boundPort: number): ReadonlySet<string> {
+  return new Set([`http://127.0.0.1:${boundPort}`, `http://localhost:${boundPort}`, `http://[::1]:${boundPort}`])
+}
+
+function isAllowedHost(request: Request, boundPort: number): boolean {
+  const host = request.headers.get("host")
+
+  if (!host) return false
+
+  return allowedLoopbackHosts(boundPort).has(host.toLowerCase())
+}
+
+function isAllowedMutationOrigin(request: Request, boundPort: number): boolean {
+  const origin = request.headers.get("origin")
+
+  if (origin !== null) {
+    return allowedLoopbackOrigins(boundPort).has(origin.toLowerCase())
+  }
+
+  return request.headers.get("sec-fetch-site") === "same-origin"
+}
+
+function hasJsonContentType(request: Request): boolean {
+  const ct = request.headers.get("content-type") ?? ""
+
+  return ct.toLowerCase().split(";")[0]?.trim() === "application/json"
 }
 
 async function decodeRequestJson<A>(
@@ -109,7 +160,7 @@ function serveStaticFile(distDir: string, pathname: string): Response | null {
   if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) return null
 
   return new Response(Bun.file(candidate), {
-    headers: { "content-type": contentTypeFor(candidate) },
+    headers: { "content-type": contentTypeFor(candidate), "x-content-type-options": "nosniff" },
   })
 }
 
@@ -127,13 +178,27 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
     safeActions,
   })
 
+  const bound = { port: options.port ?? Number(process.env.PORT ?? "4320") }
+
   const server = Bun.serve({
     hostname: options.host ?? "127.0.0.1",
-    port: options.port ?? Number(process.env.PORT ?? "4320"),
+    port: bound.port,
     idleTimeout: 120,
     fetch: async (request) => {
       const reqUrl = new URL(request.url)
       const pathname = reqUrl.pathname
+
+      if (pathname.startsWith("/api/")) {
+        if (!isAllowedHost(request, bound.port)) {
+          return jsonResponse({ error: "Forbidden host" }, 403)
+        }
+
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          if (!isAllowedMutationOrigin(request, bound.port)) {
+            return jsonResponse({ error: "Forbidden origin" }, 403)
+          }
+        }
+      }
 
       if (request.method === "GET" && pathname === "/api/health") {
         return jsonResponse({ ok: true, daemon: bridge.snapshot().daemon })
@@ -146,6 +211,19 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
       if (request.method === "GET" && pathname === "/api/stream") {
         const encoder = new TextEncoder()
         let unsubscribe: (() => void) | null = null
+        let keepalive: ReturnType<typeof setInterval> | null = null
+
+        const cleanup = () => {
+          if (keepalive !== null) {
+            clearInterval(keepalive)
+            keepalive = null
+          }
+
+          if (unsubscribe !== null) {
+            unsubscribe()
+            unsubscribe = null
+          }
+        }
 
         const stream = new ReadableStream<Uint8Array>({
           start(controller) {
@@ -159,12 +237,22 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
               try {
                 writeEvent(event)
               } catch {
-                unsubscribe?.()
+                cleanup()
               }
             })
+
+            keepalive = setInterval(() => {
+              try {
+                controller.enqueue(encoder.encode(": keepalive\n\n"))
+              } catch {
+                cleanup()
+              }
+            }, 25_000)
+
+            request.signal.addEventListener("abort", cleanup, { once: true })
           },
           cancel() {
-            unsubscribe?.()
+            cleanup()
           },
         })
 
@@ -173,6 +261,7 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
             "content-type": "text/event-stream; charset=utf-8",
             "cache-control": "no-cache",
             connection: "keep-alive",
+            "x-content-type-options": "nosniff",
           },
         })
       }
@@ -180,7 +269,12 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
       const timelineMatch = /^\/api\/projects\/([^/]+)\/timeline$/.exec(pathname)
 
       if (request.method === "GET" && timelineMatch) {
-        const projectId = decodeURIComponent(timelineMatch[1] ?? "")
+        const projectId = decodeRouteParam(timelineMatch[1])
+
+        if (projectId === null || !isValidProjectId(projectId)) {
+          return jsonResponse({ error: "Invalid project id" }, 400)
+        }
+
         const sessionId = reqUrl.searchParams.get("sessionId") ?? ""
         const entries = await bridge.getTimeline(projectId, sessionId)
 
@@ -190,7 +284,12 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
       const filesListMatch = /^\/api\/projects\/([^/]+)\/files$/.exec(pathname)
 
       if (request.method === "GET" && filesListMatch) {
-        const projectId = decodeURIComponent(filesListMatch[1] ?? "")
+        const projectId = decodeRouteParam(filesListMatch[1])
+
+        if (projectId === null || !isValidProjectId(projectId)) {
+          return jsonResponse({ error: "Invalid project id" }, 400)
+        }
+
         const files = bridge.refreshFiles(projectId)
 
         return jsonResponse({ projectId, files })
@@ -199,7 +298,12 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
       const fileItemMatch = /^\/api\/projects\/([^/]+)\/file$/.exec(pathname)
 
       if (request.method === "GET" && fileItemMatch) {
-        const projectId = decodeURIComponent(fileItemMatch[1] ?? "")
+        const projectId = decodeRouteParam(fileItemMatch[1])
+
+        if (projectId === null || !isValidProjectId(projectId)) {
+          return jsonResponse({ error: "Invalid project id" }, 400)
+        }
+
         const relPath = reqUrl.searchParams.get("path") ?? ""
         const rawMode = reqUrl.searchParams.get("raw") === "1"
 
@@ -211,7 +315,11 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
           }
 
           return new Response(Bun.file(abs), {
-            headers: { "content-type": contentTypeFor(abs) },
+            headers: {
+              "content-type": contentTypeFor(abs),
+              "content-security-policy": "sandbox",
+              "x-content-type-options": "nosniff",
+            },
           })
         }
 
@@ -225,7 +333,16 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
       }
 
       if (request.method === "PUT" && fileItemMatch) {
-        const projectId = decodeURIComponent(fileItemMatch[1] ?? "")
+        const projectId = decodeRouteParam(fileItemMatch[1])
+
+        if (projectId === null || !isValidProjectId(projectId)) {
+          return jsonResponse({ error: "Invalid project id" }, 400)
+        }
+
+        if (!hasJsonContentType(request)) {
+          return jsonResponse({ error: "Content-Type must be application/json" }, 415)
+        }
+
         const decoded = await decodeRequestJson(request, decodeSaveFileBody)
 
         if (Option.isNone(decoded)) {
@@ -246,7 +363,12 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
       const previewMatch = /^\/api\/projects\/([^/]+)\/preview$/.exec(pathname)
 
       if (request.method === "GET" && previewMatch) {
-        const projectId = decodeURIComponent(previewMatch[1] ?? "")
+        const projectId = decodeRouteParam(previewMatch[1])
+
+        if (projectId === null || !isValidProjectId(projectId)) {
+          return jsonResponse({ error: "Invalid project id" }, 400)
+        }
+
         const relPath = reqUrl.searchParams.get("path") ?? ""
         const content = readProjectTextFile(vibestHome, projectId, relPath)
 
@@ -258,6 +380,8 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
           headers: {
             "content-type": "text/html; charset=utf-8",
             "cache-control": "no-store",
+            "content-security-policy": "sandbox allow-scripts",
+            "x-content-type-options": "nosniff",
           },
         })
       }
@@ -265,7 +389,12 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
       const peekMatch = /^\/api\/sessions\/([^/]+)\/peek$/.exec(pathname)
 
       if (request.method === "GET" && peekMatch) {
-        const sessionId = decodeURIComponent(peekMatch[1] ?? "")
+        const sessionId = decodeRouteParam(peekMatch[1])
+
+        if (sessionId === null) {
+          return jsonResponse({ error: "Invalid session id" }, 400)
+        }
+
         const result = await bridge.peekSession(sessionId)
 
         return jsonResponse(result)
@@ -274,7 +403,16 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
       const sendMatch = /^\/api\/sessions\/([^/]+)\/send$/.exec(pathname)
 
       if (request.method === "POST" && sendMatch) {
-        const sessionId = decodeURIComponent(sendMatch[1] ?? "")
+        const sessionId = decodeRouteParam(sendMatch[1])
+
+        if (sessionId === null) {
+          return jsonResponse({ error: "Invalid session id" }, 400)
+        }
+
+        if (!hasJsonContentType(request)) {
+          return jsonResponse({ error: "Content-Type must be application/json" }, 415)
+        }
+
         const decoded = await decodeRequestJson(request, decodeSendBody)
 
         if (Option.isNone(decoded)) {
@@ -289,7 +427,12 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
       const interruptMatch = /^\/api\/sessions\/([^/]+)\/interrupt$/.exec(pathname)
 
       if (request.method === "POST" && interruptMatch) {
-        const sessionId = decodeURIComponent(interruptMatch[1] ?? "")
+        const sessionId = decodeRouteParam(interruptMatch[1])
+
+        if (sessionId === null) {
+          return jsonResponse({ error: "Invalid session id" }, 400)
+        }
+
         const result = await bridge.interruptSession(sessionId)
 
         return jsonResponse(result, result.ok ? 200 : 400)
@@ -298,7 +441,12 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
       const archiveMatch = /^\/api\/sessions\/([^/]+)\/archive$/.exec(pathname)
 
       if (request.method === "POST" && archiveMatch) {
-        const sessionId = decodeURIComponent(archiveMatch[1] ?? "")
+        const sessionId = decodeRouteParam(archiveMatch[1])
+
+        if (sessionId === null) {
+          return jsonResponse({ error: "Invalid session id" }, 400)
+        }
+
         const result = await bridge.archiveSession(sessionId)
 
         return jsonResponse(result, result.ok ? 200 : 400)
@@ -316,11 +464,11 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
     },
   })
 
-  const boundPort = server.port ?? 4320
+  bound.port = server.port ?? 4320
 
   return {
-    port: boundPort,
-    url: `http://${server.hostname}:${boundPort}`,
+    port: bound.port,
+    url: `http://${server.hostname}:${bound.port}`,
     stop: () => {
       bridge.stop()
       void server.stop(true)
