@@ -21,7 +21,7 @@ import { newId, sessionLabel } from "@vibest/schema/id"
 import { Routing } from "@vibest/schema/plugin"
 import { type AgentStatus, RuntimeAddress } from "@vibest/schema/session"
 import { Effect, Schema } from "effect"
-import { SqlClient, type SqlError, type Statement } from "effect/sql"
+import { SqlClient, type Statement } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 import { SessionLive } from "../session/live.ts"
@@ -594,37 +594,6 @@ export const statements = Effect.gen(function* () {
       }
     }).pipe(Effect.orDie)
 
-  const teamOwner = (project: string, team: string) =>
-    sql<{ owner: string | null }>`SELECT parent_session_id AS owner FROM session
-      WHERE project_id = ${project} AND team = ${team} LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.owner ?? undefined))
-
-  const unusedTeamId = (project: string): Effect.Effect<string, SqlError.SqlError> =>
-    sql<{ id: string }>`SELECT 't-' || lower(hex(randomblob(2))) AS id`.pipe(
-      Effect.flatMap(([row]) =>
-        teamOwner(project, row!.id).pipe(
-          Effect.flatMap((owner) => (owner === undefined ? Effect.succeed(row!.id) : unusedTeamId(project))),
-        ),
-      ),
-    )
-
-  const teamLive = (project: string, team: string) =>
-    sql`SELECT 1 FROM session WHERE project_id = ${project} AND team = ${team} AND ended_at IS NULL LIMIT 1`.pipe(
-      Effect.map((rows) => rows.length > 0),
-    )
-
-  const mayListTeam = (project: string, team: string, caller: string) =>
-    sql`SELECT 1 FROM session WHERE project_id = ${project} AND team = ${team}
-      AND (id = ${caller} OR parent_session_id = ${caller}) LIMIT 1`.pipe(
-      Effect.map((rows) => rows.length > 0),
-      Effect.orDie,
-    )
-
-  const teamMembers = (project: string, team: string) =>
-    sql<{ id: string; parent: string | null }>`SELECT id, parent_session_id AS parent FROM session
-      WHERE project_id = ${project} AND team = ${team} AND ended_at IS NULL ORDER BY created_at, rowid`.pipe(
-      Effect.orDie,
-    )
-
   const fromCurrentHarness = (sessionId: string, current: number, reporter?: number, pid?: number) =>
     Effect.gen(function* () {
       const processes = yield* sql<{
@@ -710,11 +679,6 @@ export const statements = Effect.gen(function* () {
     unusedId,
     creatorOf,
     nearestAlive,
-    teamOwner,
-    unusedTeamId,
-    teamLive,
-    mayListTeam,
-    teamMembers,
     fromCurrentHarness,
     canResumeConversation,
     latestReply,

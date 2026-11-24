@@ -10,7 +10,7 @@ import { TypedAhead } from "./ask.ts"
 import { userOnly } from "./caller.ts"
 import * as Cli from "./cli.ts"
 import { clients } from "./client.ts"
-import { bareTeam, Commands } from "./commands/commands.ts"
+import { Commands } from "./commands/commands.ts"
 import { Runtime } from "./framework/runtime.ts"
 import { Host } from "./host.ts"
 import { updater } from "./update-check.ts"
@@ -32,6 +32,10 @@ const Handlers = Runtime.handlers(Commands, {
   peek: () => import("./commands/handlers/peek.ts"),
   archive: () => import("./commands/handlers/archive.ts"),
   ls: () => import("./commands/handlers/ls.ts"),
+  session: {
+    link: () => import("./commands/handlers/session/link.ts"),
+    unlink: () => import("./commands/handlers/session/unlink.ts"),
+  },
   events: () => import("./commands/handlers/events.ts"),
   models: () => import("./commands/handlers/models.ts"),
   harness: {
@@ -76,7 +80,6 @@ const replacements = [...Platform.replacements, Platform.app({ version: VERSION 
 
 Runtime.run(Commands, Handlers, {
   version: VERSION,
-  args: bareTeam,
   extra: { after: "update", commands: commands(userOnly, clients) },
 }).pipe(
   Cli.printFailure,

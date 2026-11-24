@@ -43,8 +43,6 @@ export const LABEL = {
   runtime: "vibest.runtime",
   project: "vibest.project",
   session: "vibest.session",
-  space: "herdr.space",
-  tab: "herdr.tab",
   seen: "herdr.seen",
   typed: "vibest.typed",
 } as const
@@ -125,7 +123,8 @@ export const terminalName = (input: Parameters<Runtime["open"]>[0], attempt = 0)
   return `${base ? `${base.slice(0, 31 - suffix.length).replace(/-+$/, "")}-` : ""}${suffix}`
 }
 
-export const terminalId = (socket: string, address: string) => `${address}@${socket}`
+export const terminalId = (socket: string, address: string, defaultSocket?: string) =>
+  socket === defaultSocket ? address : `${address}@${socket}`
 
 export const parseTerminalId = (id: string, fallbackSocket: string) => {
   const at = id.indexOf("@")
@@ -203,7 +202,9 @@ export const make = (deps: {
       core.busy.delete(address)
 
       return wake(core, address).pipe(
-        Effect.andThen(PubSub.publish(events, { type: "exited", terminal: { id: terminalId(socket, address) } })),
+        Effect.andThen(
+          PubSub.publish(events, { type: "exited", terminal: { id: terminalId(socket, address, deps.socket) } }),
+        ),
       )
     }
 
@@ -244,7 +245,7 @@ export const make = (deps: {
           ? Effect.void
           : PubSub.publish(events, {
               type: "state",
-              terminal: { id: terminalId(socket, terminal) },
+              terminal: { id: terminalId(socket, terminal, deps.socket) },
               state,
             })
       }
@@ -252,7 +253,7 @@ export const make = (deps: {
       if (SEEN_EVENTS.has(type))
         return PubSub.publish(events, {
           type: "seen",
-          terminal: { id: terminalId(socket, terminal) },
+          terminal: { id: terminalId(socket, terminal, deps.socket) },
         })
 
       if (type === "foreground") {
@@ -392,7 +393,10 @@ export const make = (deps: {
 
     const open: Runtime["open"] = (input) =>
       Effect.gen(function* () {
+        const parent = input.parent !== undefined ? parseTerminalId(input.parent.id, deps.socket) : undefined
         const near = input.near !== undefined ? parseTerminalId(input.near.id, deps.socket) : undefined
+        const targetSocket = parent?.socket ?? near?.socket ?? deps.socket
+        const parentAddress = parent?.address
         const project = input.launch.env["VIBEST_PROJECT_ID"]
         const session = input.launch.env["VIBEST_SESSION_ID"]
         const argv = yield* argvOf(input.launch)
@@ -428,15 +432,17 @@ export const make = (deps: {
               ),
             )
 
-            return { id: terminalId(socket, started.address) } satisfies Terminal
+            return { id: terminalId(socket, started.address, deps.socket) } satisfies Terminal
           })
 
-        if (near === undefined) return yield* runOn(deps.socket, undefined)
+        if (parentAddress === undefined && targetSocket === deps.socket) return yield* runOn(deps.socket, undefined)
 
-        return yield* runOn(near.socket, near.address).pipe(
+        return yield* runOn(targetSocket, parentAddress).pipe(
           Effect.catchIf(
-            (e) => e.code === "not_found" || (near.socket !== deps.socket && e.code === "unreachable"),
-            (e) => runOn(e.code === "unreachable" ? deps.socket : near.socket, undefined),
+            (e) =>
+              (parentAddress !== undefined && e.code === "not_found") ||
+              (targetSocket !== deps.socket && e.code === "unreachable"),
+            (e) => runOn(e.code === "unreachable" ? deps.socket : targetSocket, undefined),
           ),
         )
       })
@@ -572,8 +578,8 @@ export const make = (deps: {
                 [LABEL.runtime]: KIND,
                 [LABEL.project]: project,
                 [LABEL.session]: entrySession,
-                [LABEL.space]: project,
-                [LABEL.tab]: entrySession,
+                "herdr.space": "",
+                "herdr.tab": "",
                 [LABEL.typed]: String(Date.now()),
               },
             }),

@@ -17,8 +17,7 @@
     "load": true,
     "agents": true,
     "worktrees": true,
-    "stop": true,
-    "teams": true
+    "stop": true
   },
   "methods": {
     "Agents.List": {
@@ -14483,6 +14482,440 @@
         }
       }
     },
+    "Session.Link": {
+      "access": [
+        "agent",
+        "peer"
+      ],
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "spec": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "_tag": {
+                    "type": "string",
+                    "enum": [
+                      "Mutual"
+                    ]
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "_tag",
+                  "ids"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "_tag": {
+                    "type": "string",
+                    "enum": [
+                      "Directed"
+                    ]
+                  },
+                  "from": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "to": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "_tag",
+                  "from",
+                  "to"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "_tag": {
+                    "type": "string",
+                    "enum": [
+                      "Chain"
+                    ]
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "_tag",
+                  "ids"
+                ],
+                "additionalProperties": true
+              }
+            ]
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "spec"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "edges"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              },
+              {
+                "$ref": "#/$defs/AmbiguousSessionEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownMachineEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineUnavailableEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineIncompatibleEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "AmbiguousSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "AmbiguousSession"
+                ]
+              },
+              "prefix": {
+                "type": "string"
+              },
+              "matches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "prefix",
+              "matches"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownMachineEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownMachine"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "machines": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "machines"
+            ],
+            "additionalProperties": true
+          },
+          "MachineUnavailableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineUnavailable"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "MachineIncompatibleEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineIncompatible"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "DaemonStoppingEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "DaemonStopping"
+                ]
+              },
+              "method": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method"
+            ],
+            "additionalProperties": true
+          },
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
     "Session.Ready": {
       "access": "self",
       "stream": false,
@@ -14997,6 +15430,440 @@
         }
       }
     },
+    "Session.Unlink": {
+      "access": [
+        "agent",
+        "peer"
+      ],
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "spec": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "_tag": {
+                    "type": "string",
+                    "enum": [
+                      "Mutual"
+                    ]
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "_tag",
+                  "ids"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "_tag": {
+                    "type": "string",
+                    "enum": [
+                      "Directed"
+                    ]
+                  },
+                  "from": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "to": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "_tag",
+                  "from",
+                  "to"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "_tag": {
+                    "type": "string",
+                    "enum": [
+                      "Chain"
+                    ]
+                  },
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "_tag",
+                  "ids"
+                ],
+                "additionalProperties": true
+              }
+            ]
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "spec"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "edges"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              },
+              {
+                "$ref": "#/$defs/AmbiguousSessionEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownMachineEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineUnavailableEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineIncompatibleEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "AmbiguousSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "AmbiguousSession"
+                ]
+              },
+              "prefix": {
+                "type": "string"
+              },
+              "matches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "prefix",
+              "matches"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownMachineEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownMachine"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "machines": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "machines"
+            ],
+            "additionalProperties": true
+          },
+          "MachineUnavailableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineUnavailable"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "MachineIncompatibleEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineIncompatible"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "DaemonStoppingEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "DaemonStopping"
+                ]
+              },
+              "method": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method"
+            ],
+            "additionalProperties": true
+          },
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
     "Spawn": {
       "access": "agent",
       "stream": false,
@@ -15157,20 +16024,39 @@
               }
             ]
           },
-          "team": {
+          "from": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               },
               {
                 "type": "null"
               }
             ]
           },
-          "newTeam": {
+          "to": {
             "anyOf": [
               {
-                "type": "boolean"
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "with": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               },
               {
                 "type": "null"
@@ -15364,16 +16250,6 @@
                   ],
                   "additionalProperties": true
                 }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "team": {
-            "anyOf": [
-              {
-                "type": "string"
               },
               {
                 "type": "null"
@@ -16738,252 +17614,6 @@
         }
       }
     },
-    "Team.List": {
-      "access": "session",
-      "stream": false,
-      "payload": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "team": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "additionalProperties": true
-      },
-      "success": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "team": {
-            "type": "string"
-          },
-          "members": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "agent": {
-                  "type": "string"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "idle",
-                    "working",
-                    "blocked",
-                    "done",
-                    "unknown"
-                  ]
-                },
-                "startedBy": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "id",
-                "agent",
-                "name",
-                "status",
-                "startedBy"
-              ],
-              "additionalProperties": true
-            }
-          }
-        },
-        "required": [
-          "team",
-          "members"
-        ],
-        "additionalProperties": true
-      },
-      "error": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "anyOf": [
-          {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              }
-            ]
-          },
-          {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
-          },
-          {
-            "$ref": "#/$defs/ProtocolRejectedEncoded"
-          }
-        ],
-        "$defs": {
-          "ForbiddenEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "Forbidden"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "InvalidCallerEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "InvalidCaller"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "NoSuchSessionEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "NoSuchSession"
-                ]
-              },
-              "id": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "id",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "ProtocolRejectedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProtocolRejected"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "protocol": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "mismatch": {
-                "type": "object",
-                "properties": {
-                  "protocol": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
-                    ]
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "action": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "protocol",
-                  "version",
-                  "message",
-                  "action"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "protocol",
-              "mismatch"
-            ],
-            "additionalProperties": true
-          }
-        }
-      }
-    },
     "Watch": {
       "access": [
         "cli",
@@ -17557,6 +18187,12 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "to": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -17581,7 +18217,8 @@
                     "task",
                     "latest",
                     "parentId",
-                    "finished"
+                    "finished",
+                    "to"
                   ],
                   "additionalProperties": true
                 }
@@ -18218,6 +18855,12 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "to": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "required": [
@@ -18242,7 +18885,8 @@
                   "task",
                   "latest",
                   "parentId",
-                  "finished"
+                  "finished",
+                  "to"
                 ],
                 "additionalProperties": true
               }

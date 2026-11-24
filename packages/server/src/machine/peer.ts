@@ -243,7 +243,8 @@ const make = Effect.gen(function* () {
         })
         .pipe(
           Effect.catchTag("NoRuntime", (e) => new NoRuntime({ message: `${self.name}: ${e.message}` })),
-          Effect.catchTag("TeamRefused", Effect.die),
+          Effect.catchTag("LinkRefused", Effect.die),
+          Effect.catchTag("AmbiguousSession", Effect.die),
         )
 
       return {

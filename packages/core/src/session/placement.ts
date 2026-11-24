@@ -122,13 +122,15 @@ export const make = Effect.gen(function* () {
   })
 
   const systemPromptOf = Effect.fn("Placement.systemPromptOf")(function* (session: SessionRow) {
+    const creator = yield* db.session.creatorLabel(session.id)
+
     return systemPrompt({
       system: (yield* definitionIn(agents, session.agent)).system,
       id: session.id,
       checkout: (yield* db.session.sessionIdentity(session.id))?.entry,
       sharer: yield* db.session.earlierSharer(session.id),
-      creator: yield* db.session.creatorLabel(session.id),
-      team: (yield* db.session.sessionIdentity(session.id))?.team ?? undefined,
+      creator,
+      linkedTo: yield* db.session.linkedTargets(session.id, creator?.id),
       projectDir: layout.project(session.projectId),
       agents: agents.all,
       ...(yield* projectText(layout.project(session.projectId))),
@@ -326,11 +328,12 @@ export const make = Effect.gen(function* () {
     },
   ) {
     const remote = yield* db.session.startedByPeer(session.id)
+    const creator = yield* nearCreator(session, h.id)
 
     const near =
       input.near !== undefined
         ? input.near
-        : ((yield* nearCreator(session, h.id)) ??
+        : (creator ??
           (!remote && (target === undefined || target === "")
             ? yield* db.session.lastProjectTerminal(session.projectId, h.id)
             : undefined))
@@ -347,6 +350,7 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         launch: { ...launch, env: { ...input.env, ...launch.env } },
         label: (session.entry ? entryLabel(input.project) : session.name).slice(0, 60),
+        ...(creator !== undefined && { parent: creator }),
         ...(near !== undefined && { near }),
         ...(input.split === true && { split: true }),
         ...(remote && { remote: true }),
