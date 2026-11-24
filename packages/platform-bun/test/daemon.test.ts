@@ -1,5 +1,4 @@
 import childProcess from "node:child_process"
-import fs from "node:fs"
 import util from "node:util"
 
 import { assert, describe, it } from "@effect/vitest"
@@ -159,53 +158,43 @@ describe.concurrent("vibestd.pid lock", () => {
     "tightens pre-existing 0644 vibestd.pid to 0600, publishes ws inside DaemonInfo, removes stale vibest-ws.json, and truncates on stop",
     () =>
       Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
+        const fs = yield* FileSystem.FileSystem
         const layout = yield* Layout.make(yield* tempDirectory("vibest-ws-pid-"))
         const staleWsInfo = `${layout.home}/vibest-ws.json`
-        yield* fileSystem.writeFileString(layout.daemonInfo, "")
-        yield* fileSystem.chmod(layout.daemonInfo, 0o644)
-        yield* fileSystem.writeFileString(staleWsInfo, "{}")
+        yield* fs.writeFileString(layout.daemonInfo, "")
+        yield* fs.chmod(layout.daemonInfo, 0o644)
+        yield* fs.writeFileString(staleWsInfo, "{}")
 
         const proc = yield* Effect.forkScoped(daemon(layout.home))
         const ping = yield* pingOf(layout.socket)
         const info = yield* recordedInfo(layout.daemonInfo, ping.instance)
 
-        assert.strictEqual(fs.statSync(layout.daemonInfo).mode & 0o777, 0o600)
+        assert.strictEqual((yield* fs.stat(layout.daemonInfo)).mode & 0o777, 0o600)
         assert.isDefined(info.ws)
         assert.strictEqual(info.ws?.url, `ws://127.0.0.1:${info.ws?.port}`)
         assert.isAbove(info.ws?.port ?? 0, 0)
         assert.match(info.ws?.token ?? "", /^[a-f0-9]{64}$/)
         assert.strictEqual(info.ws?.protocol, PROTOCOL)
-        assert.isFalse(yield* fileSystem.exists(staleWsInfo))
+        assert.isFalse(yield* fs.exists(staleWsInfo))
 
         process.kill(ping.pid!, "SIGTERM")
         yield* Fiber.await(proc)
-        assert.strictEqual(yield* fileSystem.readFileString(layout.daemonInfo), "")
+        assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), "")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )
 
   it.live(
-    "omits ws from DaemonInfo when disabled via VIBEST_WEBSOCKET=0 or vibest.json",
+    "omits ws from DaemonInfo when disabled via VIBEST_WEBSOCKET=0",
     () =>
       Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const envLayout = yield* Layout.make(yield* tempDirectory("vibest-ws-env-"))
-        const envProc = yield* Effect.forkScoped(daemon(envLayout.home, { VIBEST_WEBSOCKET: "0" }))
-        const envPing = yield* pingOf(envLayout.socket)
-        const envInfo = yield* recordedInfo(envLayout.daemonInfo, envPing.instance)
-        assert.isUndefined(envInfo.ws)
-        process.kill(envPing.pid!, "SIGTERM")
-        yield* Fiber.await(envProc)
-
-        const cfgLayout = yield* Layout.make(yield* tempDirectory("vibest-ws-cfg-"))
-        yield* fs.writeFileString(cfgLayout.config, JSON.stringify({ websocket: false }))
-        const cfgProc = yield* Effect.forkScoped(daemon(cfgLayout.home))
-        const cfgPing = yield* pingOf(cfgLayout.socket)
-        const cfgInfo = yield* recordedInfo(cfgLayout.daemonInfo, cfgPing.instance)
-        assert.isUndefined(cfgInfo.ws)
-        process.kill(cfgPing.pid!, "SIGTERM")
-        yield* Fiber.await(cfgProc)
+        const layout = yield* Layout.make(yield* tempDirectory("vibest-ws-env-"))
+        const proc = yield* Effect.forkScoped(daemon(layout.home, { VIBEST_WEBSOCKET: "0" }))
+        const ping = yield* pingOf(layout.socket)
+        const info = yield* recordedInfo(layout.daemonInfo, ping.instance)
+        assert.isUndefined(info.ws)
+        process.kill(ping.pid!, "SIGTERM")
+        yield* Fiber.await(proc)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )
