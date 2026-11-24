@@ -124,7 +124,7 @@ CREATE TABLE session (
   agent                 TEXT NOT NULL,                -- agent definition name (open set)
   name                  TEXT NOT NULL,
   directory             TEXT NOT NULL,
-  origin_peer           TEXT,                         -- started by another vibestd: its id
+  origin_remote         TEXT,                         -- started by another vibestd: its id
   origin_project        TEXT,                         -- and its project there
   origin_session        TEXT,                         -- and the session there its notices and sends go to (that project's entry session)
   created_at            INTEGER NOT NULL,
@@ -136,14 +136,15 @@ CREATE TABLE session (
 CREATE INDEX session_project ON session (project_id);
 CREATE INDEX session_parent  ON session (parent_session_id);
 CREATE INDEX session_live    ON session (directory) WHERE ended_at IS NULL;
-CREATE INDEX session_origin  ON session (origin_peer, origin_project) WHERE origin_peer IS NOT NULL;
+CREATE INDEX session_origin  ON session (origin_remote, origin_project) WHERE origin_remote IS NOT NULL;
 
 CREATE TABLE session_edge (                           -- directed messaging graph; projected from session.linked / session.unlinked
   from_session_id       TEXT NOT NULL,
+  to_remote_id          TEXT NOT NULL DEFAULT '',     -- '' for local sessions, or the target vibestd identity id
   to_session_id         TEXT NOT NULL,
-  PRIMARY KEY (from_session_id, to_session_id)
+  PRIMARY KEY (from_session_id, to_remote_id, to_session_id)
 ) STRICT;
-CREATE INDEX session_edge_to ON session_edge (to_session_id);
+CREATE INDEX session_edge_to ON session_edge (to_remote_id, to_session_id);
 
 CREATE TABLE process (                                -- id: the seq of its process.started in the session
   session_id           TEXT    NOT NULL,
@@ -253,42 +254,42 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 `TraceEntry` (with `Change`) from `packages/schema/src/plugin.ts` are part of the catalog contract through
 `process.started.routing`: change them by the same rules as a fact.
 
-| type                                | data                                                                                                                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| project.created                     | directory?, repositories                                                                                                                                                 |
-| project.moved                       | from, to, repositories                                                                                                                                                   |
-| project.repositories_changed        | repositories                                                                                                                                                             |
-| project.entry_changed               | session? (none: the project has no entry session)                                                                                                                        |
-| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}, message? (the original delegation seq)                                                      |
-| session.linked                      | to (target session id for directed messaging edge from this session)                                                                                                     |
-| session.unlinked                    | to (target session id removed from directed messaging edges of this session)                                                                                             |
-| session.renamed                     | name                                                                                                                                                                     |
-| session.directory_changed           | directory                                                                                                                                                                |
-| session.ended                       | reason: archived, replaced (vibest --new)                                                                                                                                |
-| process.started                     | harness, provider?, model?, routing?, resume?, runtime, terminal?, pid? (an entry session's launch)                                                                      |
-| process.placed                      | process, terminal, pid?: the terminal of a process started before its terminal opened                                                                                    |
-| process.ready                       | process, pid?, integration? {version, protocol}; may repeat after a plugin reload                                                                                        |
-| process.pid                         | process, pid: a pid report that is not a ready report                                                                                                                    |
-| process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                |
-| process.ended                       | process, reason: exited, restart, move (an entry session moving terminal), archived, launch_failed, superseded, stopped; by? (stopped: who stopped it, a sender)         |
-| execution.allocated                 | executionId, processId?, typed? (direct input; not an inbox message). Allocating this id is not a start.                                                                 |
-| execution.accepted                  | execution. Historical catalog-5 fact kept at its original sequence; projected as a no-op, never a start.                                                                 |
-| execution.started                   | executionId, processId?. Only with attributable start evidence.                                                                                                          |
-| execution.succeeded                 | executionId, reply?. The run ended normally. Not task acceptance and not a message sent.                                                                                 |
-| execution.failed                    | executionId, failure {message, kind?: limit, resetAt?}, reply?. Only a confirmed error.                                                                                  |
-| execution.interrupted               | executionId, reason?, reply?. A stop request is not this event.                                                                                                          |
-| execution.unresolved                | executionId, observation: lost or not_started, failure?, reply?. Timeout or disconnect. Not a confirmed failure; a later terminal event for this id still applies.       |
-| execution.input                     | executionId, typed. Additional direct input submitted while an execution is open.                                                                                        |
-| inbox.enqueued                      | sender, content, senderExecutionId?, requestId?, transferId?, aboutSessionId? (a notice). Starts pending; the event carries no status                                    |
-| inbox.delivery_started              | messageId, execution? (the reserved recipient execution when one is open). A reservation, not delivery, and not written again for each wait                              |
-| inbox.delivered                     | messageId, recipientExecutionId. Both required: handed as that execution's input                                                                                         |
-| inbox.delivery_failed               | messageId, reason. A recorded failure, not an unknown result                                                                                                             |
-| inbox.dropped                       | messageId, reason. Local delivery responsibility ended (the entry session left, a waiting message withdrawn)                                                             |
-| inbox.unresolved                    | history: route, delivered_without_execution, failed_unspecified, unconfirmed, or released. Migration only: an old record that cannot be stated as one of the above       |
-| machine.added, .connected, .removed | name (added: target, vibestd)                                                                                                                                            |
-| peer.seen                           | id, name                                                                                                                                                                 |
-| outbox.queued                       | id, peer, session (the sender), recipient? (the session on the peer; else the sender's origin session), kind?, content, execution? (a send: the sender's open execution) |
-| outbox.acked                        | peer, ids                                                                                                                                                                |
+| type                                | data                                                                                                                                                                         |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| project.created                     | directory?, repositories                                                                                                                                                     |
+| project.moved                       | from, to, repositories                                                                                                                                                       |
+| project.repositories_changed        | repositories                                                                                                                                                                 |
+| project.entry_changed               | session? (none: the project has no entry session)                                                                                                                            |
+| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}, message? (the original delegation seq)                                                          |
+| session.linked                      | to (target session id for directed messaging edge from this session)                                                                                                         |
+| session.unlinked                    | to (target session id removed from directed messaging edges of this session)                                                                                                 |
+| session.renamed                     | name                                                                                                                                                                         |
+| session.directory_changed           | directory                                                                                                                                                                    |
+| session.ended                       | reason: archived, replaced (vibest --new)                                                                                                                                    |
+| process.started                     | harness, provider?, model?, routing?, resume?, runtime, terminal?, pid? (an entry session's launch)                                                                          |
+| process.placed                      | process, terminal, pid?: the terminal of a process started before its terminal opened                                                                                        |
+| process.ready                       | process, pid?, integration? {version, protocol}; may repeat after a plugin reload                                                                                            |
+| process.pid                         | process, pid: a pid report that is not a ready report                                                                                                                        |
+| process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                    |
+| process.ended                       | process, reason: exited, restart, move (an entry session moving terminal), archived, launch_failed, superseded, stopped; by? (stopped: who stopped it, a sender)             |
+| execution.allocated                 | executionId, processId?, typed? (direct input; not an inbox message). Allocating this id is not a start.                                                                     |
+| execution.accepted                  | execution. Historical catalog-5 fact kept at its original sequence; projected as a no-op, never a start.                                                                     |
+| execution.started                   | executionId, processId?. Only with attributable start evidence.                                                                                                              |
+| execution.succeeded                 | executionId, reply?. The run ended normally. Not task acceptance and not a message sent.                                                                                     |
+| execution.failed                    | executionId, failure {message, kind?: limit, resetAt?}, reply?. Only a confirmed error.                                                                                      |
+| execution.interrupted               | executionId, reason?, reply?. A stop request is not this event.                                                                                                              |
+| execution.unresolved                | executionId, observation: lost or not_started, failure?, reply?. Timeout or disconnect. Not a confirmed failure; a later terminal event for this id still applies.           |
+| execution.input                     | executionId, typed. Additional direct input submitted while an execution is open.                                                                                            |
+| inbox.enqueued                      | sender, content, senderExecutionId?, requestId?, transferId?, aboutSessionId? (a notice). Starts pending; the event carries no status                                        |
+| inbox.delivery_started              | messageId, execution? (the reserved recipient execution when one is open). A reservation, not delivery, and not written again for each wait                                  |
+| inbox.delivered                     | messageId, recipientExecutionId. Both required: handed as that execution's input                                                                                             |
+| inbox.delivery_failed               | messageId, reason. A recorded failure, not an unknown result                                                                                                                 |
+| inbox.dropped                       | messageId, reason. Local delivery responsibility ended (the entry session left, a waiting message withdrawn)                                                                 |
+| inbox.unresolved                    | history: route, delivered_without_execution, failed_unspecified, unconfirmed, or released. Migration only: an old record that cannot be stated as one of the above           |
+| machine.added, .connected, .removed | name (added: target, remote)                                                                                                                                                 |
+| remote.seen                         | id, name                                                                                                                                                                     |
+| outbox.queued                       | id, remote, session (the sender), recipient? (the session on the remote; else the sender's origin session), kind?, content, execution? (a send: the sender's open execution) |
+| outbox.acked                        | remote, ids                                                                                                                                                                  |
 
 An execution's input is its typed text, or the inbox rows delivered into that execution. A delivery opens the
 execution and then writes `inbox.delivered` with that execution's id, once the text is its input. Launch arguments are

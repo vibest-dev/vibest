@@ -413,15 +413,15 @@ const checks: ReadonlyArray<Check> = [
         )
         await s.okA(["archive", address])
 
-        const started = s.bDb<{ peer: string | null; facts: string }>(
-          `SELECT origin_peer AS peer, (SELECT group_concat(type, ' ') FROM
+        const started = s.bDb<{ remote: string | null; facts: string }>(
+          `SELECT origin_remote AS remote, (SELECT group_concat(type, ' ') FROM
             (SELECT type FROM event WHERE aggregate = session.id ORDER BY seq)) AS facts
           FROM session WHERE id LIKE ?`,
           `${id8}%`,
         )
 
         expect(
-          started?.peer === a.id &&
+          started?.remote === a.id &&
             /inbox\.enqueued session\.created .*process\.started .*execution\.allocated .*execution\.started .*execution\.succeeded .*session\.ended/.test(
               started.facts,
             ),

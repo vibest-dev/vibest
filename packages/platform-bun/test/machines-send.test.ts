@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
-import { Peer } from "@vibest/server/machine/peer"
+import { Inbound } from "@vibest/server/machine/inbound"
 import { Effect, Stream } from "effect"
 import { RpcClient } from "effect/rpc"
 import { SqlClient, Statement } from "effect/sql"
@@ -71,15 +71,15 @@ describe("a Send retried with the same request across machines", () => {
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
-  it.effect("items queued while the peer was away are all sent, read in pages of 100, after it connects", () =>
+  it.effect("items queued while the remote was away are all sent, read in pages of 100, after it connects", () =>
     Effect.gen(function* () {
       const b = yield* repoStack()
-      const peer = randomId()
+      const remote = randomId()
       const ids = Array.from({ length: 2500 }, () => randomId())
-      yield* b.as(peer, "p1")
+      yield* b.as(remote, "p1")
 
-      for (const id of ids) yield* b.db.remote.sendToPeer(randomId(), peer, randomId(), "x", id)
-      const peers = yield* b.run(Peer.Service)
+      for (const id of ids) yield* b.db.remote.sendToRemote(randomId(), remote, randomId(), "x", id)
+      const inbound = yield* b.run(Inbound.Service)
       const reads: Array<ReadonlyArray<unknown>> = []
 
       const countReads: Statement.Transformer = (statement) => {
@@ -90,8 +90,8 @@ describe("a Send retried with the same request across machines", () => {
         return Effect.succeed(statement)
       }
 
-      const sent = yield* peers
-        .outbox(peer)
+      const sent = yield* inbound
+        .outbox(remote)
         .pipe(
           Stream.take(ids.length),
           Stream.runCollect,

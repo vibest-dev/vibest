@@ -8,7 +8,7 @@ import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibes
 import { Runtimes } from "@vibest/core/runtimes"
 import { type Runtime } from "@vibest/plugin/effect"
 import { Host } from "@vibest/plugin/host"
-import { peerHeaders } from "@vibest/protocol/protocol"
+import { REMOTE_BY_USER, remoteHeaders } from "@vibest/protocol/protocol"
 import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import {
@@ -217,7 +217,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const fired = yield* plugins.machine(
         hook,
-        { name: row.name, target: row.target, vibestd: row.vibestdId, runtimes: there.get(row.name)?.runtimes ?? [] },
+        { name: row.name, target: row.target, vibestd: row.remoteId, runtimes: there.get(row.name)?.runtimes ?? [] },
         runtime,
       )
 
@@ -409,8 +409,8 @@ const make = Effect.gen(function* () {
 
       const hello = yield* opening(
         RpcClient.withHeaders(
-          client["Peer.Hello"]({ id: self.id, name: self.name, callsMe: name }),
-          peerHeaders(self.id),
+          client["Remote.Hello"]({ id: self.id, name: self.name, callsMe: name }),
+          remoteHeaders(self.id),
         ),
       ).pipe(Effect.mapError(failed))
 
@@ -423,23 +423,54 @@ const make = Effect.gen(function* () {
 
   const receive = (row: MachineRow, link: Link, item: OutboxItem) =>
     Effect.gen(function* () {
-      const name = (yield* db.remote.nameForPeer(row.vibestdId)) ?? row.name
+      const name = (yield* db.remote.nameForRemote(row.remoteId)) ?? row.name
       const address = `${name}/${shortId(item.session)}`
+      const content = `${item.content}${item.cut ? `… (full text: vibest result ${address})` : ""}`
+      const from = { machine: name, ...(item.from ?? { session: item.session }) }
+      const sep = item.recipient.indexOf(":")
 
-      const outcome = yield* db.remote.receivePeerItem({
+      if (sep > 0) {
+        const targetRemoteId = item.recipient.slice(0, sep)
+        const targetSessionId = item.recipient.slice(sep + 1)
+        const targetMachine = yield* db.remote.machineWithRemote(targetRemoteId)
+        const targetEntry = targetMachine === undefined ? undefined : entries.get(targetMachine.name)
+        const targetLink = targetEntry?.state === "connected" ? targetEntry.link : undefined
+
+        if (targetLink !== undefined) {
+          yield* targetLink
+            .call(
+              targetLink.client.Send(
+                { id: targetSessionId, message: content, request: item.id, from },
+                { headers: remoteHeaders(self.id, "relay", REMOTE_BY_USER) },
+              ),
+            )
+            .pipe(Effect.ignore)
+          yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+
+          return
+        }
+
+        if (targetMachine !== undefined) return
+        yield* Effect.logWarning(`${name}: dropped a ${item.kind} for unknown remote ${targetRemoteId}`)
+        yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+
+        return
+      }
+
+      const outcome = yield* db.remote.receiveRemoteItem({
         id: item.id,
         recipient: item.recipient,
         kind: item.kind,
         sender: address,
-        from: { machine: name, ...(item.from ?? { session: item.session }) },
-        content: `${item.content}${item.cut ? `… (full text: vibest result ${address})` : ""}`,
+        from,
+        content,
       })
 
       if (outcome === "unknown")
         yield* Effect.logWarning(
           `${name}: dropped a ${item.kind} for session ${item.recipient}, which this vibestd does not have`,
         )
-      yield* link.client["Peer.Ack"]({ ids: [item.id] }, { headers: peerHeaders(self.id) })
+      yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
     })
 
   type First = {
@@ -454,7 +485,7 @@ const make = Effect.gen(function* () {
       yield* set(row.name, { state: "connecting", reason: entries.get(row.name)?.reason })
       const opened = first?.opened ?? (yield* open(row.name, row.target))
 
-      if (opened.hello.id !== row.vibestdId)
+      if (opened.hello.id !== row.remoteId)
         return yield* new MachineDown({
           message: differentMessage(row.name, opened.hello.id),
           stop: "different",
@@ -472,7 +503,7 @@ const make = Effect.gen(function* () {
       if (first === undefined) yield* Effect.forkScoped(lock.withLock(row.name)(fire(row, "connect")))
       const link = opened.link
 
-      const outbox = link.client["Peer.Outbox"](undefined, { headers: peerHeaders(self.id) }).pipe(
+      const outbox = link.client["Remote.Outbox"](undefined, { headers: remoteHeaders(self.id) }).pipe(
         Stream.runForEach((item) => receive(row, link, item)),
         Effect.matchCause({
           onSuccess: () => `${row.name} closed the connection`,
@@ -575,7 +606,7 @@ const make = Effect.gen(function* () {
       const info: MachineInfo = {
         ...listedMachine(row.name, entry),
         target: row.target,
-        id: row.vibestdId,
+        id: row.remoteId,
         connectedAt: row.connectedAt,
         ...(connected && entry.vibestd !== undefined && { vibestd: entry.vibestd }),
         ...(connected && entry.version !== undefined && { version: entry.version }),
@@ -641,13 +672,13 @@ const make = Effect.gen(function* () {
       )
 
       const id = opened.hello.id
-      const added = id === self.id ? undefined : yield* db.remote.addMachine({ name, target, vibestdId: id })
+      const added = id === self.id ? undefined : yield* db.remote.addMachine({ name, target, remoteId: id })
 
       if (added === undefined) {
         yield* Scope.close(pipe, Exit.void)
 
         if (id === self.id) return yield* failed(`${name} is this vibestd`)
-        const same = yield* db.remote.machineWithVibestd(id)
+        const same = yield* db.remote.machineWithRemote(id)
 
         if (same !== undefined) return yield* new AlreadyAdded({ machine: same.name, id })
 
@@ -769,7 +800,7 @@ const make = Effect.gen(function* () {
           message: `${name} runs a vibestd that cannot read its load; run vibest update there`,
         })
 
-      return yield* link.call(RpcClient.withHeaders(link.client["Machine.Load"]({}), peerHeaders(self.id))).pipe(
+      return yield* link.call(RpcClient.withHeaders(link.client["Machine.Load"]({}), remoteHeaders(self.id))).pipe(
         Effect.catchTag("NoSuchSession", (e) =>
           Effect.fail(new MachineUnavailable({ machine: name, message: e.message })),
         ),

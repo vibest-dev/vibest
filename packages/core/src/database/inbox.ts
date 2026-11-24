@@ -201,8 +201,8 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
         if (heir === undefined) return undefined
 
-        if ("peer" in heir) {
-          yield* remote.queueForPeer(heir.peer, heir.session, {
+        if ("remote" in heir) {
+          yield* remote.queueForRemote(heir.remote, heir.session, {
             sessionId: row.sessionId,
             content: row.message,
             kind: "notice",
@@ -406,9 +406,13 @@ export const make = (session: Session.Statements, inbox: Statements) =>
         ),
       ),
 
-      maySend: Effect.fn("Db.inbox.maySend")((sender: string, recipient: string) =>
-        sql`SELECT 1 FROM session_edge e JOIN session b ON b.id = e.to_session_id
-          WHERE e.from_session_id = ${sender} AND e.to_session_id = ${recipient}`.pipe(
+      maySend: Effect.fn("Db.inbox.maySend")((sender: string, recipient: string, remoteId = "") =>
+        (remoteId === ""
+          ? sql`SELECT 1 FROM session_edge e JOIN session b ON b.id = e.to_session_id
+              WHERE e.from_session_id = ${sender} AND e.to_remote_id = '' AND e.to_session_id = ${recipient}`
+          : sql`SELECT 1 FROM session_edge e
+              WHERE e.from_session_id = ${sender} AND e.to_remote_id = ${remoteId} AND e.to_session_id = ${recipient}`
+        ).pipe(
           Effect.map((rows) => rows.length > 0),
           Effect.orDie,
         ),

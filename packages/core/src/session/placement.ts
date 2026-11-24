@@ -327,7 +327,7 @@ export const make = Effect.gen(function* () {
       readonly beforeStart?: Effect.Effect<void>
     },
   ) {
-    const remote = yield* db.session.startedByPeer(session.id)
+    const remote = yield* db.session.startedByRemote(session.id)
     const creator = yield* nearCreator(session, h.id)
 
     const near =

@@ -43,18 +43,18 @@ joins its stdin and stdout to B's vibestd socket, starting B's vibestd when it i
 the ordinary RPC protocol (`packages/client/src/pipe.ts`: a socket over the child's stdin and stdout, pinged every
 5 s, dead after 10 s without a frame, no reconnect of its own).
 
-Every request on the pipe carries `vibest-caller: peer`, `vibest-peer: <A's identity id>` and, when it acts for a
-project, `vibest-peer-project: <A's project id>`. B refuses every peer request except `Ping` and `Peer.Hello` until
-that id has a `peer` row, and refuses every method not in `PEER_CALLS` (`packages/protocol/src/rpc.ts`). A forwarded
-call (`FORWARDED_CALLS`: `Get`, `List`, `Send`, `Interrupt`, `Archive`, `Peek`) also carries `vibest-peer-by`, which is
+Every request on the pipe carries `vibest-caller: remote`, `vibest-remote: <A's identity id>` and, when it acts for a
+project, `vibest-remote-project: <A's project id>`. B refuses every remote request except `Ping` and `Remote.Hello` until
+that id has a `remote` row, and refuses every method not in `REMOTE_CALLS` (`packages/protocol/src/access.ts`). A forwarded
+call (`FORWARDED_CALLS`: `Get`, `List`, `Send`, `Interrupt`, `Archive`, `Peek`) also carries `vibest-remote-by`, which is
 `user` or the id of the session on A that made the call, and B refuses it without that header. A session `X` reaches
 on B only the sessions whose `origin_session` is `X` (`List`, `Get`, `Send`, `Interrupt`, `Archive`, `Peek`), and what it
 sends them is signed with `X`; `user` reaches every session A's project started there. This
 scopes by mistake, not by trust: whoever can run the ssh command already acts as that user on B.
 
-`Peer.Hello { id, name, callsMe }` answers B's `{ id, name, version }` and upserts the `peer` row with `id` and `name`
+`Remote.Hello { id, name, callsMe }` answers B's `{ id, name, version }` and upserts the `remote` row with `id` and `name`
 (not for B's own id: A refuses dialing itself; `callsMe` is not stored). As in herdr-core, B has no command to show
-or forget the vibestds that dial it: the `peer` table is the line's own record, and the user manages machines from A (`vibest machine`).
+or forget the vibestds that dial it: the `remote` table is the line's own record, and the user manages machines from A (`vibest machine`).
 
 `vibest connect` and `vibest machine` are the user's: `userOnly` refuses them for agents, and the
 guard refuses them in an agent's shell.
@@ -63,7 +63,7 @@ guard refuses them in an agent's shell.
 
 `vibest machine add <name> <ssh target>` (user only) connects once, with a 30 s limit: `Ping` (the protocol must be
 this one, else `MachineIncompatible` "<name> runs vibest <v> (protocol <n>); run vibest update there"), then
-`Peer.Hello`. Only then is the `machine` row inserted, with B's identity id, and that first connection becomes the
+`Remote.Hello`. Only then is the `machine` row inserted, with B's identity id, and that first connection becomes the
 supervised one (add dials once); a failure records nothing. It is refused when B answers this vibestd's
 own id ("<name> is this vibestd") or an id another row already has (`AlreadyAdded`: "this is the vibestd already
 added as <name> (<id8>); use that name"), decided from the result of the `INSERT … ON CONFLICT DO NOTHING`.
@@ -78,11 +78,11 @@ vibest on B (`command -v vibest`, else `$HOME/.local/bin/vibest`) and runs `vibe
 password), no space, no leading `-`, no control character, at most 1024 bytes.
 
 `Machines` keeps one connection per row, started when vibestd starts and when a machine is added; the child is spawned
-by the platform layer (`MachineTransport`). Each connect runs `Ping`, then `Peer.Hello`, whose id must equal the row's
-`vibestd_id`, then writes `connected_at`. A drop is retried on herdr's ladder, 0.5 s doubling to 120 s, reset after
+by the platform layer (`MachineTransport`). Each connect runs `Ping`, then `Remote.Hello`, whose id must equal the row's
+`remote_id`, then writes `connected_at`. A drop is retried on herdr's ladder, 0.5 s doubling to 120 s, reset after
 60 s connected. A protocol mismatch or a different vibestd stops the retries until vibestd restarts or the machine is
 added again: "<name> now answers as a different vibestd (<id8>): its database was replaced or the target points
-elsewhere; remove the machine and add it again". `vibestd_id` is never updated in place. Connection state
+elsewhere; remove the machine and add it again". `remote_id` is never updated in place. Connection state
 (`connecting | connected | unreachable | different`, since, reason) is memory only, one entry per row.
 
 Known limits: `vibest machine rename` and a "connect now" command are not built; a machine that stays unreachable
@@ -90,7 +90,7 @@ notifies nobody.
 
 ## B: agents for another machine
 
-`Peer.Spawn` (peer caller, with `vibest-peer-project` naming A's project) carries either one repository
+`Remote.Spawn` (remote caller, with `vibest-remote-project` naming A's project) carries either one repository
 (`repository`, `identity`, `commit`: a single-repository project) or `repositories`, one entry per repository of a
 multi-repository project (`folder`, its folder name inside A's project, `repository`, `identity`, `commit`). A
 multi-repository project is just a folder holding several git repositories, on both machines. B finds the one project
@@ -105,7 +105,7 @@ listing them, and that project must hold only that repository. Folder names that
 one (`Tools` and `tools` on macOS) are refused. `vibest run --machine <B> --project <p>` sends `project`: before any matching B narrows to
 the one project whose id is `p`, whose id starts with `p` (at least 8 characters) or whose folder is named `p`,
 refuses when none or several are, and still checks that its repositories are exactly A's; A refuses `--project`
-without `--machine`, and a B without the `peerSpawnProject` capability ("run vibest update on <B>"); the CLI refuses
+without `--machine`, and a B without the `remoteSpawnProject` capability ("run vibest update on <B>"); the CLI refuses
 `--project` when its own vibestd lacks that capability ("run vibest update").
 Then B checks every commit before creating anything (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`;
 "<B>'s checkout <dir> does not have <sha>: push it and fetch it there", one clause per missing commit), and runs
@@ -115,13 +115,13 @@ Folder names that are not safe directory names, or repeat, are refused. B never 
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
 started it is the `origin` of its `session.created` fact (peer, project, reportTo), kept in the session's
 `origin_*` columns (`reportTo` as `origin_session`): the session on A that ran `vibest run --machine`, carried in
-`vibest-peer-by`. `Peer.Spawn` for the user (`vibest-peer-by: user`) is refused with `Forbidden`. The forwarded `request` finds the session
+`vibest-remote-by`. `Remote.Spawn` for the user (`vibest-remote-by: user`) is refused with `Forbidden`. The forwarded `request` finds the session
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
 notices go to B's own inbox delivery and no outbox row is written for it.
 
-Every notice of a peer session with a `reportTo` goes to B's `outbox` as a `notice`, and every `vibest send` it makes to that creator as a `send`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. A forward writes no local inbox row: the outbox item is the receipt, and it is not an inbox delivery. With no `peer` row nothing is queued. `Peer.Outbox` streams
-the peer's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
-`Peer.Ack { ids }` appends `outbox.acked`, which sets their `acked_at`; an acknowledged row stays, so a retry of the
+Every notice of a remote session with a `reportTo` goes to B's `outbox` as a `notice`, and every `vibest send` it makes to a linked remote session goes as a `send`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. A forward writes no local inbox row: the outbox item is the receipt, and it is not an inbox delivery. With no `remote` row nothing is queued. `Remote.Outbox` streams
+the remote's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
+`Remote.Ack { ids }` appends `outbox.acked`, which sets their `acked_at`; an acknowledged row stays, so a retry of the
 same request id finds it and queues nothing. Archiving a peer session (`session.ended`) deletes its unacknowledged
 rows.
 
@@ -176,15 +176,15 @@ their case; either gives `NoProject`.
 
 ## A: remote sessions
 
-`vibest run --machine <name>` (a session, the entry session included) sends `Peer.Spawn` over the machine's connection with
+`vibest run --machine <name>` (a session, the entry session included) sends `Remote.Spawn` over the machine's connection with
 the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`) and the
-calling session, which B records as the creator, as `vibest-peer-by`; a project whose folder holds two or more repositories
+calling session, which B records as the creator, as `vibest-remote-by`; a project whose folder holds two or more repositories
 sends one such entry per repository folder, with its folder name, and a folder holding one checkout sends that checkout
 as the single-repository request an older B takes; the folder is read at each run (not from A's database,
 so a repository cloned beside a running project is sent). A repository without a remote is refused on A, naming it. A B whose Ping
-does not have the `peerSpawnRepositories` capability is refused on A for a multi-repository project ("<B> runs a
+does not have the `remoteSpawnRepositories` capability is refused on A for a multi-repository project ("<B> runs a
 vibest that does not take a project of several repositories; run vibest update on <B>"), never downgraded to one
-repository; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Peer.Spawn` forwarded for the user.
+repository; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Remote.Spawn` forwarded for the user.
 `--env`, `--share`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
@@ -194,8 +194,8 @@ in that runtime and fails with `NoRuntime` (`<B>: the runtime "x" is not
 loaded; loaded: …`) when it does not have it. With none of the three, B's own hooks choose, as for a local run.
 An address `<name>/<id>` is resolved once, at the entry of each method, into a local id or a machine and an id; a
 bare id is always local and nothing is searched across machines. `vibest result|send|interrupt|archive|peek
-<name>/<id>` forward `Get`, `Send`, `Interrupt`, `Archive` and `Peek` with `vibest-peer-project` set to the caller's
-project and `vibest-peer-by` set to the calling session, or `user`. `List` (and `vibest ls`) answers `{ sessions, machines }`, as `hc ls` does: `sessions` has the local rows and
+<name>/<id>` forward `Get`, `Send`, `Interrupt`, `Archive` and `Peek` with `vibest-remote-project` set to the caller's
+project and `vibest-remote-by` set to the calling session, or `user`. `List` (and `vibest ls`) answers `{ sessions, machines }`, as `hc ls` does: `sessions` has the local rows and
 each connected machine's rows (ids `<name>/<id>`, `machine` set), asked of all machines at once; `machines` lists every
 added machine, connected or not, with `state`, `since` and, when it is not connected, `reason`; a connected
 machine whose `List` fails is shown `unreachable` with that failure as its `reason`. The code is
@@ -210,13 +210,13 @@ there; check, then retry`) and `MachineIncompatible` (B speaks another protocol;
 a machine that is not connected fails at once; nothing is queued. The 1 MiB prompt limit is B's: A sends the prompt
 and passes `PromptTooLarge` through.
 
-After `Peer.Hello`, A opens `Peer.Outbox`. For each item it runs one transaction (`Db.receivePeerItem`): the
+After `Remote.Hello`, A opens `Remote.Outbox`. For each item it runs one transaction (`Db.receiveRemoteItem`): the
 recipient's project (none: logged and acknowledged); an inbox row whose `transfer_id` is the outbox id, or an outbox
 row already carrying that id (found: only acknowledged); otherwise an `inbox.enqueued` with `transferId` set to that
 id, from the remote agent session with its machine (a `notice` is from `"vibest"`), routed to the recipient while it
 has not ended, else to the project's entry session, pending when that one is present, else dropped without being
 handed to an agent. A forward to another machine reuses the same id on the outbox and writes no local delivery. A `notice` has content
-`<name>/<id8>: <text>`; a `send` is a `send` row whose content is an `<vibest-agent-message>` naming `<name>/<id8>` (a pointer to `vibest result` follows the text when the item was cut). Then `Peer.Ack`. A pipe that drops
+`<name>/<id8>: <text>`; a `send` is a `send` row whose content is an `<vibest-agent-message>` naming `<name>/<id8>` (a pointer to `vibest result` follows the text when the item was cut). Then `Remote.Ack`. A pipe that drops
 between the commit and the ack sends the item again at the next connect, and `peer_item` finds it wherever the first
 copy was routed. The outbox stream failing (the 10 s ping timeout of a held pipe, for one) counts as the connection going
 down.
@@ -227,7 +227,7 @@ vibest's machine list is the source of truth, and a runtime that can show other 
 gets B when vibest adds or reaches B, gets it back whenever vibest needs it and finds it gone, and loses it at
 `vibest machine rm`. The transport stays vibest's own ssh pipe; the view is an extra on top of it.
 
-- **What B tells A.** `Peer.Hello` answers `runtimes`: every runtime loaded on B with its `status`, `reason` and
+- **What B tells A.** `Remote.Hello` answers `runtimes`: every runtime loaded on B with its `status`, `reason` and
   `link`, an opaque record from the runtime's optional `link()` member (hc: `{core: <B's hc core id>, session: <B's hc
   session, or "" when B's vibestd reached its core through HC_SOCKET>}`). A keeps the last list per machine in memory
   with its time.
@@ -244,7 +244,7 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
   gets no `connect` for them until the next reconnect, because only a runtime registry commit triggers the catch-up.
 - **`ensure`: check and repair at the moment of use.** Before `List` and `Get` rewrite a remote row of runtime kind
   `k`, before `Peek` names the terminal, before `machine ls` shows "here", and before `run --machine` sends
-  `Peer.Spawn` with runtime `k`, A asks its runtime of kind `k` with `locate` where B's terminals are. `missing` (the
+  `Remote.Spawn` with runtime `k`, A asks its runtime of kind `k` with `locate` where B's terminals are. `missing` (the
   runtime has no machine with the link's id) fires `connect` for that runtime and asks again. Still missing: the
   note is kept for 30 s, during which `ls`, `Get`, `Peek` and `machine ls` show it without trying again; `run
   --machine` always tries, and still starts the agent, answering the note in `notes`. The pause starts when the
@@ -253,7 +253,7 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
   `--runtime`, else the caller's terminal runtime, else A's entry session's, also when A's runtime of that kind has no
   `locate`. So when A runs in the herdr TUI or Rex and B does not have that runtime, `run --machine` fails with B's
   `NoRuntime`; pass `--runtime <kind B has>` to run it there (its rows then say they cannot be shown here). `ensure`
-  runs before `Peer.Spawn` only when A's runtime of the forwarded kind has `locate`.
+  runs before `Remote.Spawn` only when A's runtime of the forwarded kind has `locate`.
 - **The address.** A remote row's `address` becomes A's view: found, `{machine: "local", id: <the terminal id A's
   runtime takes>}` (hc: `mb/t7@<A's socket>`); not found, `{machine: <name>, id: ""}` and `view` says why (the
   runtime's note, a failed repair, or `<name>'s <kind> agents cannot be shown here; vibest peek <name>/<id> reads
@@ -327,7 +327,7 @@ replacing a mirror row when B's vibestd moved to another hc session on the same 
 ## Tables
 
 Read-model tables of the ledger (schema.md), written only by their facts: `machine.added`, `machine.connected` and
-`machine.removed`; `peer.seen`; `outbox.queued` and `outbox.acked`, all facts of the ledger aggregate (`meta.ledger`); `outbox.queued`
+`machine.removed`; `remote.seen`; `outbox.queued` and `outbox.acked`, all facts of the ledger aggregate (`meta.ledger`); `outbox.queued`
 names the sending session and, when the receiver is not the sender's own creator (a send or notice that passes an ended creator on to the nearest living one on another machine), the receiving session (`recipient`) in its data. No fact names a machine: everything in one ledger
 is on this machine, and a session on B is only in B's ledger (A asks B for it).
 
@@ -335,29 +335,29 @@ is on this machine, and a session on B is only in B's ledger (A asks B for it).
 CREATE TABLE machine (             -- A: another machine's vibestd this one dials
   name         TEXT PRIMARY KEY,   -- what --machine takes; the first part of an address racknerd/<id>
   target       TEXT NOT NULL,      -- ssh target; never a password
-  vibestd_id   TEXT NOT NULL UNIQUE CHECK (length(vibestd_id) = 36),  -- B's identity id at machine add; never changed
+  remote_id    TEXT NOT NULL UNIQUE CHECK (length(remote_id) = 36),  -- B's identity id at machine add; never changed
   connected_at INTEGER NOT NULL,   -- last successful connect (the add is the first; machine.connected)
   created_at   INTEGER NOT NULL
 ) STRICT;
 
-CREATE TABLE peer (                -- B: a vibestd that dials this one, like an hc peers.json entry
+CREATE TABLE remote (              -- B: a vibestd that dials this one
   id           TEXT PRIMARY KEY CHECK (length(id) = 36),  -- that vibestd's identity id
   name         TEXT NOT NULL,      -- its identity name, as it last presented it
-  connected_at INTEGER NOT NULL    -- its last successful Peer.Hello (peer.seen)
+  connected_at INTEGER NOT NULL    -- its last successful Remote.Hello (remote.seen)
 ) STRICT;
 
-CREATE TABLE outbox (              -- B: what this vibestd delivers, or delivered, to a peer
-  id         TEXT PRIMARY KEY CHECK (length(id) = 36),  -- random UUIDv4; the dedupe key on A (inbox.peer_item)
+CREATE TABLE outbox (              -- B: what this vibestd delivers, or delivered, to a remote
+  id         TEXT PRIMARY KEY CHECK (length(id) = 36),  -- random UUIDv4; the dedupe key on A (inbox.transfer_id)
   seq        INTEGER NOT NULL,     -- its outbox.queued in the ledger aggregate: the order it is sent in
-  peer_id    TEXT NOT NULL,
+  remote_id  TEXT NOT NULL,
   session_id TEXT NOT NULL,        -- the session that sends it
-  recipient  TEXT,                 -- the session on the peer that receives it; null in rows from before it existed (then the sender's origin_session)
+  recipient  TEXT,                 -- the session on the remote that receives it; null in rows from before it existed (then the sender's origin_session)
   kind       TEXT NOT NULL CHECK (kind IN ('send', 'notice')),
   content    TEXT NOT NULL,        -- the text, rendered on A by kind
   created_at INTEGER NOT NULL,
   acked_at   INTEGER               -- its outbox.acked; null: still to deliver
 ) STRICT;
-CREATE INDEX outbox_peer ON outbox (peer_id, seq) WHERE acked_at IS NULL;
+CREATE INDEX outbox_remote ON outbox (remote_id, seq) WHERE acked_at IS NULL;
 CREATE INDEX outbox_session ON outbox (session_id);
 ```
 

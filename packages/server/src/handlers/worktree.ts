@@ -33,10 +33,10 @@ export const make = Effect.gen(function* () {
     "Worktree.List": ({ project, machine }, { headers }) =>
       Effect.gen(function* () {
         if (machine !== undefined && machine !== LOCAL_MACHINE) {
-          if (reader(headers)(CALLER_HEADER) === "peer")
+          if (reader(headers)(CALLER_HEADER) === "remote")
             return yield* new Forbidden({
               method: "Worktree.List",
-              message: "a peer asks for this machine's worktrees only",
+              message: "a remote asks for this machine's worktrees only",
             })
 
           return yield* remote.worktrees(machine, project)

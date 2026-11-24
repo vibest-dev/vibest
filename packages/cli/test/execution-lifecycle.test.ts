@@ -78,7 +78,7 @@ const oldFacts = (ledger: string): ReadonlyArray<Fact> => [
     "outbox.queued",
     {
       id: "66666666-6666-4666-8666-666666666661",
-      peer: PEER,
+      remote: PEER,
       session: S,
       kind: "send",
       content: "remote",
@@ -254,7 +254,7 @@ describe("execution lifecycle", () => {
           at: 9,
           data: {
             id: "66666666-6666-4666-8666-666666666661",
-            peer: "55555555-5555-4555-8555-555555555555",
+            remote: "55555555-5555-4555-8555-555555555555",
             session: S,
             kind: "send",
             content: "remote",
@@ -268,7 +268,7 @@ describe("execution lifecycle", () => {
           at: 10,
           data: {
             id: "66666666-6666-4666-8666-666666666662",
-            peer: "55555555-5555-4555-8555-555555555555",
+            remote: "55555555-5555-4555-8555-555555555555",
             session: S,
             content: "a notice",
           },

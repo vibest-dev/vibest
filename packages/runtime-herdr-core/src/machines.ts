@@ -174,19 +174,19 @@ const NONE: ReadonlyMap<string, Terminal> = new Map()
 
 export const locate = (
   hc: Hc,
-  peer: VibestPlugin.Runtime.Peer,
+  remote: VibestPlugin.Runtime.Remote,
   sessions: ReadonlyMap<string, string>,
 ): Effect.Effect<VibestPlugin.Runtime.Located> =>
   Effect.gen(function* () {
-    const core = peer.link.core
+    const core = remote.link.core
 
-    if (core === undefined) return { missing: false, terminals: NONE, note: `${peer.id} gave no hc link` }
+    if (core === undefined) return { missing: false, terminals: NONE, note: `${remote.id} gave no hc link` }
     const row = (yield* hc.call("machine.list", {})).machines.find((r) => r.id === core)
 
     if (row === undefined) return { missing: true, terminals: NONE }
 
     if (row.state !== "connected") {
-      const note = stateNote(peer.id, row)
+      const note = stateNote(remote.id, row)
 
       return {
         missing: false,

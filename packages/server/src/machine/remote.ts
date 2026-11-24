@@ -1,7 +1,7 @@
 import type { PipeClient } from "@vibest/client/pipe"
 import { callerKind } from "@vibest/core/caller"
 import { Db } from "@vibest/core/database/db"
-import type { PeerScope } from "@vibest/core/database/remote"
+import type { RemoteScope } from "@vibest/core/database/remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
@@ -12,7 +12,7 @@ import { listProjectRepositories } from "@vibest/core/project/create"
 import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
-import { peerHeaders } from "@vibest/protocol/protocol"
+import { remoteHeaders } from "@vibest/protocol/protocol"
 import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
@@ -44,7 +44,7 @@ export type ListScope =
   | { readonly _tag: "All" }
   | { readonly _tag: "Project"; readonly id: string }
   | { readonly _tag: "Nothing" }
-  | ({ readonly _tag: "Peer" } & PeerScope)
+  | ({ readonly _tag: "Remote" } & RemoteScope)
 
 export const ListScope = Data.taggedEnum<ListScope>()
 
@@ -92,7 +92,7 @@ const make = Effect.gen(function* () {
     project: string,
     by: string,
     f: (client: PipeClient, headers: Record<string, string>) => Effect.Effect<A, E>,
-  ) => Effect.flatMap(machines.link(machine), (link) => link.call(f(link.client, peerHeaders(self.id, project, by))))
+  ) => Effect.flatMap(machines.link(machine), (link) => link.call(f(link.client, remoteHeaders(self.id, project, by))))
 
   const relay = Effect.fn("Remote.relay")(<A, E>(at: At, project: string, by: string, f: Forwarded<A, E>) =>
     call(at.machine, project, by, (client, headers) => f(client, at, { headers })),
@@ -108,10 +108,32 @@ const make = Effect.gen(function* () {
         ),
     ),
 
+    link: Effect.fn("Remote.link")(
+      (
+        machine: string,
+        edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>,
+      ) =>
+        Effect.flatMap(machines.link(machine), (link) =>
+          link.call(link.client["Remote.Link"]({ edges }, { headers: remoteHeaders(self.id) })),
+        ),
+    ),
+
+    unlink: Effect.fn("Remote.unlink")(
+      (
+        machine: string,
+        edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>,
+      ) =>
+        Effect.flatMap(machines.link(machine), (link) =>
+          link.call(link.client["Remote.Unlink"]({ edges }, { headers: remoteHeaders(self.id) })),
+        ),
+    ),
+
     harnesses: Effect.fn("Remote.harnesses")((machine: string, provider: string | undefined) =>
       Effect.flatMap(machines.link(machine), (link) =>
         link.call(
-          link.client["Harnesses.List"](provider === undefined ? {} : { provider }, { headers: peerHeaders(self.id) }),
+          link.client["Harnesses.List"](provider === undefined ? {} : { provider }, {
+            headers: remoteHeaders(self.id),
+          }),
         ),
       ),
     ),
@@ -131,7 +153,7 @@ const make = Effect.gen(function* () {
             return link.stream(
               link.client["Project.Clone"](
                 { url: input.url, ...(input.directory !== undefined && { directory: input.directory }) },
-                { headers: peerHeaders(self.id) },
+                { headers: remoteHeaders(self.id) },
               ),
             )
           }
@@ -175,7 +197,7 @@ const make = Effect.gen(function* () {
           message: `${machine} runs a vibest that does not list agents; run vibest update there`,
         })
 
-      return yield* link.call(link.client["Agents.List"]({}, { headers: peerHeaders(self.id) }))
+      return yield* link.call(link.client["Agents.List"]({}, { headers: remoteHeaders(self.id) }))
     }),
     worktrees: Effect.fn("Remote.worktrees")((machine: string, project: string | undefined) =>
       Effect.gen(function* () {
@@ -188,13 +210,13 @@ const make = Effect.gen(function* () {
           })
 
         return yield* link.call(
-          link.client["Worktree.List"](project === undefined ? {} : { project }, { headers: peerHeaders(self.id) }),
+          link.client["Worktree.List"](project === undefined ? {} : { project }, { headers: remoteHeaders(self.id) }),
         )
       }),
     ),
 
     list: Effect.fn("Remote.list")(function* (scope: ListScope, by: string, stopped: boolean | undefined) {
-      if (Predicate.isTagged(scope, "Peer")) return { sessions: [], machines: [] }
+      if (Predicate.isTagged(scope, "Remote")) return { sessions: [], machines: [] }
 
       const each = yield* Effect.forEach(
         yield* machines.states,
@@ -204,7 +226,7 @@ const make = Effect.gen(function* () {
             : link
                 .call(
                   link.client.List(stopped === undefined ? {} : { stopped }, {
-                    headers: peerHeaders(self.id, scope.id, by),
+                    headers: remoteHeaders(self.id, scope.id, by),
                   }),
                 )
                 .pipe(
@@ -259,7 +281,7 @@ const make = Effect.gen(function* () {
       if (input.files !== undefined && input.files.length > 0) {
         const link = yield* machines.link(machine)
 
-        if (link.capabilities.peerSpawnFiles !== true)
+        if (link.capabilities.remoteSpawnFiles !== true)
           return yield* new MachineFailed({
             message: `${machine} runs a vibest that does not take --file; run vibest update there`,
           })
@@ -312,12 +334,12 @@ const make = Effect.gen(function* () {
 
       const capabilities = (yield* machines.link(machine)).capabilities
 
-      if (input.project !== undefined && capabilities.peerSpawnProject !== true)
+      if (input.project !== undefined && capabilities.remoteSpawnProject !== true)
         return yield* new MachineFailed({
           message: `${machine} runs a vibest that does not take --project; run vibest update on ${machine}`,
         })
 
-      if ("repositories" in sent && capabilities.peerSpawnRepositories !== true)
+      if ("repositories" in sent && capabilities.remoteSpawnRepositories !== true)
         return yield* new MachineFailed({
           message: `${machine} runs a vibest that does not take a project of several repositories; run vibest update on ${machine}`,
         })
@@ -331,7 +353,7 @@ const make = Effect.gen(function* () {
           : yield* machines.ensure(machine, runtime, new Map(), true)
 
       const spawned = yield* call(machine, from.project, from.session, (client, headers) =>
-        client["Peer.Spawn"](
+        client["Remote.Spawn"](
           {
             ...sent,
             ...(input.project !== undefined && { project: input.project }),
@@ -348,6 +370,11 @@ const make = Effect.gen(function* () {
           { headers },
         ),
       )
+
+      const machineRow = yield* db.remote.machineNamed(machine)
+
+      if (machineRow !== undefined)
+        yield* db.session.linkSessions([{ from: from.session, to: spawned.session, remote: machineRow.remoteId }])
 
       return {
         id: addressed(machine, spawned.session),

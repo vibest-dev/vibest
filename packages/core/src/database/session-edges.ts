@@ -7,6 +7,13 @@ import { Bus } from "../bus.ts"
 export type SessionEdge = {
   readonly from: string
   readonly to: string
+  readonly remote?: string | undefined
+}
+
+export interface SpawnLinks {
+  readonly from?: ReadonlyArray<string> | undefined
+  readonly to?: ReadonlyArray<string> | undefined
+  readonly with?: ReadonlyArray<string> | undefined
 }
 
 export const make = Effect.gen(function* () {
@@ -53,7 +60,7 @@ export const make = Effect.gen(function* () {
         FROM session_edge e
         JOIN session s ON s.id = e.to_session_id
         JOIN project p ON p.id = s.project_id
-        WHERE e.from_session_id = ${id} AND s.ended_at IS NULL
+        WHERE e.from_session_id = ${id} AND e.to_remote_id = '' AND s.ended_at IS NULL
           ${exclude === undefined ? sql`` : sql`AND e.to_session_id != ${exclude}`}
         ORDER BY s.created_at, s.rowid`.pipe(
         Effect.map((rows) =>
@@ -66,20 +73,37 @@ export const make = Effect.gen(function* () {
       ),
     ),
 
-    linkSessions: Effect.fn("Db.session.linkSessions")((edges: ReadonlyArray<readonly [string, string]>) =>
+    resolveRemoteEdges: Effect.fn("Db.session.resolveRemoteEdges")(
+      (fromSessionId: string, target: string, remoteId?: string) =>
+        sql<{ remote: string; session: string }>`SELECT to_remote_id AS remote, to_session_id AS session
+          FROM session_edge
+          WHERE from_session_id = ${fromSessionId}
+            ${remoteId === undefined ? sql`AND to_remote_id != ''` : sql`AND to_remote_id = ${remoteId}`}
+            AND to_session_id >= ${target} AND to_session_id < ${`${target}~`}
+          ORDER BY to_session_id LIMIT 11`.pipe(Effect.orDie),
+    ),
+
+    linkSessions: Effect.fn("Db.session.linkSessions")((edges: ReadonlyArray<SessionEdge>) =>
       tx(
         Effect.gen(function* () {
           const out: Array<SessionEdge> = []
 
-          for (const [from, to] of edges) {
-            if (from === to) continue
+          for (const edge of edges) {
+            const remote = edge.remote ?? ""
+
+            if (remote === "" && edge.from === edge.to) continue
 
             const exists =
-              (yield* sql`SELECT 1 FROM session_edge WHERE from_session_id = ${from} AND to_session_id = ${to}`)
-                .length > 0
+              (yield* sql`SELECT 1 FROM session_edge WHERE from_session_id = ${edge.from}
+                  AND to_remote_id = ${remote} AND to_session_id = ${edge.to}`).length > 0
 
-            if (!exists) yield* publish(SessionLinked, { sessionId: from, data: { to } })
-            out.push({ from, to })
+            if (!exists)
+              yield* publish(SessionLinked, {
+                sessionId: edge.from,
+                data: { to: edge.to, ...(remote !== "" && { remote }) },
+              })
+
+            out.push({ from: edge.from, to: edge.to, ...(remote !== "" && { remote }) })
           }
 
           return out
@@ -87,20 +111,27 @@ export const make = Effect.gen(function* () {
       ).pipe(Effect.orDie),
     ),
 
-    unlinkSessions: Effect.fn("Db.session.unlinkSessions")((edges: ReadonlyArray<readonly [string, string]>) =>
+    unlinkSessions: Effect.fn("Db.session.unlinkSessions")((edges: ReadonlyArray<SessionEdge>) =>
       tx(
         Effect.gen(function* () {
           const out: Array<SessionEdge> = []
 
-          for (const [from, to] of edges) {
-            if (from === to) continue
+          for (const edge of edges) {
+            const remote = edge.remote ?? ""
+
+            if (remote === "" && edge.from === edge.to) continue
 
             const exists =
-              (yield* sql`SELECT 1 FROM session_edge WHERE from_session_id = ${from} AND to_session_id = ${to}`)
-                .length > 0
+              (yield* sql`SELECT 1 FROM session_edge WHERE from_session_id = ${edge.from}
+                  AND to_remote_id = ${remote} AND to_session_id = ${edge.to}`).length > 0
 
-            if (exists) yield* publish(SessionUnlinked, { sessionId: from, data: { to } })
-            out.push({ from, to })
+            if (exists)
+              yield* publish(SessionUnlinked, {
+                sessionId: edge.from,
+                data: { to: edge.to, ...(remote !== "" && { remote }) },
+              })
+
+            out.push({ from: edge.from, to: edge.to, ...(remote !== "" && { remote }) })
           }
 
           return out

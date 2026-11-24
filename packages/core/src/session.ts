@@ -362,14 +362,14 @@ export const make = Effect.gen(function* () {
 
   const link = Effect.fn("Session.link")((projectId: string, spec: EdgeSpec) =>
     expandEdges(projectId, spec).pipe(
-      Effect.flatMap((pairs) => db.session.linkSessions(pairs)),
+      Effect.flatMap((pairs) => db.session.linkSessions(pairs.map(([from, to]) => ({ from, to })))),
       Effect.map((edges) => ({ edges })),
     ),
   )
 
   const unlink = Effect.fn("Session.unlink")((projectId: string, spec: EdgeSpec) =>
     expandEdges(projectId, spec).pipe(
-      Effect.flatMap((pairs) => db.session.unlinkSessions(pairs)),
+      Effect.flatMap((pairs) => db.session.unlinkSessions(pairs.map(([from, to]) => ({ from, to })))),
       Effect.map((edges) => ({ edges })),
     ),
   )

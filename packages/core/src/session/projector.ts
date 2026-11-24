@@ -52,10 +52,10 @@ export const layer = Layer.effectDiscard(
       const { data } = fact
       const origin = data.origin
 
-      return sql`INSERT INTO session (id, project_id, parent_session_id, agent, name, directory, origin_peer,
+      return sql`INSERT INTO session (id, project_id, parent_session_id, agent, name, directory, origin_remote,
           origin_project, origin_session, created_at, active_at, message_id)
         VALUES (${sessionIdOf(fact)}, ${data.project}, ${data.parent ?? null}, ${data.agent}, ${data.name},
-          ${data.directory}, ${origin?.peer ?? null}, ${origin?.project ?? null}, ${origin?.session ?? null},
+          ${data.directory}, ${origin?.remote ?? null}, ${origin?.project ?? null}, ${origin?.session ?? null},
           ${fact.at}, ${origin === undefined ? null : fact.at}, ${data.message ?? null})`
     })
     yield* bus.project(
@@ -69,19 +69,20 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(SessionEnded, (fact) =>
       Effect.andThen(
         sql`UPDATE session SET ended_at = coalesce(ended_at, ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
-        sql`UPDATE outbox SET peer_id = '' WHERE session_id = ${sessionIdOf(fact)} AND acked_at IS NULL`,
+        sql`UPDATE outbox SET remote_id = '' WHERE session_id = ${sessionIdOf(fact)} AND acked_at IS NULL`,
       ),
     )
     yield* bus.project(
       SessionLinked,
       (fact) =>
-        sql`INSERT OR IGNORE INTO session_edge (from_session_id, to_session_id)
-          VALUES (${sessionIdOf(fact)}, ${fact.data.to})`,
+        sql`INSERT OR IGNORE INTO session_edge (from_session_id, to_remote_id, to_session_id)
+          VALUES (${sessionIdOf(fact)}, ${fact.data.remote ?? ""}, ${fact.data.to})`,
     )
     yield* bus.project(
       SessionUnlinked,
       (fact) =>
-        sql`DELETE FROM session_edge WHERE from_session_id = ${sessionIdOf(fact)} AND to_session_id = ${fact.data.to}`,
+        sql`DELETE FROM session_edge WHERE from_session_id = ${sessionIdOf(fact)}
+          AND to_remote_id = ${fact.data.remote ?? ""} AND to_session_id = ${fact.data.to}`,
     )
 
     yield* bus.project(
