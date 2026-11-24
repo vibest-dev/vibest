@@ -123,7 +123,8 @@ export const terminalName = (input: Parameters<Runtime["open"]>[0], attempt = 0)
   return `${base ? `${base.slice(0, 31 - suffix.length).replace(/-+$/, "")}-` : ""}${suffix}`
 }
 
-export const terminalId = (socket: string, address: string) => `${address}@${socket}`
+export const terminalId = (socket: string, address: string, defaultSocket?: string) =>
+  socket === defaultSocket ? address : `${address}@${socket}`
 
 export const parseTerminalId = (id: string, fallbackSocket: string) => {
   const at = id.indexOf("@")
@@ -201,7 +202,9 @@ export const make = (deps: {
       core.busy.delete(address)
 
       return wake(core, address).pipe(
-        Effect.andThen(PubSub.publish(events, { type: "exited", terminal: { id: terminalId(socket, address) } })),
+        Effect.andThen(
+          PubSub.publish(events, { type: "exited", terminal: { id: terminalId(socket, address, deps.socket) } }),
+        ),
       )
     }
 
@@ -242,7 +245,7 @@ export const make = (deps: {
           ? Effect.void
           : PubSub.publish(events, {
               type: "state",
-              terminal: { id: terminalId(socket, terminal) },
+              terminal: { id: terminalId(socket, terminal, deps.socket) },
               state,
             })
       }
@@ -250,7 +253,7 @@ export const make = (deps: {
       if (SEEN_EVENTS.has(type))
         return PubSub.publish(events, {
           type: "seen",
-          terminal: { id: terminalId(socket, terminal) },
+          terminal: { id: terminalId(socket, terminal, deps.socket) },
         })
 
       if (type === "foreground") {
@@ -393,7 +396,7 @@ export const make = (deps: {
         const parent = input.parent !== undefined ? parseTerminalId(input.parent.id, deps.socket) : undefined
         const near = input.near !== undefined ? parseTerminalId(input.near.id, deps.socket) : undefined
         const targetSocket = parent?.socket ?? near?.socket ?? deps.socket
-        const parentAddress = parent !== undefined && parent.socket === targetSocket ? parent.address : undefined
+        const parentAddress = parent?.address
         const project = input.launch.env["VIBEST_PROJECT_ID"]
         const session = input.launch.env["VIBEST_SESSION_ID"]
         const argv = yield* argvOf(input.launch)
@@ -429,7 +432,7 @@ export const make = (deps: {
               ),
             )
 
-            return { id: terminalId(socket, started.address) } satisfies Terminal
+            return { id: terminalId(socket, started.address, deps.socket) } satisfies Terminal
           })
 
         if (parentAddress === undefined && targetSocket === deps.socket) return yield* runOn(deps.socket, undefined)
@@ -593,13 +596,6 @@ export const make = (deps: {
       return ["env", `HC_SOCKET=${socket}`, "hc", "attach", address]
     }
 
-    const viewAddress: NonNullable<Runtime["viewAddress"]> = (terminal) => {
-      if (terminal.id === "") return terminal
-      const { socket, address } = parseTerminalId(terminal.id, deps.socket)
-
-      return socket === deps.socket ? { id: address } : terminal
-    }
-
     return {
       id: KIND,
       status,
@@ -613,7 +609,6 @@ export const make = (deps: {
       present,
       doctor,
       attach,
-      viewAddress,
       seen,
       see,
       events: RuntimeApi.eventsFrom(events),

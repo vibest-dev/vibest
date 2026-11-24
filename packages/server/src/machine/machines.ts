@@ -609,14 +609,12 @@ const make = Effect.gen(function* () {
       return rows.map((row): R => {
         const found = row.address.id === "" ? undefined : views.get(row.runtime)
         const terminal = found?.terminals.get(row.id)
-        const rt = terminal === undefined ? undefined : runtimes.find(row.runtime)
-        const mapped = terminal === undefined ? undefined : (rt?.viewAddress?.(terminal) ?? terminal)
 
         return {
           ...row,
           machine: name,
-          address: mapped === undefined ? { machine: name, id: "" } : { machine: "local", id: mapped.id },
-          ...(mapped === undefined && found?.note !== undefined && { view: found.note }),
+          address: terminal === undefined ? { machine: name, id: "" } : { machine: "local", id: terminal.id },
+          ...(terminal === undefined && found?.note !== undefined && { view: found.note }),
         }
       })
     })

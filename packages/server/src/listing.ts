@@ -87,13 +87,6 @@ export const sessionListing = (deps: {
       return repositories
     })
 
-  const viewAddress = (runtime: string, address: RuntimeAddress): RuntimeAddress => {
-    if (address.id === "" || address.machine !== "local") return address
-    const rt = runtimes.find(runtime)
-
-    return rt?.viewAddress === undefined ? address : { machine: address.machine, id: rt.viewAddress(address).id }
-  }
-
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
     Effect.gen(function* () {
       const briefs = yield* db.session.sessionBriefs(rows.map((row) => row.id))
@@ -101,9 +94,8 @@ export const sessionListing = (deps: {
 
       return rows.map((row) => {
         const brief = briefs.get(row.id)
-        const info = toInfo(row, brief, waiting.get(row.id))
 
-        return { ...info, address: viewAddress(info.runtime, info.address), task: taskForLs(brief?.task ?? null) }
+        return { ...toInfo(row, brief, waiting.get(row.id)), task: taskForLs(brief?.task ?? null) }
       })
     })
 

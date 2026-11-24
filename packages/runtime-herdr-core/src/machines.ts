@@ -2,7 +2,7 @@ import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Duration, Effect, Predicate, type Scope, Stream } from "effect"
 import type { api, HcFailure, HcClient } from "effect-herdr-core-sdk"
 
-import { KIND, LABEL, terminalId } from "./terminal-runtime.ts"
+import { KIND, LABEL } from "./terminal-runtime.ts"
 
 type Hc = Pick<HcClient, "call">
 
@@ -174,7 +174,6 @@ const NONE: ReadonlyMap<string, Terminal> = new Map()
 
 export const locate = (
   hc: Hc,
-  socket: string,
   peer: VibestPlugin.Runtime.Peer,
   sessions: ReadonlyMap<string, string>,
 ): Effect.Effect<VibestPlugin.Runtime.Located> =>
@@ -205,7 +204,7 @@ export const locate = (
       const session = t.labels[LABEL.session]
 
       if (t.address.startsWith(`${row.name}/`) && session !== undefined && wanted.has(session))
-        terminals.set(session, { id: terminalId(socket, t.address) })
+        terminals.set(session, { id: t.address })
     }
 
     return {

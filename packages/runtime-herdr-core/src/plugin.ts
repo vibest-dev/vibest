@@ -13,10 +13,10 @@ const platform = Layer.mergeAll(
   NodePath.layer,
 )
 
-const caller: VibestPlugin.Runtime.RuntimeCaller = {
+const callerFor = (defaultSocket: string): VibestPlugin.Runtime.RuntimeCaller => ({
   env: CALLER_ENV,
-  terminal: (env) => Effect.succeed(terminalFrom(env)),
-}
+  terminal: (env) => Effect.succeed(terminalFrom(env, defaultSocket)),
+})
 
 const set = (name: string) => Config.option(Config.String(name)).pipe(Config.map(Option.filter((v) => v !== "")))
 
@@ -40,13 +40,13 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
         ...runtime,
         id: KIND,
         name: "herdr-core",
-        caller,
+        caller: callerFor(socket),
         link: () =>
           home.hello.pipe(
             Effect.map((hello) => ({ core: hello.core.id, session })),
             Effect.orElseSucceed(() => undefined),
           ),
-        locate: (peer, sessions) => Machines.locate(home, socket, peer, sessions),
+        locate: (peer, sessions) => Machines.locate(home, peer, sessions),
       }
 
       yield* context.runtime.transform((editor) => editor.add(definition))

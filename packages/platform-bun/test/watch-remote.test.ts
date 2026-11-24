@@ -377,11 +377,10 @@ describe("Watch with remote machines", () => {
   )
 
   it.effect(
-    "Watch strips default socket on local hc-like addresses and maps remote addresses through machines.ensure + viewAddress",
+    "Get, List, and Watch all return identical hc addresses (bare default socket, secondary @socket, and remote machine/address)",
     () =>
       Effect.gen(function* () {
         const net = new Net()
-        const defaultSocket = "/tmp/default-hc.sock"
         const unused = () => Effect.die(new Error("unused"))
 
         const fakeHcPlugin = (id: string, coreId: string, mirrorName?: string) =>
@@ -398,13 +397,6 @@ describe("Watch with remote machines", () => {
                   process: unused,
                   close: unused,
                   events: Stream.never,
-                  viewAddress: (terminal) => {
-                    const at = terminal.id.indexOf("@")
-
-                    return at >= 0 && terminal.id.slice(at + 1) === defaultSocket
-                      ? { id: terminal.id.slice(0, at) }
-                      : terminal
-                  },
                   link: () => Effect.succeed({ core: coreId }),
                   locate: (_peer, sessions) =>
                     Effect.succeed(
@@ -416,7 +408,7 @@ describe("Watch with remote machines", () => {
                             terminals: new Map(
                               [...sessions.entries()].map(([sessionId, remoteAddr]) => [
                                 sessionId,
-                                { id: `${mirrorName}/${remoteAddr}@${defaultSocket}` },
+                                { id: `${mirrorName}/${remoteAddr}` },
                               ]),
                             ),
                           },
@@ -438,8 +430,36 @@ describe("Watch with remote machines", () => {
               aProject,
               "pi",
               false,
-              { runtime: "hc", address: { machine: "local", id: `t1pk@${defaultSocket}` } },
+              { runtime: "hc", address: { machine: "local", id: "t1pk" } },
               { agent: "coordinator", projectDirectory: aRepo },
+            ),
+          ),
+        )
+
+        const aSecondaryId = randomId()
+        yield* a.run(
+          Effect.flatMap(Db.Service, (db) =>
+            db.session.insertSession(
+              {
+                id: aSecondaryId,
+                agent: "general",
+                harnessId: "pi",
+                harnessSessionId: null,
+                name: "secondary-socket",
+                runtime: "hc",
+                address: { machine: "local", id: "t2@/other.sock" },
+                status: "idle",
+                startedAt: 1000,
+                createdAt: 1000,
+                lastActive: 1000,
+                executionState: "completed",
+                executionPromptedAt: 1000,
+                provider: null,
+                model: null,
+                exitedAt: null,
+              },
+              aProject,
+              { cwd: aRepo },
             ),
           ),
         )
@@ -447,14 +467,30 @@ describe("Watch with remote machines", () => {
         const bRepo = yield* b.run(makeRepository)
         const bProject = yield* b.run(projectOf(bRepo))
 
-        const bEntry = yield* b.run(
+        const bRemoteId = randomId()
+        yield* b.run(
           Effect.flatMap(Db.Service, (db) =>
-            db.session.startEntry(
+            db.session.insertSession(
+              {
+                id: bRemoteId,
+                agent: "general",
+                harnessId: "pi",
+                harnessSessionId: null,
+                name: "remote-hc",
+                runtime: "hc",
+                address: { machine: "local", id: "t9pk" },
+                status: "idle",
+                startedAt: 1000,
+                createdAt: 1000,
+                lastActive: 1000,
+                executionState: "completed",
+                executionPromptedAt: 1000,
+                provider: null,
+                model: null,
+                exitedAt: null,
+              },
               bProject,
-              "pi",
-              false,
-              { runtime: "hc", address: { machine: "local", id: `t9pk@${defaultSocket}` } },
-              { agent: "coordinator", projectDirectory: bRepo },
+              { cwd: bRepo, origin: { peer: a.id, project: aProject, reportTo: aEntry.sessionId } },
             ),
           ),
         )
@@ -467,7 +503,7 @@ describe("Watch with remote machines", () => {
           return (
             first !== undefined &&
             isSnapshot(first) &&
-            first.sessions.some((s) => s.id === bEntry.sessionId && s.machine === "mac-mini")
+            first.sessions.some((s) => s.id === bRemoteId && s.machine === "mac-mini")
           )
         })
 
@@ -476,11 +512,27 @@ describe("Watch with remote machines", () => {
 
         if (!isSnapshot(snapshot)) return
 
-        const localSession = snapshot.sessions.find((s) => s.id === aEntry.sessionId)
-        assert.deepStrictEqual(localSession?.address, { machine: "local", id: "t1pk" })
+        const listed = yield* RpcClient.withHeaders(a.raw.List({}), cliHeaders(aRepo))
+        const gotLocal = yield* a.cli(a.raw.Get({ id: aEntry.sessionId }))
+        const gotSecondary = yield* a.cli(a.raw.Get({ id: aSecondaryId }))
 
-        const remoteSession = snapshot.sessions.find((s) => s.id === bEntry.sessionId)
-        assert.deepStrictEqual(remoteSession?.address, { machine: "local", id: "mac-mini/t9pk" })
+        const gotRemote = yield* RpcClient.withHeaders(a.raw.Get({ id: `mac-mini/${bRemoteId}` }), cliHeaders(aRepo))
+
+        const expectedLocal = { machine: "local", id: "t1pk" }
+        const expectedSecondary = { machine: "local", id: "t2@/other.sock" }
+        const expectedRemote = { machine: "local", id: "mac-mini/t9pk" }
+
+        assert.deepStrictEqual(snapshot.sessions.find((s) => s.id === aEntry.sessionId)?.address, expectedLocal)
+        assert.deepStrictEqual(listed.sessions.find((s) => s.id === aEntry.sessionId)?.address, expectedLocal)
+        assert.deepStrictEqual(gotLocal?.address, expectedLocal)
+
+        assert.deepStrictEqual(snapshot.sessions.find((s) => s.id === aSecondaryId)?.address, expectedSecondary)
+        assert.deepStrictEqual(listed.sessions.find((s) => s.id === aSecondaryId)?.address, expectedSecondary)
+        assert.deepStrictEqual(gotSecondary?.address, expectedSecondary)
+
+        assert.deepStrictEqual(snapshot.sessions.find((s) => s.id === bRemoteId)?.address, expectedRemote)
+        assert.deepStrictEqual(listed.sessions.find((s) => s.id === `mac-mini/${bRemoteId}`)?.address, expectedRemote)
+        assert.deepStrictEqual(gotRemote?.address, expectedRemote)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

@@ -3,7 +3,7 @@ import { Effect, Ref, Stream } from "effect"
 import { type HcClient, HcCoreTooOld, HcError, HcTransportError, type api } from "effect-herdr-core-sdk"
 import { TestClock } from "effect/testing"
 
-import { FOLLOW_ATTEMPTS, failure, make } from "../src/terminal-runtime.ts"
+import { FOLLOW_ATTEMPTS, failure, make, terminalId } from "../src/terminal-runtime.ts"
 
 const HOME = "/run/home.sock"
 
@@ -124,7 +124,7 @@ describe("runtime-herdr-core errors, reconnects and doctor", () => {
         near: { id: "t1@/run/dead.sock" },
       })
 
-      assert.strictEqual(opened.id, `t2@${HOME}`)
+      assert.strictEqual(opened.id, "t2")
       assert.strictEqual(seen.length, 2)
       assert.strictEqual(seen[0]?.socket, "/run/dead.sock")
       assert.strictEqual(seen[1]?.socket, HOME)
@@ -225,14 +225,10 @@ describe("runtime-herdr-core errors, reconnects and doctor", () => {
       }).pipe(Effect.scoped),
   )
 
-  it.effect("viewAddress strips the default socket and keeps secondary sockets", () =>
-    Effect.gen(function* () {
-      const { runtime } = yield* runtimeWith(Effect.succeed(hello))
-      assert.deepStrictEqual(runtime.viewAddress?.({ id: `t1pk@${HOME}` }), { id: "t1pk" })
-      assert.deepStrictEqual(runtime.viewAddress?.({ id: `mac-mini/t1pk@${HOME}` }), { id: "mac-mini/t1pk" })
-      assert.deepStrictEqual(runtime.viewAddress?.({ id: "t1pk" }), { id: "t1pk" })
-      assert.deepStrictEqual(runtime.viewAddress?.({ id: "t2@/other.sock" }), { id: "t2@/other.sock" })
-      assert.deepStrictEqual(runtime.viewAddress?.({ id: "" }), { id: "" })
-    }).pipe(Effect.scoped),
-  )
+  it("terminalId omits the default socket and keeps secondary sockets", () => {
+    assert.strictEqual(terminalId(HOME, "t1pk", HOME), "t1pk")
+    assert.strictEqual(terminalId(HOME, "mac-mini/t1pk", HOME), "mac-mini/t1pk")
+    assert.strictEqual(terminalId("/other.sock", "t2", HOME), "t2@/other.sock")
+    assert.strictEqual(terminalId(HOME, "t1pk"), `t1pk@${HOME}`)
+  })
 })
