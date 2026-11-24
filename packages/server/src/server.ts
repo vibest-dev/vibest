@@ -60,15 +60,13 @@ export const handlersCore = Layer.mergeAll(
 
 export const handlers = handlersCore.pipe(Layer.provide(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer))))
 
-const serverLayer = RpcServer.layer(VibestRpcs).pipe(
-  Layer.provide(Layer.mergeAll(handlersCore, AdmissionLive)),
+const socketServerRpcLayer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(CallerGateLive),
-  Layer.provide(ProtocolGateLive),
   Layer.provide(RpcServer.layerProtocolSocketServer),
   Layer.provide(RpcSerialization.layerNdJsonRpc()),
 )
 
-export const layer = serverLayer.pipe(Layer.provide(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer))))
+export const layer = socketServerRpcLayer.pipe(Layer.provide(Layer.mergeAll(handlers, AdmissionLive, ProtocolGateLive)))
 
 export class SocketServerLayer extends Context.Service<
   SocketServerLayer,
@@ -83,9 +81,9 @@ export const socketServer = LayerNode.make({
   deps: [socketServerLayer],
 })
 
-export const node = LayerNode.make({
-  name: "vibest/RpcServer",
-  layer: serverLayer,
+export const handlersNode = LayerNode.make({
+  name: "vibest/RpcHandlers",
+  layer: handlersCore,
   deps: [
     services,
     Agents.node,
@@ -118,10 +116,27 @@ export const node = LayerNode.make({
     WatchFeed.node,
     App.node,
     Identity.node,
-    socketServer,
     PlatformNode.childProcessSpawner,
     PlatformNode.fileSystem,
     PlatformNode.layout,
     PlatformNode.path,
   ],
+})
+
+export const admissionNode = LayerNode.make({
+  name: "vibest/Admission",
+  layer: AdmissionLive,
+  deps: [Drain.node],
+})
+
+export const protocolGateNode = LayerNode.make({
+  name: "vibest/ProtocolGate",
+  layer: ProtocolGateLive,
+  deps: [Db.node, App.node],
+})
+
+export const node = LayerNode.make({
+  name: "vibest/RpcServer",
+  layer: socketServerRpcLayer,
+  deps: [handlersNode, admissionNode, protocolGateNode, Db.node, socketServer],
 })

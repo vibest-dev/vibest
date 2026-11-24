@@ -1,26 +1,7 @@
-import { Agents } from "@vibest/core/agents"
 import { App } from "@vibest/core/app"
-import { Bus } from "@vibest/core/bus"
-import { Concurrency } from "@vibest/core/concurrency"
-import { Db } from "@vibest/core/database/db"
-import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
-import { Git } from "@vibest/core/git"
-import { Harness } from "@vibest/core/harness"
-import { Harnesses } from "@vibest/core/harnesses"
-import { Identity } from "@vibest/core/identity"
-import { Inbox } from "@vibest/core/inbox"
-import { Integration } from "@vibest/core/integration"
-import { PluginLoader, pluginLoaderNode, Plugins } from "@vibest/core/plugin"
-import { Processes } from "@vibest/core/processes"
-import { Project } from "@vibest/core/project"
-import { RepositoryUrl } from "@vibest/core/repository-url"
-import { Runtimes } from "@vibest/core/runtimes"
-import { Session } from "@vibest/core/session"
-import { EntrySession } from "@vibest/core/session/entry"
-import { Starts } from "@vibest/core/session/starts"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { PluginLoader, pluginLoaderNode } from "@vibest/core/plugin"
 import { UI_WS_CALLS } from "@vibest/protocol/access"
 import { TOKEN_HEADER } from "@vibest/protocol/protocol"
 import { Caller, CallerGate, type CallerIdentity, Forbidden, VibestRpcs } from "@vibest/protocol/rpc"
@@ -39,15 +20,7 @@ import * as Socket from "effect/socket/Socket"
 
 import { AdmissionLive, ProtocolGateLive } from "./gates.ts"
 import { DaemonHandlers } from "./handlers/daemon.ts"
-import * as Listing from "./listing.ts"
-import { Load } from "./machine/load.ts"
-import { Machines } from "./machine/machines.ts"
-import { Peer } from "./machine/peer.ts"
-import { Remote } from "./machine/remote.ts"
-import { handlersCore } from "./server.ts"
-import { services } from "./services.ts"
-import { UpdateCheck } from "./update-check.ts"
-import { WatchFeed } from "./watch-feed.ts"
+import { admissionNode, handlers, handlersNode, protocolGateNode } from "./server.ts"
 
 export const WsInfo = Schema.Struct({
   url: Schema.String,
@@ -430,9 +403,7 @@ const wsLayer = Layer.unwrap(
         )
 
         const rpcLayer = RpcServer.layer(VibestRpcs).pipe(
-          Layer.provide(Layer.mergeAll(handlersCore, AdmissionLive)),
           Layer.provide(WsCallerGateLive),
-          Layer.provide(ProtocolGateLive),
           Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
         )
 
@@ -444,48 +415,20 @@ const wsLayer = Layer.unwrap(
   }),
 )
 
-export const layer = wsLayer.pipe(Layer.provide(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer))))
+export const layer = wsLayer.pipe(Layer.provide(Layer.mergeAll(handlers, AdmissionLive, ProtocolGateLive)))
 
 export const node = LayerNode.make({
   name: "vibest/WsServer",
   layer: wsLayer,
   deps: [
-    services,
-    Agents.node,
-    Bus.node,
-    Concurrency.node,
-    Starts.node,
-    Db.node,
-    Drain.node,
-    Git.node,
-    Harness.node,
-    Harnesses.node,
+    handlersNode,
+    admissionNode,
+    protocolGateNode,
     DaemonHandlers.identityNode,
-    Inbox.node,
-    Integration.node,
-    EntrySession.node,
-    Listing.node,
-    Load.node,
-    Machines.node,
-    Peer.node,
-    Plugins.node,
     pluginLoaderNode,
-    Processes.node,
-    Project.node,
-    Remote.node,
-    Runtimes.node,
-    Session.node,
-    DaemonHandlers.shutdownNode,
-    RepositoryUrl.node,
-    Subscriptions.node,
-    UpdateCheck.node,
-    WatchFeed.node,
     App.node,
-    Identity.node,
     wsServerLayer,
-    PlatformNode.childProcessSpawner,
     PlatformNode.fileSystem,
     PlatformNode.layout,
-    PlatformNode.path,
   ],
 })
