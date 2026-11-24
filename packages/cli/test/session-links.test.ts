@@ -3,6 +3,7 @@ import { Db } from "@vibest/core/database/db"
 import { Placement } from "@vibest/core/session/placement"
 import { authed, makeRepository } from "@vibest/platform-bun/test/lib/fakes"
 import { asCli, asEntry, asSession, client, test } from "@vibest/platform-bun/test/lib/rpc-helpers"
+import { session as draftSession } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import { EdgeChain, EdgeDirected, EdgeMutual } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
@@ -149,6 +150,20 @@ describe("Session graph links RPC", () => {
       const promptAfter = yield* placement.systemPromptOf(rowA)
       assert.notInclude(promptAfter, `vibest send ${entryId}`)
       assert.include(promptAfter, "not linked to message it directly")
+
+      const remoteCreatorId = "99999999-9999-4999-8999-999999999999"
+      const remoteSessionId = "88888888-8888-4888-8888-888888888888"
+
+      yield* db.session.insertSession(draftSession(remoteSessionId), opened.projectId, {
+        cwd: repo,
+        task: "remote task",
+        origin: { peer: "peer-1", project: "77777777-7777-4777-8777-777777777777", reportTo: remoteCreatorId },
+      })
+
+      const remoteRow = (yield* db.session.getSession(remoteSessionId))!
+      const remotePrompt = yield* placement.systemPromptOf(remoteRow)
+      assert.include(remotePrompt, `vibest send ${remoteCreatorId}`)
+      assert.notInclude(remotePrompt, "not linked to message it directly")
     }),
   )
 })
