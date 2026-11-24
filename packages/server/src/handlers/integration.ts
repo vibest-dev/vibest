@@ -42,10 +42,10 @@ export const make = Effect.gen(function* () {
     "Harnesses.List": ({ provider, machine }, { headers }) =>
       Effect.gen(function* () {
         if (machine !== undefined && machine !== LOCAL_MACHINE) {
-          if (reader(headers)(CALLER_HEADER) === "peer")
+          if (reader(headers)(CALLER_HEADER) === "remote")
             return yield* new Forbidden({
               method: "Harnesses.List",
-              message: "a peer asks for this machine's harnesses only",
+              message: "a remote asks for this machine's harnesses only",
             })
 
           return yield* remote.harnesses(machine, provider)
@@ -59,10 +59,10 @@ export const make = Effect.gen(function* () {
     "Agents.List": ({ machine }, { headers }) =>
       Effect.gen(function* () {
         if (machine !== undefined && machine !== LOCAL_MACHINE) {
-          if (reader(headers)(CALLER_HEADER) === "peer")
+          if (reader(headers)(CALLER_HEADER) === "remote")
             return yield* new Forbidden({
               method: "Agents.List",
-              message: "a peer asks for this machine's agents only",
+              message: "a remote asks for this machine's agents only",
             })
 
           return yield* remote.agents(machine)

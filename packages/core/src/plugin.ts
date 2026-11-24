@@ -489,9 +489,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       if (!(yield* settled)) {
         const waiting = stillLoading()
 
-        return waiting.length === 0
-          ? "plugins are still activating; tool call refused."
-          : `plugins are still activating (${waiting.join(", ")}); tool call refused.`
+        return `plugins are still activating${waiting.length === 0 ? "" : ` (${waiting.join(", ")})`}; tool call refused.`
       }
 
       for (const hook of hooksOf("session.tool.execute.before")) {

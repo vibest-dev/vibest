@@ -14,8 +14,6 @@ import { Hooks } from "./hooks.ts"
 
 type Short = keyof VibestPlugin.SessionHooks
 
-const HOOKS: ReadonlyArray<Short> = ["start.before", "tool.execute.before"]
-
 type SessionRegistrations = {
   readonly [S in Short]: (
     callback: (event: VibestPlugin.SessionHooks[S]) => Effect.Effect<void, VibestPlugin.SessionFailures[S]>,
@@ -106,10 +104,14 @@ export const make = Effect.gen(function* () {
     }
 
     const hook: VibestPlugin.SessionDomain["hook"] = (short, callback) => {
-      if (!Predicate.isString(short) || !HOOKS.includes(short)) {
+      if (!Predicate.isString(short) || !Object.hasOwn(sessionRegistrations, short)) {
         return Effect.die(
           new Error(
-            `unsupported hook ${JSON.stringify(`session.${String(short)}`)}; supported: ${HOOKS.map((s) => `session.${s}`).join(", ")}`,
+            `unsupported hook ${JSON.stringify(`session.${String(short)}`)}; supported: ${Object.keys(
+              sessionRegistrations,
+            )
+              .map((s) => `session.${s}`)
+              .join(", ")}`,
           ),
         )
       }

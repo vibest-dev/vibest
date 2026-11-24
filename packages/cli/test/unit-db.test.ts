@@ -442,7 +442,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a peer item for an ended session goes to its nearest living creator, once; with none, nothing is written locally",
+    "a remote item for an ended session goes to its nearest living creator, once; with none, nothing is written locally",
     () =>
       Effect.gen(function* () {
         const db = yield* Db.Service
@@ -469,19 +469,22 @@ describe("Db", () => {
             status: string
           }>`SELECT recipient_session_id AS recipient, status FROM inbox WHERE sender_type = 'vibest'`
 
-        assert.strictEqual(yield* db.remote.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
-        assert.strictEqual(yield* db.remote.receivePeerItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "duplicate")
+        assert.strictEqual(yield* db.remote.receiveRemoteItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")), "queued")
+        assert.strictEqual(
+          yield* db.remote.receiveRemoteItem(item("7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f")),
+          "duplicate",
+        )
         assert.deepStrictEqual(yield* rows(), [{ recipient: creator, status: "pending" }])
         yield* db.session.archive(creator)
         const disposed = "8c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f"
-        assert.strictEqual(yield* db.remote.receivePeerItem(item(disposed)), "queued")
-        assert.strictEqual(yield* db.remote.receivePeerItem(item(disposed)), "duplicate")
+        assert.strictEqual(yield* db.remote.receiveRemoteItem(item(disposed)), "queued")
+        assert.strictEqual(yield* db.remote.receiveRemoteItem(item(disposed)), "duplicate")
         assert.deepStrictEqual(
           yield* sql<{ status: string }>`SELECT status FROM inbox WHERE transfer_id = ${disposed}`,
           [{ status: "dropped" }],
         )
         yield* db.session.startEntry(project, "pi", false, place, ENTRY)
-        assert.strictEqual(yield* db.remote.receivePeerItem(item(disposed)), "duplicate")
+        assert.strictEqual(yield* db.remote.receiveRemoteItem(item(disposed)), "duplicate")
         assert.deepStrictEqual(
           yield* sql<{ status: string }>`SELECT status FROM inbox WHERE transfer_id = ${disposed}`,
           [{ status: "dropped" }],

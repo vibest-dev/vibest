@@ -28,7 +28,7 @@ import {
   archived,
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
-import type { PeerStart } from "../database/remote.ts"
+import type { RemoteStart } from "../database/remote.ts"
 import { Drain } from "../drain.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
@@ -110,7 +110,7 @@ export interface SpawnInput {
   readonly request?: string | undefined
   readonly commit?: string | undefined
   readonly folders?: ReadonlyArray<PinnedFolder> | undefined
-  readonly origin?: PeerStart | undefined
+  readonly origin?: RemoteStart | undefined
   readonly files?: ReadonlyArray<Attachment> | undefined
   readonly from?: ReadonlyArray<string> | undefined
   readonly to?: ReadonlyArray<string> | undefined

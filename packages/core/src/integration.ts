@@ -139,7 +139,7 @@ const make = Effect.gen(function* () {
         {
           id: row.id,
           agent: row.agent,
-          project: String(row.projectId),
+          project: row.projectId,
           projectDir: layout.project(row.projectId),
           directory: row.directory,
         },

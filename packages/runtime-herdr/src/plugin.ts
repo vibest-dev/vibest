@@ -54,7 +54,7 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
           id: KIND,
           caller,
           link: () => Machines.link(pool),
-          locate: (peer, sessions) => Machines.locate(cli, peer, sessions),
+          locate: (remote, sessions) => Machines.locate(cli, remote, sessions),
         }),
       )
       yield* Mirror.mirror(context.machine, cli)

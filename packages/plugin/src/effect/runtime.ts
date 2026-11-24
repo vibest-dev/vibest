@@ -3,7 +3,7 @@ import { Effect, PubSub, Schema, Stream } from "effect"
 import type { Launch } from "./launch.ts"
 import type { Transform } from "./registration.ts"
 
-export interface Peer {
+export interface Remote {
   readonly id: string
   readonly target: string
   readonly link: Readonly<Record<string, string>>
@@ -112,7 +112,7 @@ export interface RuntimeDefinition {
   readonly doctor?: (harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>
   readonly attach?: (target: string | undefined, terminal?: Terminal) => ReadonlyArray<string>
   readonly link?: () => Effect.Effect<Readonly<Record<string, string>> | undefined>
-  readonly locate?: (peer: Peer, sessions: ReadonlyMap<string, string>) => Effect.Effect<Located>
+  readonly locate?: (remote: Remote, sessions: ReadonlyMap<string, string>) => Effect.Effect<Located>
 }
 
 export interface RuntimeEditor {

@@ -224,7 +224,7 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
-    "a peer send taken by the entry names the remote address, not the user",
+    "a remote send taken by the entry names the remote address, not the user",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db.Service
@@ -242,7 +242,7 @@ describe.concurrent("an idle session takes its next batch", () => {
       yield* herdr.seedAgent("test/coord")
 
       assert.strictEqual(
-        yield* db.remote.receivePeerItem({
+        yield* db.remote.receiveRemoteItem({
           id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
           recipient: entry.sessionId,
           kind: "send",

@@ -22,7 +22,7 @@ export default Runtime.handler(Commands.commands.run, (o) =>
             message: "this vibestd does not take --runtime on vibest run; run vibest update",
           })
 
-        if (Option.isSome(o.project) && ping.capabilities?.peerSpawnProject !== true)
+        if (Option.isSome(o.project) && ping.capabilities?.remoteSpawnProject !== true)
           return yield* new LaunchFailed({
             message: "this vibestd does not take --project on vibest run; run vibest update",
           })

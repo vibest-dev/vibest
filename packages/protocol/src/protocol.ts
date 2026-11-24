@@ -38,18 +38,18 @@ export const CWD_HEADER = "vibest-cwd"
 export const RUNTIME_HEADER = "vibest-runtime"
 export const PLUGIN_VERSION_HEADER = "vibest-plugin-version"
 export const PROCESS_HEADER = "vibest-process"
-export const PEER_HEADER = "vibest-peer"
-export const PEER_PROJECT_HEADER = "vibest-peer-project"
+export const REMOTE_HEADER = "vibest-remote"
+export const REMOTE_PROJECT_HEADER = "vibest-remote-project"
 
-export const PEER_BY_HEADER = "vibest-peer-by"
-export const PEER_BY_USER = "user"
+export const REMOTE_BY_HEADER = "vibest-remote-by"
+export const REMOTE_BY_USER = "user"
 
-export const peerHeaders = (peer: string, project?: string, by?: string) => ({
+export const remoteHeaders = (remote: string, project?: string, by?: string) => ({
   [PROTOCOL_HEADER]: String(PROTOCOL),
-  [CALLER_HEADER]: "peer",
-  [PEER_HEADER]: peer,
-  ...(project !== undefined && { [PEER_PROJECT_HEADER]: project }),
-  ...(by !== undefined && { [PEER_BY_HEADER]: by }),
+  [CALLER_HEADER]: "remote",
+  [REMOTE_HEADER]: remote,
+  ...(project !== undefined && { [REMOTE_PROJECT_HEADER]: project }),
+  ...(by !== undefined && { [REMOTE_BY_HEADER]: by }),
 })
 
 export const TAKE_ROUTE = "/inbox/take"
@@ -107,14 +107,14 @@ export const CAPABILITIES = {
   handoff: true,
   requests: true,
   watch: true,
-  peerWatch: true,
+  remoteWatch: true,
   events: true,
   projects: true,
   spawnRuntime: true,
   spawnFiles: true,
-  peerSpawnFiles: true,
-  peerSpawnRepositories: true,
-  peerSpawnProject: true,
+  remoteSpawnFiles: true,
+  remoteSpawnRepositories: true,
+  remoteSpawnProject: true,
   projectClone: true,
   load: true,
   agents: true,

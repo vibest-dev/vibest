@@ -63,8 +63,15 @@ export type Outcome<N extends Name> = { readonly ms: number } & (
 
 export const errorMessage = (cause: Cause.Cause<unknown>) => messageOf(Cause.squash(cause))
 
-const isSessionRefused = (e: unknown): e is VibestPlugin.SessionRefused => Predicate.isTagged(e, "SessionRefused")
-const isToolRefused = (e: unknown): e is VibestPlugin.ToolRefused => Predicate.isTagged(e, "ToolRefused")
+const REFUSAL_TAG: Partial<Record<Name, "SessionRefused" | "ToolRefused">> = {
+  "session.start.before": "SessionRefused",
+  "session.tool.execute.before": "ToolRefused",
+}
+
+const isRefusal =
+  (tag: "SessionRefused" | "ToolRefused") =>
+  (e: unknown): e is VibestPlugin.SessionRefused | VibestPlugin.ToolRefused =>
+    Predicate.isTagged(e, tag)
 
 const decision = <A>(value: A | void) => (Predicate.isObjectOrArray(value) ? value : undefined)
 
@@ -144,21 +151,13 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
 
   if (Exit.isSuccess(exit.value)) return { ms, outcome: "ok", value: decision(exit.value.value) } satisfies Outcome<N>
   const cause = exit.value.cause
-  const errorOption = Cause.findErrorOption(cause)
-  const sessionRefused = Option.filter(errorOption, isSessionRefused)
+  const refusalTag = REFUSAL_TAG[name]
+  const failure: unknown = Option.getOrUndefined(Cause.findErrorOption(cause))
 
-  if (name === "session.start.before" && Option.isSome(sessionRefused)) {
+  if (refusalTag !== undefined && isRefusal(refusalTag)(failure)) {
     stats.refused++
 
-    return { ms, outcome: "refused", reason: sessionRefused.value.reason } satisfies Outcome<N>
-  }
-
-  const toolRefused = Option.filter(errorOption, isToolRefused)
-
-  if (name === "session.tool.execute.before" && Option.isSome(toolRefused)) {
-    stats.refused++
-
-    return { ms, outcome: "refused", reason: toolRefused.value.reason } satisfies Outcome<N>
+    return { ms, outcome: "refused", reason: failure.reason } satisfies Outcome<N>
   }
 
   const error = errorMessage(cause)

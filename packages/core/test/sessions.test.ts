@@ -314,7 +314,7 @@ describe.concurrent("Session", () => {
         (yield* Session.Service).spawn({
           ...input,
           harness: undefined,
-          origin: { peer: "a".repeat(32), project: "p", reportTo: "origin-session" },
+          origin: { remote: "a".repeat(32), project: "p", reportTo: "origin-session" },
         }),
       )
 

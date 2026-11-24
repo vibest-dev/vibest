@@ -46,7 +46,7 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
             Effect.map((hello) => ({ core: hello.core.id, session })),
             Effect.orElseSucceed(() => undefined),
           ),
-        locate: (peer, sessions) => Machines.locate(home, peer, sessions),
+        locate: (remote, sessions) => Machines.locate(home, remote, sessions),
       }
 
       yield* context.runtime.transform((editor) => editor.add(definition))
