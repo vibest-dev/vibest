@@ -141,8 +141,9 @@ export const createProject = Effect.fn("Project.createProject")(function* (
 export interface ProjectRepository {
   readonly name: string
   readonly path: string
-  readonly branch: string
 }
+
+const REPO_CONCURRENCY = 8
 
 const ownGitCheckout = (dir: string) =>
   Effect.gen(function* () {
@@ -170,20 +171,23 @@ export const listProjectRepositories = Effect.fn("Project.listProjectRepositorie
   const names = yield* goneIsUndefined(fs.readDirectory(directory))
 
   if (names === undefined) return undefined
-  const found: ProjectRepository[] = []
+  const candidates = names.slice().sort().filter(safeRepositoryDirectory)
 
-  for (const name of names.slice().sort()) {
-    if (!safeRepositoryDirectory(name)) continue
-    const child = path.join(directory, name)
+  const checked = yield* Effect.forEach(
+    candidates,
+    (name) =>
+      Effect.gen(function* () {
+        const child = path.join(directory, name)
+        const stat = yield* goneIsUndefined(fs.stat(child))
 
-    const stat = yield* fs
-      .stat(child)
-      .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
+        if (stat === undefined || stat.type !== "Directory" || !(yield* ownGitCheckout(child))) return undefined
 
-    if (stat === undefined || stat.type !== "Directory" || !(yield* ownGitCheckout(child))) continue
-    const branch = yield* git.currentBranch(child).pipe(Effect.orElseSucceed(() => ""))
-    found.push({ name, path: child, branch })
-  }
+        return { name, path: child } satisfies ProjectRepository
+      }),
+    { concurrency: REPO_CONCURRENCY },
+  )
+
+  const found = checked.filter((entry): entry is ProjectRepository => entry !== undefined)
 
   return found.length > 0 ? found : undefined
 })
@@ -195,38 +199,36 @@ export const projectRoot = Effect.fn("Project.projectRoot")(function* (directory
 
   if (children) {
     const path = yield* Path.Path
-    let mains = 0
-    let linkedParent: string | undefined
-    let same = true
 
-    for (const child of children) {
-      if (yield* isMainCheckout(child.path)) {
-        mains++
-        continue
-      }
+    const inspected = yield* Effect.forEach(
+      children,
+      (child) =>
+        Effect.gen(function* () {
+          if (yield* isMainCheckout(child.path)) return "main" as const
 
-      const checkout = yield* mainCheckout(child.path).pipe(Effect.option)
+          return yield* mainCheckout(child.path).pipe(
+            Effect.option,
+            Effect.map(Option.map((value) => path.dirname(value))),
+          )
+        }),
+      { concurrency: REPO_CONCURRENCY },
+    )
 
-      if (Option.isNone(checkout)) {
-        same = false
-        continue
-      }
+    if (inspected.every((entry) => entry === "main")) return { root: directory }
 
-      const parent = path.dirname(checkout.value)
+    const linkedParents = inspected.filter(
+      (entry): entry is Option.Some<string> => entry !== "main" && Option.isSome(entry),
+    )
 
-      if (linkedParent === undefined) linkedParent = parent
-      else if (linkedParent !== parent) same = false
-    }
-
-    if (mains === children.length) return { root: directory }
-
-    if (same && mains === 0 && linkedParent !== undefined) {
+    if (linkedParents.length === children.length && new Set(linkedParents.map((entry) => entry.value)).size === 1) {
+      const linkedParent = linkedParents[0]!.value
       const nested = yield* listProjectRepositories(linkedParent)
-      let nestedMains = nested !== undefined
 
-      if (nested) for (const child of nested) if (!(yield* isMainCheckout(child.path))) nestedMains = false
+      const nestedChecks = nested
+        ? yield* Effect.forEach(nested, (child) => isMainCheckout(child.path), { concurrency: REPO_CONCURRENCY })
+        : undefined
 
-      if (nested && nestedMains) return { root: linkedParent }
+      if (nested && nestedChecks?.every(Boolean)) return { root: linkedParent }
 
       return { root: yield* mainCheckout(linkedParent) }
     }
@@ -245,19 +247,23 @@ export const projectRepositories = Effect.fn("Project.projectRepositories")(func
   const children = yield* listProjectRepositories(root)
 
   const checkouts = children
-    ? yield* Effect.forEach(children, (child) => mainCheckout(child.path))
+    ? yield* Effect.forEach(children, (child) => mainCheckout(child.path), { concurrency: REPO_CONCURRENCY })
     : [yield* mainCheckout(root)]
 
-  const places: RepositoryPlace[] = []
+  const realPaths = yield* Effect.forEach(checkouts, (checkout) => fs.realPath(checkout), {
+    concurrency: REPO_CONCURRENCY,
+  })
 
-  for (const checkout of checkouts) {
-    const path = yield* fs.realPath(checkout)
+  const uniquePaths = [...new Set(realPaths)]
 
-    if (places.some((place) => place.path === path)) continue
-    places.push({ path, remote: yield* Git.Service.use((git) => git.remoteUrl(path)) })
-  }
-
-  return places
+  return yield* Effect.forEach(
+    uniquePaths,
+    (repoPath) =>
+      Git.Service.use((git) => git.remoteUrl(repoPath)).pipe(
+        Effect.map((remote): RepositoryPlace => ({ path: repoPath, remote })),
+      ),
+    { concurrency: REPO_CONCURRENCY },
+  )
 })
 
 const removeWorktrees = (
@@ -301,11 +307,17 @@ export const createIsolatedWorktrees = Effect.fn("Project.createIsolatedWorktree
 export const discardIsolatedWorktrees = Effect.fn("Project.discardIsolatedWorktrees")(function* (workspace: string) {
   const folders = (yield* listProjectRepositories(workspace)) ?? []
 
-  const entries = yield* Effect.forEach(folders, (folder) =>
-    mainCheckout(folder.path).pipe(
-      Effect.option,
-      Effect.map((checkout) => ({ repository: Option.getOrElse(checkout, () => folder.path), worktree: folder.path })),
-    ),
+  const entries = yield* Effect.forEach(
+    folders,
+    (folder) =>
+      mainCheckout(folder.path).pipe(
+        Effect.option,
+        Effect.map((checkout) => ({
+          repository: Option.getOrElse(checkout, () => folder.path),
+          worktree: folder.path,
+        })),
+      ),
+    { concurrency: REPO_CONCURRENCY },
   )
 
   yield* removeWorktrees(entries, workspace)
@@ -319,18 +331,21 @@ export const workspaceGit = Effect.fn("Project.workspaceGit")(function* (workspa
   const folders = yield* listProjectRepositories(workspace)
 
   if (!folders) return undefined
-  const lines: RepositoryGit[] = []
 
-  for (const folder of folders) {
-    const state = (yield* gitState(folder.path)) ?? {
-      branch: "",
-      pushed: false,
-      saved: false,
-      why: "git cannot read it",
-    }
-
-    lines.push({ name: folder.name, ...state })
-  }
-
-  return lines
+  return yield* Effect.forEach(
+    folders,
+    (folder) =>
+      gitState(folder.path).pipe(
+        Effect.map((state): RepositoryGit => ({
+          name: folder.name,
+          ...(state ?? {
+            branch: "",
+            pushed: false,
+            saved: false,
+            why: "git cannot read it",
+          }),
+        })),
+      ),
+    { concurrency: REPO_CONCURRENCY },
+  )
 })

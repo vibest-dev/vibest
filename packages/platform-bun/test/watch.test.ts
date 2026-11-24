@@ -17,6 +17,7 @@ import * as Platform from "#platform"
 
 import {
   authed,
+  FakeGit,
   FakeRuntime,
   makeRepository,
   projectOf,
@@ -29,7 +30,7 @@ import {
 const served = Server.layer.pipe(
   Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
-  Layer.provideMerge(testLayer()),
+  Layer.provideMerge(testLayer({ sshHosts: { work: "Git.Internal.Example" } })),
 )
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>) =>
@@ -89,7 +90,13 @@ describe("Watch", () => {
       const { next, c } = yield* watching(repo)
       const snapshot = yield* next(isSnapshot)
       assert.deepStrictEqual(snapshot.projects, [
-        { id: project, directory: repo, entrySessionId: entryId, activity: "idle" },
+        {
+          id: project,
+          directory: repo,
+          entrySessionId: entryId,
+          activity: "idle",
+          repositories: [{ path: repo, identity: null }],
+        },
       ])
       assert.deepStrictEqual(
         snapshot.sessions.map((s) => [s.id, s.agent, s.parentId]),
@@ -120,6 +127,7 @@ describe("Watch", () => {
         directory: other,
         entrySessionId: null,
         activity: "idle",
+        repositories: [{ path: other, identity: null }],
       })
 
       yield* c.Remove({ id })
@@ -307,14 +315,23 @@ describe("Watch", () => {
   test(
     "a client that stops acknowledging falls behind, and the stream fails with WatchLagged instead of growing",
     Effect.gen(function* () {
-      const { repo, project } = yield* withEntry
+      const { repo, project, entryId } = yield* withEntry
+      const db = yield* Db.Service
       const bus = yield* Bus.Service
       const w = yield* wire
       yield* w.send({ jsonrpc: "2.0", id: 1, method: "Watch", params: null, headers: Object.entries(cliHeaders(repo)) })
       const first = yield* w.recv
       assert.strictEqual((first["result"] as Array<WatchEvent>)[0]!._tag, "Snapshot")
 
-      for (let i = 0; i < WATCH_BACKLOG + 500; i++) yield* bus.observe({ type: "project.changed", projectId: project })
+      const read = db.session.sessionIdentity
+      const ids = Array.from({ length: WATCH_BACKLOG + 500 }, (_, i) => `ended-${i}`)
+
+      Object.assign(db.session, {
+        sessionIdentity: (id: string) => (id.startsWith("ended-") ? Effect.succeed({ projectId: project }) : read(id)),
+      })
+
+      for (const id of ids) yield* bus.observe({ type: "session.changed", sessionId: id })
+      yield* bus.observe({ type: "session.changed", sessionId: entryId })
       const ack = { jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: 1 } }
 
       for (;;) {
@@ -325,6 +342,130 @@ describe("Watch", () => {
         assert.include(JSON.stringify(line["error"]), "WatchLagged")
         break
       }
+    }),
+  )
+
+  test(
+    "session.changed ticks reuse cached project repositories without re-probing git, while project.changed invalidates the cache",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const bus = yield* Bus.Service
+      const fakeGit = yield* FakeGit
+      const { repo, project, entryId } = yield* withEntry
+      yield* fakeGit.update(repo, { origin: "git@github.com:Org/Cached.git" })
+
+      const { next } = yield* watching(repo)
+      const snapshot = yield* next(isSnapshot)
+
+      assert.deepStrictEqual(snapshot.projects, [
+        {
+          id: project,
+          directory: repo,
+          entrySessionId: entryId,
+          activity: "idle",
+          repositories: [{ path: repo, identity: "github.com/Org/Cached" }],
+        },
+      ])
+
+      const readRemote = fakeGit.git.remoteUrl
+      let remoteReads = 0
+
+      Object.assign(fakeGit.git, {
+        remoteUrl: (dir: string, order?: "ranked" | "project") => {
+          remoteReads++
+
+          return readRemote(dir, order)
+        },
+      })
+
+      yield* db.session.setStatus(entryId, "working")
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === "working",
+      )
+      yield* db.session.setStatus(entryId, "idle")
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === "idle",
+      )
+      assert.strictEqual(remoteReads, 0)
+
+      yield* fakeGit.update(repo, { origin: "git@github.com:Org/Updated.git" })
+      yield* bus.observe({ type: "project.changed", projectId: project })
+
+      const refreshed = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") &&
+          e.project.id === project &&
+          e.project.repositories[0]?.identity === "github.com/Org/Updated",
+      )
+
+      assert.strictEqual(remoteReads, 1)
+      assert.deepStrictEqual(refreshed.project.repositories, [{ path: repo, identity: "github.com/Org/Updated" }])
+    }),
+  )
+
+  test(
+    "Snapshot and Project events include normalized repository identities for single-repo, multi-repo and updated projects",
+    Effect.gen(function* () {
+      const bus = yield* Bus.Service
+      const fakeGit = yield* FakeGit
+      const single = yield* makeRepository
+      yield* fakeGit.update(single, { origin: "git@github.com:Org/App.git" })
+      const openedSingle = yield* authed(yield* client, cliHeaders(single))["Project.Open"]({})
+
+      const parent = yield* tempDirectory("vibest-multi-")
+      const repoA = `${parent}/a-origin`
+      const repoB = `${parent}/b-alias`
+      const repoC = `${parent}/c-local`
+      yield* Effect.promise(() => fs.mkdir(repoA))
+      yield* Effect.promise(() => fs.mkdir(repoB))
+      yield* Effect.promise(() => fs.mkdir(repoC))
+      yield* fakeGit.repository(repoA, { origin: "https://GitHub.com/Org/Web.git" })
+      yield* fakeGit.repository(repoB, { origin: "work:team/service.git" })
+      yield* fakeGit.repository(repoC)
+
+      const { next } = yield* watching(single)
+      const snapshot = yield* next(isSnapshot)
+      const singleRow = snapshot.projects.find((p) => p.id === openedSingle.projectId)
+
+      assert.deepStrictEqual(singleRow?.repositories, [{ path: single, identity: "github.com/Org/App" }])
+
+      const openedMulti = yield* authed(yield* client, cliHeaders(parent))["Project.Open"]({})
+
+      const multiEvent = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") && e.project.id === openedMulti.projectId,
+      )
+
+      const expectedMulti = [
+        { path: repoA, identity: "github.com/Org/Web" },
+        { path: repoB, identity: "git.internal.example/team/service" },
+        { path: repoC, identity: null },
+      ]
+
+      assert.deepStrictEqual(multiEvent.project.repositories, expectedMulti)
+
+      const snapshotAfter = yield* (yield* watching(parent)).next(isSnapshot)
+      const multiRow = snapshotAfter.projects.find((p) => p.id === openedMulti.projectId)
+
+      assert.deepStrictEqual(multiRow?.repositories, expectedMulti)
+
+      yield* fakeGit.update(repoC, { origin: "git@gitlab.com:team/newly-added.git" })
+      yield* bus.observe({ type: "project.changed", projectId: openedMulti.projectId })
+
+      const updated = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") &&
+          e.project.id === openedMulti.projectId &&
+          e.project.repositories.some((r) => r.path === repoC && r.identity === "gitlab.com/team/newly-added"),
+      )
+
+      assert.deepStrictEqual(updated.project.repositories, [
+        { path: repoA, identity: "github.com/Org/Web" },
+        { path: repoB, identity: "git.internal.example/team/service" },
+        { path: repoC, identity: "gitlab.com/team/newly-added" },
+      ])
     }),
   )
 })

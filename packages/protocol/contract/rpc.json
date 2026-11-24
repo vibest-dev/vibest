@@ -17036,13 +17036,40 @@
                         "working",
                         "idle"
                       ]
+                    },
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "identity": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "identity"
+                        ],
+                        "additionalProperties": true
+                      }
                     }
                   },
                   "required": [
                     "id",
                     "directory",
                     "entrySessionId",
-                    "activity"
+                    "activity",
+                    "repositories"
                   ],
                   "additionalProperties": true
                 }
@@ -17594,13 +17621,40 @@
                       "working",
                       "idle"
                     ]
+                  },
+                  "repositories": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "identity": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "identity"
+                      ],
+                      "additionalProperties": true
+                    }
                   }
                 },
                 "required": [
                   "id",
                   "directory",
                   "entrySessionId",
-                  "activity"
+                  "activity",
+                  "repositories"
                 ],
                 "additionalProperties": true
               }
