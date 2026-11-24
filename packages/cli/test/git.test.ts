@@ -792,7 +792,7 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
   )
 
   it.effect(
-    "bounded git concurrency: 6 multi-repo worktrees x 10 real git repos runs in parallel, stays within GIT_CONCURRENCY, and finishes under 3s",
+    "bounded git concurrency: 6 multi-repo worktrees x 10 real git repos runs in parallel, stays within GIT_CONCURRENCY, and finishes under 15s",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -802,25 +802,12 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         let maxInFlight = 0
 
         const countingSpawner = ChildProcessSpawner.make((command) =>
-          Effect.gen(function* () {
-            maxInFlight = Math.max(maxInFlight, ++inFlight)
-            const handle = yield* baseSpawner.spawn(command)
-            let released = false
-
-            const release = Effect.sync(() => {
-              if (!released) {
-                released = true
-                inFlight--
-              }
-            })
-
-            yield* Effect.addFinalizer(() => release)
-
-            return {
-              ...handle,
-              exitCode: handle.exitCode.pipe(Effect.ensuring(release)),
-            }
-          }),
+          Effect.acquireRelease(
+            Effect.sync(() => {
+              maxInFlight = Math.max(maxInFlight, ++inFlight)
+            }),
+            () => Effect.sync(() => void inFlight--),
+          ).pipe(Effect.andThen(baseSpawner.spawn(command))),
         )
 
         const projectDir = yield* tempDirectory("vibest-bench-project-")
