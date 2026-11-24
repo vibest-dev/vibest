@@ -22,6 +22,7 @@ import {
   layout,
 } from "herdr"
 
+import { showSpace } from "../../shared/session-ui.ts"
 import { SMALL, TEXT } from "../../shared/text-size.ts"
 
 function find(node, id) {
@@ -756,7 +757,7 @@ export default class Spaces extends View {
         if (from !== null && over === w.id && from !== w.id) {
           const index = spaces().findIndex((s) => s.id === w.id)
           if (index !== -1) run("space.move", { id: from, index: index + 1 })
-        } else if (from === w.id) run("space.select", { id: w.id })
+        } else if (from === w.id) showSpace(w.id)
         cx.notify()
       })
       .on_mouse_down("right", () => this.menu(w))
@@ -799,7 +800,7 @@ export default class Spaces extends View {
         .items_center()
         .when(w.active, (el) => el.bg(t.selected))
         .when(!w.active, (el) => el.hover((s) => s.bg(t.hover)))
-        .on_click(() => run("space.select", { id: w.id }))
+        .on_click(() => showSpace(w.id))
         .child(
           div()
             .text_color(w.active ? t.foreground : t.muted)

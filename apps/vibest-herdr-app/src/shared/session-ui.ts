@@ -119,3 +119,10 @@ export const openProject = (key: string, m: MachineMember): void => {
 
   if (terminal) run("pane.focus", { terminal })
 }
+
+export const showSpace = (id: string): void => {
+  setShared(CHAT, null)
+  setShared(SELECTED, null)
+  applyLayout()
+  run("space.select", { id })
+}
