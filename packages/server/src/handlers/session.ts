@@ -102,13 +102,6 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const c = yield* Caller
 
-      if (Predicate.isTagged(c, "Peer")) {
-        if (c.projectId === undefined)
-          return yield* new Forbidden({ method, message: `${method} needs the calling project` })
-
-        return c.projectId
-      }
-
       if (Predicate.isTagged(c, "Ui")) {
         const ref = Predicate.isTagged(spec, "Directed") ? spec.from[0] : spec.ids[0]
 

@@ -132,12 +132,14 @@ export const make = Effect.gen(function* () {
       directory === projectDirectory &&
       !directory.startsWith(`${layout.worktrees}/`)
 
+    const creatorLinked = creator !== undefined && (creator.remote || (yield* db.inbox.maySend(session.id, creator.id)))
+
     return systemPrompt({
       system: (yield* definitionIn(agents, session.agent)).system,
       id: session.id,
       checkout,
       sharer: yield* db.session.earlierSharer(session.id),
-      creator,
+      creator: creator === undefined ? undefined : { ...creator, linked: creatorLinked },
       linkedTo: yield* db.session.linkedTargets(session.id, creator?.id),
       projectDir: layout.project(session.projectId),
       agents: agents.all,

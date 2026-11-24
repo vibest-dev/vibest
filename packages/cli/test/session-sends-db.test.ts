@@ -208,7 +208,7 @@ describe("sends from sessions", () => {
           assert.deepStrictEqual(yield* db.session.nearestAlive(B), { local: entryId })
           assert.isTrue(yield* db.inbox.maySend(B, A))
           const creator = yield* db.session.creatorLabel(B)
-          assert.deepStrictEqual(creator, { id: A, label: `agent ${session(A).name}` })
+          assert.deepStrictEqual(creator, { id: A, label: `agent ${session(A).name}`, remote: false })
 
           const prompt = systemPrompt({
             system: "",

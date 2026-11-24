@@ -13467,10 +13467,7 @@
       }
     },
     "Session.Link": {
-      "access": [
-        "agent",
-        "peer"
-      ],
+      "access": "agent",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -13552,16 +13549,6 @@
                 "additionalProperties": true
               }
             ]
-          },
-          "machine": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -13611,15 +13598,6 @@
               },
               {
                 "$ref": "#/$defs/AmbiguousSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
               }
             ]
           },
@@ -13713,78 +13691,6 @@
               "_tag",
               "prefix",
               "matches"
-            ],
-            "additionalProperties": true
-          },
-          "UnknownMachineEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "UnknownMachine"
-                ]
-              },
-              "machine": {
-                "type": "string"
-              },
-              "machines": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            },
-            "required": [
-              "_tag",
-              "machine",
-              "machines"
-            ],
-            "additionalProperties": true
-          },
-          "MachineUnavailableEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "MachineUnavailable"
-                ]
-              },
-              "machine": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "machine",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "MachineIncompatibleEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "MachineIncompatible"
-                ]
-              },
-              "machine": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "machine",
-              "message"
             ],
             "additionalProperties": true
           },
@@ -14415,10 +14321,7 @@
       }
     },
     "Session.Unlink": {
-      "access": [
-        "agent",
-        "peer"
-      ],
+      "access": "agent",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -14500,16 +14403,6 @@
                 "additionalProperties": true
               }
             ]
-          },
-          "machine": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -14559,15 +14452,6 @@
               },
               {
                 "$ref": "#/$defs/AmbiguousSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
               }
             ]
           },
@@ -14661,78 +14545,6 @@
               "_tag",
               "prefix",
               "matches"
-            ],
-            "additionalProperties": true
-          },
-          "UnknownMachineEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "UnknownMachine"
-                ]
-              },
-              "machine": {
-                "type": "string"
-              },
-              "machines": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            },
-            "required": [
-              "_tag",
-              "machine",
-              "machines"
-            ],
-            "additionalProperties": true
-          },
-          "MachineUnavailableEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "MachineUnavailable"
-                ]
-              },
-              "machine": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "machine",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "MachineIncompatibleEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "MachineIncompatible"
-                ]
-              },
-              "machine": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "machine",
-              "message"
             ],
             "additionalProperties": true
           },

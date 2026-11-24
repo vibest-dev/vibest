@@ -17,7 +17,7 @@ import {
 import { Context, Effect, FileSystem, Layer, Option, Path, Predicate } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import { type SessionRow, archived, runtimeOf, terminalOf, exitedAt } from "./database/db-rows.ts"
+import { type SessionRow, runtimeOf, terminalOf, exitedAt } from "./database/db-rows.ts"
 import { Db, type SessionFilter } from "./database/db.ts"
 import type { SessionEdge } from "./database/session.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -34,7 +34,7 @@ import { Placement } from "./session/placement.ts"
 import { Reconcile } from "./session/reconcile.ts"
 import { type Outdated, Restart } from "./session/restart.ts"
 import type { SendRefused } from "./session/sends.ts"
-import { LinkRefused, Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
+import { LinkRefused, resolveLiveTarget, Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
 import { gitState, mainCheckout } from "./worktree.ts"
 
 export * as Session from "./session.ts"
@@ -289,23 +289,9 @@ export const make = Effect.gen(function* () {
       ),
   )
 
-  const resolveEdgeTarget = (projectId: string) => (ref: string) =>
-    Effect.gen(function* () {
-      const id = yield* db.session.resolveSession(ref)
-      const row = yield* db.session.getSession(id)
-
-      if (row === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
-
-      if (row.projectId !== projectId) return yield* new LinkRefused({ message: `${id} belongs to another project` })
-
-      if (archived(row)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
-
-      return id
-    })
-
   const expandEdges = (projectId: string, spec: EdgeSpec) =>
     Effect.gen(function* () {
-      const resolve = resolveEdgeTarget(projectId)
+      const resolve = resolveLiveTarget(db, projectId)
       const pairs: Array<readonly [string, string]> = []
       const seen = new Set<string>()
 
@@ -321,7 +307,7 @@ export const make = Effect.gen(function* () {
       if (Predicate.isTagged(spec, "Mutual")) {
         const ids = [...new Set(yield* Effect.forEach(spec.ids, resolve))]
 
-        if (ids.length < 2) return yield* new LinkRefused({ message: "give at least two distinct sessions to link" })
+        if (ids.length < 2) return yield* new LinkRefused({ message: "give at least two distinct sessions" })
 
         for (const a of ids) for (const b of ids) push(a, b)
 
@@ -336,11 +322,11 @@ export const make = Effect.gen(function* () {
           return yield* new LinkRefused({ message: "give at least one source and one target session" })
 
         if (from.length === 1 && to.length === 1 && from[0] === to[0])
-          return yield* new LinkRefused({ message: "a session does not link to itself" })
+          return yield* new LinkRefused({ message: "a session cannot target itself" })
 
         for (const a of from) for (const b of to) push(a, b)
 
-        if (pairs.length === 0) return yield* new LinkRefused({ message: "a session does not link to itself" })
+        if (pairs.length === 0) return yield* new LinkRefused({ message: "a session cannot target itself" })
 
         return pairs
       }
@@ -353,7 +339,7 @@ export const make = Effect.gen(function* () {
         const a = ids[i]!
         const b = ids[i + 1]!
 
-        if (a === b) return yield* new LinkRefused({ message: "a session does not link to itself" })
+        if (a === b) return yield* new LinkRefused({ message: "a session cannot target itself" })
         push(a, b)
       }
 

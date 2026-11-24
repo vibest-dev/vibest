@@ -19,6 +19,7 @@ import hcTerminals from "./scenarios/hc-terminals.ts"
 import hc from "./scenarios/hc.ts"
 import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
+import links from "./scenarios/links.ts"
 import machinesHerdr from "./scenarios/machines-herdr.ts"
 import machinesRepositories from "./scenarios/machines-repositories.ts"
 import machines from "./scenarios/machines.ts"
@@ -31,7 +32,6 @@ import rex from "./scenarios/rex.ts"
 import routing from "./scenarios/routing.ts"
 import sessions from "./scenarios/sessions.ts"
 import start from "./scenarios/start.ts"
-import teams from "./scenarios/teams.ts"
 import terminalStatus from "./scenarios/terminal-status.ts"
 import update from "./scenarios/update.ts"
 import {
@@ -65,7 +65,7 @@ const areas = {
   hc: [...hc, ...hcTerminals],
   rex,
   sessions,
-  delivery: [...delivery, ...teams],
+  delivery: [...delivery, ...links],
   routing,
   entry: entrySession,
   machines: [...machines, ...machinesRepositories, ...machinesHerdr],
