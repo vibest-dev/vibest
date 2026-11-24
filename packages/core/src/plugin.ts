@@ -528,7 +528,7 @@ export const node = LayerNode.make({
     Archive.node,
     Subscriptions.node,
     Summaries.node,
-    PlatformNode.crypto,
+    PlatformNode.digest,
     PlatformNode.fileSystem,
     PlatformNode.layout,
     PlatformNode.path,

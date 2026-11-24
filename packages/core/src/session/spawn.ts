@@ -12,20 +12,8 @@ import {
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
-import {
-  Clock,
-  Context,
-  Crypto,
-  Deferred,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  Predicate,
-  Ref,
-  Schema,
-} from "effect"
+import { Clock, Context, Deferred, Effect, FileSystem, Layer, Option, Path, Predicate, Ref, Schema } from "effect"
+import { SecureRandom } from "effect/crypto"
 import { Hex } from "effect/encoding"
 
 import { definitionLaunch } from "../agent-launch.ts"
@@ -148,7 +136,7 @@ export const make = Effect.gen(function* () {
   const layout = yield* Layout
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const crypto = yield* Crypto.Crypto
+  const secureRandom = yield* SecureRandom.SecureRandom
   const git = yield* Git.Service
   const scope = yield* Effect.scope
   const locks = yield* SessionLocks.Service
@@ -383,7 +371,7 @@ export const make = Effect.gen(function* () {
           yield* fs.makeDirectory(parentPath, { recursive: true }).pipe(Effect.mapError((e) => refuse(e.message)))
 
           for (let i = 0; i < ALLOCATION_NAME_ATTEMPTS; i++) {
-            const candidate = Hex.encode(yield* crypto.randomBytes(2).pipe(Effect.orDie))
+            const candidate = Hex.encode(yield* secureRandom.randomBytes(2))
 
             if (!ALLOCATION_LEAF.test(candidate)) continue
             const where = layout.allocationWorktree(repository, candidate)
@@ -569,7 +557,7 @@ export const deps = [
   Runtimes.node,
   SessionLocks.node,
   Starts.node,
-  PlatformNode.crypto,
+  PlatformNode.secureRandom,
   PlatformNode.fileSystem,
   PlatformNode.layout,
   PlatformNode.path,

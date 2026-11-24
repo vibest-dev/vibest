@@ -94,8 +94,9 @@ const fakeMachine = (options: {
 
   const spawner = ChildProcessSpawner.make((command) => {
     if (!ChildProcess.isStandardCommand(command)) return Effect.die("piped")
-    const id = [command.command, ...command.args].join(" ")
-    spawned.push({ command: command.command, args: command.args, stdin: command.options.stdin })
+    const args = command.args.map(String)
+    const id = [command.command, ...args].join(" ")
+    spawned.push({ command: command.command, args, stdin: command.options.stdin })
 
     return Effect.succeed(
       output(hanging.has(id) ? "" : (options.commands[id] ?? ""), hanging.has(id) ? Effect.never : Effect.succeed(0)),
