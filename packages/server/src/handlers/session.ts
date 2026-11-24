@@ -1,53 +1,72 @@
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
+import { expandEdgeSpec, SESSION_PREFIX } from "@vibest/core/database/session-edges"
 import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
+import { Identity } from "@vibest/core/identity"
 import { Integration } from "@vibest/core/integration"
 import { raisesSeen } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Session } from "@vibest/core/session"
+import { resolveLiveTarget } from "@vibest/core/session/spawn"
 import { Starts } from "@vibest/core/session/starts"
-import { Caller, type CallerIdentity, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
+import { Caller, type CallerIdentity, type EdgeSpec, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
 import type { AgentFrom, AgentSender } from "@vibest/schema/event"
-import { MachineFailed } from "@vibest/schema/machine"
-import { NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
+import { MachineFailed, UnknownMachine } from "@vibest/schema/machine"
+import { AmbiguousSession, NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Predicate, Stream } from "effect"
 
 import { integrationOf, processOf, reader } from "../gates.ts"
 import * as Listing from "../listing.ts"
 import { RemoteWatch } from "../machine/remote-watch.ts"
-import { ListScope } from "../machine/remote.ts"
+import { address, ListScope, Remote } from "../machine/remote.ts"
 import { WatchFeed } from "../watch-feed.ts"
 import * as CallerChecks from "./caller.ts"
 import type { Handlers, MethodOf } from "./caller.ts"
 import { group } from "./group.ts"
 import { Routing } from "./remote.ts"
 
+type ResolvedEndpoint =
+  | { readonly local: true; readonly id: string; readonly remoteId: string }
+  | { readonly local: false; readonly machine: string; readonly id: string; readonly remoteId: string }
+
+const formatEndpoint = (ep: ResolvedEndpoint) => (ep.local ? ep.id : `${ep.machine}/${ep.id}`)
+
 export const make = Effect.gen(function* () {
-  const { projectOf, scope, machineFromCaller, cliOnly, userOnly, self } = yield* CallerChecks.Service
+  const { projectOf, scope, machineFromCaller, cliOnly, userOnly, self: selfCaller } = yield* CallerChecks.Service
   const { reach, routed, spawnOn } = yield* Routing
   const { listed, watched, snapshotProjects } = yield* Listing.Service
   const sessions = yield* Session.Service
   const db = yield* Db.Service
+  const selfIdentity = yield* Identity.Service
   const runtimes = yield* Runtimes.Service
   const watchFeed = yield* WatchFeed.Service
   const remoteWatch = yield* RemoteWatch.Service
+  const remoteService = yield* Remote.Service
   const bus = yield* Bus.Service
   const integration = yield* Integration.Service
   const starts = yield* Starts.Service
   const seenLocked = yield* KeyedMutex.make<string>()
 
-  const peerSender = (caller: Extract<CallerIdentity, { readonly _tag: "Peer" }>, from: AgentFrom | undefined) =>
+  const remoteSender = (caller: Extract<CallerIdentity, { readonly _tag: "Remote" }>, from: AgentFrom | undefined) =>
     Effect.gen(function* () {
-      if (caller.session === undefined) return undefined
+      if (caller.session === undefined && from === undefined) return undefined
 
-      const machine = yield* db.remote.nameForPeer(caller.peerId)
-      const record: AgentFrom = from?.session === caller.session ? from : { session: caller.session }
+      const machine = yield* db.remote.nameForRemote(caller.remoteId)
 
-      return { type: "agent", ...(machine !== undefined && { machine }), ...record } satisfies AgentSender
+      const record: AgentFrom =
+        caller.session !== undefined ? (from?.session === caller.session ? from : { session: caller.session }) : from!
+
+      const senderMachine = record.machine ?? machine
+
+      return {
+        type: "agent",
+        ...(senderMachine !== undefined && { machine: senderMachine }),
+        ...record,
+      } satisfies AgentSender
     })
 
-  const startedByPeer = (
+  const startedByRemote = (
     scope: NonNullable<Parameters<typeof db.session.resolveSession>[1]>,
     id: string,
     direct: boolean,
@@ -56,7 +75,9 @@ export const make = Effect.gen(function* () {
       if (scope.session === undefined) return true
       const route = direct ? yield* db.session.creatorOf(id) : yield* db.session.nearestAlive(id)
 
-      return route !== undefined && "peer" in route && route.peer === scope.peer && route.session === scope.session
+      return (
+        route !== undefined && "remote" in route && route.remote === scope.remote && route.session === scope.session
+      )
     })
 
   const managed = (method: MethodOf<"owner">, input: string) =>
@@ -65,7 +86,7 @@ export const make = Effect.gen(function* () {
       const id = yield* db.session.resolveSession(input, scope)
 
       if (c === undefined) {
-        if (scope !== undefined && !(yield* startedByPeer(scope, id, false)))
+        if (scope !== undefined && !(yield* startedByRemote(scope, id, false)))
           return yield* new Forbidden({
             method,
             message: `${id} was not started by the session that called; a session manages only the sessions it started`,
@@ -121,6 +142,88 @@ export const make = Effect.gen(function* () {
       return project.id
     })
 
+  const resolveEndpoint = (method: string, projectId: string, ref: string) =>
+    Effect.gen(function* () {
+      const at = address(ref)
+
+      if (Predicate.isTagged(at, "Local")) {
+        const id = yield* resolveLiveTarget(
+          db,
+          projectId,
+        )(at.id).pipe(Effect.catchTag("LinkRefused", (e) => Effect.fail(new Forbidden({ method, message: e.message }))))
+
+        return { local: true as const, id, remoteId: selfIdentity.id }
+      }
+
+      if (!SESSION_PREFIX.test(at.id)) return yield* new NoSuchSession({ id: ref, message: `no session ${ref}` })
+      const machineRow = yield* db.remote.machineNamed(at.machine)
+
+      if (machineRow === undefined)
+        return yield* new UnknownMachine({
+          machine: at.machine,
+          machines: (yield* db.remote.machines).map((m) => m.name),
+        })
+
+      const liveRemote = yield* remoteService.liveSessions(at.machine, projectId)
+      const matches = liveRemote.filter((s) => s.id.startsWith(at.id))
+
+      if (matches.length === 0) return yield* new NoSuchSession({ id: ref, message: `no session ${ref}` })
+
+      if (matches.length > 1)
+        return yield* new AmbiguousSession({
+          prefix: at.id,
+          matches: matches.map((s) => `${at.machine}/${s.id}`),
+        })
+
+      return { local: false as const, machine: at.machine, id: matches[0]!.id, remoteId: machineRow.remoteId }
+    })
+
+  const applyEndpointPairs = (
+    pairs: ReadonlyArray<readonly [ResolvedEndpoint, ResolvedEndpoint]>,
+    mode: "link" | "unlink",
+  ) =>
+    Effect.gen(function* () {
+      const localEdges: Array<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }> = []
+
+      const remoteByMachine = new Map<
+        string,
+        Array<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>
+      >()
+
+      for (const [from, to] of pairs) {
+        if (from.local) {
+          localEdges.push(to.local ? { from: from.id, to: to.id } : { from: from.id, to: to.id, remote: to.remoteId })
+          continue
+        }
+
+        const list = remoteByMachine.get(from.machine) ?? []
+        const sameRemote = !to.local && to.machine === from.machine
+        list.push(sameRemote ? { from: from.id, to: to.id } : { from: from.id, to: to.id, remote: to.remoteId })
+        remoteByMachine.set(from.machine, list)
+      }
+
+      if (localEdges.length > 0)
+        yield* mode === "link" ? db.session.linkSessions(localEdges) : db.session.unlinkSessions(localEdges)
+
+      for (const [machine, edges] of remoteByMachine)
+        yield* mode === "link" ? remoteService.link(machine, edges) : remoteService.unlink(machine, edges)
+
+      return { edges: pairs.map(([from, to]) => ({ from: formatEndpoint(from), to: formatEndpoint(to) })) }
+    })
+
+  const applyCrossMachineEdges = (
+    method: "Session.Link" | "Session.Unlink",
+    projectId: string,
+    spec: EdgeSpec,
+    mode: "link" | "unlink",
+  ) =>
+    expandEdgeSpec(
+      spec,
+      (ref) => resolveEndpoint(method, projectId, ref),
+      formatEndpoint,
+      (message) => Effect.fail(new Forbidden({ method, message })),
+    ).pipe(Effect.flatMap((pairs) => applyEndpointPairs(pairs, mode)))
+
   return {
     Spawn: (input) =>
       Effect.gen(function* () {
@@ -129,14 +232,54 @@ export const make = Effect.gen(function* () {
         if (!Predicate.isTagged(c, "Session")) return yield* new NoCallingSession()
         const project = yield* projectOf(c, "Spawn")
 
-        const hasLinks = (input.from?.length ?? 0) > 0 || (input.to?.length ?? 0) > 0 || (input.with?.length ?? 0) > 0
+        if (input.machine !== undefined) {
+          const resolve = (ref: string) => resolveEndpoint("Spawn", project.id, ref)
+          const fromEndpoints = yield* Effect.forEach(input.from ?? [], resolve)
+          const toEndpoints = yield* Effect.forEach(input.to ?? [], resolve)
+          const withEndpoints = yield* Effect.forEach(input.with ?? [], resolve)
+          const spawned = yield* spawnOn(input.machine, input, c.sessionId, project.id)
 
-        if (input.machine !== undefined && hasLinks)
-          return yield* new MachineFailed({
-            message: "--from, --to and --with are not available with --machine yet; nothing was started",
-          })
+          if (fromEndpoints.length > 0 || toEndpoints.length > 0 || withEndpoints.length > 0) {
+            const machineRow = (yield* db.remote.machineNamed(input.machine))!
+            const prefix = `${input.machine}/`
+            const spawnedId = spawned.id.startsWith(prefix) ? spawned.id.slice(prefix.length) : spawned.id
 
-        if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c.sessionId, project.id)
+            const spawnedEp: ResolvedEndpoint = {
+              local: false,
+              machine: input.machine,
+              id: spawnedId,
+              remoteId: machineRow.remoteId,
+            }
+
+            const pairs: Array<readonly [ResolvedEndpoint, ResolvedEndpoint]> = []
+            const seen = new Set<string>()
+
+            const push = (from: ResolvedEndpoint, to: ResolvedEndpoint) => {
+              const fk = formatEndpoint(from)
+              const tk = formatEndpoint(to)
+
+              if (fk === tk) return
+              const key = `${fk}\0${tk}`
+
+              if (seen.has(key)) return
+              seen.add(key)
+              pairs.push([from, to])
+            }
+
+            for (const from of fromEndpoints) push(from, spawnedEp)
+
+            for (const to of toEndpoints) push(spawnedEp, to)
+
+            for (const target of withEndpoints) {
+              push(target, spawnedEp)
+              push(spawnedEp, target)
+            }
+
+            if (pairs.length > 0) yield* applyEndpointPairs(pairs, "link")
+          }
+
+          return spawned
+        }
 
         if (input.project !== undefined)
           return yield* new MachineFailed({
@@ -171,18 +314,12 @@ export const make = Effect.gen(function* () {
 
     "Session.Link": ({ spec }) =>
       linkProject("Session.Link", spec).pipe(
-        Effect.flatMap((projectId) => sessions.link(projectId, spec)),
-        Effect.catchTag("LinkRefused", (e) =>
-          Effect.fail(new Forbidden({ method: "Session.Link", message: e.message })),
-        ),
+        Effect.flatMap((projectId) => applyCrossMachineEdges("Session.Link", projectId, spec, "link")),
       ),
 
     "Session.Unlink": ({ spec }) =>
       linkProject("Session.Unlink", spec).pipe(
-        Effect.flatMap((projectId) => sessions.unlink(projectId, spec)),
-        Effect.catchTag("LinkRefused", (e) =>
-          Effect.fail(new Forbidden({ method: "Session.Unlink", message: e.message })),
-        ),
+        Effect.flatMap((projectId) => applyCrossMachineEdges("Session.Unlink", projectId, spec, "unlink")),
       ),
 
     Republish: () => sessions.republish,
@@ -201,14 +338,23 @@ export const make = Effect.gen(function* () {
                 ),
               )
           const { c, scope } = yield* reach("Send")
-          const target = yield* db.session.resolveSession(input, scope)
 
-          if (c === undefined && scope !== undefined && !(yield* startedByPeer(scope, target, true)))
+          const target = yield* db.session
+            .resolveSession(input, scope)
+            .pipe(
+              Effect.catchTag("NoSuchSession", (err) =>
+                scope !== undefined && scope.session === undefined && p.from !== undefined
+                  ? db.session.resolveSession(input)
+                  : Effect.fail(err),
+              ),
+            )
+
+          if (c === undefined && scope !== undefined && !(yield* startedByRemote(scope, target, true)))
             return yield* new Forbidden({
               method: "Send",
               message: `${target} was not started by the session that called, and it did not start it; a message goes only to the session that started it or to a session it started`,
             })
-          const from = Predicate.isTagged(caller, "Peer") ? yield* peerSender(caller, p.from) : undefined
+          const from = Predicate.isTagged(caller, "Remote") ? yield* remoteSender(caller, p.from) : undefined
           yield* sessions.send(target, p.message, from ?? { type: "user" }, p.request)
 
           return { id: target }
@@ -233,8 +379,8 @@ export const make = Effect.gen(function* () {
                 ? yield* db.remote.senderOf(caller.sessionId)
                 : undefined
 
-              const by = Predicate.isTagged(caller, "Peer")
-                ? ((yield* peerSender(caller, undefined)) ?? { type: "user" as const })
+              const by = Predicate.isTagged(caller, "Remote")
+                ? ((yield* remoteSender(caller, undefined)) ?? { type: "user" as const })
                 : fromSession === undefined
                   ? { type: "user" as const }
                   : { type: "agent" as const, ...fromSession }
@@ -331,13 +477,13 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const caller = yield* Caller
 
-          if (!Predicate.isTagged(caller, "Peer")) yield* userOnly("Watch")
+          if (!Predicate.isTagged(caller, "Remote")) yield* userOnly("Watch")
 
           const localChanges = yield* watchFeed.subscribe
           const sessionRows = yield* watched(yield* listed(ListScope.All(), false, true))
           const localProjects = yield* snapshotProjects(sessionRows)
 
-          if (Predicate.isTagged(caller, "Peer")) {
+          if (Predicate.isTagged(caller, "Remote")) {
             const snapshot: WatchEvent = Listing.WatchEvents.Snapshot({
               projects: localProjects,
               sessions: sessionRows,
@@ -388,7 +534,7 @@ export const make = Effect.gen(function* () {
 
     "Session.Ready": ({ id, pid, conversation }, { headers }) =>
       Effect.gen(function* () {
-        yield* self("Session.Ready", id)
+        yield* selfCaller("Session.Ready", id)
         const read = reader(headers)
 
         if (conversation !== undefined) {

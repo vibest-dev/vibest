@@ -373,8 +373,8 @@ const checks: ReadonlyArray<Check> = [
         expect(m?.state === "connected" && m.id === b.id, `machine ls: ${JSON.stringify(m)}`)
         const loaded = (JSON.parse(await s.okA(["machine", "ls"])) as Array<{ load?: MachineLoad }>)[0]
         expect(plausible(loaded?.load), `M10 mb load: ${JSON.stringify(loaded)}`)
-        const peer = s.bDb<{ id: string; n: number }>("SELECT id, (SELECT count(*) FROM peer) AS n FROM peer")
-        expect(peer?.n === 1 && peer.id === a.id, `B's peer rows: ${JSON.stringify(peer)}`)
+        const remote = s.bDb<{ id: string; n: number }>("SELECT id, (SELECT count(*) FROM remote) AS n FROM remote")
+        expect(remote?.n === 1 && remote.id === a.id, `B's remote rows: ${JSON.stringify(remote)}`)
         const again = await s.onA(["machine", "add", "mb-again", "b-host"])
         expect(again.code !== 0 && again.stderr.includes("already added as mb"), `second add: ${again.stderr}`)
 
@@ -413,15 +413,15 @@ const checks: ReadonlyArray<Check> = [
         )
         await s.okA(["archive", address])
 
-        const started = s.bDb<{ peer: string | null; facts: string }>(
-          `SELECT origin_peer AS peer, (SELECT group_concat(type, ' ') FROM
+        const started = s.bDb<{ remote: string | null; facts: string }>(
+          `SELECT origin_remote AS remote, (SELECT group_concat(type, ' ') FROM
             (SELECT type FROM event WHERE aggregate = session.id ORDER BY seq)) AS facts
           FROM session WHERE id LIKE ?`,
           `${id8}%`,
         )
 
         expect(
-          started?.peer === a.id &&
+          started?.remote === a.id &&
             /inbox\.enqueued session\.created .*process\.started .*execution\.allocated .*execution\.started .*execution\.succeeded .*session\.ended/.test(
               started.facts,
             ),
@@ -599,8 +599,8 @@ const checks: ReadonlyArray<Check> = [
         await fs.mkdir(a2.VIBEST_HOME, { recursive: true })
         const added = await w.run(w.repository, [binary, "machine", "add", "mb", "b-host"], { env: a2 })
         expect(added.code === 0, `second A machine add: ${added.stderr}`)
-        const peers = s.bDb<{ n: number }>("SELECT count(*) AS n FROM peer")?.n
-        expect(peers === 2, `B's peer rows: ${peers}`)
+        const remotes = s.bDb<{ n: number }>("SELECT count(*) AS n FROM remote")?.n
+        expect(remotes === 2, `B's remote rows: ${remotes}`)
         const listed = await w.run(w.repository, [binary, "ls"], { env: a2 })
         expect(
           listed.code === 0 && !listed.stdout.includes(address.slice(3)),

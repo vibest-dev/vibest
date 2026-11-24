@@ -2,15 +2,15 @@ import type { RpcGroup } from "effect/rpc"
 
 import type { VibestRpcs } from "./rpc.ts"
 
-type Access = "open" | "session" | "agent" | "owner" | "cli" | "self" | "peer"
+type Access = "open" | "session" | "agent" | "owner" | "cli" | "self" | "remote"
 
 export const ACCESS = {
-  Ping: ["open", "peer"],
+  Ping: ["open", "remote"],
   Plugins: "open",
   Concurrency: "open",
-  "Harnesses.List": ["open", "peer"],
-  "Agents.List": ["open", "peer"],
-  "Worktree.List": ["open", "peer"],
+  "Harnesses.List": ["open", "remote"],
+  "Agents.List": ["open", "remote"],
+  "Worktree.List": ["open", "remote"],
   "Integration.Guard": "open",
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
@@ -18,40 +18,42 @@ export const ACCESS = {
   ExecutionEnd: "open",
   Prompt: "open",
   Spawn: "agent",
-  Launch: ["cli", "peer"],
-  List: ["agent", "peer"],
+  Launch: ["cli", "remote"],
+  List: ["agent", "remote"],
   "Session.Link": "agent",
   "Session.Unlink": "agent",
-  Get: ["agent", "peer"],
+  Get: ["agent", "remote"],
   "Inbox.Subscribe": "session",
   "Inbox.Take": "session",
-  Watch: ["cli", "peer"],
+  Watch: ["cli", "remote"],
   Events: "cli",
   "Session.Seen": "cli",
   "Session.Attach": "cli",
   "Session.Claim": "cli",
-  "Project.Open": ["cli", "peer"],
+  "Project.Open": ["cli", "remote"],
   "Project.Move": "cli",
   "Project.Create": "cli",
-  "Project.Clone": ["agent", "peer"],
+  "Project.Clone": ["agent", "remote"],
   "Project.Info": "agent",
   "Project.Search": "agent",
-  Send: ["owner", "session", "peer"],
-  Interrupt: ["owner", "peer"],
-  Stop: ["owner", "peer"],
-  Peek: ["owner", "peer"],
-  Archive: ["owner", "peer"],
+  Send: ["owner", "session", "remote"],
+  Interrupt: ["owner", "remote"],
+  Stop: ["owner", "remote"],
+  Peek: ["owner", "remote"],
+  Archive: ["owner", "remote"],
   "Daemon.Stop": "cli",
   "Daemon.Handoff": "cli",
   "Session.Ready": "self",
   "Agents.Outdated": "cli",
   "Agents.Restart": "cli",
-  "Peer.Hello": "peer",
-  "Peer.Spawn": "peer",
-  "Peer.Outbox": "peer",
-  "Peer.Ack": "peer",
+  "Remote.Hello": "remote",
+  "Remote.Spawn": "remote",
+  "Remote.Outbox": "remote",
+  "Remote.Ack": "remote",
+  "Remote.Link": "remote",
+  "Remote.Unlink": "remote",
   "Machine.Add": "cli",
-  "Machine.Load": ["cli", "peer"],
+  "Machine.Load": ["cli", "remote"],
   "Machine.List": "cli",
   "Machine.Remove": "cli",
 } as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly Access[]>
@@ -75,14 +77,14 @@ export const UI_WS_CALLS: ReadonlySet<string> = new Set([
   "Agents.List",
 ])
 
-export const PEER_CALLS: ReadonlySet<string> = new Set(
+export const REMOTE_CALLS: ReadonlySet<string> = new Set(
   Object.entries(ACCESS)
-    .filter(([, access]) => [access].flat().includes("peer"))
+    .filter(([, access]) => [access].flat().includes("remote"))
     .map(([method]) => method),
 )
 
 export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
-  [...PEER_CALLS].filter(
+  [...REMOTE_CALLS].filter(
     (method) =>
       method !== "Ping" &&
       method !== "Harnesses.List" &&
@@ -93,6 +95,6 @@ export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
       method !== "Project.Open" &&
       method !== "Launch" &&
       method !== "Watch" &&
-      !method.startsWith("Peer."),
+      !method.startsWith("Remote."),
   ),
 )

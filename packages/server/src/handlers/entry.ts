@@ -4,7 +4,7 @@ import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import { Identity } from "@vibest/core/identity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { SessionLaunch } from "@vibest/core/session/entry"
-import { peerHeaders } from "@vibest/protocol/protocol"
+import { remoteHeaders } from "@vibest/protocol/protocol"
 import { Caller, Forbidden, InvalidCaller } from "@vibest/protocol/rpc"
 import { NoSuchProject } from "@vibest/schema/project"
 import { LaunchFailed } from "@vibest/schema/session"
@@ -34,15 +34,15 @@ export const make = Effect.gen(function* () {
         const away = input.machine !== undefined && input.machine !== LOCAL_MACHINE
 
         if (away) {
-          if (Predicate.isTagged(caller, "Peer"))
-            return yield* new Forbidden({ method: "Launch", message: "a peer launches only on this machine" })
+          if (Predicate.isTagged(caller, "Remote"))
+            return yield* new Forbidden({ method: "Launch", message: "a remote launches only on this machine" })
           const link = yield* machines.link(input.machine!)
           const { machine: _, ...forwarded } = input
 
-          return yield* link.call(link.client.Launch(forwarded, { headers: peerHeaders(self.id) }))
+          return yield* link.call(link.client.Launch(forwarded, { headers: remoteHeaders(self.id) }))
         }
 
-        if (!Predicate.isTagged(caller, "Peer")) yield* userOnly("Launch")
+        if (!Predicate.isTagged(caller, "Remote")) yield* userOnly("Launch")
 
         const project = yield* Effect.gen(function* () {
           if (input.projectId !== undefined) {

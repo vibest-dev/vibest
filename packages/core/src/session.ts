@@ -14,12 +14,11 @@ import {
   type UnknownAgent,
   HarnessUnavailable,
 } from "@vibest/schema/session"
-import { Context, Effect, FileSystem, Layer, Option, Path, Predicate } from "effect"
+import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { type SessionRow, runtimeOf, terminalOf, exitedAt } from "./database/db-rows.ts"
 import { Db, type SessionFilter } from "./database/db.ts"
-import type { SessionEdge } from "./database/session.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 import { Git, type GitState } from "./git.ts"
@@ -34,7 +33,7 @@ import { Placement } from "./session/placement.ts"
 import { Reconcile } from "./session/reconcile.ts"
 import { type Outdated, Restart } from "./session/restart.ts"
 import type { SendRefused } from "./session/sends.ts"
-import { LinkRefused, resolveLiveTarget, Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
+import { type LinkRefused, Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
 import { gitState, mainCheckout } from "./worktree.ts"
 
 export * as Session from "./session.ts"
@@ -94,11 +93,6 @@ export interface SessionView extends SessionRow {
   readonly git: SessionGit | undefined
 }
 
-export type EdgeSpec =
-  | { readonly _tag: "Mutual"; readonly ids: ReadonlyArray<string> }
-  | { readonly _tag: "Directed"; readonly from: ReadonlyArray<string>; readonly to: ReadonlyArray<string> }
-  | { readonly _tag: "Chain"; readonly ids: ReadonlyArray<string> }
-
 export interface Interface {
   readonly spawn: (
     input: SpawnInput,
@@ -116,14 +110,6 @@ export interface Interface {
     | AmbiguousSession
     | LinkRefused
   >
-  readonly link: (
-    projectId: string,
-    spec: EdgeSpec,
-  ) => Effect.Effect<{ readonly edges: ReadonlyArray<SessionEdge> }, NoSuchSession | AmbiguousSession | LinkRefused>
-  readonly unlink: (
-    projectId: string,
-    spec: EdgeSpec,
-  ) => Effect.Effect<{ readonly edges: ReadonlyArray<SessionEdge> }, NoSuchSession | AmbiguousSession | LinkRefused>
   readonly send: (id: string, message: string, sender?: Sender, request?: string) => Effect.Effect<void, NoSuchSession>
   readonly admit: (
     sender: { readonly sessionId: string; readonly projectId: string },
@@ -283,81 +269,8 @@ export const make = Effect.gen(function* () {
       ),
   )
 
-  const expandEdges = (projectId: string, spec: EdgeSpec) =>
-    Effect.gen(function* () {
-      const resolve = resolveLiveTarget(db, projectId)
-      const pairs: Array<readonly [string, string]> = []
-      const seen = new Set<string>()
-
-      const push = (from: string, to: string) => {
-        if (from === to) return
-        const key = `${from}\0${to}`
-
-        if (seen.has(key)) return
-        seen.add(key)
-        pairs.push([from, to])
-      }
-
-      if (Predicate.isTagged(spec, "Mutual")) {
-        const ids = [...new Set(yield* Effect.forEach(spec.ids, resolve))]
-
-        if (ids.length < 2) return yield* new LinkRefused({ message: "give at least two distinct sessions" })
-
-        for (const a of ids) for (const b of ids) push(a, b)
-
-        return pairs
-      }
-
-      if (Predicate.isTagged(spec, "Directed")) {
-        const from = yield* Effect.forEach(spec.from, resolve)
-        const to = yield* Effect.forEach(spec.to, resolve)
-
-        if (from.length === 0 || to.length === 0)
-          return yield* new LinkRefused({ message: "give at least one source and one target session" })
-
-        if (from.length === 1 && to.length === 1 && from[0] === to[0])
-          return yield* new LinkRefused({ message: "a session cannot target itself" })
-
-        for (const a of from) for (const b of to) push(a, b)
-
-        if (pairs.length === 0) return yield* new LinkRefused({ message: "a session cannot target itself" })
-
-        return pairs
-      }
-
-      const ids = yield* Effect.forEach(spec.ids, resolve)
-
-      if (ids.length < 2) return yield* new LinkRefused({ message: "give at least two sessions for --chain" })
-
-      for (let i = 0; i + 1 < ids.length; i++) {
-        const a = ids[i]!
-        const b = ids[i + 1]!
-
-        if (a === b) return yield* new LinkRefused({ message: "a session cannot target itself" })
-        push(a, b)
-      }
-
-      return pairs
-    })
-
-  const link = Effect.fn("Session.link")((projectId: string, spec: EdgeSpec) =>
-    expandEdges(projectId, spec).pipe(
-      Effect.flatMap((pairs) => db.session.linkSessions(pairs)),
-      Effect.map((edges) => ({ edges })),
-    ),
-  )
-
-  const unlink = Effect.fn("Session.unlink")((projectId: string, spec: EdgeSpec) =>
-    expandEdges(projectId, spec).pipe(
-      Effect.flatMap((pairs) => db.session.unlinkSessions(pairs)),
-      Effect.map((edges) => ({ edges })),
-    ),
-  )
-
   return Service.of({
     spawn,
-    link,
-    unlink,
     send,
     admit,
     interrupt,

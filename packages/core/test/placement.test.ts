@@ -208,7 +208,7 @@ describe.concurrent("Placement project near-terminal", () => {
           lastActive: 300,
         },
         projectId,
-        { cwd: repo, origin: { peer: "peer-1", project: "remote-proj" } },
+        { cwd: repo, origin: { remote: "remote-1", project: "remote-proj" } },
       )
 
       assert.deepStrictEqual(yield* db.session.lastProjectTerminal(projectId, "rex"), {

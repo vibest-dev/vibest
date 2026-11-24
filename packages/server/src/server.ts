@@ -37,9 +37,9 @@ import * as RemoteHandlers from "./handlers/remote.ts"
 import * as SessionHandlers from "./handlers/session.ts"
 import * as WorktreeHandlers from "./handlers/worktree.ts"
 import * as Listing from "./listing.ts"
+import { Inbound } from "./machine/inbound.ts"
 import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
-import { Peer } from "./machine/peer.ts"
 import { RemoteWatch } from "./machine/remote-watch.ts"
 import { Remote } from "./machine/remote.ts"
 import { services } from "./services.ts"
@@ -106,7 +106,7 @@ export const handlersNode = LayerNode.make({
     Load.node,
     Machines.node,
     RemoteWatch.node,
-    Peer.node,
+    Inbound.node,
     Plugins.node,
     Processes.node,
     Project.node,

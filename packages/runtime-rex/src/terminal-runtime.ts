@@ -755,26 +755,30 @@ export const make = (deps: {
 
     const NONE: ReadonlyMap<string, Terminal> = new Map()
 
-    const locate: NonNullable<Runtime["locate"]> = (peer) =>
+    const locate: NonNullable<Runtime["locate"]> = (remote) =>
       rpc("hosts.list", {}).pipe(
         decoded(Hosts),
         Effect.map((r): VibestPlugin.Runtime.Located => {
-          const host = r.hosts?.find((h) => h.host_id !== undefined && h.host_id === peer.link["host"])
+          const host = r.hosts?.find((h) => h.host_id !== undefined && h.host_id === remote.link["host"])
 
           return host === undefined
             ? {
                 missing: false,
                 terminals: NONE,
-                note: `no Rex host here is ${peer.id}; add it with rex hosts to open its terminals`,
+                note: `no Rex host here is ${remote.id}; add it with rex hosts to open its terminals`,
               }
             : {
                 missing: false,
                 terminals: NONE,
                 as: host.label,
-                note: `${peer.id}'s terminals are on Rex host ${host.label}: rex -S ${host.label}`,
+                note: `${remote.id}'s terminals are on Rex host ${host.label}: rex -S ${host.label}`,
               }
         }),
-        Effect.orElseSucceed(() => ({ missing: false, terminals: NONE, note: `Rex here cannot look for ${peer.id}` })),
+        Effect.orElseSucceed(() => ({
+          missing: false,
+          terminals: NONE,
+          note: `Rex here cannot look for ${remote.id}`,
+        })),
       )
 
     return {

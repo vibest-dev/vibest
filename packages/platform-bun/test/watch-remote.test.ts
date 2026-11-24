@@ -4,7 +4,7 @@ import { SocketConnector } from "@vibest/client/socket-connector"
 import { Db } from "@vibest/core/database/db"
 import { Identity } from "@vibest/core/identity"
 import { Plugin } from "@vibest/plugin/effect"
-import { peerHeaders } from "@vibest/protocol/protocol"
+import { remoteHeaders } from "@vibest/protocol/protocol"
 import { PingResult, WatchEvent, WatchLagged } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
@@ -52,9 +52,9 @@ const watchStream = (raw: Effect.Success<ReturnType<typeof connect>>, headers: R
 
 const isSnapshot = (e: WatchEvent): e is Extract<WatchEvent, { _tag: "Snapshot" }> => Predicate.isTagged(e, "Snapshot")
 
-const FakePeerRpcs = RpcGroup.make(
+const FakeRemoteRpcs = RpcGroup.make(
   Rpc.make("Ping", { success: PingResult }),
-  Rpc.make("Peer.Hello", {
+  Rpc.make("Remote.Hello", {
     payload: { id: Schema.String, name: Schema.String, callsMe: Schema.String },
     success: Schema.Struct({
       id: Schema.String,
@@ -63,35 +63,36 @@ const FakePeerRpcs = RpcGroup.make(
       runtimes: Schema.Array(Schema.Unknown),
     }),
   }),
-  Rpc.make("Peer.Outbox", { success: Schema.Unknown, stream: true }),
+  Rpc.make("Remote.Outbox", { success: Schema.Unknown, stream: true }),
   Rpc.make("Watch", { success: WatchEvent, error: WatchLagged, stream: true }),
 )
 
-const fakePeerSocket = (options: {
+const fakeRemoteSocket = (options: {
   readonly protocol: number
   readonly version: string
-  readonly peerWatch?: boolean
+  readonly remoteWatch?: boolean
   readonly id?: string
   readonly watch?: () => Stream.Stream<WatchEvent, WatchLagged>
 }) =>
   Effect.gen(function* () {
-    const dir = yield* tempDirectory("vibest-fake-peer-")
-    const socket = `${dir}/peer.sock`
-    const peerId = options.id ?? randomId()
+    const dir = yield* tempDirectory("vibest-fake-remote-")
+    const socket = `${dir}/remote.sock`
+    const remoteId = options.id ?? randomId()
 
-    const handlers = FakePeerRpcs.toLayer({
+    const handlers = FakeRemoteRpcs.toLayer({
       Ping: () =>
         Effect.succeed({
           version: options.version,
           protocol: options.protocol,
-          capabilities: { ...(options.peerWatch === true && { peerWatch: true }) },
+          capabilities: { ...(options.remoteWatch === true && { remoteWatch: true }) },
         }),
-      "Peer.Hello": () => Effect.succeed({ id: peerId, name: "legacy-box", version: options.version, runtimes: [] }),
-      "Peer.Outbox": () => Stream.never,
+      "Remote.Hello": () =>
+        Effect.succeed({ id: remoteId, name: "legacy-box", version: options.version, runtimes: [] }),
+      "Remote.Outbox": () => Stream.never,
       Watch: () => (options.watch ? options.watch() : Stream.never),
     })
 
-    const server = RpcServer.layer(FakePeerRpcs).pipe(
+    const server = RpcServer.layer(FakeRemoteRpcs).pipe(
       Layer.provide(handlers),
       Layer.provide(RpcServer.layerProtocolSocketServer),
       Layer.provide(RpcSerialization.layerNdJsonRpc()),
@@ -110,12 +111,12 @@ const fakePeerSocket = (options: {
       (ready) => ready,
     )
 
-    return { socket, peerId }
+    return { socket, remoteId }
   })
 
 describe("Watch with remote machines", () => {
   it.effect(
-    "connected remote peer streams projects, sessions, and SessionEnded tagged with machine; mutual A<->B peer Watch stays local-only",
+    "connected remote streams projects, sessions, and SessionEnded tagged with machine; mutual A<->B remote Watch stays local-only",
     () =>
       Effect.gen(function* () {
         const net = new Net()
@@ -154,11 +155,11 @@ describe("Watch with remote machines", () => {
           )
         })
 
-        const peerWatch = yield* watchStream(a.raw, peerHeaders(b.id))
-        const peerSnap = yield* peerWatch.next(isSnapshot)
-        assert.deepStrictEqual(peerSnap.machines, [])
-        assert.isFalse(peerSnap.projects.some((p) => p.machine !== undefined))
-        assert.isFalse(peerSnap.sessions.some((s) => s.machine !== undefined))
+        const remoteWatch = yield* watchStream(a.raw, remoteHeaders(b.id))
+        const remoteSnap = yield* remoteWatch.next(isSnapshot)
+        assert.deepStrictEqual(remoteSnap.machines, [])
+        assert.isFalse(remoteSnap.projects.some((p) => p.machine !== undefined))
+        assert.isFalse(remoteSnap.sessions.some((s) => s.machine !== undefined))
 
         const cliWatch = yield* watchStream(a.raw, cliHeaders(a.layout.home))
         const cliSnap = yield* cliWatch.next(isSnapshot)
@@ -227,8 +228,8 @@ describe("Watch with remote machines", () => {
     Effect.gen(function* () {
       const net = new Net()
       const a = yield* makeStack(net)
-      const peer = yield* fakePeerSocket({ protocol: PROTOCOL, version: "0.0.2-dev", peerWatch: true })
-      net.route("offline-host", peer.socket)
+      const remote = yield* fakeRemoteSocket({ protocol: PROTOCOL, version: "0.0.2-dev", remoteWatch: true })
+      net.route("offline-host", remote.socket)
       yield* a.cli(a.raw["Machine.Add"]({ name: "offline-box", target: "offline-host" }))
 
       net.fail("offline-host", 255, "ssh: connect to host offline-host port 22: Connection refused")
@@ -250,14 +251,14 @@ describe("Watch with remote machines", () => {
   )
 
   it.effect(
-    "incompatible remote machine (no peerWatch capability and protocol mismatch) reports state incompatible",
+    "incompatible remote machine (no remoteWatch capability and protocol mismatch) reports state incompatible",
     () =>
       Effect.gen(function* () {
         const net = new Net()
         const a = yield* makeStack(net)
 
-        const oldPeer = yield* fakePeerSocket({ protocol: PROTOCOL, version: "0.0.1-old", peerWatch: false })
-        net.route("old-host", oldPeer.socket)
+        const oldRemote = yield* fakeRemoteSocket({ protocol: PROTOCOL, version: "0.0.1-old", remoteWatch: false })
+        net.route("old-host", oldRemote.socket)
         yield* a.cli(a.raw["Machine.Add"]({ name: "old-box", target: "old-host" }))
 
         const watch = yield* watchStream(a.raw, cliHeaders(a.layout.home))
@@ -267,8 +268,8 @@ describe("Watch with remote machines", () => {
         assert.strictEqual(oldBox!.state, "incompatible")
         assert.include(oldBox!.reason ?? "", "run vibest update on old-box")
 
-        const mismatchPeer = yield* fakePeerSocket({ protocol: PROTOCOL - 1, version: "0.0.0-mismatch" })
-        net.route("old-host", mismatchPeer.socket)
+        const mismatchRemote = yield* fakeRemoteSocket({ protocol: PROTOCOL - 1, version: "0.0.0-mismatch" })
+        net.route("old-host", mismatchRemote.socket)
         yield* net.cutAll("old-host")
         yield* untilVirtual(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "incompatible")
 
@@ -322,10 +323,10 @@ describe("Watch with remote machines", () => {
           to: [],
         })
 
-        const peer = yield* fakePeerSocket({
+        const remote = yield* fakeRemoteSocket({
           protocol: PROTOCOL,
           version: "0.0.2-dev",
-          peerWatch: true,
+          remoteWatch: true,
           watch: () => {
             watchAttempts++
 
@@ -338,7 +339,7 @@ describe("Watch with remote machines", () => {
                     machines: [],
                   }),
                 ),
-                Stream.fail(new WatchLagged({ message: "simulated lag on remote peer" })),
+                Stream.fail(new WatchLagged({ message: "simulated lag on remote" })),
               )
 
             return Stream.concat(
@@ -354,7 +355,7 @@ describe("Watch with remote machines", () => {
           },
         })
 
-        net.route("laggy-host", peer.socket)
+        net.route("laggy-host", remote.socket)
         yield* a.cli(a.raw["Machine.Add"]({ name: "laggy-box", target: "laggy-host" }))
 
         yield* untilVirtual(a.cli(a.raw.Watch(undefined).pipe(Stream.take(1), Stream.runCollect)), (chunk) => {
@@ -487,7 +488,7 @@ describe("Watch with remote machines", () => {
                 exitedAt: null,
               },
               bProject,
-              { cwd: bRepo, origin: { peer: a.id, project: aProject, reportTo: aEntry.sessionId } },
+              { cwd: bRepo, origin: { remote: a.id, project: aProject, reportTo: aEntry.sessionId } },
             ),
           ),
         )

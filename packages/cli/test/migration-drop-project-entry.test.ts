@@ -11,7 +11,7 @@ import * as Platform from "#platform"
 const P1 = "11111111-1111-4111-8111-111111111111"
 const S1 = "22222222-2222-4222-8222-222222222222"
 const S2 = "33333333-3333-4333-8333-333333333333"
-const MIGRATION = "20261124010000_drop_project_entry"
+const MIGRATION = "20261124030000_drop_project_entry"
 
 const oldFacts = [
   [P1, 1, "project.created", { directory: "/p1", repositories: [] }],
@@ -25,7 +25,7 @@ const oldFacts = [
 
 const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
 
-describe("ledger migration 20261124010000_drop_project_entry", () => {
+describe("ledger migration 20261124030000_drop_project_entry", () => {
   it.effect(
     "rewrites replaced to archived, drops project.entry_changed, renumbers seq densely, and passes replay",
     () =>

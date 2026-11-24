@@ -214,7 +214,7 @@ export const make = Effect.gen(function* () {
 
     if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
 
-    const localRoot = isRoot(session) && !(yield* db.session.startedByPeer(id))
+    const localRoot = isRoot(session) && !(yield* db.session.startedByRemote(id))
 
     if (
       (localRoot && exitedAt(session) === null && inbox.pulls(harnessIdOf(session))) ||
@@ -420,7 +420,7 @@ export const make = Effect.gen(function* () {
       session !== undefined &&
       !archived(session) &&
       exitedAt(session) !== null &&
-      !(isRoot(session) && !(yield* db.session.startedByPeer(id)))
+      !(isRoot(session) && !(yield* db.session.startedByRemote(id)))
     )
       yield* wakes.wake(id, { rows: new Set(), ended: true })
   }

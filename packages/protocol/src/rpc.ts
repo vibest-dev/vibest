@@ -144,8 +144,8 @@ export type CallerIdentity =
       readonly repositoryRoot?: string
     }
   | {
-      readonly _tag: "Peer"
-      readonly peerId: string
+      readonly _tag: "Remote"
+      readonly remoteId: string
       readonly projectId?: string
       readonly session?: string
     }
@@ -190,6 +190,16 @@ export class Admission extends RpcMiddleware.Service<Admission>()("vibest/Admiss
 export class CallerGate extends RpcMiddleware.Service<CallerGate, { provides: Caller }>()("vibest/CallerGate", {
   error: Schema.Union([InvalidCaller, Forbidden, NoSuchSession]),
 }) {}
+
+const RemoteEdges = Schema.Array(
+  Schema.Struct({ from: Schema.String, to: Schema.String, remote: Schema.optional(Schema.String) }),
+)
+
+const RemoteLinkSpec = {
+  payload: { edges: RemoteEdges },
+  success: Schema.Struct({ edges: RemoteEdges }),
+  error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
+}
 
 const protocol = <
   Tag extends string,
@@ -574,7 +584,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Session.Link", {
         payload: { spec: EdgeSpec },
         success: Schema.Struct({ edges: Schema.Array(SessionEdge) }),
-        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
       }),
     ),
   ),
@@ -583,7 +593,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Session.Unlink", {
         payload: { spec: EdgeSpec },
         success: Schema.Struct({ edges: Schema.Array(SessionEdge) }),
-        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
       }),
     ),
   ),
@@ -851,7 +861,7 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
-    Rpc.make("Peer.Hello", {
+    Rpc.make("Remote.Hello", {
       payload: { id: Schema.String, name: Schema.String, callsMe: Schema.String },
       success: Schema.Struct({
         id: Schema.String,
@@ -864,7 +874,7 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(
     admitted(
-      Rpc.make("Peer.Spawn", {
+      Rpc.make("Remote.Spawn", {
         payload: {
           repository: Schema.optional(Schema.String),
           identity: Schema.optional(Schema.String),
@@ -919,8 +929,10 @@ export class VibestRpcs extends RpcGroup.make(
       }),
     ),
   ),
-  scoped(Rpc.make("Peer.Outbox", { success: OutboxItem, error: Forbidden, stream: true })),
-  scoped(Rpc.make("Peer.Ack", { payload: { ids: Schema.Array(Schema.String) }, error: Forbidden })),
+  scoped(Rpc.make("Remote.Outbox", { success: OutboxItem, error: Forbidden, stream: true })),
+  scoped(Rpc.make("Remote.Ack", { payload: { ids: Schema.Array(Schema.String) }, error: Forbidden })),
+  scoped(admitted(Rpc.make("Remote.Link", RemoteLinkSpec))),
+  scoped(admitted(Rpc.make("Remote.Unlink", RemoteLinkSpec))),
   scoped(
     Rpc.make("Machine.Add", {
       payload: { name: Schema.String, target: Schema.String },

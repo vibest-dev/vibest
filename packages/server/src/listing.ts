@@ -106,8 +106,8 @@ export const sessionListing = (deps: {
 
       const waiting = yield* starts.waiting
 
-      if (Predicate.isTagged(scope, "Peer"))
-        return yield* listedRows(yield* sessions.list({ peer: scope, stopped, unarchived, waiting }))
+      if (Predicate.isTagged(scope, "Remote"))
+        return yield* listedRows(yield* sessions.list({ remote: scope, stopped, unarchived, waiting }))
       const projectId = Predicate.isTagged(scope, "Project") ? scope.id : undefined
 
       return yield* listedRows(

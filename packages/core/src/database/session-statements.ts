@@ -38,7 +38,7 @@ export type Current = {
   readonly readyAt: number | null
 }
 
-export type Creator = { readonly local: string } | { readonly peer: string; readonly session: string } | undefined
+export type Creator = { readonly local: string } | { readonly remote: string; readonly session: string } | undefined
 
 type ProcessColumns = {
   readonly id: number
@@ -133,7 +133,7 @@ export const statements = Effect.gen(function* () {
 
   const latestRoot = (project: string) =>
     sql<{ id: string }>`SELECT id FROM session
-      WHERE project_id = ${project} AND parent_session_id IS NULL AND origin_peer IS NULL AND ended_at IS NULL
+      WHERE project_id = ${project} AND parent_session_id IS NULL AND origin_remote IS NULL AND ended_at IS NULL
       ORDER BY coalesce(active_at, created_at) DESC, rowid DESC LIMIT 1`.pipe(
       Effect.flatMap((rows) => (rows[0] === undefined ? Effect.succeed(undefined) : findSession(rows[0].id))),
     )
@@ -221,7 +221,7 @@ export const statements = Effect.gen(function* () {
     )
 
   const isRoot = (id: string) =>
-    sql`SELECT 1 FROM session WHERE id = ${id} AND parent_session_id IS NULL AND origin_peer IS NULL`.pipe(
+    sql`SELECT 1 FROM session WHERE id = ${id} AND parent_session_id IS NULL AND origin_remote IS NULL`.pipe(
       Effect.map((rows) => rows.length > 0),
     )
 
@@ -529,7 +529,7 @@ export const statements = Effect.gen(function* () {
     sql<{ terminal: string }>`SELECT p.terminal FROM process p
       JOIN session s ON s.id = p.session_id
       WHERE s.project_id = ${projectId}
-        AND s.origin_peer IS NULL
+        AND s.origin_remote IS NULL
         AND p.runtime = ${runtime}
         AND p.terminal IS NOT NULL
         AND p.terminal != ''
@@ -558,13 +558,13 @@ export const statements = Effect.gen(function* () {
   const unusedId = newId(sessionPrefixTaken)
 
   const creatorOf = (id: string): Effect.Effect<Creator> =>
-    sql<{ parent: string | null; peer: string | null; session: string | null }>`SELECT
-        parent_session_id AS parent, origin_peer AS peer, origin_session AS session
+    sql<{ parent: string | null; remote: string | null; session: string | null }>`SELECT
+        parent_session_id AS parent, origin_remote AS remote, origin_session AS session
       FROM session WHERE id = ${id}`.pipe(
       Effect.map(([row]): Creator => {
         if (row === undefined) return undefined
 
-        if (row.peer !== null && row.session !== null) return { peer: row.peer, session: row.session }
+        if (row.remote !== null && row.session !== null) return { remote: row.remote, session: row.session }
 
         if (row.parent !== null) return { local: row.parent }
 
@@ -580,7 +580,7 @@ export const statements = Effect.gen(function* () {
       for (;;) {
         const creator = yield* creatorOf(current)
 
-        if (creator === undefined || "peer" in creator) return creator
+        if (creator === undefined || "remote" in creator) return creator
 
         if ((yield* sql`SELECT 1 FROM session WHERE id = ${creator.local} AND ended_at IS NULL`).length > 0)
           return creator
@@ -612,7 +612,7 @@ export const statements = Effect.gen(function* () {
           AND p.harness_session_id = ${harnessSessionId}
       )
       OR (
-        EXISTS (SELECT 1 FROM session WHERE id = ${sessionId} AND parent_session_id IS NULL AND origin_peer IS NULL)
+        EXISTS (SELECT 1 FROM session WHERE id = ${sessionId} AND parent_session_id IS NULL AND origin_remote IS NULL)
         AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND harness_session_id = ${harnessSessionId})
       )
     ) AS ok`.pipe(

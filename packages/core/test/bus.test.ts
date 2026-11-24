@@ -42,10 +42,10 @@ const story = Effect.gen(function* () {
 
   const ids = yield* commit(
     Effect.gen(function* () {
-      yield* emit(Catalog["machine.added"], { at: 100, data: { name: "mb", target: "root@mb", vibestd: MACHINE } })
+      yield* emit(Catalog["machine.added"], { at: 100, data: { name: "mb", target: "root@mb", remote: MACHINE } })
       yield* emit(Catalog["machine.connected"], { at: 150, data: { name: "mb" } })
-      yield* emit(Catalog["peer.seen"], { at: 160, data: { id: PEER, name: "mac" } })
-      yield* emit(Catalog["peer.seen"], { at: 170, data: { id: PEER, name: "mac2" } })
+      yield* emit(Catalog["remote.seen"], { at: 160, data: { id: PEER, name: "mac" } })
+      yield* emit(Catalog["remote.seen"], { at: 170, data: { id: PEER, name: "mac2" } })
       yield* emit(Catalog["project.created"], {
         projectId: P,
         at: 200,
@@ -185,18 +185,18 @@ const story = Effect.gen(function* () {
           agent: "subagent",
           name: "remote",
           directory: "/src/app",
-          origin: { peer: PEER, project: OTHER_PROJECT, session: MAIN },
+          origin: { remote: PEER, project: OTHER_PROJECT, session: MAIN },
         },
       })
       yield* emit(Catalog["outbox.queued"], {
         at: 510,
-        data: { id: ITEM, peer: PEER, session: REMOTE, content: "done" },
+        data: { id: ITEM, remote: PEER, session: REMOTE, content: "done" },
       })
       yield* emit(Catalog["outbox.queued"], {
         at: 511,
-        data: { id: ITEM_2, peer: PEER, session: REMOTE, kind: "send", content: "archived" },
+        data: { id: ITEM_2, remote: PEER, session: REMOTE, kind: "send", content: "archived" },
       })
-      yield* emit(Catalog["outbox.acked"], { at: 520, data: { peer: PEER, ids: [ITEM] } })
+      yield* emit(Catalog["outbox.acked"], { at: 520, data: { remote: PEER, ids: [ITEM] } })
 
       const notice = yield* emit(Catalog["inbox.enqueued"], {
         sessionId: MAIN,
@@ -288,7 +288,7 @@ describe("projectors", () => {
 
       const rows = yield* rowsOf<Readonly<Record<string, string | number | null>>>(
         sql,
-        `SELECT id, name, agent, parent_session_id, origin_peer,
+        `SELECT id, name, agent, parent_session_id, origin_remote,
           origin_project, origin_session, created_at, ended_at, process_id, active_at
         FROM session ORDER BY created_at`,
       )
@@ -299,7 +299,7 @@ describe("projectors", () => {
           name: "main",
           agent: "main",
           parentSessionId: null,
-          originPeer: null,
+          originRemote: null,
           originProject: null,
           originSession: null,
           createdAt: 210,
@@ -312,7 +312,7 @@ describe("projectors", () => {
           name: "fix-tests",
           agent: "subagent",
           parentSessionId: MAIN,
-          originPeer: null,
+          originRemote: null,
           originProject: null,
           originSession: null,
           createdAt: 300,
@@ -325,7 +325,7 @@ describe("projectors", () => {
           name: "remote",
           agent: "subagent",
           parentSessionId: null,
-          originPeer: PEER,
+          originRemote: PEER,
           originProject: OTHER_PROJECT,
           originSession: MAIN,
           createdAt: 500,
@@ -599,17 +599,17 @@ describe("projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("machine, peer and outbox facts", () =>
+  it.effect("machine, remote and outbox facts", () =>
     Effect.gen(function* () {
       const { sql, bus } = yield* story
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM machine"), [])
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM peer"), [{ id: PEER, name: "mac2", connectedAt: 170 }])
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM remote"), [{ id: PEER, name: "mac2", connectedAt: 170 }])
       const [queued] = yield* sql<{ seq: number }>`SELECT seq FROM event WHERE type = 'outbox.queued' ORDER BY seq DESC`
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM outbox WHERE acked_at IS NULL"), [
         {
           id: ITEM_2,
           seq: queued!.seq,
-          peerId: PEER,
+          remoteId: PEER,
           recipient: null,
           sessionId: REMOTE,
           kind: "send",
@@ -624,11 +624,11 @@ describe("projectors", () => {
         },
       ])
       yield* bus.transaction(
-        bus.publish(Catalog["machine.added"], { at: 900, data: { name: "mc", target: "mc", vibestd: MACHINE } }),
+        bus.publish(Catalog["machine.added"], { at: 900, data: { name: "mc", target: "mc", remote: MACHINE } }),
       )
       yield* bus.transaction(bus.publish(Catalog["machine.connected"], { at: 950, data: { name: "mc" } }))
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM machine"), [
-        { name: "mc", target: "mc", vibestdId: MACHINE, connectedAt: 950, createdAt: 900 },
+        { name: "mc", target: "mc", remoteId: MACHINE, connectedAt: 950, createdAt: 900 },
       ])
     }).pipe(Effect.provide(memory())),
   )
@@ -699,7 +699,7 @@ describe("bus", () => {
 
       const failed = yield* bus
         .transaction(
-          Effect.andThen(bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } }), Effect.fail("stop")),
+          Effect.andThen(bus.publish(Catalog["remote.seen"], { data: { id: PEER, name: "a" } }), Effect.fail("stop")),
         )
         .pipe(Effect.exit)
 
@@ -707,7 +707,7 @@ describe("bus", () => {
       assert.deepStrictEqual(yield* published, [])
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["machine.added"], { data: { name: "mb", target: "mb", vibestd: MACHINE } })
+          yield* bus.publish(Catalog["machine.added"], { data: { name: "mb", target: "mb", remote: MACHINE } })
           yield* bus.transaction(bus.publish(Catalog["machine.connected"], { data: { name: "mb" } }))
           assert.deepStrictEqual(yield* published, [])
         }),
@@ -774,7 +774,7 @@ describe("bus", () => {
             sessionId: MAIN,
             data: { sender: { type: "agent", session: MAIN }, content: "hi" },
           })
-          yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
+          yield* bus.publish(Catalog["remote.seen"], { data: { id: PEER, name: "a" } })
           yield* bus.publish(Catalog["project.moved"], {
             projectId: P,
             data: { from: "/a", to: "/b", repositories: [] },
@@ -786,7 +786,7 @@ describe("bus", () => {
         { position: 1, aggregate: P, seq: 1, type: "project.created" },
         { position: 2, aggregate: MAIN, seq: 1, type: "session.created" },
         { position: 3, aggregate: MAIN, seq: 2, type: "inbox.enqueued" },
-        { position: 4, aggregate: ledgerId!.value, seq: 1, type: "peer.seen" },
+        { position: 4, aggregate: ledgerId!.value, seq: 1, type: "remote.seen" },
         { position: 5, aggregate: P, seq: 2, type: "project.moved" },
       ])
     }).pipe(Effect.provide(memory())),
@@ -858,7 +858,7 @@ describe("bus", () => {
         Effect.gen(function* () {
           yield* bus.publish(Catalog["machine.added"], {
             at: 500,
-            data: { name: "mb", target: "mb", vibestd: MACHINE },
+            data: { name: "mb", target: "mb", remote: MACHINE },
           })
           yield* bus.publish(Catalog["machine.connected"], { at: 400, data: { name: "mb" } })
         }),
@@ -922,10 +922,10 @@ describe("project", () => {
       yield* installLedger
       const sql = yield* SqlClient.SqlClient
       yield* sql`INSERT INTO event (aggregate, seq, at, type, data)
-        VALUES (${PEER}, 1, 1, 'peer.seen', '{"id":"p","name":"a"}')`
+        VALUES (${PEER}, 1, 1, 'remote.seen', '{"id":"p","name":"a"}')`
       const error = yield* (yield* Bus.Service).rebuild.pipe(Effect.flip)
       assert.strictEqual(error._tag, "UnknownFact")
-      assert.include(error.message, `event ${PEER} 1: peer.seen has no projector`)
+      assert.include(error.message, `event ${PEER} 1: remote.seen has no projector`)
     }).pipe(Effect.provide(Bus.layer.pipe(Layer.provideMerge(Layer.fresh(memorySqlite))))),
   )
 })
@@ -935,8 +935,8 @@ describe("delivery order", () => {
     Effect.gen(function* () {
       yield* installLedger
       const bus = yield* Bus.Service
-      const first = yield* bus.subscribe([Catalog["peer.seen"]])
-      const second = yield* bus.subscribe([Catalog["peer.seen"], Catalog["machine.connected"]])
+      const first = yield* bus.subscribe([Catalog["remote.seen"]])
+      const second = yield* bus.subscribe([Catalog["remote.seen"], Catalog["machine.connected"]])
       yield* Stream.fromSubscription(first).pipe(
         Stream.take(1),
         Stream.runForEach(() => bus.publish(Catalog["machine.connected"], { data: { name: "mb" } })),
@@ -945,8 +945,8 @@ describe("delivery order", () => {
       yield* Effect.yieldNow
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
-          yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "b" } })
+          yield* bus.publish(Catalog["remote.seen"], { data: { id: PEER, name: "a" } })
+          yield* bus.publish(Catalog["remote.seen"], { data: { id: PEER, name: "b" } })
         }),
       )
       const seen = yield* Effect.forEach([1, 2, 3], () => PubSub.take(second))

@@ -4,7 +4,7 @@ import { Placement } from "@vibest/core/session/placement"
 import { authed, makeRepository } from "@vibest/platform-bun/test/lib/fakes"
 import { asCli, asEntry, asSession, client, test } from "@vibest/platform-bun/test/lib/rpc-helpers"
 import { session as draftSession } from "@vibest/platform-bun/test/lib/unit-helpers"
-import { peerHeaders } from "@vibest/protocol/protocol"
+import { remoteHeaders } from "@vibest/protocol/protocol"
 import { EdgeChain, EdgeDirected, EdgeMutual } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
 
@@ -114,20 +114,21 @@ describe("Session graph links RPC", () => {
       )
 
       assert.strictEqual(remoteLinks._tag, "MachineFailed")
+      assert.notInclude(remoteLinks.message, "not available with --machine")
 
-      const peer = authed(base, peerHeaders("peer-1", opened.projectId))
+      const remote = authed(base, remoteHeaders("remote-1", opened.projectId))
 
-      const peerLink = yield* Effect.flip(
-        peer["Session.Link"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) }),
+      const remoteLink = yield* Effect.flip(
+        remote["Session.Link"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) }),
       )
 
-      assert.strictEqual(peerLink._tag, "InvalidCaller")
+      assert.strictEqual(remoteLink._tag, "InvalidCaller")
 
-      const peerUnlink = yield* Effect.flip(
-        peer["Session.Unlink"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) }),
+      const remoteUnlink = yield* Effect.flip(
+        remote["Session.Unlink"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) }),
       )
 
-      assert.strictEqual(peerUnlink._tag, "InvalidCaller")
+      assert.strictEqual(remoteUnlink._tag, "InvalidCaller")
 
       const singleUnlink = yield* Effect.flip(cli["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [a.id] }) }))
       assert.strictEqual(singleUnlink._tag, "Forbidden")
@@ -157,13 +158,18 @@ describe("Session graph links RPC", () => {
       yield* db.session.insertSession(draftSession(remoteSessionId), opened.projectId, {
         cwd: repo,
         task: "remote task",
-        origin: { peer: "peer-1", project: "77777777-7777-4777-8777-777777777777", reportTo: remoteCreatorId },
+        origin: { remote: "remote-1", project: "77777777-7777-4777-8777-777777777777", reportTo: remoteCreatorId },
       })
 
       const remoteRow = (yield* db.session.getSession(remoteSessionId))!
       const remotePrompt = yield* placement.systemPromptOf(remoteRow)
       assert.include(remotePrompt, `vibest send ${remoteCreatorId}`)
       assert.notInclude(remotePrompt, "not linked to message it directly")
+
+      yield* db.session.unlinkSessions([{ from: remoteSessionId, to: remoteCreatorId, remote: "remote-1" }])
+      const remotePromptUnlinked = yield* placement.systemPromptOf(remoteRow)
+      assert.notInclude(remotePromptUnlinked, `vibest send ${remoteCreatorId}`)
+      assert.include(remotePromptUnlinked, "not linked to message it directly")
     }),
   )
 })

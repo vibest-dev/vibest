@@ -8,7 +8,7 @@ const Ended = Schema.Struct({
 const decodeEnded = (data: string) => Schema.decodeUnknownEffect(Schema.fromJsonString(Ended))(data).pipe(Effect.orDie)
 
 export const migration = {
-  id: "20261124010000_drop_project_entry",
+  id: "20261124030000_drop_project_entry",
   up: (tx: SqlClient.SqlClient) =>
     Effect.gen(function* () {
       const ended = yield* tx<{ readonly position: number; readonly data: string }>`SELECT position, data FROM event

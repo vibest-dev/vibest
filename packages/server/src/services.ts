@@ -28,9 +28,9 @@ import { Starts } from "@vibest/core/session/starts"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 
 import * as Listing from "./listing.ts"
+import { Inbound } from "./machine/inbound.ts"
 import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
-import { Peer } from "./machine/peer.ts"
 import { RemoteWatch } from "./machine/remote-watch.ts"
 import { Remote } from "./machine/remote.ts"
 import { WatchFeed } from "./watch-feed.ts"
@@ -62,7 +62,7 @@ export const services = LayerNode.group([
   Restart.node,
   Session.node,
   Integration.node,
-  Peer.node,
+  Inbound.node,
   SessionLaunch.node,
   Load.node,
   Machines.node,

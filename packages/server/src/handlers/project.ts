@@ -4,7 +4,7 @@ import { Identity } from "@vibest/core/identity"
 import { Project } from "@vibest/core/project"
 import { createProject } from "@vibest/core/project/create"
 import { moveProjectHere, resolveProject } from "@vibest/core/project/identity"
-import { peerHeaders } from "@vibest/protocol/protocol"
+import { remoteHeaders } from "@vibest/protocol/protocol"
 import { Caller, Forbidden } from "@vibest/protocol/rpc"
 import { Effect, Predicate } from "effect"
 
@@ -27,23 +27,23 @@ export const make = Effect.gen(function* () {
         const away = machine !== undefined && machine !== LOCAL_MACHINE
 
         if (away) {
-          if (Predicate.isTagged(caller, "Peer"))
+          if (Predicate.isTagged(caller, "Remote"))
             return yield* new Forbidden({
               method: "Project.Open",
-              message: "a peer opens projects only on this machine",
+              message: "a remote opens projects only on this machine",
             })
           const link = yield* machines.link(machine!)
 
           return yield* link
             .call(
               link.client["Project.Open"](directory === undefined ? {} : { directory }, {
-                headers: peerHeaders(self.id),
+                headers: remoteHeaders(self.id),
               }),
             )
             .pipe(Effect.catchTag("NoSuchSession", (e) => Effect.die(e)))
         }
 
-        if (!Predicate.isTagged(caller, "Peer")) yield* userOnly("Project.Open")
+        if (!Predicate.isTagged(caller, "Remote")) yield* userOnly("Project.Open")
         const target = directory ?? (Predicate.isTagged(caller, "Cli") ? caller.repositoryRoot : undefined)
 
         if (target === undefined)

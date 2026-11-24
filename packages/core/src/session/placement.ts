@@ -132,14 +132,15 @@ export const make = Effect.gen(function* () {
       directory === projectDirectory &&
       !directory.startsWith(`${layout.worktrees}/`)
 
-    const creatorLinked = creator !== undefined && (creator.remote || (yield* db.inbox.maySend(session.id, creator.id)))
+    const creatorLinked =
+      creator !== undefined && (yield* db.inbox.maySend(session.id, creator.id, creator.remote ?? ""))
 
     return systemPrompt({
       system: (yield* definitionIn(agents, session.agent)).system,
       id: session.id,
       checkout,
       sharer: yield* db.session.earlierSharer(session.id),
-      creator: creator === undefined ? undefined : { ...creator, linked: creatorLinked },
+      creator: creator === undefined ? undefined : { id: creator.id, label: creator.label, linked: creatorLinked },
       linkedTo: yield* db.session.linkedTargets(session.id, creator?.id),
       projectDir: layout.project(session.projectId),
       agents: agents.all,
@@ -343,7 +344,7 @@ export const make = Effect.gen(function* () {
       readonly beforeStart?: Effect.Effect<void>
     },
   ) {
-    const remote = yield* db.session.startedByPeer(session.id)
+    const remote = yield* db.session.startedByRemote(session.id)
     const creator = yield* nearCreator(session, h.id)
 
     const near =
