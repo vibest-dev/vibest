@@ -355,14 +355,14 @@ const reports = (runtime: Runtime): Check => ({
   },
 })
 
-const SEND_THEN_HERDR =
-  "Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: herdr pane list > herdr-ran.txt. Then reply with exactly: pong"
+const SEND_THEN_GUARD =
+  "Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: vibest integration stop > guard-ran.txt. Then reply with exactly: pong"
 
 const noApprovalDialog: Check = {
   id: "I12",
   tier: "agent",
   title:
-    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to run herdr, herdr does not run",
+    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to run vibest integration stop, it does not run",
   run: async (w) => {
     const c = await cursorWorld(w, "herdr", "i12")
     await fs.writeFile(
@@ -372,7 +372,7 @@ const noApprovalDialog: Check = {
     const ids: Array<string> = []
 
     try {
-      const id = await c.start(SEND_THEN_HERDR)
+      const id = await c.start(SEND_THEN_GUARD)
       ids.push(id)
       const seen = new Set<string>()
       await until(
@@ -407,7 +407,7 @@ const noApprovalDialog: Check = {
         row<{ d: string }>(w, `SELECT directory AS d FROM ${SESSIONS} s WHERE id = ?`, id)?.d ?? "",
       )
 
-      expect(!(await Bun.file(path.join(worktree, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
+      expect(!(await Bun.file(path.join(worktree, "guard-ran.txt")).exists()), "guard-ran.txt exists")
     } finally {
       await c.close(ids)
     }

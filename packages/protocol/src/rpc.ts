@@ -18,7 +18,7 @@ import {
   UnknownMachine,
 } from "@vibest/schema/machine"
 import { MessageStatus } from "@vibest/schema/model"
-import { AgentRefused, PluginInfo, PluginsNotActive, Routing } from "@vibest/schema/plugin"
+import { SessionRefused, PluginInfo, PluginsNotActive, Routing } from "@vibest/schema/plugin"
 import {
   NoSuchProject,
   CloneFailed,
@@ -430,7 +430,7 @@ export class VibestRpcs extends RpcGroup.make(
           NoCallingSession,
           NoHarnessChosen,
           NoRuntime,
-          AgentRefused,
+          SessionRefused,
           PluginsNotActive,
           UnknownAgent,
           NoSuchSession,
@@ -523,7 +523,7 @@ export class VibestRpcs extends RpcGroup.make(
           NoSuchSession,
           LaunchFailed,
           NoRuntime,
-          AgentRefused,
+          SessionRefused,
           PluginsNotActive,
           UnknownAgent,
           ...LINE_ERRORS,
@@ -735,7 +735,7 @@ export class VibestRpcs extends RpcGroup.make(
           NotInRepository,
           NoSuchSession,
           NoHarnessChosen,
-          AgentRefused,
+          SessionRefused,
           PluginsNotActive,
           RuntimeUnreachable,
           RuntimeIncompatible,
@@ -919,7 +919,7 @@ export class VibestRpcs extends RpcGroup.make(
           NoCallingSession,
           NoHarnessChosen,
           NoRuntime,
-          AgentRefused,
+          SessionRefused,
           PluginsNotActive,
           UnknownAgent,
           NoSuchSession,

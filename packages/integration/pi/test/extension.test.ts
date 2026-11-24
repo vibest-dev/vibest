@@ -492,12 +492,14 @@ describe("pi-vibest", () => {
           reason: "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused.",
         },
       ])
-      assert.deepStrictEqual(yield* s.emit("tool_call", { toolName: "write", input: { path: "a" } }, { cwd: "/" }), [
+      assert.deepStrictEqual(yield* bash("vibest integration stop"), [
         {
           block: true,
-          reason:
-            "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session.",
+          reason: "vibest integration stop is the harness's hook, not an agent command.",
         },
+      ])
+      assert.deepStrictEqual(yield* s.emit("tool_call", { toolName: "write", input: { path: "a" } }, { cwd: "/" }), [
+        undefined,
       ])
       yield* s.emit("session_start", { reason: "startup" }, { mode: "rpc" })
       yield* TestClock.withLive(Effect.sleep("300 millis"))

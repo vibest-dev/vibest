@@ -24,7 +24,7 @@ const builtin: Candidate = {
       Effect.gen(function* () {
         events.push("setup")
         yield* Effect.addFinalizer(() => Effect.sync(() => events.push("close")))
-        yield* ctx.agent.hook("start.before", () => Effect.void)
+        yield* ctx.session.hook("start.before", () => Effect.void)
       }),
   }),
 }

@@ -47,7 +47,7 @@ describe("vibest.sock", () => {
         Plugin.define({
           id: "see",
           effect: (ctx) =>
-            ctx.agent.hook("start.before", (e) =>
+            ctx.session.hook("start.before", (e) =>
               Effect.sync(() => {
                 seenDirectory.project = e.project
               }),
@@ -152,7 +152,7 @@ describe("vibest.sock", () => {
         }),
       )
 
-      assert.ok(Predicate.isTagged(failed, "LaunchFailed") || Predicate.isTagged(failed, "AgentRefused"), failed._tag)
+      assert.ok(Predicate.isTagged(failed, "LaunchFailed") || Predicate.isTagged(failed, "SessionRefused"), failed._tag)
       assert.strictEqual((yield* db.session.latestRoot(projectId))!.id, before)
     }),
     { missingBinary: ["cursor"] },

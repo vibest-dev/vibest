@@ -19,7 +19,7 @@ First use case: A plugin intercepts session spawn to select harness and model ba
 | Hot reload and activation wait            | Required once npm is supported (async installation), aligned with OpenCode's supervisor; spawn activation wait has a cap                                             |
 | Multiple plugins modifying the same value | One event mutated in place by every callback in plugin order (no per-callback copy); later execution overrides; host records source via per-callback diffs           |
 | Composition mode                          | Sequential for every hook; the default harness choice (`@vibest/plugin-harness-choice`, bundled by the product) runs first                                           |
-| Rejection                                 | Only `agent.start.before` may refuse (`AgentRefused`): a defect or a timeout there is also a refusal. On `agent.fail` a defect or timeout fails that operation       |
+| Rejection                                 | Only `session.start.before` may refuse (`SessionRefused`): a defect or a timeout there is also a refusal. On `agent.fail` a defect or timeout fails that operation   |
 
 ## 1. OpenCode V2 Reference (Source Code Studied)
 
@@ -68,9 +68,9 @@ export namespace Plugin {
   export const define = (plugin: Plugin) => plugin          // Identity function, for type inference only
 }
 
-// Hooks are registered on their domain (ctx.agent.hook("start.before", ...)), OpenCode V2 style
+// Hooks are registered on their domain (ctx.session.hook("start.before", ...)), OpenCode V2 style
 export interface Hooks {
-  readonly "agent.start.before": { readonly event: AgentStartBefore; readonly error: AgentRefused }
+  readonly "session.start.before": { readonly event: SessionStartBefore; readonly error: SessionRefused }
   readonly "agent.fail": { readonly event: AgentFail; readonly error: never }
 }
 
@@ -80,7 +80,7 @@ export interface Context {
   readonly subscription: { readonly report: (input: SubscriptionReport) => Effect.Effect<void> }  // unregistered when scope closes; an unknown name fails setup
 }
 
-export interface AgentStartBefore {
+export interface SessionStartBefore {
   readonly project: string                                    // Project directory; readonly enforced at type level only, not checked at runtime
   readonly agent: string                                      // the agent definition id
   readonly parentSessionId: string | undefined                // who asked; undefined for the entry session
@@ -104,10 +104,10 @@ export interface AgentFail {                                  // a started sessi
   move: { harness: string; provider?: string | undefined; model?: string | undefined } | undefined  // mutable: where the session restarts
 }
 
-export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
+export class SessionRefused extends Schema.TaggedError<SessionRefused>()("SessionRefused", { reason: Schema.String }) {}
 ```
 
-The plugin's `AgentRefused` only contains `reason`; wire (RPC) error is defined by the host, see §5.
+The plugin's `SessionRefused` only contains `reason`; wire (RPC) error is defined by the host, see §5.
 
 Examples:
 
@@ -119,7 +119,7 @@ import { Effect } from "effect"
 export default Plugin.define({
   id: "route",
   effect: (ctx) =>
-    ctx.agent.hook("start.before", (e) =>
+    ctx.session.hook("start.before", (e) =>
       Effect.sync(() => {
         if (e.model) return // Don't override if already selected by coordinator or earlier plugin (convention)
         if (/^(research|investigate)\b/i.test(e.prompt))
@@ -137,13 +137,13 @@ export default Plugin.define({
 
 ```ts
 // Guard: refuse
-import { AgentRefused, Plugin } from "@omac/plugin"
+import { SessionRefused, Plugin } from "@omac/plugin"
 export default Plugin.define({
   id: "budget",
   effect: (ctx) =>
-    ctx.agent.hook("start.before", (e) =>
+    ctx.session.hook("start.before", (e) =>
       e.model?.includes("opus") && e.project.includes("/sandbox/")
-        ? Effect.fail(new AgentRefused({ reason: "opus is not allowed in sandbox repositories" }))
+        ? Effect.fail(new SessionRefused({ reason: "opus is not allowed in sandbox repositories" }))
         : Effect.void,
     ),
 })
@@ -155,7 +155,7 @@ import { Plugin } from "@omac/plugin"
 export default Plugin.define({
   id: "cheap-second",
   effect: (ctx) =>
-    ctx.agent.hook("fail", (e) =>
+    ctx.session.hook("fail", (e) =>
       Effect.sync(() => {
         if (e.reason === "limited") e.move = { harness: "cursor" }
       }),
@@ -205,12 +205,12 @@ Setup can use `Effect.acquireRelease` for resources (tied to plugin scope, relea
 ## 5. Execution Rules (omac's Own)
 
 - Trigger point: In `Session.spawn` (`packages/cli/src/sessions.ts`), resolve `repositoryRoot` to repo root first (moving `topLevel` before validation), run hooks immediately after, then run `checkProvider` / `available` / `integration` and row insertion. CLI `omac run` passes through `Server.Spawn` → `Session.spawn` (the former MCP `assign` / `handoff` did too; removed in #13), the sole trigger point. herdr session is resolved in `Server.Spawn` prior to hooks, which does not affect "rejection prevents pane launch".
-- Every hook is `sequential`: callbacks run serially in the caller's fiber in §4 order (the default harness choice, `@vibest/plugin-harness-choice`, first, then the runtime plugins), before the session is admitted or its pane started (`agent.start.before`), or before the round ends on a limit (`agent.fail`). A usage-limit move runs `agent.start.before` once more for every candidate it is about to start, with the move's harness/provider/model and the session's earlier tries prefilled: a refusal there skips that candidate, and what the chain decides is what starts.
-- Two hooks are registered: `agent.start.before`, `agent.fail`. `ctx.agent.hook` with any other name (including the earlier `session.start.before`, `session.spawn` and `worker.spawn`, which have no alias) fails the plugin's setup with `unsupported hook "<name>"; supported: agent.start.before, agent.fail`, so a stale plain-JS plugin shows as `failed` in `omac plugins` instead of running.
+- Every hook is `sequential`: callbacks run serially in the caller's fiber in §4 order (the default harness choice, `@vibest/plugin-harness-choice`, first, then the runtime plugins), before the session is admitted or its pane started (`session.start.before`), or before the round ends on a limit (`agent.fail`). A usage-limit move runs `session.start.before` once more for every candidate it is about to start, with the move's harness/provider/model and the session's earlier tries prefilled: a refusal there skips that candidate, and what the chain decides is what starts.
+- Two hooks are registered: `session.start.before`, `agent.fail`. `ctx.session.hook` with any other name (including the earlier `session.start.before`, `session.spawn` and `worker.spawn`, which have no alias) fails the plugin's setup with `unsupported hook "<name>"; supported: session.start.before, agent.fail`, so a stale plain-JS plugin shows as `failed` in `omac plugins` instead of running.
 - Every callback mutates the one event in place: no per-callback copy, so a later plugin sees (and may overwrite) what an earlier one wrote, and a failed or timed-out callback's writes stand unless a later callback overwrites them. Host diffs top-level fields generically (no field whitelist), recording trace `{ plugin, hook, ms, outcome: "ok" | "refused" | "crashed" | "timeout", changes }`. Readonly fields enforced at compile time via TS `readonly`.
 - 5s callback timeout: Callback forked into plugin's own scope with timeout on `Fiber.join`, returning on time even with uninterruptible regions; abandoned fiber finishes on its own, cleaned up by plugin scope (§2). Timeout is Layer parameter (like `options.maxSessions`), default 5s, tests inject shorter values; not user-configurable for now.
-- On `agent.start.before`, a callback failure or timeout is a refusal, never a skip: nothing is inserted, no pane starts. On `agent.fail` a failure or timeout fails that operation: the round ends failed with the plugin error (no move). Nothing is skipped silently.
-- `AgentRefused` (only meaningful on `agent.start.before`): Stops immediately, no row inserted, no pane started. Host maps it to wire error `AgentRefused { plugin, reason }` (host injects `plugin`), added to `Spawn.error` in `rpc.ts`; `omac run` reports `AgentRefused: …` on stderr and exits 1. Elsewhere an `AgentRefused` counts as a crash.
+- On `session.start.before`, a callback failure or timeout is a refusal, never a skip: nothing is inserted, no pane starts. On `agent.fail` a failure or timeout fails that operation: the round ends failed with the plugin error (no move). Nothing is skipped silently.
+- `SessionRefused` (only meaningful on `session.start.before`): Stops immediately, no row inserted, no pane started. Host maps it to wire error `SessionRefused { plugin, reason }` (host injects `plugin`), added to `Spawn.error` in `rpc.ts`; `omac run` reports `SessionRefused: …` on stderr and exits 1. Elsewhere an `SessionRefused` counts as a crash.
 - Normal validation after merging; invalid values yield `HarnessUnavailable` with plugin id that wrote it. If no source provides a harness, returns tagged `NoHarnessChosen` with actionable message: "pass harness, or install a routing plugin", also added to `Spawn.error`.
 - New hooks are added to the `Hooks` map in `@omac/plugin` with their event and error types; every hook composes the same way (sequential, one event mutated in place).
 - From Phase 2: spawn and `omac plugins` await in-flight activations (including queued pending changes) up to 10s; timeouts proceed with currently active plugins, spawn trace records `plugins still activating`.
@@ -227,7 +227,7 @@ Sources are issues from anomalyco/opencode; mostly from V1, while V2 resolved de
 | #   | Phase  | Clause                                                                                                                                                                                                                                   | Source                                                 | Test                                                                                                                                                                                                                                                                                                                                                                                                        |
 | --- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P1  | 1      | Deterministic ordering: `plugins/` path-sorted first, `omac.json` `plugins` after; independent of directory listing order; `-x` removes; `node_modules`, dotfiles, `*.d.ts`, and directories without entrypoints do not count as plugins | #45367                                                 | Two plugins write the same field: swapping config order swaps result; discovery unit test injects shuffled listing, output order unchanged; removed via `-x` does not execute; `node_modules/`, `.x.ts`, `a.d.ts`, empty dir under `plugins/` do not appear in plugin list (empty dir warns)                                                                                                                |
-| P2  | 1      | A hook failure is a refusal that names the plugin; nothing is inserted or started                                                                                                                                                        | #45367, #39031                                         | Plugin 1 throws: spawn fails `AgentRefused` with `plugin <id> crashed: …`; later plugins not called; no row in db, no pane in herdr; trace has the crash                                                                                                                                                                                                                                                    |
+| P2  | 1      | A hook failure is a refusal that names the plugin; nothing is inserted or started                                                                                                                                                        | #45367, #39031                                         | Plugin 1 throws: spawn fails `SessionRefused` with `plugin <id> crashed: …`; later plugins not called; no row in db, no pane in herdr; trace has the crash                                                                                                                                                                                                                                                  |
 | P3  | 1      | Hung hook does not hang spawn                                                                                                                                                                                                            | #39031                                                 | `Effect.never`, `Effect.promise(() => new Promise(() => {}))`, long `Effect.sleep`, `Effect.uninterruptible(Effect.sleep(...))`: spawn returns within timeout (asserted with TestClock virtual time; `TestClock.adjust` past sleep before test teardown so teardown does not await fiber), trace records `timeout`; after reject or timeout db has no extra row, herdr has no pane                          |
 | P5  | 1      | Writable field mutations actually take effect                                                                                                                                                                                            | #39674, #31680, #26910                                 | Plugin mutates harness / provider / model: session row and `ADAPTERS[harness].launchArgs` reflect new values                                                                                                                                                                                                                                                                                                |
 | P6  | 1      | Overrides are traceable                                                                                                                                                                                                                  | #6261, #12223                                          | A writes `model=a`, B writes `model=b`: final b; trace is `[{A, from: requested, to: a}, {B, from: a, to: b, overwrote: A}]`; return value and `list_siblings` show decided by B                                                                                                                                                                                                                            |
@@ -235,10 +235,10 @@ Sources are issues from anomalyco/opencode; mostly from V1, while V2 resolved de
 | P8  | 1      | Correct hook timing, output re-validated                                                                                                                                                                                                 | #19960, #44081                                         | Event `repository` is already repo root; plugin writes `harness = "vim"` → `HarnessUnavailable` includes plugin id                                                                                                                                                                                                                                                                                          |
 | P9  | 1      | Readonly fields not writable in types; a refused callback stops the chain                                                                                                                                                                | Inherent risk of mutable objects                       | `e.project = ...` fails compilation (`@ts-expect-error`); mutating `prompt` takes effect, session receives new prompt                                                                                                                                                                                                                                                                                       |
 | P10 | 1      | Setup failure or hang isolates to itself                                                                                                                                                                                                 | V2 scope-per-plugin                                    | Registers hook then throws: hook not called; other plugins normal; plugin failed with reason; setup is `Effect.never`: omacd listens normally, plugin failed with "setup timed out"; duplicate ids first-come first-served                                                                                                                                                                                  |
-| P11 | 1      | Shared effect instance in compiled binary                                                                                                                                                                                                | §2                                                     | `test/plugin-binary.test.ts`, run binary after `bun run build`: plugin `import { Effect } from "effect"` and `import * as S from "effect/Schema"` work and share host instance; plugin's bundled effect still uses host's; `@omac/plugin` `AgentRefused` matches host `instanceof`                                                                                                                          |
+| P11 | 1      | Shared effect instance in compiled binary                                                                                                                                                                                                | §2                                                     | `test/plugin-binary.test.ts`, run binary after `bun run build`: plugin `import { Effect } from "effect"` and `import * as S from "effect/Schema"` work and share host instance; plugin's bundled effect still uses host's; `@omac/plugin` `SessionRefused` matches host `instanceof`                                                                                                                        |
 | P12 | 1      | Plugin loading and execution visible at a glance, including running version                                                                                                                                                              | #39674                                                 | `omac plugins` shows source, revision (content hash / package version), load time, status, errors, plus calls, mutations, failures / timeouts / rejections, and latest error since omacd start; counts increment after spawn; file edits visibly desync with disk (auto-reloads from Phase 2). omacd log has one line per plugin loaded, one line per hook execution (info: plugin, duration, what changed) |
 | P13 | Future | User plugins follow builtin plugins                                                                                                                                                                                                      | #12223                                                 | Add when introducing first builtin plugin                                                                                                                                                                                                                                                                                                                                                                   |
-| P14 | 1      | Separate refusal from crash                                                                                                                                                                                                              | V2 `tool.execute.before`, #45367                       | Plugin 1 `AgentRefused("budget")`, plugin 2 writes model: plugin 2 not called, no row inserted, no pane started; RPC client receives `AgentRefused { plugin: plugin1, reason }`; a defect or timeout is also a refusal. A plugin that unsets the harness leaves `NoHarnessChosen`                                                                                                                           |
+| P14 | 1      | Separate refusal from crash                                                                                                                                                                                                              | V2 `tool.execute.before`, #45367                       | Plugin 1 `SessionRefused("budget")`, plugin 2 writes model: plugin 2 not called, no row inserted, no pane started; RPC client receives `SessionRefused { plugin: plugin1, reason }`; a defect or timeout is also a refusal. A plugin that unsets the harness leaves `NoHarnessChosen`                                                                                                                       |
 | P16 | 2      | Hot reload only rebuilds plugins after the change                                                                                                                                                                                        | V2 prefix diff                                         | Edit 2nd of 3 plugins: 1st does not re-setup (setup count unchanged), 2nd and 3rd rebuild in order, old scope finalizers executed                                                                                                                                                                                                                                                                           |
 | P17 | 2      | Failed new revision preserves old revision without re-executing                                                                                                                                                                          | V2 rollback + digest cache                             | Break plugin: old version remains active, `omac plugins` shows error; unrelated file changes do not re-import broken file (import side-effect count unchanged); recovers when fixed                                                                                                                                                                                                                         |
 | P18 | 2      | Coalesce rapid changes into single activation                                                                                                                                                                                            | V2 sliding queue + debounce                            | Save 10 times within 50ms: activates only once                                                                                                                                                                                                                                                                                                                                                              |
@@ -252,7 +252,7 @@ Each phase is a standalone PR, usable upon merge; subsequent phases only add to 
 
 **Phase 1: Core, usable and observable (local plugins, loaded on startup)**
 
-- `packages/plugin` (`@omac/plugin`): §3 types, `Plugin.define`, `AgentRefused`.
+- `packages/plugin` (`@omac/plugin`): §3 types, `Plugin.define`, `SessionRefused`.
 - Configuration and discovery: `plugins` in `~/.omac/omac.json` (local path entries, removal, wildcards) + `~/.omac/plugins/`; npm entries marked failed initially: "npm plugins are not supported yet".
 - Loading: Entrypoint resolution, Schema validation, `Bun.plugin` mapping (`effect/X` → `effect.X`, generated at runtime).
 - Activation: One-time activation when omacd builds Layer (listens after Server, no waiting needed), `Scope.fork`, failure isolation, id deduplication; plugin changes require omacd restart.
@@ -284,7 +284,7 @@ Each phase is a standalone PR, usable upon merge; subsequent phases only add to 
 **Future (on demand, separate PRs; exposure order and boundaries in §8)**
 
 - `omac route --prompt ...` dry-run (must reuse same trigger, P7).
-- More hooks (proposed, not registered; `ctx.agent.hook` refuses them today): `session.result`, `session.send`, `coordinator.launch`.
+- More hooks (proposed, not registered; `ctx.session.hook` refuses them today): `session.result`, `session.send`, `coordinator.launch`.
 - `first` / `parallel` composition modes; transform registry (plugins registering harness adapters or custom model catalogs).
 - Project-level plugins (requires trust model: plugins execute inside daemon, sessions can write repository).
 - Subprocess isolation.
@@ -303,13 +303,13 @@ Reference systems provide five primary extension mechanisms (Oct 2026 survey of 
 
 omac's tradeoff: **Expose minimally first** (following herdr's philosophy). Interception opens only critical points, while other needs callback via `omac` CLI; open further points only with concrete demand, each in a separate PR.
 
-| Mechanism         | omac Extension Points                                                                                                                                                                       | Status                                                                                    |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| ① Intercept       | `agent.start.before` (select harness / model / provider, mutate prompt, refuse); `agent.fail` (move a limited session); `session.result` (quality gate: send back for rework, auto-open PR) | `agent.start.before`, `agent.fail` implemented; `session.result` proposed, not registered |
-| ② Contribute      | Harness adapter registration (add aider, gemini, opencode, etc.); `omac` subcommands; rule snippets                                                                                         | Not open for now; first candidate is harness adapter                                      |
-| ③ Edit State      | Model catalog / defaults, rule templates                                                                                                                                                    | Not open for now                                                                          |
-| ④ Callback System | Plugins directly invoke `omac` CLI (env provides `OMAC_HOME` / `OMAC_COMMAND`); narrowed omac client subset                                                                                 | No SDK provided for now, CLI is sufficient                                                |
-| ⑤ Observe         | `session.status`, `session.spawned` (readonly, with trace), provided via Stream or `parallel` hook                                                                                          | Proposed, not registered; pending demand                                                  |
+| Mechanism         | omac Extension Points                                                                                                                                                                         | Status                                                                                      |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| ① Intercept       | `session.start.before` (select harness / model / provider, mutate prompt, refuse); `agent.fail` (move a limited session); `session.result` (quality gate: send back for rework, auto-open PR) | `session.start.before`, `agent.fail` implemented; `session.result` proposed, not registered |
+| ② Contribute      | Harness adapter registration (add aider, gemini, opencode, etc.); `omac` subcommands; rule snippets                                                                                           | Not open for now; first candidate is harness adapter                                        |
+| ③ Edit State      | Model catalog / defaults, rule templates                                                                                                                                                      | Not open for now                                                                            |
+| ④ Callback System | Plugins directly invoke `omac` CLI (env provides `OMAC_HOME` / `OMAC_COMMAND`); narrowed omac client subset                                                                                   | No SDK provided for now, CLI is sufficient                                                  |
+| ⑤ Observe         | `session.status`, `session.spawned` (readonly, with trace), provided via Stream or `parallel` hook                                                                                            | Proposed, not registered; pending demand                                                    |
 
 Constraints:
 
