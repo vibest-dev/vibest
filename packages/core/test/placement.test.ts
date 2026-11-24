@@ -238,13 +238,17 @@ describe.concurrent("Placement project near-terminal", () => {
         projectId,
         root: repo,
         at: { id: "local" },
-        argv: ["--harness", "pi"],
+        sessionId: undefined,
+        fresh: false,
+        harness: "pi",
+        provider: undefined,
+        model: undefined,
         focus: false,
         runtime: "herdr",
         agent: { id: "coordinator", named: false },
       })
 
-      const entryRow = (yield* db.session.entryOf(projectId))!
+      const entryRow = (yield* db.session.latestRoot(projectId))!
       assert.strictEqual(entryRow.name, `Vibest/${path.basename(repo)}`)
       assert.strictEqual((yield* fake.callsTo("open")).at(-1)?.label, entryRow.name)
       yield* db.session.endProcess(entryRow.id, "exited")
@@ -253,7 +257,11 @@ describe.concurrent("Placement project near-terminal", () => {
         projectId,
         root: repo,
         at: { id: "local" },
-        argv: ["--harness", "pi"],
+        sessionId: undefined,
+        fresh: false,
+        harness: "pi",
+        provider: undefined,
+        model: undefined,
         focus: false,
         runtime: "herdr",
         agent: { id: "coordinator", named: false },
@@ -263,14 +271,18 @@ describe.concurrent("Placement project near-terminal", () => {
       assert.strictEqual(secondOpen?.near, first.terminal)
       assert.isUndefined(secondOpen?.parent)
 
-      const secondEntryRow = (yield* db.session.entryOf(projectId))!
+      const secondEntryRow = (yield* db.session.latestRoot(projectId))!
       yield* db.session.endProcess(secondEntryRow.id, "exited")
 
       yield* entry.launch({
         projectId,
         root: repo,
         at: { id: "local", target: "explicit-session" },
-        argv: ["--harness", "pi"],
+        sessionId: undefined,
+        fresh: false,
+        harness: "pi",
+        provider: undefined,
+        model: undefined,
         focus: false,
         runtime: "herdr",
         agent: { id: "coordinator", named: false },

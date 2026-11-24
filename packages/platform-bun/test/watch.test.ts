@@ -46,7 +46,7 @@ const withEntry = Effect.gen(function* () {
   yield* herdr.addPane("w1:p8", "ws", repo)
   yield* herdr.seedAgent("w1:p8")
 
-  const started = yield* db.session.startEntry(
+  const started = yield* db.session.startRoot(
     project,
     "pi",
     false,
@@ -93,7 +93,6 @@ describe("Watch", () => {
         {
           id: project,
           directory: repo,
-          entrySessionId: entryId,
           activity: "idle",
           repositories: [{ path: repo, identity: null }],
         },
@@ -125,10 +124,43 @@ describe("Watch", () => {
       assert.deepStrictEqual(seen.project, {
         id: opened.projectId,
         directory: other,
-        entrySessionId: null,
         activity: "idle",
         repositories: [{ path: other, identity: null }],
       })
+
+      yield* c.Archive({ id })
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "SessionEnded" }> =>
+          Predicate.isTagged(e, "SessionEnded") && e.id === id && e.projectId === project,
+      )
+    }),
+  )
+
+  test(
+    "an exited-but-unarchived session stays in Watch with exitedAt set until it is archived",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const { repo, project, entryClient } = yield* withEntry
+      const { next, c } = yield* watching(repo)
+      yield* next(isSnapshot)
+
+      const { id } = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
+          Predicate.isTagged(e, "Session") && e.session.id === id && e.session.startedAt !== null,
+      )
+
+      yield* db.session.endProcess(id, "exited")
+
+      const exited = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
+          Predicate.isTagged(e, "Session") && e.session.id === id && e.session.exitedAt !== null,
+      )
+
+      assert.isNotNull(exited.session.exitedAt)
+
+      const snapshotAfterExit = yield* (yield* watching(repo)).next(isSnapshot)
+      assert.isTrue(snapshotAfterExit.sessions.some((s) => s.id === id && s.exitedAt !== null))
 
       yield* c.Archive({ id })
       yield* next(
@@ -361,7 +393,6 @@ describe("Watch", () => {
         {
           id: project,
           directory: repo,
-          entrySessionId: entryId,
           activity: "idle",
           repositories: [{ path: repo, identity: "github.com/Org/Cached" }],
         },

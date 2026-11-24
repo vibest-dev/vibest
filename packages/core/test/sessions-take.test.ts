@@ -23,7 +23,7 @@ const entryAsked = Effect.gen(function* () {
   const db = yield* Db.Service
   const repo = yield* makeRepository
 
-  const entry = yield* db.session.startEntry(
+  const entry = yield* db.session.startRoot(
     yield* projectOf(repo),
     "pulling-pi",
     false,
@@ -231,7 +231,7 @@ describe.concurrent("an idle session takes its next batch", () => {
       const inbox = yield* Inbox.Service
       const repo = yield* makeRepository
 
-      const entry = yield* db.session.startEntry(
+      const entry = yield* db.session.startRoot(
         yield* projectOf(repo),
         "pulling-pi",
         false,

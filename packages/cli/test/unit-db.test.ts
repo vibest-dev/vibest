@@ -46,34 +46,34 @@ describe("Db", () => {
     () =>
       Effect.gen(function* () {
         const db = yield* Db.Service
-        const first = yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
+        const first = yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)
         assert.isNull(first.harnessSessionId)
         yield* db.session.noteConversation(first.sessionId, "s1")
-        const again = yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
+        const again = yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)
         assert.strictEqual(again.sessionId, first.sessionId)
         assert.strictEqual(again.harnessSessionId, "s1")
         yield* db.session.noteConversation("0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", "x")
         assert.strictEqual(
-          (yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)).harnessSessionId,
+          (yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)).harnessSessionId,
           "s1",
         )
-        const renewed = yield* db.session.startEntry(yield* projectOf("r"), "pi", true, place, ENTRY)
+        const renewed = yield* db.session.startRoot(yield* projectOf("r"), "pi", true, place, ENTRY)
         assert.notStrictEqual(renewed.sessionId, first.sessionId)
         assert.isNull(renewed.harnessSessionId)
         yield* db.session.noteConversation(renewed.sessionId, "s4")
         assert.isNull(
-          (yield* db.session.startEntry(yield* projectOf("r"), "claude", false, place, ENTRY)).harnessSessionId,
+          (yield* db.session.startRoot(yield* projectOf("r"), "claude", false, place, ENTRY)).harnessSessionId,
         )
         yield* db.session.noteConversation(renewed.sessionId, "c1")
         assert.strictEqual(
-          (yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)).sessionId,
+          (yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)).sessionId,
           renewed.sessionId,
         )
-        assert.isNull((yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)).harnessSessionId)
+        assert.isNull((yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)).harnessSessionId)
         yield* db.session.noteConversation(renewed.sessionId, "s6")
         yield* db.session.noteConversation(renewed.sessionId, "s7")
         assert.strictEqual(
-          (yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)).harnessSessionId,
+          (yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)).harnessSessionId,
           "s7",
         )
         const sql = yield* SqlClient.SqlClient
@@ -82,20 +82,15 @@ describe("Db", () => {
           endedAt: number | null
         }>`SELECT ended_at FROM session WHERE id = ${first.sessionId}`
 
-        assert.isNotNull(old!.endedAt)
+        assert.isNull(old!.endedAt)
 
         const ends = yield* sql<{
           reason: string
         }>`SELECT end_reason AS reason FROM process WHERE session_id = ${first.sessionId} AND ended_at IS NOT NULL
           ORDER BY ended_at, id`
 
-        assert.strictEqual(ends.at(-1)?.reason, "archived")
-
-        const [project] = yield* sql<{
-          entryId: string
-        }>`SELECT entry_session_id AS entryId FROM project WHERE id = ${yield* projectOf("r")}`
-
-        assert.strictEqual(project!.entryId, renewed.sessionId)
+        assert.strictEqual(ends.at(-1)?.reason, "exited")
+        assert.strictEqual((yield* db.session.latestRoot(yield* projectOf("r")))?.id, renewed.sessionId)
       }).pipe(Effect.provide(memoryDb())),
   )
 
@@ -274,7 +269,7 @@ describe("Db", () => {
         const db = yield* Db.Service
         const sql = yield* SqlClient.SqlClient
         const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-        const parent = yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
+        const parent = yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)
         yield* db.session.insertSession(session(id), yield* projectOf("r"), {
           cwd: "/w",
           parentSessionId: parent.sessionId,
@@ -480,7 +475,7 @@ describe("Db", () => {
           yield* sql<{ status: string }>`SELECT status FROM inbox WHERE transfer_id = ${disposed}`,
           [{ status: "dropped" }],
         )
-        yield* db.session.startEntry(project, "pi", false, place, ENTRY)
+        yield* db.session.startRoot(project, "pi", false, place, ENTRY)
         assert.strictEqual(yield* db.remote.receivePeerItem(item(disposed)), "duplicate")
         assert.deepStrictEqual(
           yield* sql<{ status: string }>`SELECT status FROM inbox WHERE transfer_id = ${disposed}`,
@@ -617,7 +612,7 @@ describe("Db", () => {
           assert.isUndefined(
             yield* db.inbox.insertInbox({ sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", message: "m" }),
           )
-          const entry = yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
+          const entry = yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)
           yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
             parentSessionId: entry.sessionId,
           })
@@ -638,7 +633,7 @@ describe("Db", () => {
             message: "n",
           })
           yield* db.session.endExited(entry.sessionId, "exited", undefined)
-          assert.strictEqual(yield* noticeStatus("n"), "dropped")
+          assert.strictEqual(yield* noticeStatus("n"), "pending")
         }),
       ),
   )
@@ -648,9 +643,9 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db.Service
         const project = yield* projectOf("r")
-        const first = yield* db.session.startEntry(project, "claude", false, place, ENTRY)
+        const first = yield* db.session.startRoot(project, "claude", false, place, ENTRY)
         const old = (yield* db.session.getSession(first.sessionId))!.process!.id
-        yield* db.session.startEntry(project, "claude", false, place, ENTRY)
+        yield* db.session.startRoot(project, "claude", false, place, ENTRY)
         assert.isFalse(yield* db.session.endProcess(first.sessionId, "exited", old))
         assert.isNull((yield* db.session.getSession(first.sessionId))!.process!.endedAt)
       }),
@@ -663,29 +658,28 @@ describe("Db", () => {
       memory(
         Effect.gen(function* () {
           const db = yield* Db.Service
+          const project = yield* projectOf("r")
+          const entry = yield* db.session.startRoot(project, "claude", false, place, ENTRY)
           const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-          yield* db.session.insertSession(
-            session(id, { harnessId: "claude", harnessSessionId: "pre" }),
-            yield* projectOf("r"),
-          )
+          yield* db.session.insertSession(session(id, { harnessId: "claude", harnessSessionId: "pre" }), project, {
+            parentSessionId: entry.sessionId,
+          })
           const { execution } = yield* db.session.startExecution(id, 1)
           assert.isFalse(yield* db.session.canResumeConversation(id, "pre"))
           yield* db.session.acceptExecution(id, execution)
           assert.isTrue(yield* db.session.canResumeConversation(id, "pre"))
           const ended = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-          yield* db.session.insertSession(
-            session(ended, { harnessId: "claude", harnessSessionId: "old" }),
-            yield* projectOf("r"),
-          )
+          yield* db.session.insertSession(session(ended, { harnessId: "claude", harnessSessionId: "old" }), project, {
+            parentSessionId: entry.sessionId,
+          })
           yield* db.session.startExecution(ended, 1)
           yield* complete(db, ended)
           assert.isTrue(yield* db.session.canResumeConversation(ended, "old"))
-          const entry = yield* db.session.startEntry(yield* projectOf("r"), "claude", false, place, ENTRY)
           assert.isFalse(yield* db.session.canResumeConversation(entry.sessionId, "c1"))
           yield* db.session.noteConversation(entry.sessionId, "c1")
           assert.isTrue(yield* db.session.canResumeConversation(entry.sessionId, "c1"))
           assert.strictEqual(
-            (yield* db.session.startEntry(yield* projectOf("r"), "claude", false, place, ENTRY)).harnessSessionId,
+            (yield* db.session.startRoot(project, "claude", false, place, ENTRY)).harnessSessionId,
             "c1",
           )
         }),

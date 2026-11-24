@@ -226,7 +226,7 @@ describe("pi-vibest", () => {
         const row = idleRow("pi")
         yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
 
-        const coord = yield* db.session.startEntry(
+        const coord = yield* db.session.startRoot(
           yield* projectOf("r"),
           "pi",
           false,
@@ -318,7 +318,7 @@ describe("pi-vibest", () => {
         const row = idleRow("claude")
         yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
 
-        const coord = yield* db.session.startEntry(
+        const coord = yield* db.session.startRoot(
           yield* projectOf("r"),
           "pi",
           false,
@@ -457,10 +457,10 @@ describe("pi-vibest", () => {
       yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
       yield* db.session.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
 
-      const coord = yield* db.session.startEntry(
+      const coord = yield* db.session.startRoot(
         yield* projectOf("r"),
         "pi",
-        false,
+        true,
         {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p7" },
@@ -502,7 +502,7 @@ describe("pi-vibest", () => {
       yield* s.emit("session_start", { reason: "startup" }, { mode: "rpc" })
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.deepStrictEqual(s.messages, [])
-      assert.strictEqual((yield* entryPending(db, yield* projectOf("r"))).length, 1)
+      assert.strictEqual((yield* db.inbox.pendingInbox(coord.sessionId)).length, 1)
       yield* s.emit("session_start", { reason: "startup" }, tuiStart)
       yield* until(
         Effect.sync(() => s.messages.length),
@@ -538,10 +538,10 @@ describe("pi-vibest", () => {
       const row = idleRow("pi")
       yield* db.session.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
 
-      const coord = yield* db.session.startEntry(
+      const coord = yield* db.session.startRoot(
         yield* projectOf("r"),
         "pi",
-        false,
+        true,
         {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p7" },
@@ -718,7 +718,7 @@ describe("pi-vibest", () => {
       const db = yield* Db.Service
       const c = yield* cli
 
-      const launched = yield* c["Project.EntrySession"]({
+      const launched = yield* c["Session.Claim"]({
         agent: "coordinator",
         harness: "pi",
         fresh: false,
@@ -761,7 +761,7 @@ describe("pi-vibest", () => {
       yield* until(saved, (id) => id === "s-fork")
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(
-        (yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: "test/p1" }))
+        (yield* c["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: "test/p1" }))
           .harnessSessionId,
         "s-fork",
       )
@@ -769,7 +769,7 @@ describe("pi-vibest", () => {
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
 
-      const renewed = yield* c["Project.EntrySession"]({
+      const renewed = yield* c["Session.Claim"]({
         agent: "coordinator",
         harness: "pi",
         fresh: true,
@@ -778,7 +778,8 @@ describe("pi-vibest", () => {
 
       assert.notStrictEqual(renewed.sessionId, launched.sessionId)
       assert.isNull(renewed.harnessSessionId)
-      assert.isNull(yield* saved)
+      assert.strictEqual(yield* saved, "kept")
+      assert.isNull(yield* savedSession(renewed.sessionId))
     }),
   )
 
@@ -789,7 +790,7 @@ describe("pi-vibest", () => {
       const path = yield* Path.Path
       const c = yield* cli
 
-      const launched = yield* c["Project.EntrySession"]({
+      const launched = yield* c["Session.Claim"]({
         agent: "coordinator",
         harness: "pi",
         fresh: false,

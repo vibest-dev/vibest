@@ -1,130 +1,169 @@
+import { entryPlace, filterCallerEnv, specHits } from "@vibest/core/caller"
+import { Db } from "@vibest/core/database/db"
+import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
+import { Identity } from "@vibest/core/identity"
+import { Runtimes } from "@vibest/core/runtimes"
 import { EntrySession } from "@vibest/core/session/entry"
-import { Forbidden, InvalidCaller } from "@vibest/protocol/rpc"
-import { Effect } from "effect"
+import { peerHeaders } from "@vibest/protocol/protocol"
+import { Caller, Forbidden, InvalidCaller } from "@vibest/protocol/rpc"
+import { NoSuchProject } from "@vibest/schema/project"
+import { LaunchFailed } from "@vibest/schema/session"
+import { Effect, Predicate } from "effect"
 
+import { Machines } from "../machine/machines.ts"
 import * as CallerChecks from "./caller.ts"
 import type { Handlers } from "./caller.ts"
 import { group } from "./group.ts"
 
-const entryAgent = (id: string, named: boolean | undefined) => ({ id, named: named === true })
+const DEFAULT_AGENT = "coordinator"
+
+const rootAgent = (id: string, named: boolean | undefined) => ({ id, named: named === true })
 
 export const make = Effect.gen(function* () {
-  const { scope, machineFromCaller, cliOnly, resolveAt } = yield* CallerChecks.Service
+  const { machineFromCaller, cliOnly, userOnly, resolveAt } = yield* CallerChecks.Service
+  const db = yield* Db.Service
+  const self = yield* Identity.Service
+  const machines = yield* Machines.Service
+  const runtimes = yield* Runtimes.Service
   const entrySession = yield* EntrySession.Service
 
   return {
-    Launch: ({ argv, agent, agentNamed, focus, runtime, callerEnv, runtimeSession }) =>
+    Launch: (input) =>
       Effect.gen(function* () {
-        const { id, directory } = yield* cliOnly("Launch").pipe(Effect.flatMap((c) => resolveAt(c.repositoryRoot)))
-        const at = yield* machineFromCaller("Launch", { callerEnv, runtime, runtimeSession })
+        const caller = yield* Caller
+        const away = input.machine !== undefined && input.machine !== LOCAL_MACHINE
+
+        if (away) {
+          if (Predicate.isTagged(caller, "Peer"))
+            return yield* new Forbidden({ method: "Launch", message: "a peer launches only on this machine" })
+          const link = yield* machines.link(input.machine!)
+          const { machine: _, ...forwarded } = input
+
+          return yield* link.call(link.client.Launch(forwarded, { headers: peerHeaders(self.id) }))
+        }
+
+        if (!Predicate.isTagged(caller, "Peer")) yield* userOnly("Launch")
+
+        const project = yield* Effect.gen(function* () {
+          if (input.projectId !== undefined) {
+            const directory = yield* db.project.projectDirectory(input.projectId)
+
+            if (directory === undefined) return yield* new NoSuchProject({ project: input.projectId })
+
+            return { id: input.projectId, directory }
+          }
+
+          if (Predicate.isTagged(caller, "Cli")) return yield* resolveAt(caller.repositoryRoot)
+
+          return yield* new InvalidCaller({ method: "Launch", message: "Launch needs projectId" })
+        })
+
+        const at =
+          input.callerEnv !== undefined || input.runtimeSession !== undefined
+            ? yield* machineFromCaller("Launch", {
+                callerEnv: input.callerEnv ?? {},
+                runtime: input.runtime,
+                runtimeSession: input.runtimeSession,
+              })
+            : { id: LOCAL_MACHINE }
 
         return yield* entrySession.launch({
-          projectId: id,
-          root: directory,
+          projectId: project.id,
+          root: project.directory,
           at,
-          argv,
-          focus,
-          runtime,
-          agent: entryAgent(agent, agentNamed),
+          sessionId: input.sessionId,
+          fresh: input.fresh === true,
+          harness: input.harness,
+          provider: input.provider,
+          model: input.model,
+          focus: Predicate.isTagged(caller, "Ui") ? false : (input.focus ?? true),
+          runtime: input.runtime,
+          agent: rootAgent(input.agent ?? DEFAULT_AGENT, input.agentNamed),
         })
       }).pipe(
-        Effect.catchTag("EntryRunning", (e) =>
+        Effect.catchTag("SessionRunning", (e) =>
           Effect.fail(
             new Forbidden({
               method: "Launch",
-              message: `the entry session (${e.harness}) is still running in ${e.place}, and a project has one entry session; exit it there first`,
+              message: `session ${e.sessionId} (${e.harness}) is still running in ${e.place}; exit it there first or pass --new`,
             }),
           ),
         ),
       ),
 
-    "Project.StartEntry": ({ harness, agent, agentNamed, fresh, provider, model, runtime }) =>
+    "Session.Attach": ({ callerEnv, runtime, sessionId, fresh }) =>
       Effect.gen(function* () {
-        const { id, directory } = yield* cliOnly("Project.StartEntry").pipe(
-          Effect.flatMap((c) => resolveAt(c.repositoryRoot)),
-        )
+        const c = yield* cliOnly("Session.Attach")
+        const project = yield* resolveAt(c.repositoryRoot)
+        const specs = yield* runtimes.callers
+        const env = filterCallerEnv(specs, callerEnv)
+        const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
+        const place = entryPlace({ runtime, hits, loaded: specs.map((spec) => spec.id) })
 
-        return yield* entrySession.start({
-          projectId: id,
-          root: directory,
-          harness,
-          agent: entryAgent(agent, agentNamed),
-          fresh: fresh === true,
-          provider,
-          model,
-          runtime,
-        })
+        if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
+
+        if (place.in === "terminal") {
+          const spec = specs.find((item) => item.id === place.runtime)
+
+          if (spec?.ready !== undefined && !(yield* spec.ready(env).pipe(Effect.orDie)))
+            return yield* new LaunchFailed({
+              message: spec.missing ?? `this ${spec.name ?? place.runtime} place could not be named`,
+            })
+        }
+
+        const hasRoot = (yield* db.session.latestRoot(project.id)) !== undefined
+
+        const running =
+          fresh === true
+            ? null
+            : yield* entrySession.running(project.id, place.in === "terminal" ? place.terminal : "", sessionId)
+
+        return { projectId: project.id, directory: project.directory, hasRoot, place, running }
       }),
 
-    "Project.EntrySession": ({ harness, agent, agentNamed, fresh, terminal, runtime, provider, model, routing, pid }) =>
+    "Session.Claim": ({
+      sessionId,
+      harness,
+      agent,
+      agentNamed,
+      fresh,
+      move,
+      terminal,
+      runtime,
+      provider,
+      model,
+      pid,
+    }) =>
       Effect.gen(function* () {
-        const { id, directory } = yield* cliOnly("Project.EntrySession").pipe(
+        const { id, directory } = yield* cliOnly("Session.Claim").pipe(
           Effect.flatMap((c) => resolveAt(c.repositoryRoot)),
         )
 
         return yield* entrySession.claim({
           projectId: id,
           directory,
+          sessionId,
           harness,
-          agent: entryAgent(agent, agentNamed),
+          agent: rootAgent(agent, agentNamed),
           fresh,
+          move: move === true,
           terminal,
           runtime,
           provider,
           model,
-          routing,
           pid,
         })
       }).pipe(
-        Effect.catchTags({
-          NoRuntime: () =>
-            Effect.fail(
-              new InvalidCaller({
-                method: "Project.EntrySession",
-                message: "Project.EntrySession needs the runtime the entry session runs in",
-              }),
-            ),
-          EntryRunning: (e) =>
-            Effect.fail(
-              new Forbidden({
-                method: "Project.EntrySession",
-                message: `the entry session (${e.harness}) is still running in ${e.place}, and a project has one entry session; exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
-              }),
-            ),
-        }),
+        Effect.catchTag("SessionRunning", (e) =>
+          Effect.fail(
+            new Forbidden({
+              method: "Session.Claim",
+              message: `session ${e.sessionId} (${e.harness}) is still running in ${e.place}; move it here or start a new conversation with --new`,
+            }),
+          ),
+        ),
       ),
-
-    "Project.FocusEntry": () =>
-      Effect.gen(function* () {
-        const c = yield* cliOnly("Project.FocusEntry")
-        const project = yield* resolveAt(c.repositoryRoot)
-
-        return yield* entrySession.focus(project.id)
-      }),
-
-    "Project.RunningEntry": ({ terminal }) =>
-      scope("Project.RunningEntry").pipe(Effect.flatMap(({ id }) => entrySession.running(id, terminal))),
-
-    "Project.StopEntry": ({ runtime, address }) =>
-      Effect.gen(function* () {
-        const { id } = yield* cliOnly("Project.StopEntry").pipe(Effect.flatMap((c) => resolveAt(c.repositoryRoot)))
-
-        return yield* entrySession
-          .stop(id, runtime, address)
-          .pipe(
-            Effect.catchTag("NoRuntime", (e) =>
-              Effect.fail(new InvalidCaller({ method: "Project.StopEntry", message: e.message })),
-            ),
-          )
-      }),
   } satisfies Handlers
 })
 
-export const layer = group([
-  "Launch",
-  "Project.StartEntry",
-  "Project.EntrySession",
-  "Project.FocusEntry",
-  "Project.RunningEntry",
-  "Project.StopEntry",
-]).toLayer(make)
+export const layer = group(["Launch", "Session.Attach", "Session.Claim"]).toLayer(make)

@@ -177,7 +177,7 @@ describe.concurrent("Session", () => {
       const sessions = yield* Session.Service
       const db = yield* Db.Service
       const repo = yield* makeRepository
-      yield* db.session.startEntry(
+      yield* db.session.startRoot(
         yield* projectOf(repo),
         "pi",
         false,
@@ -435,13 +435,13 @@ describe.concurrent("Session", () => {
       const current = (yield* db.session.currentProcessId(id))!
       yield* db.session.setStatus(id, "idle")
       yield* integration.prompt(
-        { id, entry: false, harness: "cursor", process: current - 1 },
+        { id, harness: "cursor", process: current - 1 },
         JSON.stringify({ hook_event_name: "afterAgentThought", conversation_id: "c-stale" }),
       )
       assert.strictEqual((yield* db.session.getSession(id))!.status, "idle")
       assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "c-123")
       yield* integration.prompt(
-        { id, entry: false, harness: "cursor", process: current },
+        { id, harness: "cursor", process: current },
         JSON.stringify({ hook_event_name: "afterAgentThought" }),
       )
       assert.strictEqual((yield* db.session.getSession(id))!.status, "working")
@@ -467,7 +467,7 @@ describe.concurrent("Session", () => {
       assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "h-9")
       const resumed = (yield* db.session.currentProcessId(id))!
       yield* integration.executionEnd(
-        { id, entry: false, harness: "cursor", process: resumed },
+        { id, harness: "cursor", process: resumed },
         JSON.stringify({
           hook_event_name: "afterAgentResponse",
           conversation_id: "c-123",
@@ -485,9 +485,9 @@ describe.concurrent("Session", () => {
       const { id, db } = yield* spawnWorking(yield* makeRepository, "cursor")
       const current = (yield* db.session.currentProcessId(id))!
       const event = JSON.stringify({ hook_event_name: "beforeSubmitPrompt", conversation_id: "c-old", prompt: "x" })
-      yield* integration.prompt({ id, entry: false, harness: "cursor", process: current - 1 }, event)
+      yield* integration.prompt({ id, harness: "cursor", process: current - 1 }, event)
       assert.isNull((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null)
-      yield* integration.prompt({ id, entry: false, harness: "cursor", process: current }, event)
+      yield* integration.prompt({ id, harness: "cursor", process: current }, event)
       assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "c-old")
     }),
   )
@@ -501,7 +501,7 @@ describe.concurrent("Session", () => {
       const repo = yield* makeRepository
       yield* herdr.seedAgent("test/cursor-entry")
 
-      const { sessionId } = yield* db.session.startEntry(
+      const { sessionId } = yield* db.session.startRoot(
         yield* projectOf(repo),
         "cursor",
         false,
@@ -549,7 +549,7 @@ describe.concurrent("Session", () => {
       const integration = yield* Integration.Service
       yield* Ref.set(herdr.onStarted, (session) =>
         Effect.gen(function* () {
-          const who = { id: session, entry: false, harness: FIRST_IN_ARGV.id }
+          const who = { id: session, harness: FIRST_IN_ARGV.id }
           yield* herdr.updateAgent(session, (a) => ({ ...a, status: "unknown", registerPrompt: false }))
           yield* integration.prompt(who, JSON.stringify({ hook_event_name: "afterAgentThought" }))
           yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
@@ -587,7 +587,7 @@ describe.concurrent("Session", () => {
       const integration = yield* Integration.Service
       yield* Ref.set(herdr.onStarted, (session) =>
         Effect.gen(function* () {
-          const who = { id: session, entry: false, harness: FIRST_IN_ARGV.id }
+          const who = { id: session, harness: FIRST_IN_ARGV.id }
           yield* integration.prompt(who, JSON.stringify({ hook_event_name: "afterAgentThought" }))
           yield* integration.executionEnd(who, JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }))
         }),
@@ -628,7 +628,7 @@ describe.concurrent("Session", () => {
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
       assert.include((yield* herdr.callsTo("open"))[0]!.argv.at(-1)!, "do it")
       const integration = yield* Integration.Service
-      const who = { id, entry: false, harness: CURSOR.id }
+      const who = { id, harness: CURSOR.id }
       const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
       const sql = yield* SqlClient.SqlClient
 
@@ -881,7 +881,7 @@ describe.concurrent("Session", () => {
       const direct = "DIRECT unrelated concurrent input"
       yield* rt.runtime.send(terminal, { text: direct })
       yield* integration.prompt(
-        { id, entry: false, harness: "cursor", process: yield* db.session.currentProcessId(id) },
+        { id, harness: "cursor", process: yield* db.session.currentProcessId(id) },
         JSON.stringify({ hook_event_name: "beforeSubmitPrompt", prompt: direct }),
       )
       yield* held.release("failed")

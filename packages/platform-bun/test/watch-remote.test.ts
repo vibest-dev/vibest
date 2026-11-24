@@ -129,7 +129,7 @@ describe("Watch with remote machines", () => {
 
         const bEntry = yield* b.run(
           Effect.flatMap(Db.Service, (db) =>
-            db.session.startEntry(
+            db.session.startRoot(
               bProject,
               "pi",
               false,
@@ -333,9 +333,7 @@ describe("Watch with remote machines", () => {
               return Stream.concat(
                 Stream.make(
                   Listing.WatchEvents.Snapshot({
-                    projects: [
-                      { id: p1, directory: "/remote/p1", entrySessionId: s1, activity: "idle", repositories: [] },
-                    ],
+                    projects: [{ id: p1, directory: "/remote/p1", activity: "idle", repositories: [] }],
                     sessions: [makeSession(s1, p1, "sess-1")],
                     machines: [],
                   }),
@@ -346,9 +344,7 @@ describe("Watch with remote machines", () => {
             return Stream.concat(
               Stream.make(
                 Listing.WatchEvents.Snapshot({
-                  projects: [
-                    { id: p2, directory: "/remote/p2", entrySessionId: s2, activity: "idle", repositories: [] },
-                  ],
+                  projects: [{ id: p2, directory: "/remote/p2", activity: "idle", repositories: [] }],
                   sessions: [makeSession(s2, p2, "sess-2")],
                   machines: [],
                 }),
@@ -427,7 +423,7 @@ describe("Watch with remote machines", () => {
 
         const aEntry = yield* a.run(
           Effect.flatMap(Db.Service, (db) =>
-            db.session.startEntry(
+            db.session.startRoot(
               aProject,
               "pi",
               false,

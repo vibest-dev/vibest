@@ -42,7 +42,7 @@ const entriesAtOneTerminal = Effect.gen(function* () {
 
   const exitedEntry = (fresh: boolean) =>
     Effect.gen(function* () {
-      const { sessionId } = yield* db.session.startEntry(project, "pi", fresh, location, {
+      const { sessionId } = yield* db.session.startRoot(project, "pi", fresh, location, {
         agent: "coordinator",
         projectDirectory: repo,
       })
@@ -138,18 +138,17 @@ describe.concurrent("Session", () => {
       const db = yield* Db.Service
       const repo = yield* makeRepository
       const entryId = yield* entryOfProject(repo)
-      const project = yield* projectOf(repo)
       const address = { machine: "local", id: "test/coord" }
       const waiting = (yield* db.inbox.insertSend(entryId, "waiting"))!
-      assert.isTrue(yield* db.session.detachEntry(project, RUNTIME, address))
+      assert.isTrue(yield* db.session.detachSession(entryId, RUNTIME, address))
       const ended = () => Effect.map(db.session.getSession(entryId), (row) => row!.process!.endedAt)
       yield* sessions.check(entryId)
       assert.isNull(yield* ended())
-      yield* db.session.reattachEntry(project, RUNTIME, address)
+      yield* db.session.reattachSession(entryId)
       yield* sessions.check(entryId)
       assert.isNotNull(yield* ended())
       assert.deepStrictEqual(
-        (yield* db.inbox.inboxWithStatus(entryId, "dropped")).map((row) => row.id),
+        (yield* db.inbox.inboxWithStatus(entryId, "pending")).map((row) => row.id),
         [waiting.id],
       )
     }),
@@ -245,7 +244,7 @@ describe.concurrent("Session", () => {
       yield* held.reached
       assert.isNotNull((yield* db.session.getSession(entryId))!.process!.endedAt)
 
-      const next = yield* db.session.startEntry(
+      const next = yield* db.session.startRoot(
         row.projectId,
         "pi",
         false,

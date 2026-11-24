@@ -56,7 +56,6 @@ const story = Effect.gen(function* () {
         at: 210,
         data: { project: P, agent: "main", name: "main", directory: "" },
       })
-      yield* emit(Catalog["project.entry_changed"], { projectId: P, at: 211, data: { session: MAIN } })
       yield* emit(Catalog["session.directory_changed"], { sessionId: MAIN, at: 212, data: { directory: "/w/app" } })
 
       const mainProcess = yield* emit(Catalog["process.started"], {
@@ -238,17 +237,13 @@ const story = Effect.gen(function* () {
 const rowsOf = <A extends object>(sql: SqlClient.SqlClient, query: string) => sql.unsafe<A>(query)
 
 describe("projectors", () => {
-  it.effect("project facts: created, repositories, entry, move", () =>
+  it.effect("project facts: created, repositories, move", () =>
     Effect.gen(function* () {
       const { sql } = yield* story
 
-      const [project] = yield* rowsOf<{ directory: string; entrySessionId: string }>(
-        sql,
-        "SELECT directory, entry_session_id FROM project",
-      )
+      const [project] = yield* rowsOf<{ directory: string }>(sql, "SELECT directory FROM project")
 
       assert.strictEqual(project!.directory, "/src/app")
-      assert.strictEqual(project!.entrySessionId, MAIN)
       assert.deepStrictEqual(
         yield* rowsOf(sql, "SELECT project_id, path, remote_url FROM project_repository ORDER BY path"),
         [{ projectId: P, path: "/src/app", remoteUrl: "git@x:app.git" }],
@@ -348,7 +343,7 @@ describe("projectors", () => {
       yield* bus.transaction(
         Effect.gen(function* () {
           yield* bus.publish(Catalog["session.ended"], { sessionId: REMOTE, at: 700, data: { reason: "archived" } })
-          yield* bus.publish(Catalog["session.ended"], { sessionId: REMOTE, at: 800, data: { reason: "replaced" } })
+          yield* bus.publish(Catalog["session.ended"], { sessionId: REMOTE, at: 800, data: { reason: "archived" } })
         }),
       )
       assert.deepStrictEqual(yield* rowsOf(sql, `SELECT ended_at FROM session WHERE id = '${REMOTE}'`), [
@@ -780,7 +775,10 @@ describe("bus", () => {
             data: { sender: { type: "agent", session: MAIN }, content: "hi" },
           })
           yield* bus.publish(Catalog["peer.seen"], { data: { id: PEER, name: "a" } })
-          yield* bus.publish(Catalog["project.entry_changed"], { projectId: P, data: { session: MAIN } })
+          yield* bus.publish(Catalog["project.moved"], {
+            projectId: P,
+            data: { from: "/a", to: "/b", repositories: [] },
+          })
         }),
       )
       const [ledgerId] = yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`
@@ -789,7 +787,7 @@ describe("bus", () => {
         { position: 2, aggregate: MAIN, seq: 1, type: "session.created" },
         { position: 3, aggregate: MAIN, seq: 2, type: "inbox.enqueued" },
         { position: 4, aggregate: ledgerId!.value, seq: 1, type: "peer.seen" },
-        { position: 5, aggregate: P, seq: 2, type: "project.entry_changed" },
+        { position: 5, aggregate: P, seq: 2, type: "project.moved" },
       ])
     }).pipe(Effect.provide(memory())),
   )

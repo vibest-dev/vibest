@@ -222,7 +222,7 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
 
 export const entryOn = (stack: Effect.Success<ReturnType<typeof repoStack>>) =>
   Effect.gen(function* () {
-    const started = yield* stack.db.session.startEntry(
+    const started = yield* stack.db.session.startRoot(
       stack.project,
       "pi",
       false,

@@ -190,9 +190,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         }): Effect.Effect<"unknown" | "duplicate" | "queued"> =>
           tx(
             Effect.gen(function* () {
-              const [route] = yield* sql<{ project: string; entry: string | null; alive: number }>`SELECT
-                s.project_id AS project, p.entry_session_id AS entry, s.ended_at IS NULL AS alive
-              FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${item.recipient}`
+              const [route] = yield* sql<{ alive: number }>`SELECT s.ended_at IS NULL AS alive
+                FROM session s WHERE s.id = ${item.recipient}`
 
               if (route === undefined) return "unknown" as const
 
@@ -246,11 +245,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               const target = heir !== undefined && "local" in heir ? heir.local : undefined
 
-              const here =
-                target !== undefined &&
-                (target !== route.entry || session.placed(route.project, yield* session.currentProcess(target)))
-
-              if (target === undefined || !here) {
+              if (target === undefined) {
                 const queued = yield* inbox.queueInbox({
                   recipient: item.recipient,
                   sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
@@ -259,7 +254,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 })
 
                 yield* inbox.moveInbox(sql`recipient_session_id = ${item.recipient} AND id = ${queued}`, "dropped", {
-                  reason: "the entry session is not running",
+                  reason: "the session was archived",
                 })
 
                 return "queued" as const

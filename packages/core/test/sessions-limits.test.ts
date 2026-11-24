@@ -54,7 +54,7 @@ describe.concurrent("Session", () => {
       })
       yield* herdr.endExecution(id)
       yield* (yield* Integration.Service).executionEnd(
-        { id, entry: false, harness: "cursor", process: started.process?.id },
+        { id, harness: "cursor", process: started.process?.id },
         JSON.stringify({ hook_event_name: "afterAgentResponse", text: "", error: "rate_limit" }),
       )
       yield* sessions.check(id)

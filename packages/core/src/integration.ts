@@ -18,7 +18,6 @@ export * as Integration from "./integration.ts"
 
 export type HookCaller = {
   readonly id: string
-  readonly entry: boolean
   readonly harness: string
   readonly process?: number | undefined
 }

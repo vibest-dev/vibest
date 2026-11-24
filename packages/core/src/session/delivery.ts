@@ -7,6 +7,7 @@ import { awaitEvent, Bus } from "../bus.ts"
 import {
   type SessionRow,
   harnessIdOf,
+  isRoot,
   runtimeOf,
   terminalOf,
   exitedAt,
@@ -213,8 +214,10 @@ export const make = Effect.gen(function* () {
 
     if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
 
+    const localRoot = isRoot(session) && !(yield* db.session.startedByPeer(id))
+
     if (
-      (session.entry && inbox.pulls(harnessIdOf(session))) ||
+      (localRoot && exitedAt(session) === null && inbox.pulls(harnessIdOf(session))) ||
       executionStateOf(session) === "open" ||
       session.status === "blocked" ||
       ((session.process?.placedAt ?? null) === null && exitedAt(session) === null) ||
@@ -230,6 +233,8 @@ export const make = Effect.gen(function* () {
 
     if (state === undefined && !(yield* alive(h, terminal))) {
       if (exitedAt(session) === null) return yield* exits.settle(h, id, session.process?.id)
+
+      if (localRoot) return
 
       if ((yield* db.inbox.pendingInbox(id)).length === 0) return
 
@@ -411,7 +416,12 @@ export const make = Effect.gen(function* () {
   for (const id of yield* db.inbox.pendingRecipients()) {
     const session = yield* db.session.getSession(id)
 
-    if (session !== undefined && !archived(session) && exitedAt(session) !== null)
+    if (
+      session !== undefined &&
+      !archived(session) &&
+      exitedAt(session) !== null &&
+      !(isRoot(session) && !(yield* db.session.startedByPeer(id)))
+    )
       yield* wakes.wake(id, { rows: new Set(), ended: true })
   }
 

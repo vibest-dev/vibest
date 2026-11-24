@@ -1,6 +1,6 @@
 import { Harness as PluginHarness } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
-import { entryLabel, sessionLabel } from "@vibest/schema/id"
+import { sessionLabel } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { NoSuchSession } from "@vibest/schema/session"
 import { Cause, Clock, Context, Effect, Exit, FileSystem, Layer, Path, Ref } from "effect"
@@ -10,7 +10,6 @@ import { Agents } from "../agents.ts"
 import {
   type SessionRow,
   harnessIdOf,
-  placedTerminal,
   runtimeOf,
   startOf,
   terminalOf,
@@ -123,11 +122,20 @@ export const make = Effect.gen(function* () {
 
   const systemPromptOf = Effect.fn("Placement.systemPromptOf")(function* (session: SessionRow) {
     const creator = yield* db.session.creatorLabel(session.id)
+    const directory = yield* db.session.sessionDirectory(session.id)
+    const projectDirectory = yield* db.project.projectDirectory(session.projectId)
+
+    const checkout =
+      directory !== undefined &&
+      directory !== "" &&
+      projectDirectory !== undefined &&
+      directory === projectDirectory &&
+      !directory.startsWith(`${layout.worktrees}/`)
 
     return systemPrompt({
       system: (yield* definitionIn(agents, session.agent)).system,
       id: session.id,
-      checkout: (yield* db.session.sessionIdentity(session.id))?.entry,
+      checkout,
       sharer: yield* db.session.earlierSharer(session.id),
       creator,
       linkedTo: yield* db.session.linkedTargets(session.id, creator?.id),
@@ -145,12 +153,20 @@ export const make = Effect.gen(function* () {
     const resumeThis = resume && id !== null && (yield* db.session.canResumeConversation(session.id, id))
     const env = { ...vibestEnv(session), ...(yield* cliEnv(vibest, adapter.id)) }
 
+    const worktree = yield* worktreeOf(session).pipe(
+      Effect.catchTag("NoSuchSession", (error) =>
+        db.project
+          .projectDirectory(session.projectId)
+          .pipe(Effect.flatMap((dir) => (dir ? Effect.succeed(dir) : Effect.fail(error)))),
+      ),
+    )
+
     return {
       harness: adapter.id,
       argv: PluginHarness.harnessArgv(
         adapter,
         {
-          worktree: yield* worktreeOf(session),
+          worktree,
           projectDir: layout.project(session.projectId),
           systemPromptFile: yield* writeSystemPrompt(session.id, system),
           provider: session.process?.provider ?? null,
@@ -237,9 +253,7 @@ export const make = Effect.gen(function* () {
     )
 
   const liveCount = (projectId: string) =>
-    db.session
-      .listSessions({ projectId })
-      .pipe(Effect.map((rows) => rows.filter((row) => !row.entry && !archived(row)).length))
+    db.session.listSessions({ projectId }).pipe(Effect.map((rows) => rows.filter((row) => !archived(row)).length))
 
   const show = Effect.fn("Placement.show")(
     function* (h: Runtime, session: SessionRow, terminal: Terminal, root: string) {
@@ -247,7 +261,7 @@ export const make = Effect.gen(function* () {
       yield* h.present(terminal, {
         agent: session.agent,
         harness: harnessIdOf(session),
-        title: session.entry ? entryLabel(root) : session.name,
+        title: session.name,
         definition: session.agent,
         session: session.id,
         project: yield* projectName(root),
@@ -349,7 +363,7 @@ export const make = Effect.gen(function* () {
         project: input.project,
         cwd: input.cwd,
         launch: { ...launch, env: { ...input.env, ...launch.env } },
-        label: (session.entry ? entryLabel(input.project) : session.name).slice(0, 60),
+        label: session.name.slice(0, 60),
         ...(creator !== undefined && { parent: creator }),
         ...(near !== undefined && { near }),
         ...(input.split === true && { split: true }),
@@ -479,36 +493,15 @@ export const make = Effect.gen(function* () {
     if (h === undefined) return
 
     const rows = (yield* db.session.listSessions({ projectId })).filter(
-      (row) => !row.entry && runtimeOf(row) === kind && !archived(row),
+      (row) => runtimeOf(row) === kind && !archived(row),
     )
 
     const stored = yield* storedDirectory(projectId)
-    let shown = false
 
     for (const session of rows) {
       if (terminalOf(session).id === "") continue
       yield* show(h, session, terminalOf(session), stored ?? (yield* projectRoot(yield* worktreeOf(session))).root)
-      shown = true
     }
-
-    if (shown) return
-    const entry = yield* db.session.entryOf(projectId)
-    const place = entry === undefined ? undefined : placedTerminal(entry)
-
-    if (place?.runtime !== kind || stored === undefined) return
-
-    if (h.present === undefined) return
-    yield* h
-      .present(place.address, {
-        agent: "",
-        harness: "",
-        title: "",
-        definition: "",
-        session: "",
-        project: yield* projectName(stored),
-        live: String(rows.length),
-      })
-      .pipe(Effect.ignore)
   }, provided)
 
   const locate = Effect.fn("Placement.locate")(function* (session: SessionRow) {
@@ -544,9 +537,7 @@ export const make = Effect.gen(function* () {
   )
 
   const republish = Effect.fn("Placement.republish")(function* () {
-    const rows = (yield* db.session.listSessions()).filter(
-      (row) => !row.entry && !archived(row) && terminalOf(row).id !== "",
-    )
+    const rows = (yield* db.session.listSessions()).filter((row) => !archived(row) && terminalOf(row).id !== "")
 
     const labelled = yield* Effect.forEach(rows, (session) =>
       Effect.gen(function* () {

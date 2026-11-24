@@ -79,7 +79,6 @@ export const SessionRow = Schema.Struct({
   lastActive: Schema.Number,
   endedAt: Schema.NullOr(Schema.Number),
   parentId: Schema.NullOr(Schema.String),
-  entry: Schema.Boolean,
   process: Schema.NullOr(SessionProcess),
   openExecution: Schema.NullOr(OpenExecution),
   lastExecution: Schema.NullOr(LastExecution),
@@ -87,10 +86,11 @@ export const SessionRow = Schema.Struct({
 
 export type SessionRow = typeof SessionRow.Type
 
-export const archived = (row: Pick<SessionRow, "entry" | "endedAt">) => !row.entry && row.endedAt !== null
+export const archived = (row: Pick<SessionRow, "endedAt">) => row.endedAt !== null
 
-export const exitedAt = (row: Pick<SessionRow, "entry" | "endedAt" | "process">) =>
-  row.entry ? row.endedAt : (row.process?.endedAt ?? null)
+export const exitedAt = (row: Pick<SessionRow, "process">) => row.process?.endedAt ?? null
+
+export const isRoot = (row: Pick<SessionRow, "parentId">) => row.parentId === null
 
 export const sessionEnded = (row: SessionRow | undefined) =>
   row === undefined || exitedAt(row) !== null || archived(row)

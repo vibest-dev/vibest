@@ -1,11 +1,11 @@
 import { entryLabel } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
-import type { Routing } from "@vibest/schema/plugin"
 import {
   addPluginHint,
   describeSpawn,
   LaunchFailed,
   NoRuntime,
+  NoSuchSession,
   type RuntimeMachine,
   type RuntimeAddress,
   HarnessUnavailable,
@@ -16,7 +16,7 @@ import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schem
 import { definitionLaunch } from "../agent-launch.ts"
 import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
-import { AddressJson, encodeAddress, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
+import { archived, encodeAddress, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
@@ -37,7 +37,8 @@ export * as EntrySession from "./entry.ts"
 
 export const PRESENT_TIMEOUT = Duration.seconds(5)
 
-export class EntryRunning extends Schema.TaggedError<EntryRunning>()("EntryRunning", {
+export class SessionRunning extends Schema.TaggedError<SessionRunning>()("SessionRunning", {
+  sessionId: Schema.String,
   harness: Schema.String,
   place: Schema.String,
 }) {}
@@ -48,16 +49,16 @@ const placeOf = (runtime: { readonly id: string; readonly name?: string }, addre
   return address.id !== "" ? `${name} ${address.id}` : `${name} (not placed)`
 }
 
-export const sameEntry = (current: SessionRow | undefined, runtime: string, address: string) => {
+export const sameTerminal = (current: SessionRow | undefined, runtime: string, address: string) => {
   const place = current === undefined ? undefined : placedTerminal(current)
 
   return place !== undefined && place.runtime === runtime && encodeAddress(place.address) === address
 }
 
-const ENTRY_FIRST_INPUT =
+const ROOT_FIRST_INPUT =
   "The user has opened this conversation and has not given a task yet. Wait for the user's instructions."
 
-export interface EntryAgent {
+export interface RootAgent {
   readonly id: string
   readonly named: boolean
 }
@@ -96,15 +97,30 @@ const make = Effect.gen(function* () {
   const harnessIds = () => harnesses.all.map((definition) => definition.id)
 
   const firstInputOf = (harness: HarnessId) =>
-    harnesses.find(harness)?.systemPromptInPrompt === true ? ENTRY_FIRST_INPUT : undefined
+    harnesses.find(harness)?.systemPromptInPrompt === true ? ROOT_FIRST_INPUT : undefined
 
-  const entryAgent = (current: { readonly agent: string } | undefined, fresh: boolean, requested: EntryAgent) => {
+  const targetSession = (projectId: string, sessionId: string | undefined, fresh: boolean) =>
+    Effect.gen(function* () {
+      if (fresh) return undefined
+
+      if (sessionId === undefined) return yield* db.session.latestRoot(projectId)
+      const row = yield* db.session.getSession(sessionId)
+
+      if (row === undefined || row.projectId !== projectId)
+        return yield* new NoSuchSession({ id: sessionId, message: `no session ${sessionId}` })
+
+      if (archived(row)) return yield* new NoSuchSession({ id: sessionId, message: `${sessionId} was archived` })
+
+      return row
+    })
+
+  const rootAgent = (current: { readonly agent: string } | undefined, fresh: boolean, requested: RootAgent) => {
     const isNew = current === undefined || fresh
 
     if (!isNew && requested.named && requested.id !== current.agent)
       return Effect.fail(
         new LaunchFailed({
-          message: `this project's entry session runs as ${current.agent}; add --new to start a new conversation as ${requested.id}`,
+          message: `this session runs as ${current.agent}; add --new to start a new conversation as ${requested.id}`,
         }),
       )
     const id = isNew ? requested.id : current.agent
@@ -113,7 +129,7 @@ const make = Effect.gen(function* () {
     return definition === undefined ? Effect.fail(unknownAgent(id, agents)) : Effect.succeed({ id, definition, isNew })
   }
 
-  type Chosen = Effect.Success<ReturnType<typeof entryAgent>>
+  type Chosen = Effect.Success<ReturnType<typeof rootAgent>>
 
   const decide = (input: {
     readonly root: string
@@ -150,57 +166,94 @@ const make = Effect.gen(function* () {
       )
     })
 
-  const running = Effect.fn("EntrySession.running")(function* (projectId: string, terminal: string) {
-    const entry = yield* db.session.entryOf(projectId)
-    const place = entry === undefined ? undefined : placedTerminal(entry)
+  const runningOf = (session: SessionRow | undefined, terminal: string) =>
+    Effect.gen(function* () {
+      const place = session === undefined ? undefined : placedTerminal(session)
 
-    if (entry === undefined || place === undefined || place.address.id === terminal) return null
-    const found = runtimes.find(place.runtime)
+      if (session === undefined || place === undefined || place.address.id === terminal) return null
+      const found = runtimes.find(place.runtime)
 
-    if (!(yield* restarting.has(entry.id))) {
-      if (found === undefined) return null
-      const presence = yield* entryIdle(found, place.address).pipe(Effect.option)
+      if (!(yield* restarting.has(session.id))) {
+        if (found === undefined) return null
+        const presence = yield* entryIdle(found, place.address).pipe(Effect.option)
 
-      if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
-    }
+        if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
+      }
 
-    return {
-      harness: harnessIdOf(entry),
-      place: placeOf(found ?? { id: place.runtime }, place.address),
-      runtime: place.runtime,
-      address: encodeAddress(place.address),
-    }
+      return {
+        sessionId: session.id,
+        harness: harnessIdOf(session),
+        place: placeOf(found ?? { id: place.runtime }, place.address),
+        runtime: place.runtime,
+        address: encodeAddress(place.address),
+      }
+    })
+
+  const running = Effect.fn("EntrySession.running")(function* (
+    projectId: string,
+    terminal: string,
+    sessionId?: string,
+  ) {
+    const target = yield* targetSession(projectId, sessionId, false)
+
+    return yield* runningOf(target, terminal)
   })
 
   const onlyRuntime = Effect.map(runtimes.all, (all) => (all.length === 1 ? all[0]?.id : undefined))
 
-  const notRunning = (projectId: string, terminal: string) =>
-    Effect.flatMap(running(projectId, terminal), (found) =>
-      found ? Effect.fail(new EntryRunning({ harness: found.harness, place: found.place })) : Effect.void,
+  const notRunning = (session: SessionRow | undefined, terminal: string) =>
+    Effect.flatMap(runningOf(session, terminal), (found) =>
+      found
+        ? Effect.fail(new SessionRunning({ sessionId: found.sessionId, harness: found.harness, place: found.place }))
+        : Effect.void,
     )
+
+  const stopSession = (session: SessionRow, runtime: string, address: string) =>
+    Effect.gen(function* () {
+      const place = placedTerminal(session)
+
+      if (place === undefined || !sameTerminal(session, runtime, address)) return { result: "moved" as const }
+
+      if (yield* restarting.has(session.id))
+        return {
+          result: "unsupported" as const,
+          reason: "vibest update is restarting it there; run vibest again once it is ready",
+        }
+      const h = yield* runtimes.route(runtime)
+
+      return yield* stopAgent(h, place.address, {
+        pid: pidOf(session),
+        detach: db.session.detachSession(session.id, runtime, place.address),
+        reattach: db.session.reattachSession(session.id),
+        wait: HARNESS_EXIT_WAIT,
+      }).pipe(Effect.provideService(Bus.Service, bus), Effect.provideService(Processes.Service, processes))
+    })
 
   const launch = Effect.fn("EntrySession.launch")(function* (input: {
     readonly projectId: string
     readonly root: string
     readonly at: RuntimeMachine
-    readonly argv: ReadonlyArray<string>
+    readonly sessionId: string | undefined
+    readonly fresh: boolean
+    readonly harness: string | undefined
+    readonly provider: string | undefined
+    readonly model: string | undefined
     readonly focus: boolean
     readonly runtime: string | undefined
-    readonly agent: EntryAgent
+    readonly agent: RootAgent
   }) {
-    const { projectId: id, root, at, argv } = input
-    const current = yield* db.session.entryOf(id)
-    const fresh = argv.includes("--new")
-    const chosenAgent = yield* entryAgent(current, fresh, input.agent)
+    const { projectId: id, root, at, fresh } = input
+    const current = yield* targetSession(id, input.sessionId, fresh)
+    const chosenAgent = yield* rootAgent(current, fresh, input.agent)
     const agent = chosenAgent.id
 
     const decision = yield* decide({
       root,
       agent: chosenAgent,
       current,
-      harness: Launch.flagValue(argv, "--harness"),
-      provider: Launch.flagValue(argv, "--provider"),
-      model: Launch.flagValue(argv, "--model"),
+      harness: input.harness,
+      provider: input.provider,
+      model: input.model,
       machine: at.id,
       runtime: input.runtime,
     })
@@ -209,7 +262,7 @@ const make = Effect.gen(function* () {
       const loaded = (yield* runtimes.all).map((h) => h.id)
 
       return yield* new NoRuntime({
-        message: `no terminal runtime was chosen for the entry session${loaded.length === 0 ? "" : `; loaded: ${loaded.join(", ")}`}`,
+        message: `no terminal runtime was chosen${loaded.length === 0 ? "" : `; loaded: ${loaded.join(", ")}`}`,
       })
     }
 
@@ -250,11 +303,12 @@ const make = Effect.gen(function* () {
           model: decision.model ?? null,
           session: projectLocked.withLock(id)(
             Effect.gen(function* () {
-              yield* notRunning(id, "")
-              const existing = yield* db.session.entryOf(id)
+              const existing = yield* targetSession(id, input.sessionId, fresh)
+
+              if (existing !== undefined) yield* notRunning(existing, "")
 
               const sessionId =
-                existing === undefined || fresh ? yield* db.session.allocateSessionId().pipe(Effect.orDie) : existing.id
+                existing === undefined ? yield* db.session.allocateSessionId().pipe(Effect.orDie) : existing.id
 
               const near =
                 at.target === undefined || at.target === ""
@@ -263,7 +317,7 @@ const make = Effect.gen(function* () {
 
               const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
                 root,
-                label: entryLabel(root),
+                label: existing?.name ?? entryLabel(root),
                 home: layout.home,
                 focus: input.focus,
                 near,
@@ -277,7 +331,7 @@ const make = Effect.gen(function* () {
               )
 
               const claimed = yield* db.session
-                .startEntry(
+                .startRoot(
                   id,
                   chosen,
                   fresh,
@@ -289,7 +343,7 @@ const make = Effect.gen(function* () {
                     projectDirectory: root,
                     agent,
                     firstInput: firstInputOf(chosen),
-                    ...((existing === undefined || fresh) && { sessionId }),
+                    ...(existing === undefined ? { sessionId } : { targetSessionId: existing.id }),
                   },
                 )
                 .pipe(
@@ -310,8 +364,9 @@ const make = Effect.gen(function* () {
         Effect.catchTag("SystemPromptDirUnsafe", (error) => Effect.fail(new LaunchFailed({ message: error.message }))),
       )
 
-      if (opened === undefined) return yield* Effect.die("launch opened no terminal")
+      if (opened === undefined || claimedId === undefined) return yield* Effect.die("launch opened no terminal")
       const pane = opened
+      const sessionId = claimedId
       yield* run(pane, command).pipe(Effect.mapError((error) => new LaunchFailed({ message: error.message })))
 
       const routing =
@@ -325,6 +380,8 @@ const make = Effect.gen(function* () {
             })
 
       return {
+        sessionId,
+        projectId: id,
         runtime: rt.id,
         terminal: pane.id,
         place: placeOf(rt, pane),
@@ -334,19 +391,34 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeLaunched)))
   })
 
-  const start = Effect.fn("EntrySession.start")(function* (input: {
+  const claim = Effect.fn("EntrySession.claim")(function* (input: {
     readonly projectId: string
-    readonly root: string
+    readonly directory: string
+    readonly sessionId: string | undefined
     readonly harness: string | undefined
+    readonly fresh: boolean
+    readonly move: boolean
+    readonly terminal: string
+    readonly runtime: string | undefined
     readonly provider: string | undefined
     readonly model: string | undefined
-    readonly runtime: string | undefined
-    readonly agent: EntryAgent
-    readonly fresh: boolean
+    readonly pid: number | undefined
+    readonly agent: RootAgent
   }) {
-    const current = yield* db.session.entryOf(input.projectId)
-    const agent = yield* entryAgent(current, input.fresh, input.agent)
-    const decision = yield* decide({ ...input, agent, current, machine: "local" })
+    const { projectId, directory, terminal, fresh } = input
+    const initial = yield* targetSession(projectId, input.sessionId, fresh)
+    const chosenAgent = yield* rootAgent(initial, fresh, input.agent)
+
+    const decision = yield* decide({
+      root: directory,
+      agent: chosenAgent,
+      current: initial,
+      harness: input.harness,
+      provider: input.provider,
+      model: input.model,
+      machine: "local",
+      runtime: input.runtime,
+    })
 
     if (decision.harness === undefined) return yield* firstStart
 
@@ -356,36 +428,55 @@ const make = Effect.gen(function* () {
         message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")}; ${addPluginHint} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})`,
       })
 
-    if (decision.runtime === undefined)
-      return yield* new NoRuntime({ message: "no terminal runtime was chosen for the entry session" })
-    const rt = yield* runtimes.route(decision.runtime)
+    const kind = decision.runtime ?? input.runtime ?? (yield* onlyRuntime)
+
+    if (kind === undefined) return yield* new NoRuntime({ message: "the session's runtime is not named" })
+    const rt = yield* runtimes.route(kind)
     yield* runtimes.online(rt)
+    const chosenHarness = decision.harness
+    const agent = chosenAgent.id
 
-    return { ...decision, harness: decision.harness, runtime: rt.id }
-  })
-
-  const claim = Effect.fn("EntrySession.claim")(function* (input: {
-    readonly projectId: string
-    readonly directory: string
-    readonly harness: HarnessId
-    readonly fresh: boolean
-    readonly terminal: string
-    readonly runtime: string | undefined
-    readonly provider: string | undefined
-    readonly model: string | undefined
-    readonly routing: Routing | undefined
-    readonly pid: number | undefined
-    readonly agent: EntryAgent
-  }) {
-    const { projectId, directory, terminal } = input
-    const agent = (yield* entryAgent(yield* db.session.entryOf(projectId), input.fresh, input.agent)).id
-    const kind = input.runtime ?? (yield* onlyRuntime)
-
-    if (kind === undefined) return yield* new NoRuntime({ message: "the entry session's runtime is not named" })
+    const routing =
+      Object.keys(decision.decidedBy).length === 0
+        ? undefined
+        : describeSpawn({
+            harness: chosenHarness,
+            provider: decision.provider,
+            model: decision.model,
+            decidedBy: decision.decidedBy,
+          })
 
     return yield* projectLocked.withLock(projectId)(
       Effect.gen(function* () {
-        yield* notRunning(projectId, terminal)
+        const existing = yield* targetSession(projectId, input.sessionId, fresh)
+
+        if (existing !== undefined) {
+          const live = yield* runningOf(existing, terminal)
+
+          if (live !== null) {
+            if (!input.move)
+              return yield* new SessionRunning({
+                sessionId: live.sessionId,
+                harness: live.harness,
+                place: live.place,
+              })
+            const stopped = yield* stopSession(existing, live.runtime, live.address)
+
+            if (stopped.result === "moved")
+              return yield* new LaunchFailed({ message: "not starting: the session moved meanwhile; run vibest again" })
+
+            if (stopped.result === "unsupported")
+              return yield* new LaunchFailed({
+                message: `not starting: the session (${live.harness}) runs in ${live.place} and cannot be moved from here: ${stopped.reason}. Exit it there first`,
+              })
+
+            if (stopped.result === "running")
+              return yield* new LaunchFailed({
+                message: `not starting: the session (${live.harness}) runs in ${live.place} and did not exit; nothing changed. Exit it there first`,
+              })
+          }
+        }
+
         const address = { machine: "local", id: terminal }
 
         let claimed:
@@ -400,31 +491,32 @@ const make = Effect.gen(function* () {
 
         const command = yield* withHarness(
           Launch.entryCommand({
-            harness: input.harness,
+            harness: chosenHarness,
             agent,
             root: directory,
-            provider: input.provider ?? null,
-            model: input.model ?? null,
+            provider: decision.provider ?? null,
+            model: decision.model ?? null,
             session: Effect.gen(function* () {
-              const saved = yield* locks.withLock(terminalLock(kind, address))(
-                db.session.startEntry(
+              const saved = yield* locks.withLock(terminalLock(rt.id, address))(
+                db.session.startRoot(
                   projectId,
-                  input.harness,
-                  input.fresh,
-                  { runtime: kind, address },
+                  chosenHarness,
+                  fresh,
+                  { runtime: rt.id, address },
                   {
-                    provider: input.provider,
-                    model: input.model,
-                    routing: input.routing,
+                    provider: decision.provider,
+                    model: decision.model,
+                    routing: { decidedBy: decision.decidedBy, trace: decision.trace },
                     pid: input.pid,
                     projectDirectory: directory,
                     agent,
-                    firstInput: firstInputOf(input.harness),
+                    firstInput: firstInputOf(chosenHarness),
+                    ...(existing !== undefined && { targetSessionId: existing.id }),
                   },
                 ),
               )
 
-              claimed = { ...saved, runtime: runtimeEnv(kind, address) }
+              claimed = { ...saved, runtime: runtimeEnv(rt.id, address) }
 
               return claimed
             }),
@@ -435,10 +527,9 @@ const make = Effect.gen(function* () {
           ),
         )
 
-        if (claimed === undefined) return yield* Effect.die("entry command returned without a session")
-        const rt = runtimes.find(kind)
+        if (claimed === undefined) return yield* Effect.die("launch command returned without a session")
 
-        if (rt?.present !== undefined)
+        if (rt.present !== undefined)
           yield* rt
             .present(address, { entrySession: claimed.sessionId, projectId, title: entryLabel(directory) })
             .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
@@ -474,52 +565,14 @@ const make = Effect.gen(function* () {
           harnessSessionId: claimed.harnessSessionId,
           projectId: claimed.projectId,
           runtime: claimed.runtime,
+          ...(routing !== undefined && { routing }),
           command: { file: file!, args, env: command.env },
         }
       }),
     )
   })
 
-  const focus = Effect.fn("EntrySession.focus")(function* (projectId: string) {
-    const found = yield* running(projectId, "")
-
-    if (found === null) return null
-    const runtime = runtimes.find(found.runtime)
-
-    if (runtime?.focus === undefined) return { place: found.place, focused: false }
-    const address = yield* Schema.decodeUnknownEffect(AddressJson)(found.address).pipe(Effect.orDie)
-    const focused = yield* runtime.focus(address).pipe(Effect.exit)
-
-    return { place: found.place, focused: Exit.isSuccess(focused) }
-  })
-
-  const stop = Effect.fn("EntrySession.stop")(function* (projectId: string, runtime: string, address: string) {
-    return yield* projectLocked.withLock(projectId)(
-      Effect.gen(function* () {
-        const entry = yield* db.session.entryOf(projectId)
-        const place = entry === undefined ? undefined : placedTerminal(entry)
-
-        if (entry === undefined || place === undefined || !sameEntry(entry, runtime, address))
-          return { result: "moved" as const }
-
-        if (yield* restarting.has(entry.id))
-          return {
-            result: "unsupported" as const,
-            reason: "vibest update is restarting it there; run vibest again once it is ready",
-          }
-        const h = yield* runtimes.route(runtime)
-
-        return yield* stopAgent(h, place.address, {
-          pid: pidOf(entry),
-          detach: db.session.detachEntry(projectId, runtime, place.address),
-          reattach: db.session.reattachEntry(projectId, runtime, place.address),
-          wait: HARNESS_EXIT_WAIT,
-        }).pipe(Effect.provideService(Bus.Service, bus), Effect.provideService(Processes.Service, processes))
-      }),
-    )
-  })
-
-  return { running, launch, start, claim, focus, stop }
+  return { running, launch, claim }
 })
 
 export type Interface = Effect.Success<typeof make>

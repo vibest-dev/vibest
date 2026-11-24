@@ -102,8 +102,8 @@ export const make = Effect.gen(function* () {
     ),
 
     watchProjects: Effect.fn("Db.project.watchProjects")((id?: string) =>
-      sql<{ id: string; directory: string | null; entrySessionId: string | null }>`SELECT id, directory,
-          entry_session_id FROM project WHERE directory IS NOT NULL ${id === undefined ? sql`` : sql`AND id = ${id}`}
+      sql<{ id: string; directory: string | null }>`SELECT id, directory
+          FROM project WHERE directory IS NOT NULL ${id === undefined ? sql`` : sql`AND id = ${id}`}
           ORDER BY rowid`.pipe(Effect.orDie),
     ),
 

@@ -4,7 +4,6 @@ import { Claim, type VibestClient, type VibestClients } from "@vibest/client/cli
 import { Host } from "@vibest/plugin/host"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
-import { VibestCommand } from "@vibest/schema/layout"
 import { Config, Console, Effect, Option, Predicate, Schema } from "effect"
 import { Command } from "effect/cli"
 
@@ -243,15 +242,8 @@ const daemonOn = ({ withVibest }: VibestClients) => {
     republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
     openEntry: (directory: string) =>
       Effect.gen(function* () {
-        const focused = yield* ask(directory, (client) => client["Project.FocusEntry"]({}))
-
-        if (focused)
-          return { action: focused.focused ? ("focused" as const) : ("runs in" as const), place: focused.place }
-        const self = yield* VibestCommand
-
         const opened = yield* ask(directory, (client) =>
           client.Launch({
-            argv: [...self],
             agent: "coordinator",
             focus: true,
             runtime: KIND,

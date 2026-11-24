@@ -89,7 +89,7 @@ describe("Db", () => {
           assert.isTrue(
             yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r")),
           )
-          assert.match((yield* db.session.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)).sessionId, ID)
+          assert.match((yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)).sessionId, ID)
         }).pipe(Effect.provide(database(file)))
         assert.strictEqual((yield* header(file)).applicationId, APPLICATION_ID)
         assert.deepStrictEqual(
@@ -149,9 +149,9 @@ describe("Db", () => {
 
       const ids = yield* Effect.gen(function* () {
         const db = yield* Db.Service
-        const reported = yield* db.session.startEntry(yield* projectOf("known"), "pi", false, place, ENTRY)
+        const reported = yield* db.session.startRoot(yield* projectOf("known"), "pi", false, place, ENTRY)
         yield* db.session.noteConversation(reported.sessionId, "conv-known")
-        const quiet = yield* db.session.startEntry(yield* projectOf("unknown"), "pi", false, quietPlace, ENTRY)
+        const quiet = yield* db.session.startRoot(yield* projectOf("unknown"), "pi", false, quietPlace, ENTRY)
 
         return { reported: reported.sessionId, quiet: quiet.sessionId }
       }).pipe(Effect.provide(database(file)))

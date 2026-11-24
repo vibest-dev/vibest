@@ -15,6 +15,7 @@ import {
   SESSION_HEADER,
   TOKEN_HEADER,
 } from "@vibest/protocol/protocol"
+import { EdgeMutual } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import * as Ws from "@vibest/server/ws"
@@ -58,7 +59,7 @@ const JsonRpcFrame = Schema.Struct({
   jsonrpc: Schema.String,
   id: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
   chunk: Schema.optional(Schema.Boolean),
-  result: Schema.optional(Schema.Array(TaggedItem)),
+  result: Schema.optional(Schema.Unknown),
   error: Schema.optional(
     Schema.Struct({
       _tag: Schema.optional(Schema.String),
@@ -68,6 +69,7 @@ const JsonRpcFrame = Schema.Struct({
 })
 
 const decodeJsonRpcFrame = Schema.decodeUnknownSync(Schema.fromJsonString(JsonRpcFrame))
+const decodeTaggedItems = Schema.decodeUnknownOption(Schema.Array(TaggedItem))
 const decodeCauseReasons = Schema.decodeUnknownOption(Schema.Array(CauseReason))
 
 const rawUpgradeRequest = (port: number, headers: Record<string, string>) =>
@@ -267,8 +269,8 @@ describe("local UI WebSocket", () => {
           assert.strictEqual(first.jsonrpc, "2.0")
           assert.strictEqual(first.id, "1")
           assert.isTrue(first.chunk)
-          assert.isDefined(first.result)
-          assert.isTrue(Predicate.isTagged(first.result?.[0], "Snapshot"))
+          const firstItems = decodeTaggedItems(first.result)
+          assert.isTrue(Option.isSome(firstItems) && Predicate.isTagged(firstItems.value[0], "Snapshot"))
 
           const repo = yield* makeRepository
           const spawner = yield* asEntry(yield* client, repo)
@@ -282,11 +284,11 @@ describe("local UI WebSocket", () => {
 
           for (let i = 0; i < 10 && !sawDelta; i++) {
             const msg = parseTextFrame(yield* ws1.nextFrame(`ws1-delta-${i}`))
-            const items = msg.result
+            const items = decodeTaggedItems(msg.result)
 
             if (
-              items !== undefined &&
-              items.some((item) => Predicate.isTagged(item, "Session") || Predicate.isTagged(item, "Project"))
+              Option.isSome(items) &&
+              items.value.some((item) => Predicate.isTagged(item, "Session") || Predicate.isTagged(item, "Project"))
             ) {
               sawDelta = true
             }
@@ -311,7 +313,8 @@ describe("local UI WebSocket", () => {
           const second = parseTextFrame(yield* ws2.nextFrame("ws2-snapshot"))
           assert.strictEqual(second.id, "2")
           assert.isTrue(second.chunk)
-          assert.isTrue(Predicate.isTagged(second.result?.[0], "Snapshot"))
+          const secondItems = decodeTaggedItems(second.result)
+          assert.isTrue(Option.isSome(secondItems) && Predicate.isTagged(secondItems.value[0], "Snapshot"))
         }),
       ).pipe(Effect.provide(servedWithWs())),
   )
@@ -329,11 +332,12 @@ describe("local UI WebSocket", () => {
         }> = [
           { id: "10", method: "List", params: {} },
           { id: "11", method: "Daemon.Stop", params: { instance: "x" } },
-          { id: "12", method: "Session.Seen", params: { id: "x", finished: 0 } },
+          { id: "12", method: "Spawn", params: { agent: "general", prompt: "x", callerEnv: {} } },
           { id: "13", method: "Ping", params: null },
           { id: "14", method: "ExecutionEnd", params: { sessionId: "x", harness: "pi", event: "{}" } },
           { id: "15", method: "Prompt", params: { sessionId: "x", harness: "pi", event: "{}" } },
           { id: "16", method: "Republish", params: null },
+          { id: "17", method: "Session.Claim", params: { agent: "coordinator", fresh: false, terminal: "t1" } },
         ]
 
         for (const call of forbiddenCalls) {
@@ -402,7 +406,8 @@ describe("local UI WebSocket", () => {
 
           const first = parseTextFrame(yield* ws.nextFrame("spoof-snapshot"))
           assert.strictEqual(first.id, "spoof-1")
-          assert.isTrue(Predicate.isTagged(first.result?.[0], "Snapshot"))
+          const spoofItems = decodeTaggedItems(first.result)
+          assert.isTrue(Option.isSome(spoofItems) && Predicate.isTagged(spoofItems.value[0], "Snapshot"))
 
           const afterIntegration = (yield* db.session.getSession(id))?.process?.integration
           assert.deepStrictEqual(afterIntegration, beforeIntegration)
@@ -433,6 +438,93 @@ describe("local UI WebSocket", () => {
         yield* ws.send("x".repeat(70 * 1024))
         const code = yield* ws.closed
         assert.isTrue(code === 1009 || code === 1006, `expected oversized frame close code, got ${code}`)
+      }),
+    ).pipe(Effect.provide(servedWithWs())),
+  )
+
+  it.live("allows UI control RPCs over the local WebSocket", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const info = Option.getOrThrow(yield* Ws.Service)
+        const repo = yield* makeRepository
+        const ws = yield* connectWs(info.url, { [TOKEN_HEADER]: info.token })
+
+        const rpc = (id: string, method: string, params: Schema.Json) =>
+          Effect.gen(function* () {
+            yield* ws.send(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id,
+                method,
+                params,
+                headers: [[PROTOCOL_HEADER, String(PROTOCOL)]],
+              }),
+            )
+
+            const msg = parseTextFrame(yield* ws.nextFrame(`ui-${method}`))
+            assert.strictEqual(msg.id, id)
+            assert.isUndefined(msg.error, `unexpected error for ${method}: ${JSON.stringify(msg.error)}`)
+
+            return msg.result
+          })
+
+        const machines = yield* rpc("1", "Machine.List", {})
+        assert.isArray(machines)
+
+        const harnesses = yield* rpc("2", "Harnesses.List", {})
+        assert.isArray(harnesses)
+
+        const agents = yield* rpc("3", "Agents.List", {})
+        assert.isObject(agents)
+
+        const opened = (yield* rpc("4", "Project.Open", { directory: repo })) as {
+          readonly projectId: string
+          readonly directory: string
+        }
+
+        assert.strictEqual(opened.directory, repo)
+
+        const launched = (yield* rpc("5", "Launch", {
+          projectId: opened.projectId,
+          harness: "pi",
+          runtime: "herdr",
+        })) as { readonly sessionId: string; readonly projectId: string }
+
+        assert.strictEqual(launched.projectId, opened.projectId)
+
+        const got = (yield* rpc("6", "Get", { id: launched.sessionId })) as { readonly id: string }
+        assert.strictEqual(got.id, launched.sessionId)
+
+        const sent = (yield* rpc("7", "Send", { id: launched.sessionId, message: "hello from ui" })) as {
+          readonly id: string
+        }
+
+        assert.strictEqual(sent.id, launched.sessionId)
+
+        const second = (yield* rpc("8", "Launch", {
+          projectId: opened.projectId,
+          harness: "pi",
+          runtime: "herdr",
+          fresh: true,
+        })) as { readonly sessionId: string }
+
+        assert.notStrictEqual(second.sessionId, launched.sessionId)
+
+        const linked = (yield* rpc("9", "Session.Link", {
+          spec: EdgeMutual.make({ ids: [launched.sessionId, second.sessionId] }),
+        })) as { readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string }> }
+
+        assert.strictEqual(linked.edges.length, 2)
+
+        const unlinked = (yield* rpc("10", "Session.Unlink", {
+          spec: EdgeMutual.make({ ids: [launched.sessionId, second.sessionId] }),
+        })) as { readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string }> }
+
+        assert.strictEqual(unlinked.edges.length, 2)
+
+        yield* rpc("11", "Session.Seen", { id: launched.sessionId, finished: 1 })
+        yield* rpc("12", "Stop", { id: second.sessionId })
+        yield* rpc("13", "Archive", { id: second.sessionId })
       }),
     ).pipe(Effect.provide(servedWithWs())),
   )

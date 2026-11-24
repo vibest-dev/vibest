@@ -36,8 +36,6 @@ export const ProjectRepositoriesChanged = fact("project.repositories_changed", "
   repositories: Repositories,
 })
 
-export const ProjectEntryChanged = fact("project.entry_changed", "project", { session: optional(Text) })
-
 export const SessionCreated = fact("session.created", "session", {
   project: Text,
   agent: Text,
@@ -50,7 +48,7 @@ export const SessionCreated = fact("session.created", "session", {
 
 export const SessionRenamed = fact("session.renamed", "session", { name: Text })
 export const SessionDirectoryChanged = fact("session.directory_changed", "session", { directory: Text })
-export const SessionEnded = fact("session.ended", "session", { reason: Schema.Literals(["archived", "replaced"]) })
+export const SessionEnded = fact("session.ended", "session", { reason: Schema.Literal("archived") })
 export const SessionLinked = fact("session.linked", "session", { to: Text })
 export const SessionUnlinked = fact("session.unlinked", "session", { to: Text })
 
@@ -252,7 +250,6 @@ export const Catalog = {
   [ProjectCreated.type]: ProjectCreated,
   [ProjectMoved.type]: ProjectMoved,
   [ProjectRepositoriesChanged.type]: ProjectRepositoriesChanged,
-  [ProjectEntryChanged.type]: ProjectEntryChanged,
   [SessionCreated.type]: SessionCreated,
   [SessionRenamed.type]: SessionRenamed,
   [SessionDirectoryChanged.type]: SessionDirectoryChanged,
@@ -293,7 +290,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 12
+export const CATALOG_VERSION = 13
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

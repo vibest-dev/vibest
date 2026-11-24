@@ -1,29 +1,57 @@
-import { entryPlace, specHits, filterCallerEnv } from "@vibest/core/caller"
 import { Db } from "@vibest/core/database/db"
+import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
+import { Identity } from "@vibest/core/identity"
 import { Project } from "@vibest/core/project"
 import { createProject } from "@vibest/core/project/create"
 import { moveProjectHere, resolveProject } from "@vibest/core/project/identity"
-import { Runtimes } from "@vibest/core/runtimes"
-import { LaunchFailed } from "@vibest/schema/session"
-import { Effect } from "effect"
+import { peerHeaders } from "@vibest/protocol/protocol"
+import { Caller, Forbidden } from "@vibest/protocol/rpc"
+import { Effect, Predicate } from "effect"
 
+import { Machines } from "../machine/machines.ts"
 import * as CallerChecks from "./caller.ts"
 import type { Handlers } from "./caller.ts"
 import { group } from "./group.ts"
 
 export const make = Effect.gen(function* () {
-  const { scope, cliOnly, atProject, resolveAt } = yield* CallerChecks.Service
+  const { scope, cliOnly, userOnly, atProject } = yield* CallerChecks.Service
   const db = yield* Db.Service
+  const self = yield* Identity.Service
+  const machines = yield* Machines.Service
   const project = yield* Project.Service
-  const runtimes = yield* Runtimes.Service
 
   return {
-    "Project.Open": () =>
+    "Project.Open": ({ directory, machine }) =>
       Effect.gen(function* () {
-        const c = yield* cliOnly("Project.Open")
-        const project = yield* resolveProject(db, yield* atProject(c.repositoryRoot))
+        const caller = yield* Caller
+        const away = machine !== undefined && machine !== LOCAL_MACHINE
 
-        return { projectId: project.id, directory: project.directory }
+        if (away) {
+          if (Predicate.isTagged(caller, "Peer"))
+            return yield* new Forbidden({
+              method: "Project.Open",
+              message: "a peer opens projects only on this machine",
+            })
+          const link = yield* machines.link(machine!)
+
+          return yield* link
+            .call(
+              link.client["Project.Open"](directory === undefined ? {} : { directory }, {
+                headers: peerHeaders(self.id),
+              }),
+            )
+            .pipe(Effect.catchTag("NoSuchSession", (e) => Effect.die(e)))
+        }
+
+        if (!Predicate.isTagged(caller, "Peer")) yield* userOnly("Project.Open")
+        const target = directory ?? (Predicate.isTagged(caller, "Cli") ? caller.repositoryRoot : undefined)
+
+        if (target === undefined)
+          return yield* new Forbidden({ method: "Project.Open", message: "Project.Open needs directory" })
+
+        const opened = yield* resolveProject(db, yield* atProject(target))
+
+        return { projectId: opened.id, directory: opened.directory }
       }),
 
     "Project.Move": ({ from }) =>
@@ -40,33 +68,15 @@ export const make = Effect.gen(function* () {
         }
       }),
 
-    "Project.EntryPlace": ({ callerEnv, runtime }) =>
-      Effect.gen(function* () {
-        const c = yield* cliOnly("Project.EntryPlace")
-        const project = yield* resolveAt(c.repositoryRoot)
-        const specs = yield* runtimes.callers
-        const env = filterCallerEnv(specs, callerEnv)
-        const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
-        const place = entryPlace({ runtime, hits, loaded: specs.map((spec) => spec.id) })
-
-        if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
-
-        if (place.in === "terminal") {
-          const spec = specs.find((item) => item.id === place.runtime)
-
-          if (spec?.ready !== undefined && !(yield* spec.ready(env).pipe(Effect.orDie)))
-            return yield* new LaunchFailed({
-              message: spec.missing ?? `this ${spec.name ?? place.runtime} place could not be named`,
-            })
-        }
-
-        return { directory: project.directory, place }
-      }),
-
     "Project.Create": ({ directory, from }) =>
       Effect.gen(function* () {
-        const c = yield* cliOnly("Project.Create")
-        const created = yield* createProject(directory, from, c.repositoryRoot)
+        const c = yield* userOnly("Project.Create")
+
+        const created = yield* createProject(
+          directory,
+          from,
+          Predicate.isTagged(c, "Cli") ? c.repositoryRoot : directory,
+        )
 
         return {
           directory: created.directory,
@@ -90,7 +100,6 @@ export const make = Effect.gen(function* () {
 export const layer = group([
   "Project.Open",
   "Project.Move",
-  "Project.EntryPlace",
   "Project.Create",
   "Project.Info",
   "Project.Search",
