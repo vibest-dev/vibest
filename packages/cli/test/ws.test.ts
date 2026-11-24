@@ -1,4 +1,3 @@
-import fs from "node:fs"
 import http from "node:http"
 
 import { BunHttpServer } from "@effect/platform-bun"
@@ -205,36 +204,19 @@ const parseTextFrame = (frame: { readonly data: unknown }) => {
 }
 
 describe("local UI WebSocket", () => {
-  it.live("writes vibest-ws.json with mode 0600 on 127.0.0.1 and removes it when scope closes", () =>
+  it.live("exposes WsEndpoint on 127.0.0.1 via Ws.Service when enabled", () =>
     Effect.gen(function* () {
-      const scope = yield* Scope.make()
-      const ctx = yield* Layer.buildWithScope(testProjectBase(), scope)
-      const layout = yield* Effect.provide(Layout, ctx)
-
-      const wsScope = yield* Scope.make()
-      yield* Layer.buildWithScope(Ws.layer.pipe(Layer.provide(wsDeps)), wsScope).pipe(Effect.provide(ctx))
-
-      const stat = fs.statSync(layout.wsInfo)
-      assert.strictEqual(stat.mode & 0o777, 0o600)
-
-      const info = Option.getOrThrow(yield* Ws.readWsInfo(layout.wsInfo).pipe(Effect.provide(ctx)))
+      const info = Option.getOrThrow(yield* Ws.Service)
       assert.strictEqual(info.url, `ws://127.0.0.1:${info.port}`)
       assert.isAbove(info.port, 0)
       assert.match(info.token, /^[a-f0-9]{64}$/)
       assert.strictEqual(info.protocol, PROTOCOL)
-      assert.isString(info.version)
-      assert.isNumber(info.pid)
-
-      yield* Scope.close(wsScope, Exit.void)
-      assert.isFalse(fs.existsSync(layout.wsInfo))
-      yield* Scope.close(scope, Exit.void)
-    }),
+    }).pipe(Effect.provide(servedWithWs())),
   )
 
   it.live("rejects missing or wrong vibest-token with 401 and any Origin header with 403 before upgrade", () =>
     Effect.gen(function* () {
-      const layout = yield* Layout
-      const info = Option.getOrThrow(yield* Ws.readWsInfo(layout.wsInfo))
+      const info = Option.getOrThrow(yield* Ws.Service)
 
       const missingToken = yield* rawUpgradeRequest(info.port, {})
       assert.strictEqual(missingToken.status, 401)
@@ -267,9 +249,8 @@ describe("local UI WebSocket", () => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const layout = yield* Layout
           const db = yield* Db.Service
-          const info = Option.getOrThrow(yield* Ws.readWsInfo(layout.wsInfo))
+          const info = Option.getOrThrow(yield* Ws.Service)
 
           const ws1 = yield* connectWs(info.url, { [TOKEN_HEADER]: info.token })
           yield* ws1.send(
@@ -338,8 +319,7 @@ describe("local UI WebSocket", () => {
   it.live("forbids both scoped and non-scoped non-allowlisted RPC methods over the local WebSocket", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const layout = yield* Layout
-        const info = Option.getOrThrow(yield* Ws.readWsInfo(layout.wsInfo))
+        const info = Option.getOrThrow(yield* Ws.Service)
         const ws = yield* connectWs(info.url, { [TOKEN_HEADER]: info.token })
 
         const forbiddenCalls: ReadonlyArray<{
@@ -384,9 +364,8 @@ describe("local UI WebSocket", () => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const layout = yield* Layout
           const db = yield* Db.Service
-          const info = Option.getOrThrow(yield* Ws.readWsInfo(layout.wsInfo))
+          const info = Option.getOrThrow(yield* Ws.Service)
 
           const repo = yield* makeRepository
           const spawner = yield* asEntry(yield* client, repo)
@@ -434,8 +413,7 @@ describe("local UI WebSocket", () => {
   it.live("rejects JSON-RPC batch arrays and closes oversized frames", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const layout = yield* Layout
-        const info = Option.getOrThrow(yield* Ws.readWsInfo(layout.wsInfo))
+        const info = Option.getOrThrow(yield* Ws.Service)
 
         const ws = yield* connectWs(info.url, {
           [TOKEN_HEADER]: info.token,
@@ -459,7 +437,7 @@ describe("local UI WebSocket", () => {
     ).pipe(Effect.provide(servedWithWs())),
   )
 
-  it.live("does not bind or write vibest-ws.json when disabled via vibest.json", () =>
+  it.live("returns Option.none() when disabled via vibest.json", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
       const ctx = yield* Layer.buildWithScope(testProjectBase(), scope)
@@ -469,22 +447,23 @@ describe("local UI WebSocket", () => {
       yield* fsSvc.writeFileString(layout.config, JSON.stringify({ websocket: false }))
 
       const wsScope = yield* Scope.make()
-      yield* Layer.buildWithScope(Ws.layer.pipe(Layer.provide(wsDeps)), wsScope).pipe(Effect.provide(ctx))
+      const wsCtx = yield* Layer.buildWithScope(Ws.layer.pipe(Layer.provide(wsDeps)), wsScope).pipe(Effect.provide(ctx))
+      const endpoint = yield* Effect.provide(Ws.Service, wsCtx)
 
-      assert.isFalse(fs.existsSync(layout.wsInfo))
+      assert.isTrue(Option.isNone(endpoint))
       yield* Scope.close(wsScope, Exit.void)
       yield* Scope.close(scope, Exit.void)
     }),
   )
 
-  it.live("does not bind or write vibest-ws.json when disabled via VIBEST_WEBSOCKET=0", () =>
+  it.live("returns Option.none() when disabled via VIBEST_WEBSOCKET=0", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
       const ctx = yield* Layer.buildWithScope(testProjectBase(), scope)
-      const layout = yield* Effect.provide(Layout, ctx)
 
       const wsScope = yield* Scope.make()
-      yield* Layer.buildWithScope(
+
+      const wsCtx = yield* Layer.buildWithScope(
         Ws.layer.pipe(
           Layer.provide(wsDeps),
           Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ VIBEST_WEBSOCKET: "0" }))),
@@ -492,7 +471,9 @@ describe("local UI WebSocket", () => {
         wsScope,
       ).pipe(Effect.provide(ctx))
 
-      assert.isFalse(fs.existsSync(layout.wsInfo))
+      const endpoint = yield* Effect.provide(Ws.Service, wsCtx)
+
+      assert.isTrue(Option.isNone(endpoint))
       yield* Scope.close(wsScope, Exit.void)
       yield* Scope.close(scope, Exit.void)
     }),

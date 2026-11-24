@@ -9,12 +9,13 @@ import { Identity } from "@vibest/core/identity"
 import type { UnknownFact } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
+import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Option, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
 import { DaemonHandlers } from "./handlers/daemon.ts"
 import * as ShutdownDeadline from "./shutdown-deadline.ts"
 import type { ShutdownHost } from "./shutdown-deadline.ts"
+import * as Ws from "./ws.ts"
 
 export const DaemonInfo = Schema.Struct({
   pid: Schema.Number,
@@ -23,6 +24,7 @@ export const DaemonInfo = Schema.Struct({
   startedAt: Schema.Number,
   instance: Schema.optional(Schema.String),
   command: Schema.optional(Schema.Array(Schema.String)),
+  ws: Schema.optional(Ws.WsEndpoint),
 })
 
 export type DaemonInfo = typeof DaemonInfo.Type
@@ -129,7 +131,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     yield* host.trimLog(layout.log)
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
-    yield* fs.remove(layout.wsInfo, { force: true })
+    yield* fs.remove(`${layout.home}/vibest-ws.json`, { force: true }).pipe(Effect.ignore)
 
     const facts = yield* Identity.HostFacts.pipe(
       Effect.provide(LayerNode.compile(Identity.hostFactsNode, { replacements })),
@@ -147,7 +149,8 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     const shutdown = yield* Deferred.make<void>()
     const releases = new LayerNode.Releases()
     yield* ShutdownDeadline.install(host, releases, shutdown)
-    yield* Layer.build(
+
+    const context = yield* Layer.build(
       LayerNode.compile(daemon, {
         releases,
         replacements: [
@@ -158,9 +161,18 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
         ],
       }),
     )
+
+    const ws = yield* Effect.provide(Ws.Service, context)
     yield* fs.chmod(layout.socket, 0o600)
     yield* fs.chmod(layout.httpSocket, 0o600)
-    const info: DaemonInfo = { ...identity, version: app.version, socket: layout.socket }
+
+    const info: DaemonInfo = {
+      ...identity,
+      version: app.version,
+      socket: layout.socket,
+      ...(Option.isSome(ws) && { ws: ws.value }),
+    }
+
     yield* acquired.write(Schema.encodeSync(DaemonInfoJson)(info)).pipe(Effect.orDie)
     yield* fs.remove(`${layout.home}/vibestd.lock`, { force: true }).pipe(Effect.ignore)
     yield* Effect.log(`vibestd listening on ${layout.socket}`)

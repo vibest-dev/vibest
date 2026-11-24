@@ -6,6 +6,7 @@ import { probe } from "@vibest/client/client"
 import { LOG_MAX_BYTES } from "@vibest/platform-bun/log-file"
 import { ID } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
 import { Effect, Fiber, FileSystem } from "effect"
 
 import * as Platform from "#platform"
@@ -14,8 +15,11 @@ import { PATH_WITHOUT_HARNESS_CLIS, pingOf, recordedInfo, runVibest, tempDirecto
 
 const execFile = util.promisify(childProcess.execFile)
 
-const daemon = (home: string) =>
-  runVibest(home, { HOME: home, VIBEST_HOME: home, PATH: PATH_WITHOUT_HARNESS_CLIS }, ["daemon", "--foreground"])
+const daemon = (home: string, extraEnv: Record<string, string> = {}) =>
+  runVibest(home, { HOME: home, VIBEST_HOME: home, PATH: PATH_WITHOUT_HARNESS_CLIS, ...extraEnv }, [
+    "daemon",
+    "--foreground",
+  ])
 
 describe.concurrent("vibestd.pid lock", () => {
   it.live("a lock file this user may only read: vibestd fails as unavailable, never as a second holder", () =>
@@ -146,6 +150,51 @@ describe.concurrent("vibestd.pid lock", () => {
         }).pipe(Effect.scoped)
         assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), "")
         assert.strictEqual(yield* contend(layout.daemonInfo), "ACQUIRED")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    30_000,
+  )
+
+  it.live(
+    "tightens pre-existing 0644 vibestd.pid to 0600, publishes ws inside DaemonInfo, removes stale vibest-ws.json, and truncates on stop",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const layout = yield* Layout.make(yield* tempDirectory("vibest-ws-pid-"))
+        const staleWsInfo = `${layout.home}/vibest-ws.json`
+        yield* fs.writeFileString(layout.daemonInfo, "")
+        yield* fs.chmod(layout.daemonInfo, 0o644)
+        yield* fs.writeFileString(staleWsInfo, "{}")
+
+        const proc = yield* Effect.forkScoped(daemon(layout.home))
+        const ping = yield* pingOf(layout.socket)
+        const info = yield* recordedInfo(layout.daemonInfo, ping.instance)
+
+        assert.strictEqual((yield* fs.stat(layout.daemonInfo)).mode & 0o777, 0o600)
+        assert.isDefined(info.ws)
+        assert.strictEqual(info.ws?.url, `ws://127.0.0.1:${info.ws?.port}`)
+        assert.isAbove(info.ws?.port ?? 0, 0)
+        assert.match(info.ws?.token ?? "", /^[a-f0-9]{64}$/)
+        assert.strictEqual(info.ws?.protocol, PROTOCOL)
+        assert.isFalse(yield* fs.exists(staleWsInfo))
+
+        process.kill(ping.pid!, "SIGTERM")
+        yield* Fiber.await(proc)
+        assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), "")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    30_000,
+  )
+
+  it.live(
+    "omits ws from DaemonInfo when disabled via VIBEST_WEBSOCKET=0",
+    () =>
+      Effect.gen(function* () {
+        const layout = yield* Layout.make(yield* tempDirectory("vibest-ws-env-"))
+        const proc = yield* Effect.forkScoped(daemon(layout.home, { VIBEST_WEBSOCKET: "0" }))
+        const ping = yield* pingOf(layout.socket)
+        const info = yield* recordedInfo(layout.daemonInfo, ping.instance)
+        assert.isUndefined(info.ws)
+        process.kill(ping.pid!, "SIGTERM")
+        yield* Fiber.await(proc)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )
