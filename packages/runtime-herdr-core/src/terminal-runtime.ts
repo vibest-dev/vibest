@@ -43,8 +43,6 @@ export const LABEL = {
   runtime: "vibest.runtime",
   project: "vibest.project",
   session: "vibest.session",
-  space: "herdr.space",
-  tab: "herdr.tab",
   seen: "herdr.seen",
   typed: "vibest.typed",
 } as const
@@ -392,7 +390,10 @@ export const make = (deps: {
 
     const open: Runtime["open"] = (input) =>
       Effect.gen(function* () {
+        const parent = input.parent !== undefined ? parseTerminalId(input.parent.id, deps.socket) : undefined
         const near = input.near !== undefined ? parseTerminalId(input.near.id, deps.socket) : undefined
+        const targetSocket = parent?.socket ?? near?.socket ?? deps.socket
+        const parentAddress = parent !== undefined && parent.socket === targetSocket ? parent.address : undefined
         const project = input.launch.env["VIBEST_PROJECT_ID"]
         const session = input.launch.env["VIBEST_SESSION_ID"]
         const argv = yield* argvOf(input.launch)
@@ -431,12 +432,14 @@ export const make = (deps: {
             return { id: terminalId(socket, started.address) } satisfies Terminal
           })
 
-        if (near === undefined) return yield* runOn(deps.socket, undefined)
+        if (parentAddress === undefined && targetSocket === deps.socket) return yield* runOn(deps.socket, undefined)
 
-        return yield* runOn(near.socket, near.address).pipe(
+        return yield* runOn(targetSocket, parentAddress).pipe(
           Effect.catchIf(
-            (e) => e.code === "not_found" || (near.socket !== deps.socket && e.code === "unreachable"),
-            (e) => runOn(e.code === "unreachable" ? deps.socket : near.socket, undefined),
+            (e) =>
+              (parentAddress !== undefined && e.code === "not_found") ||
+              (targetSocket !== deps.socket && e.code === "unreachable"),
+            (e) => runOn(e.code === "unreachable" ? deps.socket : targetSocket, undefined),
           ),
         )
       })
@@ -572,8 +575,8 @@ export const make = (deps: {
                 [LABEL.runtime]: KIND,
                 [LABEL.project]: project,
                 [LABEL.session]: entrySession,
-                [LABEL.space]: project,
-                [LABEL.tab]: entrySession,
+                "herdr.space": "",
+                "herdr.tab": "",
                 [LABEL.typed]: String(Date.now()),
               },
             }),
@@ -590,6 +593,13 @@ export const make = (deps: {
       return ["env", `HC_SOCKET=${socket}`, "hc", "attach", address]
     }
 
+    const viewAddress: NonNullable<Runtime["viewAddress"]> = (terminal) => {
+      if (terminal.id === "") return terminal
+      const { socket, address } = parseTerminalId(terminal.id, deps.socket)
+
+      return socket === deps.socket ? { id: address } : terminal
+    }
+
     return {
       id: KIND,
       status,
@@ -603,6 +613,7 @@ export const make = (deps: {
       present,
       doctor,
       attach,
+      viewAddress,
       seen,
       see,
       events: RuntimeApi.eventsFrom(events),

@@ -75,6 +75,7 @@ describe.concurrent("Placement project near-terminal", () => {
 
       const opensAfter2 = yield* fake.callsTo("open")
       assert.strictEqual(opensAfter2.at(-1)?.near, t1.id)
+      assert.isUndefined(opensAfter2.at(-1)?.parent)
 
       yield* db.session.endProcess(s1.id, "exited")
       yield* db.session.endProcess(s2.id, "exited")
@@ -260,6 +261,7 @@ describe.concurrent("Placement project near-terminal", () => {
 
       const secondOpen = (yield* fake.callsTo("open")).at(-1)
       assert.strictEqual(secondOpen?.near, first.terminal)
+      assert.isUndefined(secondOpen?.parent)
 
       const secondEntryRow = (yield* db.session.entryOf(projectId))!
       yield* db.session.endProcess(secondEntryRow.id, "exited")
@@ -276,7 +278,62 @@ describe.concurrent("Placement project near-terminal", () => {
 
       const thirdOpen = (yield* fake.callsTo("open")).at(-1)
       assert.isUndefined(thirdOpen?.near)
+      assert.isUndefined(thirdOpen?.parent)
       assert.strictEqual(thirdOpen?.target, "explicit-session")
+    }),
+  )
+
+  test(
+    "child session passes creator terminal as parent and near, while top-level sessions pass no parent",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const placement = yield* Placement.Service
+      const fake = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+
+      const creator = yield* insertTopLevel(projectId, "creator", repo)
+
+      const creatorTerminal = yield* placement.openTerminal(fake.runtime, undefined, creator, {
+        project: repo,
+        cwd: repo,
+        launch: () => ({ argv: [], env: {} }),
+      })
+
+      const childId = yield* db.session.newSessionId
+      yield* db.session.insertSession(
+        {
+          id: childId,
+          agent: "general",
+          harnessId: "pi",
+          harnessSessionId: null,
+          runtime: "herdr",
+          address: { machine: "local", id: "" },
+          name: "child",
+          provider: null,
+          model: null,
+          status: "unknown",
+          startedAt: null,
+          exitedAt: null,
+          executionState: "none",
+          executionPromptedAt: 0,
+          createdAt: Date.now(),
+          lastActive: Date.now(),
+        },
+        projectId,
+        { cwd: repo, parentSessionId: creator.id },
+      )
+      const child = (yield* db.session.getSession(childId))!
+
+      yield* placement.openTerminal(fake.runtime, undefined, child, {
+        project: repo,
+        cwd: repo,
+        launch: () => ({ argv: [], env: {} }),
+      })
+
+      const childOpen = (yield* fake.callsTo("open")).at(-1)
+      assert.strictEqual(childOpen?.parent, creatorTerminal.id)
+      assert.strictEqual(childOpen?.near, creatorTerminal.id)
     }),
   )
 })

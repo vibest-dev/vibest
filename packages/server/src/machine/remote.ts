@@ -83,38 +83,9 @@ const make = Effect.gen(function* () {
     )
 
   const view = <R extends SessionInfo>(name: string, rows: ReadonlyArray<R>) =>
-    Effect.gen(function* () {
-      const shown = rows.filter((row) => row.address.id !== "")
-      const kinds = [...new Set(shown.map((row) => row.runtime))]
-
-      const views = new Map(
-        yield* Effect.forEach(
-          kinds,
-          (kind) =>
-            machines
-              .ensure(
-                name,
-                kind,
-                new Map(shown.flatMap((row) => (row.runtime === kind ? [[row.id, row.address.id] as const] : []))),
-              )
-              .pipe(Effect.map((found) => [kind, found] as const)),
-          { concurrency: "unbounded" },
-        ),
-      )
-
-      return rows.map((row): R => {
-        const found = row.address.id === "" ? undefined : views.get(row.runtime)
-        const terminal = found?.terminals.get(row.id)
-
-        return {
-          ...row,
-          id: addressed(name, row.id),
-          machine: name,
-          address: terminal === undefined ? { machine: name, id: "" } : { machine: "local", id: terminal.id },
-          ...(terminal === undefined && found?.note !== undefined && { view: found.note }),
-        }
-      })
-    })
+    Effect.map(machines.viewSessions(name, rows), (mapped) =>
+      mapped.map((row): R => ({ ...row, id: addressed(name, row.id) })),
+    )
 
   const call = <A, E>(
     machine: string,

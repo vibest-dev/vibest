@@ -152,4 +152,87 @@ describe("runtime-herdr-core errors, reconnects and doctor", () => {
       assert.deepStrictEqual(runtime.attach?.(undefined), [])
     }).pipe(Effect.scoped),
   )
+
+  it.effect(
+    "open sends no_parent when only near is passed, and parent + outlive_parent only when parent is passed",
+    () =>
+      Effect.gen(function* () {
+        const seen: Array<{
+          readonly socket: string
+          readonly params: { readonly parent?: string; readonly outlive_parent?: boolean; readonly no_parent?: boolean }
+        }> = []
+
+        const clientFor = (socketPath: string): HcClient => ({
+          socketPath,
+          hello: Effect.succeed(hello),
+          subscribe: () => Stream.fail(down("events.subscribe")),
+          call: ((
+            method: string,
+            params: { readonly parent?: string; readonly outlive_parent?: boolean; readonly no_parent?: boolean },
+          ) => {
+            seen.push({ socket: socketPath, params })
+
+            if (params.parent === "gone")
+              return Effect.fail(new HcError({ method, kind: "not_found", message: "gone" }))
+
+            return Effect.succeed({ address: `t${seen.length}` })
+          }) as HcClient["call"],
+        })
+
+        const runtime = yield* make({
+          connect: (socket) => Effect.succeed(clientFor(socket)),
+          socket: HOME,
+          scope: yield* Effect.scope,
+        })
+
+        yield* runtime.open({
+          project: "/work/demo",
+          cwd: "/work/demo",
+          launch: { argv: [], env: {} },
+          label: "entry",
+          near: { id: `t9@${HOME}` },
+        })
+
+        assert.strictEqual(seen[0]?.socket, HOME)
+        assert.strictEqual(seen[0]?.params.no_parent, true)
+        assert.isUndefined(seen[0]?.params.parent)
+
+        yield* runtime.open({
+          project: "/work/demo",
+          cwd: "/work/demo",
+          launch: { argv: [], env: {} },
+          label: "subagent",
+          parent: { id: `t1@${HOME}` },
+          near: { id: `t9@${HOME}` },
+        })
+
+        assert.strictEqual(seen[1]?.socket, HOME)
+        assert.strictEqual(seen[1]?.params.parent, "t1")
+        assert.strictEqual(seen[1]?.params.outlive_parent, true)
+        assert.isUndefined(seen[1]?.params.no_parent)
+
+        yield* runtime.open({
+          project: "/work/demo",
+          cwd: "/work/demo",
+          launch: { argv: [], env: {} },
+          label: "orphan",
+          parent: { id: `gone@${HOME}` },
+        })
+
+        assert.strictEqual(seen[2]?.params.parent, "gone")
+        assert.strictEqual(seen[3]?.params.no_parent, true)
+        assert.isUndefined(seen[3]?.params.parent)
+      }).pipe(Effect.scoped),
+  )
+
+  it.effect("viewAddress strips the default socket and keeps secondary sockets", () =>
+    Effect.gen(function* () {
+      const { runtime } = yield* runtimeWith(Effect.succeed(hello))
+      assert.deepStrictEqual(runtime.viewAddress?.({ id: `t1pk@${HOME}` }), { id: "t1pk" })
+      assert.deepStrictEqual(runtime.viewAddress?.({ id: `mac-mini/t1pk@${HOME}` }), { id: "mac-mini/t1pk" })
+      assert.deepStrictEqual(runtime.viewAddress?.({ id: "t1pk" }), { id: "t1pk" })
+      assert.deepStrictEqual(runtime.viewAddress?.({ id: "t2@/other.sock" }), { id: "t2@/other.sock" })
+      assert.deepStrictEqual(runtime.viewAddress?.({ id: "" }), { id: "" })
+    }).pipe(Effect.scoped),
+  )
 })

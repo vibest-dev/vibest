@@ -24,6 +24,7 @@ import {
   type RuntimeView,
   UnknownMachine,
 } from "@vibest/schema/machine"
+import type { RuntimeAddress } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
 import {
   Clock,
@@ -584,6 +585,42 @@ const make = Effect.gen(function* () {
     }),
   )
 
+  const viewSessions = <R extends { readonly id: string; readonly runtime: string; readonly address: RuntimeAddress }>(
+    name: string,
+    rows: ReadonlyArray<R>,
+  ) =>
+    Effect.gen(function* () {
+      const shown = rows.filter((row) => row.address.id !== "")
+      const kinds = [...new Set(shown.map((row) => row.runtime))]
+
+      const views = new Map(
+        yield* Effect.forEach(
+          kinds,
+          (kind) =>
+            ensure(
+              name,
+              kind,
+              new Map(shown.flatMap((row) => (row.runtime === kind ? [[row.id, row.address.id] as const] : []))),
+            ).pipe(Effect.map((found) => [kind, found] as const)),
+          { concurrency: "unbounded" },
+        ),
+      )
+
+      return rows.map((row): R => {
+        const found = row.address.id === "" ? undefined : views.get(row.runtime)
+        const terminal = found?.terminals.get(row.id)
+        const rt = terminal === undefined ? undefined : runtimes.find(row.runtime)
+        const mapped = terminal === undefined ? undefined : (rt?.viewAddress?.(terminal) ?? terminal)
+
+        return {
+          ...row,
+          machine: name,
+          address: mapped === undefined ? { machine: name, id: "" } : { machine: "local", id: mapped.id },
+          ...(mapped === undefined && found?.note !== undefined && { view: found.note }),
+        }
+      })
+    })
+
   return {
     add: Effect.fn("Machines.add")(function* (name: string, target: string) {
       const problem = nameProblem(name) ?? targetProblem(target)
@@ -633,6 +670,8 @@ const make = Effect.gen(function* () {
     }),
 
     ensure,
+
+    viewSessions,
 
     listing: Effect.flatMap(states, (rows) =>
       Effect.forEach(
