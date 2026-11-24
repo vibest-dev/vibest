@@ -370,9 +370,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           id: string
           projectId: string
           agent: string
+          directory: string
           harness: string
           entry: number
-        }>`SELECT a.id, a.project_id, a.agent,
+        }>`SELECT a.id, a.project_id, a.agent, a.directory,
             coalesce(p.harness, '') AS harness,
             q.entry_session_id = a.id AS entry
           FROM session a JOIN project q ON q.id = a.project_id

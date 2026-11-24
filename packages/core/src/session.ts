@@ -1,7 +1,7 @@
 import type { ArchiveOutcome } from "@vibest/schema/archive"
 import { messageOf } from "@vibest/schema/error"
 import type { Sender } from "@vibest/schema/event"
-import type { AgentRefused, PluginsNotActive } from "@vibest/schema/plugin"
+import type { SessionRefused, PluginsNotActive } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
   type AmbiguousSession,
@@ -110,7 +110,7 @@ export interface Interface {
     | UnknownAgent
     | NoHarnessChosen
     | NoRuntime
-    | AgentRefused
+    | SessionRefused
     | PluginsNotActive
     | NoSuchSession
     | AmbiguousSession

@@ -265,7 +265,7 @@ export const machineHooks = (
     const registration = { dispose: Effect.void }
     yield* plugin.effect({
       options,
-      agent: { hook: () => Effect.succeed(registration), transform: () => Effect.succeed(registration) },
+      agent: { transform: () => Effect.succeed(registration) },
       machine: {
         hook: (name, callback, hookOptions) =>
           name === "connect" || name === "remove"
@@ -281,6 +281,7 @@ export const machineHooks = (
       subscription: { report: () => Effect.void },
       event: { subscribe: () => Stream.empty },
       session: {
+        hook: () => Effect.succeed(registration),
         list: () => Effect.succeed([]),
         get: () => Effect.succeed(undefined),
         sentIn: () => Effect.succeed(0),

@@ -12,13 +12,13 @@ import { Summaries } from "../session/summaries.ts"
 import { Subscriptions } from "../subscriptions/service.ts"
 import { Hooks } from "./hooks.ts"
 
-type Short = keyof VibestPlugin.AgentHooks
+type Short = keyof VibestPlugin.SessionHooks
 
-const HOOKS: ReadonlyArray<Short> = ["start.before"]
+const HOOKS: ReadonlyArray<Short> = ["start.before", "tool.execute.before"]
 
-type AgentRegistrations = {
+type SessionRegistrations = {
   readonly [S in Short]: (
-    callback: (event: VibestPlugin.AgentHooks[S]) => Effect.Effect<void, VibestPlugin.AgentFailures[S]>,
+    callback: (event: VibestPlugin.SessionHooks[S]) => Effect.Effect<void, VibestPlugin.SessionFailures[S]>,
   ) => Effect.Effect<VibestPlugin.Registration, never, Scope.Scope>
 }
 
@@ -56,8 +56,10 @@ const sessionsFor = (
   summaries: Summaries.Interface,
   sends: Sends.Interface,
   archive: Archive.Interface,
+  hook: VibestPlugin.SessionDomain["hook"],
   plugin: string,
 ): VibestPlugin.SessionDomain => ({
+  hook,
   list: summaries.list,
   get: summaries.get,
   sentIn: summaries.sentIn,
@@ -98,20 +100,21 @@ export const make = Effect.gen(function* () {
       runtime: string | undefined = undefined,
     ) => hooks.register(name, { plugin, activation, stats, runtime, callback })
 
-    const agentRegistrations: AgentRegistrations = {
-      "start.before": (callback) => register("agent.start.before", callback),
+    const sessionRegistrations: SessionRegistrations = {
+      "start.before": (callback) => register("session.start.before", callback),
+      "tool.execute.before": (callback) => register("session.tool.execute.before", callback),
     }
 
-    const hook: VibestPlugin.AgentDomain["hook"] = (short, callback) => {
+    const hook: VibestPlugin.SessionDomain["hook"] = (short, callback) => {
       if (!Predicate.isString(short) || !HOOKS.includes(short)) {
         return Effect.die(
           new Error(
-            `unsupported hook ${JSON.stringify(`agent.${String(short)}`)}; supported: ${HOOKS.map((s) => `agent.${s}`).join(", ")}`,
+            `unsupported hook ${JSON.stringify(`session.${String(short)}`)}; supported: ${HOOKS.map((s) => `session.${s}`).join(", ")}`,
           ),
         )
       }
 
-      return agentRegistrations[short](callback)
+      return sessionRegistrations[short](callback)
     }
 
     const machine: VibestPlugin.MachineDomain["hook"] = (name, callback, options) => {
@@ -127,13 +130,13 @@ export const make = Effect.gen(function* () {
 
     return {
       options,
-      agent: { hook, transform: agents.transformFor(plugin) },
+      agent: { transform: agents.transformFor(plugin) },
       machine: { hook: machine },
       runtime: { transform: runtimes.transform },
       harness: { transform: harnesses.transform },
       subscription: { report: (input) => subscriptions.report(input) },
       event: { subscribe: factsFor(bus, plugin) },
-      session: sessionsFor(summaries, sends, archive, plugin),
+      session: sessionsFor(summaries, sends, archive, hook, plugin),
     }
   }
 })

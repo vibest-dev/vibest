@@ -4674,7 +4674,7 @@
             "$ref": "#/$defs/NoRuntimeEncoded"
           },
           {
-            "$ref": "#/$defs/AgentRefusedEncoded"
+            "$ref": "#/$defs/SessionRefusedEncoded"
           },
           {
             "$ref": "#/$defs/PluginsNotActiveEncoded"
@@ -4802,13 +4802,13 @@
             ],
             "additionalProperties": true
           },
-          "AgentRefusedEncoded": {
+          "SessionRefusedEncoded": {
             "type": "object",
             "properties": {
               "_tag": {
                 "type": "string",
                 "enum": [
-                  "AgentRefused"
+                  "SessionRefused"
                 ]
               },
               "plugin": {
@@ -8529,7 +8529,7 @@
             "$ref": "#/$defs/NoRuntimeEncoded"
           },
           {
-            "$ref": "#/$defs/AgentRefusedEncoded"
+            "$ref": "#/$defs/SessionRefusedEncoded"
           },
           {
             "$ref": "#/$defs/PluginsNotActiveEncoded"
@@ -8776,13 +8776,13 @@
             ],
             "additionalProperties": true
           },
-          "AgentRefusedEncoded": {
+          "SessionRefusedEncoded": {
             "type": "object",
             "properties": {
               "_tag": {
                 "type": "string",
                 "enum": [
-                  "AgentRefused"
+                  "SessionRefused"
                 ]
               },
               "plugin": {
@@ -12698,7 +12698,7 @@
             "$ref": "#/$defs/NoHarnessChosenEncoded"
           },
           {
-            "$ref": "#/$defs/AgentRefusedEncoded"
+            "$ref": "#/$defs/SessionRefusedEncoded"
           },
           {
             "$ref": "#/$defs/PluginsNotActiveEncoded"
@@ -12816,13 +12816,13 @@
             ],
             "additionalProperties": true
           },
-          "AgentRefusedEncoded": {
+          "SessionRefusedEncoded": {
             "type": "object",
             "properties": {
               "_tag": {
                 "type": "string",
                 "enum": [
-                  "AgentRefused"
+                  "SessionRefused"
                 ]
               },
               "plugin": {
@@ -15751,7 +15751,7 @@
             "$ref": "#/$defs/NoRuntimeEncoded"
           },
           {
-            "$ref": "#/$defs/AgentRefusedEncoded"
+            "$ref": "#/$defs/SessionRefusedEncoded"
           },
           {
             "$ref": "#/$defs/PluginsNotActiveEncoded"
@@ -16111,13 +16111,13 @@
             ],
             "additionalProperties": true
           },
-          "AgentRefusedEncoded": {
+          "SessionRefusedEncoded": {
             "type": "object",
             "properties": {
               "_tag": {
                 "type": "string",
                 "enum": [
-                  "AgentRefused"
+                  "SessionRefused"
                 ]
               },
               "plugin": {

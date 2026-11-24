@@ -75,7 +75,7 @@ facts and the old one gets nothing more.
 
 ## G13. A plugin written with Promises
 
-A plugin defined as `{ id, setup }` with Promises loads like an Effect plugin: its `agent.start.before` callback routes
+A plugin defined as `{ id, setup }` with Promises loads like an Effect plugin: its `session.start.before` callback routes
 `vibest run -- <task>` to a real Pi and `vibest ls` names it as the decider, its `event.subscribe` iterator gets the
 agent's `execution.succeeded`, and deleting its file unloads it and runs the cleanup its `setup` returned. Editing an Effect
 plugin into the `setup` form reloads it like any edit (G2).
@@ -132,3 +132,7 @@ The plugin checks again at the moment it stops a session, and a session that did
 execution open or a message waiting, keeps running and its creator hears nothing. The entry session, a session with an
 open execution, and a session started from another machine (its creator is not on this machine) keep running. The
 plugin keeps no state of its own: it reads each session's last activity, so a vibestd restart changes nothing.
+
+## G21. A plugin guards tool calls with `session.tool.execute.before`
+
+Both an Effect plugin and a Promise plugin can register `ctx.session.hook("tool.execute.before", ...)`. Each receives `{ session, tool, input, cwd }`, can refuse a tool call with `ToolRefused({ reason })` (surfacing that exact reason to the harness pre-tool hook), and increments `calls` and `refused` in `vibest plugins`. The builtin `vibest.guard` enforces only `VIBEST_SESSION_ID` tampering and `vibest integration stop|prompt|ready`; other commands are allowed by default unless a plugin refuses them.

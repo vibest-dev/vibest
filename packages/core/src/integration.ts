@@ -1,13 +1,13 @@
-import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { Clock, Context, Effect, FileSystem, Layer, Option, Path } from "effect"
+import { Layout } from "@vibest/schema/layout"
+import { Clock, Context, Effect, Layer, Option, Path } from "effect"
 
-import { Agents } from "./agents.ts"
 import { runtimeOf, terminalOf } from "./database/db-rows.ts"
 import { Db } from "./database/db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 import * as Guard from "./guard.ts"
 import { Harnesses } from "./harnesses.ts"
+import { Plugins } from "./plugin.ts"
 import type { HarnessDefinition } from "./plugin/domains.ts"
 import { jsonObject, promptOf, executionEndOf, type ObservedEnd } from "./replies.ts"
 import { alive, Runtimes } from "./runtimes.ts"
@@ -27,12 +27,10 @@ const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const sessions = yield* Session.Service
   const harnesses = yield* Harnesses.Service
-  const agents = yield* Agents.Service
+  const plugins = yield* Plugins.Service
   const runtimes = yield* Runtimes.Service
   const subscriptions = yield* Subscriptions.Service
   const layout = yield* Layout
-  const vibest = yield* VibestCommand
-  const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
 
   const noteConversation = (definition: HarnessDefinition, who: HookCaller, raw: string) =>
@@ -137,14 +135,18 @@ const make = Effect.gen(function* () {
 
       if (row === undefined) return `no session ${sessionId}; the tool call is refused.`
 
-      return yield* Guard.check({ id: row.id, agent: row.agent, projectDir: layout.project(row.projectId) }, raw)
+      return yield* Guard.check(
+        {
+          id: row.id,
+          agent: row.agent,
+          project: String(row.projectId),
+          projectDir: layout.project(row.projectId),
+          directory: row.directory,
+        },
+        raw,
+      )
     },
-    Effect.provideService(Agents.Service, agents),
-    Effect.provideService(Harnesses.Service, harnesses),
-    Effect.provideService(Layout, layout),
-    Effect.provideService(Runtimes.Service, runtimes),
-    Effect.provideService(VibestCommand, vibest),
-    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Plugins.Service, plugins),
     Effect.provideService(Path.Path, path),
   )
 
@@ -166,13 +168,12 @@ export const node = LayerNode.make({
   service: Service,
   layer,
   deps: [
-    Agents.node,
     Db.node,
     Harnesses.node,
+    Plugins.node,
     Runtimes.node,
     Session.node,
     Subscriptions.node,
-    PlatformNode.fileSystem,
     PlatformNode.layout,
     PlatformNode.path,
   ],

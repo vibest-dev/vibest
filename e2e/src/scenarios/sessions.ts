@@ -143,7 +143,7 @@ import { Effect } from "effect"
 export default Plugin.define({
   id: "see-files",
   effect: (ctx) =>
-    ctx.agent.hook("start.before", (event) =>
+    ctx.session.hook("start.before", (event) =>
       Effect.sync(() => fs.appendFileSync(${JSON.stringify(out)}, JSON.stringify({ prompt: event.prompt, files: event.files, contents: event.files.map((file) => fs.readFileSync(file, "utf8")) }) + "\\n")),
     ),
 })
@@ -553,7 +553,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S57",
     title:
-      "vibest run --file copies the file into the session's files folder in the project folder and ends the task with a line naming the copy; a plugin sees that path in agent.start.before files and reads the copy during the hook; the Pi subagent reads the copy and answers with a word from it; archive removes the session's folder",
+      "vibest run --file copies the file into the session's files folder in the project folder and ends the task with a line naming the copy; a plugin sees that path in session.start.before files and reads the copy during the hook; the Pi subagent reads the copy and answers with a word from it; archive removes the session's folder",
     run: async (w) => {
       const p = await piProject(w, "s57")
       const model = fileReadingModel()
@@ -610,7 +610,7 @@ const checks: ReadonlyArray<Check> = [
             path.dirname(path.dirname(path.dirname(folder))).endsWith("/projects") &&
             seen.prompt === `Read the attached file and answer with its word.\n\nAttached files: ${copy}` &&
             !seen.prompt.includes("s57-word-hazel"),
-          `agent.start.before saw ${JSON.stringify(seen)} for ${id}`,
+          `session.start.before saw ${JSON.stringify(seen)} for ${id}`,
         )
         expect((await fs.readFile(copy, "utf8")) === "the answer is s57-word-hazel\n", `${copy} is not the copy`)
         await until(

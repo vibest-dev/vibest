@@ -1,11 +1,11 @@
 import type {
   AgentEditor,
-  AgentHooks,
   MachineHookOptions,
   MachineHooks,
   MachineNote,
   PluginOptions,
   PluginSession,
+  SessionHooks,
   SessionSend,
   SessionStop,
   SubscriptionReport,
@@ -20,10 +20,6 @@ type Awaitable<A> = Promise<A> | A
 export interface Context {
   readonly options: PluginOptions
   readonly agent: {
-    readonly hook: <Name extends keyof AgentHooks>(
-      name: Name,
-      callback: (event: AgentHooks[Name]) => Awaitable<void>,
-    ) => Promise<Registration>
     readonly transform: (callback: (editor: AgentEditor) => void) => Promise<Registration>
   }
   readonly machine: {
@@ -38,6 +34,10 @@ export interface Context {
   readonly subscription: { readonly report: (input: SubscriptionReport) => Promise<void> }
   readonly event: EventDomain
   readonly session: {
+    readonly hook: <Name extends keyof SessionHooks>(
+      name: Name,
+      callback: (event: SessionHooks[Name]) => Awaitable<void>,
+    ) => Promise<Registration>
     readonly list: () => Promise<ReadonlyArray<PluginSession>>
     readonly get: (id: string) => Promise<PluginSession | undefined>
     readonly sentIn: (id: string, execution: number) => Promise<number>

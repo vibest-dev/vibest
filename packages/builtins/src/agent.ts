@@ -1,4 +1,4 @@
-import { Plugin, type AgentDefinition, type GuardCall } from "@vibest/plugin/effect"
+import { Plugin, type AgentDefinition } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 
 const COORDINATOR_SYSTEM = `You are an AI assistant that orchestrates software engineering tasks across multiple coding agents.
@@ -15,7 +15,7 @@ Your replies go to the reader your session facts name. Agent messages and system
 
 ## 2. Your Tools
 
-You run the bare command \`vibest\` to direct agents, gh (gh pr, gh run, gh issue, gh api, etc.) for GitHub workflow, and shell commands to inspect work, such as git status / diff / log / show, ls, cat and rg. Anything that changes the repository goes to an agent. Start every agent with \`vibest run\`; never with your harness's own subagent tool. vibest's pre-tool hook refuses editing files outside the project folder, terminal runtime control, starting a harness CLI yourself, gh auth / config / alias / extension, \`vibest integration stop\` or \`vibest integration prompt\`, and vibest with VIBEST_SESSION_ID changed; vibest itself refuses what is the user's.
+You run the bare command \`vibest\` to direct agents, gh (gh pr, gh run, gh issue, gh api, etc.) for GitHub workflow, and shell commands to inspect work, such as git status / diff / log / show, ls, cat and rg. Anything that changes the repository goes to an agent. Start every agent with \`vibest run\`; never with your harness's own subagent tool. vibest's pre-tool hook refuses \`vibest integration stop\`, \`vibest integration prompt\`, \`vibest integration ready\`, and \`vibest\` with VIBEST_SESSION_ID changed or cleared; vibest itself refuses what is the user's.
 
 The project folder (VIBEST_PROJECT_DIR; its path is in your session facts) is shared with every agent of the project; read and write it with your file tools. Its fixed subfolders: docs/ (documents about the project), memories/ (curated index in memories/MEMORY.md, loaded into the system prompt, plus one topic file per lesson read on demand or searched with \`vibest project search <query> --kind memories\`) and artifacts/ (plans, long task text and other handoffs between agents). preferences.md there is how the user likes work done: when the user states a lasting preference about how work should be done, add or update one short line in it with your file tools; do not record one-off requests.
 
@@ -114,53 +114,16 @@ Then the details: what you did or found — be specific with file paths, line nu
 Optionally end with a \`## Remember\` section: lessons worth keeping for future work in this repository.
 `
 
-const GH_UNSAFE = new Set(["alias", "extension", "ext", "config", "auth"])
-
-const COORDINATOR_EDITS =
-  "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session."
-
-const nameOf = (program: string | undefined) => (program ?? "").slice((program ?? "").lastIndexOf("/") + 1)
-const firstWord = (words: ReadonlyArray<string>) => words.find((w) => !w.startsWith("-")) ?? ""
-const inside = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`)
-
-const coordinatorGuard = (call: GuardCall) => {
-  for (const [program, ...rest] of call.programs) {
-    const name = nameOf(program)
-
-    if (call.session.harnessBinaries.has(name))
-      return `The coordinator does not start ${name} itself: it would inherit the coordinator's identity and report its executions as the coordinator's. Start agents with vibest run.`
-
-    if (name === "gh" && GH_UNSAFE.has(firstWord(rest)))
-      return `gh ${firstWord(rest)} changes gh's credentials or what it runs; ask the user to.`
-  }
-
-  if (call.writes !== undefined) {
-    const folder = call.session.projectFolder
-
-    if (folder === "" || call.writes.length === 0 || !call.writes.every((path) => inside(path, folder)))
-      return COORDINATOR_EDITS
-  }
-
-  return undefined
-}
-
-const generalGuard = (call: GuardCall) =>
-  call.programs.some(([program]) => call.session.runtimePrograms.has(nameOf(program)))
-    ? "Sessions do not run a terminal runtime; vibest manages it."
-    : undefined
-
 export const coordinator: AgentDefinition = {
   id: "coordinator",
   description: "plans, directs, reviews and summarizes the work; does not change code itself",
   system: COORDINATOR_SYSTEM,
-  guard: coordinatorGuard,
 }
 
 export const general: AgentDefinition = {
   id: "general",
   description: "does the work itself; may start other sessions when the task splits",
   system: GENERAL_SYSTEM,
-  guard: generalGuard,
 }
 
 export const agentPlugin = Plugin.define({

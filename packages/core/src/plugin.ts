@@ -1,7 +1,7 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
 import { fromPromise } from "@vibest/plugin/promise/adapter"
 import { messageOf } from "@vibest/schema/error"
-import { AgentRefused, type Change, PluginInfo, PluginsNotActive, TraceEntry } from "@vibest/schema/plugin"
+import { SessionRefused, type Change, PluginInfo, PluginsNotActive, TraceEntry } from "@vibest/schema/plugin"
 import { Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Predicate, Queue, Scope, Stream } from "effect"
 
 import { Agents } from "./agents.ts"
@@ -26,7 +26,7 @@ import { Subscriptions } from "./subscriptions/service.ts"
 
 export * as Plugins from "./plugin.ts"
 
-export { AgentRefused, Change, PluginInfo, PluginsNotActive, Routing, TraceEntry } from "@vibest/schema/plugin"
+export { SessionRefused, Change, PluginInfo, PluginsNotActive, Routing, TraceEntry } from "@vibest/schema/plugin"
 
 export { type Candidate, pluginEntries, PluginLoader, pluginLoaderNode } from "./plugin/sources.ts"
 
@@ -102,14 +102,23 @@ const info = (slot: Slot): PluginInfo => {
 const ROUTE = ["prompt", "harness", "provider", "model", "machine", "runtime"] as const
 const REQUIRED: ReadonlyArray<(typeof ROUTE)[number]> = ["prompt", "machine"]
 
-const routed = (before: VibestPlugin.AgentStartBefore, after: VibestPlugin.AgentStartBefore) =>
+const routed = (before: VibestPlugin.SessionStartBefore, after: VibestPlugin.SessionStartBefore) =>
   ROUTE.filter(
     (field) =>
       JSON.stringify(before[field]) !== JSON.stringify(after[field]) &&
       (after[field] !== undefined || !REQUIRED.includes(field)),
   )
 
-const readOnly = <T extends object>(event: T): T => Object.freeze(structuredClone(event))
+const deepFreeze = <T>(value: T): T => {
+  if (!Predicate.isObjectOrArray(value)) return value
+  Object.freeze(value)
+
+  for (const child of Object.values(value)) deepFreeze(child)
+
+  return value
+}
+
+const readOnly = <T extends object>(event: T): T => deepFreeze(structuredClone(event))
 
 const decide = <V>(
   field: string,
@@ -370,7 +379,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         return hooksOf(name, runtime)
       })
 
-    const refusal = (stopped: Hooks.Stopped) => new AgentRefused({ plugin: stopped.plugin, reason: stopped.reason })
+    const refusal = (stopped: Hooks.Stopped) => new SessionRefused({ plugin: stopped.plugin, reason: stopped.reason })
 
     const hooksOf = <N extends Hooks.Name>(name: N, runtime?: string): ReadonlyArray<Hooks.Entry<N>> =>
       slots.flatMap((s) => (s.running && s.running.broken === undefined ? hooks.get(name, runtime, s.running) : []))
@@ -400,13 +409,13 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       decidedBefore?: Readonly<Record<string, string>>,
     ) {
       const trace: Array<TraceEntry> = []
-      const entries = yield* admit("agent.start.before")
+      const entries = yield* admit("session.start.before")
 
       return yield* Effect.gen(function* () {
         const current = yield* subscriptions.list
         const machines = yield* machinesListing(runtimes, input.machines[0]?.harnesses ?? [])
 
-        const event: VibestPlugin.AgentStartBefore = {
+        const event: VibestPlugin.SessionStartBefore = {
           ...input,
           files: input.files ?? [],
           machines,
@@ -416,7 +425,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         const decidedBy: Record<string, string> = {}
         Object.assign(decidedBy, decidedBefore)
 
-        const route = (draft: VibestPlugin.AgentStartBefore, plugin: string) => {
+        const route = (draft: VibestPlugin.SessionStartBefore, plugin: string) => {
           const fields = routed(event, draft)
           const values = Object.fromEntries(fields.map((field) => [field, structuredClone(draft[field])]))
           const changes = fields.map((field) => decide(field, event[field], values[field], plugin, decidedBy))
@@ -425,7 +434,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           return changes
         }
 
-        const stopped = yield* Hooks.dispatch("agent.start.before", entries, event, route, trace, root, timeout)
+        const stopped = yield* Hooks.dispatch("session.start.before", entries, event, route, trace, root, timeout)
 
         if (stopped !== undefined) return yield* refusal(stopped)
 
@@ -476,10 +485,42 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       )
     })
 
+    const guard = Effect.fn("Plugins.guard")(function* (event: VibestPlugin.SessionToolExecuteBefore) {
+      if (!(yield* settled)) {
+        const waiting = stillLoading()
+
+        return waiting.length === 0
+          ? "plugins are still activating; tool call refused."
+          : `plugins are still activating (${waiting.join(", ")}); tool call refused.`
+      }
+
+      for (const hook of hooksOf("session.tool.execute.before")) {
+        const ran = yield* Hooks.run("session.tool.execute.before", hook, readOnly(event), root, timeout)
+
+        if (ran.outcome === "refused") {
+          yield* Effect.log(`plugin ${hook.plugin} session.tool.execute.before: refused (${ran.reason})`)
+
+          return ran.reason
+        }
+
+        if (ran.outcome === "timeout") {
+          yield* Effect.logWarning(`plugin ${hook.plugin} session.tool.execute.before: ${ran.error}`)
+          continue
+        }
+
+        if (ran.outcome === "crashed") {
+          yield* Effect.logWarning(`plugin ${hook.plugin} session.tool.execute.before crashed`, ran.cause)
+          continue
+        }
+      }
+
+      return undefined
+    })
+
     const list = Effect.sync(() => slots.map(info))
     const importing = (sources: ReadonlyArray<string>) => Effect.sync(() => void (loading = sources))
 
-    return { service: Service.of({ start, list, settled, machine }), activate, holdNow, importing }
+    return { service: Service.of({ start, guard, list, settled, machine }), activate, holdNow, importing }
   })
 
 export const makePlugins = (

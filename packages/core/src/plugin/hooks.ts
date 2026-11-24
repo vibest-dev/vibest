@@ -9,19 +9,22 @@ import { LayerNode } from "../effect/layer-node.ts"
 export * as Hooks from "./hooks.ts"
 
 export interface Events {
-  readonly "agent.start.before": VibestPlugin.AgentStartBefore
+  readonly "session.start.before": VibestPlugin.SessionStartBefore
+  readonly "session.tool.execute.before": VibestPlugin.SessionToolExecuteBefore
   readonly "machine.connect": VibestPlugin.MachineEvent
   readonly "machine.remove": VibestPlugin.MachineEvent
 }
 
 export interface Results extends Record<keyof Events, unknown> {
-  readonly "agent.start.before": void
+  readonly "session.start.before": void
+  readonly "session.tool.execute.before": void
   readonly "machine.connect": ReadonlyArray<VibestPlugin.MachineNote>
   readonly "machine.remove": ReadonlyArray<VibestPlugin.MachineNote>
 }
 
 interface Failures extends Record<keyof Events, unknown> {
-  readonly "agent.start.before": VibestPlugin.AgentRefused
+  readonly "session.start.before": VibestPlugin.SessionRefused
+  readonly "session.tool.execute.before": VibestPlugin.ToolRefused
   readonly "machine.connect": never
   readonly "machine.remove": never
 }
@@ -60,7 +63,8 @@ export type Outcome<N extends Name> = { readonly ms: number } & (
 
 export const errorMessage = (cause: Cause.Cause<unknown>) => messageOf(Cause.squash(cause))
 
-const isAgentRefused = (e: unknown): e is VibestPlugin.AgentRefused => Predicate.isTagged(e, "AgentRefused")
+const isSessionRefused = (e: unknown): e is VibestPlugin.SessionRefused => Predicate.isTagged(e, "SessionRefused")
+const isToolRefused = (e: unknown): e is VibestPlugin.ToolRefused => Predicate.isTagged(e, "ToolRefused")
 
 const decision = <A>(value: A | void) => (Predicate.isObjectOrArray(value) ? value : undefined)
 
@@ -79,7 +83,12 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("vibest/PluginHooks") {}
 
 export const layer = Layer.sync(Service, () => {
-  let table: Table = { "agent.start.before": [], "machine.connect": [], "machine.remove": [] }
+  let table: Table = {
+    "session.start.before": [],
+    "session.tool.execute.before": [],
+    "machine.connect": [],
+    "machine.remove": [],
+  }
 
   const register: Interface["register"] = (name, entry) =>
     Effect.gen(function* () {
@@ -135,12 +144,21 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
 
   if (Exit.isSuccess(exit.value)) return { ms, outcome: "ok", value: decision(exit.value.value) } satisfies Outcome<N>
   const cause = exit.value.cause
-  const refused = Option.filter(Cause.findErrorOption(cause), isAgentRefused)
+  const errorOption = Cause.findErrorOption(cause)
+  const sessionRefused = Option.filter(errorOption, isSessionRefused)
 
-  if (name === "agent.start.before" && Option.isSome(refused)) {
+  if (name === "session.start.before" && Option.isSome(sessionRefused)) {
     stats.refused++
 
-    return { ms, outcome: "refused", reason: refused.value.reason } satisfies Outcome<N>
+    return { ms, outcome: "refused", reason: sessionRefused.value.reason } satisfies Outcome<N>
+  }
+
+  const toolRefused = Option.filter(errorOption, isToolRefused)
+
+  if (name === "session.tool.execute.before" && Option.isSome(toolRefused)) {
+    stats.refused++
+
+    return { ms, outcome: "refused", reason: toolRefused.value.reason } satisfies Outcome<N>
   }
 
   const error = errorMessage(cause)
@@ -152,9 +170,9 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
 
 export type Stopped = { readonly plugin: string; readonly reason: string }
 
-type AgentName = "agent.start.before"
+type SessionName = "session.start.before"
 
-export const dispatch = Effect.fnUntraced(function* <N extends AgentName>(
+export const dispatch = Effect.fnUntraced(function* <N extends SessionName>(
   name: N,
   hooks: ReadonlyArray<Entry<N>>,
   event: Events[N],

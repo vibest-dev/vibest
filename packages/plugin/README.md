@@ -22,7 +22,7 @@ export default Plugin.define({
 ```
 
 Or write it with Promises: `setup` gets the same context with Promises (hook callbacks return a value or a Promise and
-refuse by throwing `AgentRefused`; `event.subscribe` is an `AsyncIterable`) and may return a cleanup that runs when the
+refuse by throwing `SessionRefused`; `event.subscribe` is an `AsyncIterable`) and may return a cleanup that runs when the
 plugin unloads.
 
 ```ts
@@ -31,7 +31,7 @@ import { Plugin } from "@vibest/plugin"
 export default Plugin.define({
   id: "my-plugin",
   setup: async (context) => {
-    await context.agent.hook("start.before", async (event) => {
+    await context.session.hook("start.before", async (event) => {
       if (event.prompt.startsWith("ask:")) event.harness = "pi"
     })
     return () => console.log("unloaded")
@@ -48,7 +48,7 @@ lists every plugin, builtins first, with its status and counters.
 | Member                | What it does                                                                                                                                                                                                                                                                                                                                                                                                 |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `options`             | the plugin's options                                                                                                                                                                                                                                                                                                                                                                                         |
-| `agent.hook`          | intercept `start.before` (assign `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`; read `files`, the absolute paths of the files attached with `vibest run --file`) and `fail` (assign `move`)                                                                                                                                                           |
+| `session.hook`        | intercept `start.before` (assign `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `SessionRefused`; read `files`, the absolute paths of the files attached with `vibest run --file`) and `fail` (assign `move`)                                                                                                                                                         |
 | `runtime.transform`   | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                                                                                                                                                                                                                                                           |
 | `harness.transform`   | add, change or remove `Harness.HarnessDefinition`s                                                                                                                                                                                                                                                                                                                                                           |
 | `subscription.report` | replace one `(harness, provider)` row's usage limits                                                                                                                                                                                                                                                                                                                                                         |

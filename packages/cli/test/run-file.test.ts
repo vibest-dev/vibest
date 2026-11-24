@@ -21,7 +21,7 @@ const seen: Seen = { prompt: "", files: [] }
 const capture = Plugin.define({
   id: "see-prompt",
   effect: (ctx) =>
-    ctx.agent.hook("start.before", (event) =>
+    ctx.session.hook("start.before", (event) =>
       Effect.sync(() => {
         seen.prompt = event.prompt
         seen.files = event.files
