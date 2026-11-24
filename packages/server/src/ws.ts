@@ -1,13 +1,21 @@
 import { App } from "@vibest/core/app"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
+import { writeAtomic } from "@vibest/core/paths"
 import { PluginLoader, pluginLoaderNode } from "@vibest/core/plugin"
 import { UI_WS_CALLS } from "@vibest/protocol/access"
-import { TOKEN_HEADER } from "@vibest/protocol/protocol"
-import { Caller, CallerGate, type CallerIdentity, Forbidden, VibestRpcs } from "@vibest/protocol/rpc"
+import { PROTOCOL_HEADER, protocolMismatch, TOKEN_HEADER } from "@vibest/protocol/protocol"
+import {
+  Caller,
+  CallerGate,
+  type CallerIdentity,
+  Forbidden,
+  ProtocolGate,
+  ProtocolRejected,
+} from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Config, Context, Data, Effect, FileSystem, Layer, Option, Predicate, Queue, Schema, Scope } from "effect"
+import { Cause, Config, Context, Data, Deferred, Effect, FileSystem, Layer, Option, Predicate, Schema } from "effect"
 import { Hex } from "effect/encoding"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -16,11 +24,10 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as NetAddress from "effect/net/NetAddress"
 import { RpcMessage, RpcSerialization, RpcServer } from "effect/rpc"
-import * as Socket from "effect/socket/Socket"
 
-import { AdmissionLive, ProtocolGateLive } from "./gates.ts"
 import { DaemonHandlers } from "./handlers/daemon.ts"
-import { admissionNode, handlers, handlersNode, protocolGateNode } from "./server.ts"
+import { group } from "./handlers/group.ts"
+import { handlers, handlersNode } from "./server.ts"
 
 export const WsInfo = Schema.Struct({
   url: Schema.String,
@@ -39,36 +46,24 @@ const WsConfigFile = Schema.Struct({
   websocket: Schema.optional(Schema.Boolean),
 })
 
-const RequestIdSchema = Schema.Union([Schema.String, Schema.Number])
+const WsRpcs = group(["Watch"])
 
-const ClientMessageSchema = Schema.Union([
-  Schema.Struct({
-    _tag: Schema.tag("Request"),
-    id: RequestIdSchema,
-    tag: Schema.String,
-    payload: Schema.Unknown,
-    headers: Schema.Array(Schema.Tuple([Schema.String, Schema.String])),
-    isNotification: Schema.optional(Schema.Literal(true)),
-    traceId: Schema.optional(Schema.String),
-    spanId: Schema.optional(Schema.String),
-    sampled: Schema.optional(Schema.Boolean),
-  }),
-  Schema.Struct({ _tag: Schema.tag("Ack"), requestId: RequestIdSchema }),
-  Schema.Struct({ _tag: Schema.tag("Interrupt"), requestId: RequestIdSchema }),
-  Schema.Struct({ _tag: Schema.tag("Ping") }),
-  Schema.Struct({ _tag: Schema.tag("Eof") }),
-])
+const MAX_FRAME_BYTES = 64 * 1024
+
+class MaxBufferSizeExceeded extends Data.TaggedError("MaxBufferSizeExceeded")<{ readonly message: string }> {}
+
+type RpcExitEncoded = Extract<RpcMessage.FromServerEncoded, { readonly _tag: "Exit" }>["exit"]
+
+type RpcFailureReason = Extract<RpcExitEncoded, { readonly _tag: "Failure" }>["cause"][number]
 
 const decodeWsConfig = Schema.decodeUnknownOption(WsConfigFile)
-const decodeRpcMessage = Schema.decodeUnknownOption(ClientMessageSchema)
 const Callers = Data.taggedEnum<CallerIdentity>()
-const ClientMessages = Data.taggedEnum<RpcMessage.FromClientEncoded>()
+const ServerMessages = Data.taggedEnum<RpcMessage.FromServerEncoded>()
+const RpcExits = Data.taggedEnum<RpcExitEncoded>()
+const RpcReasons = Data.taggedEnum<RpcFailureReason>()
 
-export const readWsInfo = (file: string) =>
-  Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString(file)).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(WsInfoJson)),
-    Effect.option,
-  )
+const baseSerialization = RpcSerialization.jsonRpc()
+const encodeForbidden = Schema.encodeSync(Forbidden)
 
 declare const crypto: { readonly getRandomValues: (bytes: Uint8Array) => Uint8Array }
 declare const TextDecoder: new () => { readonly decode: (input: Uint8Array) => string }
@@ -77,6 +72,12 @@ const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 
 const randomHex = (byteLength: number): string => Hex.encode(crypto.getRandomValues(new Uint8Array(byteLength)))
+
+export const readWsInfo = (file: string) =>
+  Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString(file)).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(WsInfoJson)),
+    Effect.option,
+  )
 
 const tokenMatches = (expected: Uint8Array, candidate: string | undefined): boolean => {
   if (candidate === undefined) return false
@@ -120,209 +121,105 @@ const wsEnabled = Effect.gen(function* () {
   return true
 })
 
-const writePrivateFile = (file: string, content: string, pid: number) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const tmp = `${file}.${pid}.${randomHex(4)}.tmp`
+const HeaderPairSchema = Schema.Tuple([Schema.String, Schema.String])
+const decodeHeaderPairs = Schema.decodeUnknownOption(Schema.Array(HeaderPairSchema))
 
-    yield* Effect.scoped(
-      fs.open(tmp, { flag: "w", mode: 0o600 }).pipe(
-        Effect.flatMap((handle) => handle.writeAll(new TextEncoder().encode(content))),
-        Effect.andThen(fs.chmod(tmp, 0o600)),
-        Effect.andThen(fs.rename(tmp, file)),
-        Effect.onError(() => fs.remove(tmp, { force: true }).pipe(Effect.ignore)),
-      ),
-    )
-  })
-
-const makeWsProtocol = Effect.gen(function* () {
-  const serialization = RpcSerialization.jsonRpc()
-  const encodeDefectUnsafe = Schema.encodeSync(serialization.codecFor(Schema.Defect()))
-  const disconnects = yield* Queue.make<number>()
-  let nextClientId = 0
-
-  const clients = new Map<
-    number,
-    {
-      readonly write: (response: RpcMessage.FromServerEncoded) => Effect.Effect<void>
-      readonly close: () => Effect.Effect<void>
-    }
-  >()
-
-  const clientIds = new Set<number>()
-  let writeRequest: (clientId: number, message: RpcMessage.FromClientEncoded) => Effect.Effect<void> = () => Effect.void
-
-  const onSocket = Effect.fnUntraced(function* (
-    socket: Socket.Socket,
-    headers: ReadonlyArray<readonly [string, string]>,
-  ) {
-    const scope = yield* Effect.scope
-    const parser = serialization.makeUnsafe()
-    const id = nextClientId++
-    yield* Scope.addFinalizerExit(scope, () => {
-      clients.delete(id)
-      clientIds.delete(id)
-
-      return Queue.offer(disconnects, id)
-    })
-
-    const writer = yield* socket.writer
-
-    const writeEncoded = (encoded: string | Uint8Array | undefined) => {
-      if (encoded === undefined) return Effect.void
-
-      const frame = Predicate.isString(encoded) ? encoded : textDecoder.decode(encoded)
-
-      return Effect.orDie(writer.write(frame))
-    }
-
-    const write = (response: RpcMessage.FromServerEncoded) => {
-      try {
-        return writeEncoded(parser.encode(response))
-      } catch (cause) {
-        return writeEncoded(parser.encode(RpcMessage.ResponseDefectEncoded(encodeDefectUnsafe(cause))))
-      }
-    }
-
-    const close = () => writer.write(new Socket.CloseEvent(1001, "server shutting down")).pipe(Effect.ignore)
-
-    clients.set(id, { write, close })
-    clientIds.add(id)
-
-    const processData = (data: string | Uint8Array): Effect.Effect<void> => {
-      try {
-        const decoded = parser.decode(data)
-
-        if (decoded.length === 0) return Effect.void
-
-        return Effect.forEach(
-          decoded,
-          (raw) => {
-            const parsed = decodeRpcMessage(raw)
-
-            if (Option.isNone(parsed)) return Effect.void
-            const message = parsed.value
-
-            if (Predicate.isTagged(message, "Request")) {
-              const merged: Array<[string, string]> = [
-                ...headers.map(([k, v]): [string, string] => [k, v]),
-                ...message.headers.map(([k, v]): [string, string] => [k, v]),
-              ]
-
-              const payload =
-                message.tag === "Watch" &&
-                Predicate.isObject(message.payload) &&
-                !Array.isArray(message.payload) &&
-                Object.keys(message.payload).length === 0
-                  ? null
-                  : message.payload
-
-              const request = ClientMessages.Request({
-                id: RpcMessage.RequestId(message.id),
-                tag: message.tag,
-                payload,
-                headers: merged,
-                ...(message.isNotification !== undefined && { isNotification: message.isNotification }),
-                ...(message.traceId !== undefined && { traceId: message.traceId }),
-                ...(message.spanId !== undefined && { spanId: message.spanId }),
-                ...(message.sampled !== undefined && { sampled: message.sampled }),
-              })
-
-              return writeRequest(id, request)
-            }
-
-            if (Predicate.isTagged(message, "Ack")) {
-              return writeRequest(id, ClientMessages.Ack({ requestId: RpcMessage.RequestId(message.requestId) }))
-            }
-
-            if (Predicate.isTagged(message, "Interrupt")) {
-              return writeRequest(id, ClientMessages.Interrupt({ requestId: RpcMessage.RequestId(message.requestId) }))
-            }
-
-            if (Predicate.isTagged(message, "Ping")) {
-              return writeRequest(id, RpcMessage.constPing)
-            }
-
-            if (Predicate.isTagged(message, "Eof")) {
-              return writeRequest(id, RpcMessage.constEof)
-            }
-
-            return Effect.void
-          },
-          { discard: true },
-        )
-      } catch (cause) {
-        if (Predicate.isTagged(cause, "MaxBufferSizeExceeded")) {
-          return Effect.orDie(writer.write(new Socket.CloseEvent(1009, String(cause))))
-        }
-
-        return writeEncoded(parser.encode(RpcMessage.ResponseDefectEncoded(encodeDefectUnsafe(cause))))
-      }
-    }
-
-    yield* Effect.gen(function* () {
-      const { pull } = yield* socket.reader
-
-      while (true) {
-        const frames = yield* pull
-
-        for (let i = 0; i < frames.length; i++) {
-          const frame = frames[i]
-
-          if (frame !== undefined) yield* processData(frame)
-        }
-      }
-    }).pipe(
-      Effect.catchReason("SocketError", "SocketCloseError", () => Effect.void),
-      Effect.tapCause((cause) => Effect.logError("local WebSocket connection failed", cause)),
-      Effect.orDie,
-    )
-  })
-
-  const protocol = yield* RpcServer.Protocol.make((writeRequest_) => {
-    writeRequest = writeRequest_
-
-    return Effect.succeed({
-      disconnects,
-      send: (clientId, response) => {
-        const client = clients.get(clientId)
-
-        if (!client) return Effect.void
-
-        return Effect.orDie(client.write(response))
-      },
-      end: () => Effect.void,
-      clientIds: Effect.sync(() => clientIds),
-      initialMessage: Effect.succeedNone,
-      supportsAck: false,
-      supportsTransferables: false,
-      supportsSpanPropagation: true,
-      supportsNotifications: true,
-      codecFor: serialization.codecFor,
-    })
-  })
-
-  const closeAll = Effect.suspend(() =>
-    Effect.forEach(Array.from(clients.values()), (client) => client.close(), { discard: true }),
-  )
-
-  return { protocol, onSocket, closeAll }
+const RawRpcFrameSchema = Schema.Struct({
+  jsonrpc: Schema.optional(Schema.String),
+  id: Schema.optional(Schema.Union([Schema.String, Schema.Number, Schema.Null])),
+  method: Schema.optional(Schema.String),
+  params: Schema.optional(Schema.Unknown),
+  headers: Schema.optional(Schema.Unknown),
 })
+
+const decodeRawRpcFrame = Schema.decodeUnknownOption(RawRpcFrameSchema)
+
+const wsSerialization = RpcSerialization.RpcSerialization.of({
+  ...baseSerialization,
+  makeUnsafe: () => {
+    const parser = baseSerialization.makeUnsafe()
+
+    return {
+      encode: (response) => parser.encode(response),
+      decode: (data) => {
+        const byteLength = Predicate.isString(data) ? textEncoder.encode(data).byteLength : data.byteLength
+
+        if (byteLength > MAX_FRAME_BYTES) {
+          throw new MaxBufferSizeExceeded({ message: `WebSocket frame exceeds ${MAX_FRAME_BYTES} bytes` })
+        }
+
+        const text = Predicate.isString(data) ? data : textDecoder.decode(data)
+        const parsed: unknown = JSON.parse(text)
+
+        if (Array.isArray(parsed) || !Predicate.isObject(parsed)) {
+          throw new Error("WebSocket frame must be a single JSON-RPC object")
+        }
+
+        const frame = decodeRawRpcFrame(parsed)
+
+        if (Option.isNone(frame)) {
+          throw new Error("Invalid JSON-RPC frame")
+        }
+
+        const rawHeaders = decodeHeaderPairs(frame.value.headers)
+
+        const filteredHeaders = Option.isSome(rawHeaders)
+          ? rawHeaders.value.filter(([key]) => key.toLowerCase() === PROTOCOL_HEADER)
+          : []
+
+        const normalizedParams =
+          frame.value.method === "Watch" &&
+          Predicate.isObject(frame.value.params) &&
+          !Array.isArray(frame.value.params) &&
+          Object.keys(frame.value.params).length === 0
+            ? null
+            : frame.value.params
+
+        const sanitized = {
+          ...parsed,
+          headers: filteredHeaders,
+          ...(frame.value.params !== undefined && { params: normalizedParams }),
+        }
+
+        return parser.decode(JSON.stringify(sanitized))
+      },
+    }
+  },
+})
+
+export const WsProtocolGateLive = Layer.effect(
+  ProtocolGate,
+  Effect.gen(function* () {
+    const { version } = yield* App.Service
+
+    return ProtocolGate.of((effect, { headers, rpc }) => {
+      const sent = Option.getOrUndefined(Headers.get(headers, PROTOCOL_HEADER))
+
+      if (sent === String(PROTOCOL)) return effect
+
+      return Effect.fail(
+        new ProtocolRejected({
+          method: rpc._tag,
+          protocol: sent ?? null,
+          mismatch: protocolMismatch(sent === undefined ? undefined : Number(sent), PROTOCOL, version, undefined),
+        }),
+      )
+    })
+  }),
+)
 
 export const WsCallerGateLive = Layer.succeed(
   CallerGate,
-  CallerGate.of((effect, { rpc }) => {
-    if (!UI_WS_CALLS.has(rpc._tag)) {
-      return Effect.fail(
-        new Forbidden({
-          method: rpc._tag,
-          message: `${rpc._tag} is not available on the local WebSocket`,
-        }),
-      )
-    }
-
-    return Effect.provideService(effect, Caller, Callers.Ui())
-  }),
+  CallerGate.of((effect, { rpc }) =>
+    UI_WS_CALLS.has(rpc._tag)
+      ? Effect.provideService(effect, Caller, Callers.Ui())
+      : Effect.fail(
+          new Forbidden({
+            method: rpc._tag,
+            message: `${rpc._tag} is not available on the local WebSocket`,
+          }),
+        ),
+  ),
 )
 
 export class WsServerLayer extends Context.Service<WsServerLayer, Layer.Layer<HttpServer.HttpServer, ServeError>>()(
@@ -348,87 +245,128 @@ const wsLayer = Layer.unwrap(
     const pid = identity.pid ?? 0
     const token = randomHex(32)
     const expectedToken = textEncoder.encode(token)
+    const ready = yield* Deferred.make<void>()
+    let closing = false
 
-    const protocolAndHandler = Effect.gen(function* () {
-      const { protocol, onSocket, closeAll } = yield* makeWsProtocol
+    const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket.pipe(
+      Effect.provideService(RpcSerialization.RpcSerialization, wsSerialization),
+    )
 
-      const httpApp = Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
+    const wrappedProtocol = RpcServer.Protocol.of({
+      ...protocol,
+      supportsAck: false,
+      run: (writeRequest) =>
+        Deferred.succeed(ready, undefined).pipe(
+          Effect.andThen(
+            protocol.run((clientId, message) => {
+              if (Predicate.isTagged(message, "Request") && !UI_WS_CALLS.has(message.tag)) {
+                const exit = RpcExits.Failure({
+                  cause: [
+                    RpcReasons.Fail({
+                      error: encodeForbidden(
+                        new Forbidden({
+                          method: message.tag,
+                          message: `${message.tag} is not available on the local WebSocket`,
+                        }),
+                      ),
+                    }),
+                  ],
+                })
 
-        if (Option.isSome(Headers.get(request.headers, "origin"))) {
-          return HttpServerResponse.jsonUnsafe({ error: "browser origin refused" }, { status: 403 })
-        }
+                return protocol.send(clientId, ServerMessages.Exit({ requestId: message.id, exit }))
+              }
 
-        const provided = Option.getOrUndefined(Headers.get(request.headers, TOKEN_HEADER))
-
-        if (!tokenMatches(expectedToken, provided)) {
-          return HttpServerResponse.jsonUnsafe({ error: "invalid vibest-token" }, { status: 401 })
-        }
-
-        const socket = yield* request.upgrade
-        yield* onSocket(socket, Object.entries(request.headers))
-
-        return HttpServerResponse.empty()
-      })
-
-      return { protocol, httpApp, closeAll }
+              return writeRequest(clientId, message)
+            }),
+          ),
+        ),
     })
 
-    return Layer.unwrap(
-      Effect.map(protocolAndHandler, ({ protocol, httpApp, closeAll }) => {
-        const publish = Layer.effectDiscard(
-          Effect.gen(function* () {
-            const server = yield* HttpServer.HttpServer
+    const httpApp = Effect.gen(function* () {
+      if (closing) {
+        return HttpServerResponse.jsonUnsafe({ error: "server shutting down" }, { status: 503 })
+      }
 
-            if (!NetAddress.isInetAddress(server.address)) {
-              return yield* Effect.die(new Error("local WebSocket server must bind a TCP loopback address"))
-            }
+      const request = yield* HttpServerRequest.HttpServerRequest
 
-            const port = server.address.port
+      if (Option.isSome(Headers.get(request.headers, "origin"))) {
+        return HttpServerResponse.jsonUnsafe({ error: "browser origin refused" }, { status: 403 })
+      }
 
-            const info: WsInfo = {
-              url: `ws://127.0.0.1:${port}`,
-              port,
-              token,
-              protocol: PROTOCOL,
-              version,
-              pid,
-            }
+      const provided = Option.getOrUndefined(Headers.get(request.headers, TOKEN_HEADER))
 
-            yield* writePrivateFile(layout.wsInfo, Schema.encodeSync(WsInfoJson)(info), pid)
-            yield* Effect.addFinalizer(() =>
-              closeAll.pipe(Effect.andThen(fs.remove(layout.wsInfo, { force: true }).pipe(Effect.ignore))),
-            )
-          }),
+      if (!tokenMatches(expectedToken, provided)) {
+        return HttpServerResponse.jsonUnsafe({ error: "invalid vibest-token" }, { status: 401 })
+      }
+
+      yield* Deferred.await(ready)
+
+      const proto = Option.getOrUndefined(Headers.get(request.headers, PROTOCOL_HEADER))
+      const sanitizedHeaders = Headers.fromInput(proto !== undefined ? [[PROTOCOL_HEADER, proto]] : [])
+
+      return yield* httpEffect.pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request.modify({ headers: sanitizedHeaders })),
+        Effect.tapCause((cause) =>
+          Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logError("local WebSocket connection failed", cause),
+        ),
+      )
+    })
+
+    const publish = Layer.effectDiscard(
+      Effect.gen(function* () {
+        const server = yield* HttpServer.HttpServer
+
+        if (!NetAddress.isInetAddress(server.address) || server.address.address.toString() !== "127.0.0.1") {
+          return yield* Effect.die(new Error("local WebSocket server must bind 127.0.0.1"))
+        }
+
+        yield* Deferred.await(ready)
+
+        const port = server.address.port
+
+        const info: WsInfo = {
+          url: `ws://127.0.0.1:${port}`,
+          port,
+          token,
+          protocol: PROTOCOL,
+          version,
+          pid,
+        }
+
+        yield* writeAtomic(layout.wsInfo, Schema.encodeSync(WsInfoJson)(info), { mode: 0o600 })
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            closing = true
+          }).pipe(Effect.andThen(fs.remove(layout.wsInfo, { force: true }).pipe(Effect.ignore))),
         )
-
-        const rpcLayer = RpcServer.layer(VibestRpcs).pipe(
-          Layer.provide(WsCallerGateLive),
-          Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
-        )
-
-        const served = publish.pipe(Layer.provideMerge(HttpServer.serve(httpApp)))
-
-        return Layer.mergeAll(served, rpcLayer).pipe(Layer.provide(wsServer))
       }),
     )
+
+    const rpcLayer = RpcServer.layer(WsRpcs).pipe(
+      Layer.provide(WsCallerGateLive),
+      Layer.provide(WsProtocolGateLive),
+      Layer.provide(Layer.succeed(RpcServer.Protocol, wrappedProtocol)),
+    )
+
+    const served = publish.pipe(Layer.provideMerge(HttpServer.serve(httpApp)))
+
+    return Layer.mergeAll(served, rpcLayer).pipe(Layer.provide(wsServer))
   }),
 )
 
-export const layer = wsLayer.pipe(Layer.provide(Layer.mergeAll(handlers, AdmissionLive, ProtocolGateLive)))
+export const layer = wsLayer.pipe(Layer.provide(handlers))
 
 export const node = LayerNode.make({
   name: "vibest/WsServer",
   layer: wsLayer,
   deps: [
     handlersNode,
-    admissionNode,
-    protocolGateNode,
     DaemonHandlers.identityNode,
     pluginLoaderNode,
     App.node,
     wsServerLayer,
     PlatformNode.fileSystem,
     PlatformNode.layout,
+    PlatformNode.path,
   ],
 })
