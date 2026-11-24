@@ -749,7 +749,7 @@ transform.
 | Domain         | Members              | Edits                                                               |
 | -------------- | -------------------- | ------------------------------------------------------------------- |
 | `options`      | the plugin's options | —                                                                   |
-| `agent`        | `hook`               | `start.before`, `fail`                                              |
+| `agent`        | `hook`               | `start.before`, `tool.before`                                       |
 | `runtime`      | `transform`          | `RuntimeDefinition`s by `id`, each with its optional `caller` (§10) |
 | `harness`      | `transform`          | `HarnessDefinition`s by `id` (§8)                                   |
 | `subscription` | `report`             | one `(harness, provider)` row's limits                              |
@@ -770,13 +770,14 @@ and facts committed between that and the next revision's subscription are not de
 its own copy of a fact. A plugin runs its consumer in its own scope (`Effect.forkScoped`); the 5 s setup bound covers
 starting it, not its life.
 
-**Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before", ...)`):
+**Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before" | "tool.before", ...)`):
 
-| Hook                 | Changes (by assigning to the event)                                   | Runs                                                  |
-| -------------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
-| `agent.start.before` | any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` | before every Agent starts, the entry session included |
+| Hook                 | Changes / Refusal                                                                                  | Runs                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `agent.start.before` | any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime`; refuses with `AgentRefused` | before every Agent starts, the entry session included   |
+| `agent.tool.before`  | read-only event `{ session, tool, input, cwd }`; refuses with `ToolRefused`                        | before a harness runs a tool call (`Integration.guard`) |
 
-Every event carries the Project, the caller and the current Subscriptions. `agent.start.before` also carries `files`, the absolute paths of the copies of the files attached with `vibest run --file`; it is read only. A callback returns
+Every `agent.start.before` event carries the Project, the caller and the current Subscriptions. `agent.start.before` also carries `files`, the absolute paths of the copies of the files attached with `vibest run --file`; it is read only. A callback returns
 nothing and changes the event by assigning to its fields (OpenCode's shared mutated event). Each callback gets its own
 copy of the event as decided so far and core copies the changed fields back only when the callback succeeded within
 its deadline, so a callback that times out, fails or writes after its deadline leaves no partial or late write. Callbacks
@@ -784,9 +785,10 @@ run sequentially in plugin order, so a later plugin sees (and may override) what
 `agent.start.before` an assigned `undefined` unsets `harness`, `provider`, `model` or `runtime`, and is ignored for
 `prompt` and `machine`; fields outside that list are not copied back.
 The trace attributes each field to the plugin that changed it
-last. Only `agent.start.before` may refuse: `Effect.fail(new AgentRefused({ reason }))` stops the chain at
+last. On `agent.start.before`, `Effect.fail(new AgentRefused({ reason }))` stops the chain at
 once, nothing is inserted and nothing starts; a defect or a timeout there is also a refusal (`plugin <id>
-crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. Nothing is skipped silently.
+crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. On `agent.tool.before`,
+each callback gets a frozen deep clone of `{ session, tool, input, cwd }` and runs sequentially in load order; `Effect.fail(new ToolRefused({ reason }))` (or throwing `new ToolRefused({ reason })` in a Promise plugin) stops immediately and returns `reason` to the harness pre-tool hook, while a crash or timeout is logged, counted, and skipped so a broken plugin does not brick tool calls. The builtin `vibest.guard` enforces only protocol self-protection (`VIBEST_SESSION_ID` tampering and `vibest integration stop|prompt|ready`).
 
 **Default harness.** No builtin chooses or refuses a harness by quota. A new agent without a harness inherits its
 caller's harness, provider and model in core, before `agent.start.before` (§9); subscriptions are data in the hook
@@ -838,9 +840,9 @@ See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module
 **Order:**
 
 ```
-builtin plugins         `@vibest/builtins` `pre`: vibest.harness-pi, vibest.harness-claude,
-                        vibest.runtime-herdr-core, vibest.runtime-herdr, vibest.runtime-choice, vibest.harness-default,
-                        vibest.agent-files
+builtin plugins         `@vibest/builtins` `pre`: vibest.agent, vibest.guard, vibest.harness-pi, vibest.harness-claude,
+                        vibest.harness-cursor, vibest.harness-agy, vibest.runtime-herdr-core, vibest.runtime-herdr,
+                        vibest.runtime-rex, vibest.runtime-choice, vibest.harness-default, vibest.agent-files
 user plugins            the plugins directory (sorted by name), then `vibest.json` `plugins`, in order
 ```
 

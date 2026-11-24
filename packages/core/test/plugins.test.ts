@@ -7,8 +7,15 @@ import { Builtins, makePlugins, PluginLoader, Plugins } from "@vibest/core/plugi
 import { Hooks } from "@vibest/core/plugin/hooks"
 import { Session } from "@vibest/core/session"
 import { mainCheckout } from "@vibest/core/worktree"
-import { Plugin as PromisePlugin } from "@vibest/plugin"
-import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore, type Registration } from "@vibest/plugin/effect"
+import { Plugin as PromisePlugin, ToolRefused as PromiseToolRefused } from "@vibest/plugin"
+import {
+  AgentRefused as PluginRefused,
+  Plugin,
+  ToolRefused,
+  type AgentStartBefore,
+  type AgentToolBefore,
+  type Registration,
+} from "@vibest/plugin/effect"
 import type { Fact } from "@vibest/schema/event"
 import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
@@ -232,6 +239,7 @@ describe("plugins: spawn hook", () => {
         listed.map((p) => [p.id, p.status]),
         [
           ["vibest.agent", "active"],
+          ["vibest.guard", "active"],
           ["vibest.runtime-choice", "active"],
           ["session", "failed"],
           ["worker", "failed"],
@@ -240,11 +248,11 @@ describe("plugins: spawn hook", () => {
           ["current", "active"],
         ],
       )
-      const supported = "agent.start.before"
-      assert.include(listed[2]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
-      assert.include(listed[3]!.error, `unsupported hook "agent.worker.spawn"`)
-      assert.include(listed[4]!.error, `unsupported hook "agent.session.start"`)
-      assert.include(listed[5]!.error, `unsupported hook "agent.toString"`)
+      const supported = "agent.start.before, agent.tool.before"
+      assert.include(listed[3]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
+      assert.include(listed[4]!.error, `unsupported hook "agent.worker.spawn"`)
+      assert.include(listed[5]!.error, `unsupported hook "agent.session.start"`)
+      assert.include(listed[6]!.error, `unsupported hook "agent.toString"`)
     }),
     {
       plugins: [
@@ -556,5 +564,74 @@ describe("plugins: event.subscribe", () => {
       assert.isTrue(held.some((fact) => fact.sessionId === second.id && fact.type === "session.created"))
     }),
     { plugins: [watcher] },
+  )
+})
+
+describe("plugins: tool.before hook", () => {
+  const sampleEvent: AgentToolBefore = {
+    session: { id: "s1", agent: "general", project: "p1", projectDir: "/tmp/projects/p1" },
+    tool: "Bash",
+    input: { command: "echo hi" },
+    cwd: "/tmp/work",
+  }
+
+  test(
+    "Effect and Promise tool.before hooks run in load order, receive frozen events, refuse with ToolRefused, and ignore crashes",
+    Effect.gen(function* () {
+      const plugins = yield* Plugins.Service
+
+      const crasher = yield* plugins.guard({ ...sampleEvent, tool: "Read", input: { file_path: "/a" } })
+      assert.isUndefined(crasher)
+
+      const effectRefused = yield* plugins.guard({ ...sampleEvent, tool: "Write", input: { file_path: "/blocked" } })
+      assert.strictEqual(effectRefused, "effect blocked")
+
+      const promiseRefused = yield* plugins.guard({ ...sampleEvent, tool: "Bash", input: { command: "danger" } })
+      assert.strictEqual(promiseRefused, "promise blocked")
+
+      const listed = yield* plugins.list
+      assert.deepInclude(
+        listed.find((p) => p.id === "crasher"),
+        { calls: 3, crashed: 3, refused: 0 },
+      )
+      assert.deepInclude(
+        listed.find((p) => p.id === "effect-tool"),
+        { calls: 3, refused: 1 },
+      )
+      assert.deepInclude(
+        listed.find((p) => p.id === "promise-tool"),
+        { calls: 2, refused: 1 },
+      )
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "crasher",
+          effect: (ctx) => ctx.agent.hook("tool.before", () => Effect.die("boom")),
+        }),
+        Plugin.define({
+          id: "effect-tool",
+          effect: (ctx) =>
+            ctx.agent.hook("tool.before", (event) => {
+              assert.isTrue(Object.isFrozen(event))
+              assert.isTrue(Object.isFrozen(event.session))
+              assert.isTrue(Object.isFrozen(event.input))
+
+              return event.tool === "Write" && event.input.file_path === "/blocked"
+                ? Effect.fail(new ToolRefused({ reason: "effect blocked" }))
+                : Effect.void
+            }),
+        }),
+        PromisePlugin.define({
+          id: "promise-tool",
+          setup: async (ctx) => {
+            await ctx.agent.hook("tool.before", async (event) => {
+              if (event.tool === "Bash" && event.input.command === "danger")
+                throw new PromiseToolRefused({ reason: "promise blocked" })
+            })
+          },
+        }) as never,
+      ],
+    },
   )
 })

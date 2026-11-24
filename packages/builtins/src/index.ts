@@ -10,6 +10,7 @@ import { Effect, type Schema } from "effect"
 
 import { agentFilesPlugin } from "./agent-files.ts"
 import { agentPlugin } from "./agent.ts"
+import { guardPlugin } from "./guard.ts"
 import { harnessDefaultPlugin } from "./harness-default.ts"
 import { runtimeChoicePlugin } from "./runtime-choice.ts"
 
@@ -39,6 +40,7 @@ export const pre = (home: string) =>
 
     return [
       builtin(agentPlugin),
+      builtin(guardPlugin),
       builtin(pi),
       builtin(claude),
       builtin(cursor),

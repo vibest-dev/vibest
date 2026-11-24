@@ -16,8 +16,7 @@ The vibest binary finds the plugins installed beside it. A vibest with no plugin
 
 ## I3. Pi runs vibest's extension
 
-A real Pi session started by vibest runs vibest's extension (reporting, guard and inbox; the TUI presentation is a separate extension loaded beside it): a herdr command the agent tries is refused with the
-guard's reason and does not run, and the agent's reply is the execution's reply.
+A real Pi session started by vibest runs vibest's extension (reporting, guard and inbox; the TUI presentation is a separate extension loaded beside it): a command refused by `vibest.guard` (such as `vibest integration stop`) does not run and returns the guard's reason, and the agent's reply is the execution's reply.
 
 ## I4. Claude runs vibest's plugin beside the user's plugins
 
@@ -43,9 +42,7 @@ vibest too, also while a background shell keeps the terminal busy.
 
 ## I9. Claude's guard without settings
 
-Claude starts without a settings file; vibest's plugin guards each tool call instead. A herdr command, and reading,
-finding or searching in another Project's folder, are each refused with the guard's reason, no refused file's text
-reaches the model, and reading in its own Project folder is allowed.
+Claude starts without a settings file; vibest's plugin guards each tool call instead. Commands refused by `vibest.guard` (`VIBEST_SESSION_ID=other vibest ls`, `vibest integration stop`) are refused with the guard's reason and do not run, while ordinary commands (`hc --version`) and reading in its own Project folder are allowed.
 
 ## I10. Cursor reports to vibestd
 

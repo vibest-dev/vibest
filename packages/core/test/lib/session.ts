@@ -44,6 +44,7 @@ import {
 import { ChildProcessSpawner } from "effect/process"
 
 import { agentPlugin } from "../../../builtins/src/agent.ts"
+import { guardPlugin } from "../../../builtins/src/guard.ts"
 import { runtimeChoicePlugin } from "../../../builtins/src/runtime-choice.ts"
 import { DaemonHandlers } from "../../../server/src/handlers/daemon.ts"
 import { Load } from "../../../server/src/machine/load.ts"
@@ -119,6 +120,7 @@ export const pluginsHost = (
 ) => {
   const loaded: ReadonlyArray<Candidate> = [
     { source: "test:agent", revision: "-", options: {}, plugin: agentPlugin },
+    { source: "test:guard", revision: "-", options: {}, plugin: guardPlugin },
     { source: "test:vibest.runtime-choice", revision: "-", options: {}, plugin: runtimeChoicePlugin() },
     ...added.map(candidateOf),
   ]

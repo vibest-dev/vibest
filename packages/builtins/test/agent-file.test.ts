@@ -60,7 +60,6 @@ describe("agent files", () => {
     )
 
     assert.deepStrictEqual(result.definitions, [{ id: "general", description: "mine", system: "Only this." }])
-    assert.isUndefined(result.definitions[0]?.guard)
     assert.include(errorOf(result, "old"), "unknown key extends")
     assert.include(errorOf(result, "blank"), "description is empty")
   })

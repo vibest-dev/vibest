@@ -27,6 +27,7 @@ export interface Interface {
     input: StartInput,
     decidedBy?: Readonly<Record<string, string>>,
   ) => Effect.Effect<SpawnDecision, AgentRefused | PluginsNotActive>
+  readonly guard: (event: VibestPlugin.AgentToolBefore) => Effect.Effect<string | undefined>
   readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   readonly settled: Effect.Effect<boolean>
   readonly machine: (

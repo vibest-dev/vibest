@@ -109,7 +109,16 @@ const routed = (before: VibestPlugin.AgentStartBefore, after: VibestPlugin.Agent
       (after[field] !== undefined || !REQUIRED.includes(field)),
   )
 
-const readOnly = <T extends object>(event: T): T => Object.freeze(structuredClone(event))
+const deepFreeze = <T>(value: T): T => {
+  if (!Predicate.isObjectOrArray(value)) return value
+  Object.freeze(value)
+
+  for (const child of Object.values(value)) deepFreeze(child)
+
+  return value
+}
+
+const readOnly = <T extends object>(event: T): T => deepFreeze(structuredClone(event))
 
 const decide = <V>(
   field: string,
@@ -476,10 +485,42 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       )
     })
 
+    const guard = Effect.fn("Plugins.guard")(function* (event: VibestPlugin.AgentToolBefore) {
+      if (!(yield* settled)) {
+        const waiting = stillLoading()
+
+        return waiting.length === 0
+          ? "plugins are still activating; tool call refused."
+          : `plugins are still activating (${waiting.join(", ")}); tool call refused.`
+      }
+
+      for (const hook of hooksOf("agent.tool.before")) {
+        const ran = yield* Hooks.run("agent.tool.before", hook, readOnly(event), root, timeout)
+
+        if (ran.outcome === "refused") {
+          yield* Effect.log(`plugin ${hook.plugin} agent.tool.before: refused (${ran.reason})`)
+
+          return ran.reason
+        }
+
+        if (ran.outcome === "timeout") {
+          yield* Effect.logWarning(`plugin ${hook.plugin} agent.tool.before: ${ran.error}`)
+          continue
+        }
+
+        if (ran.outcome === "crashed") {
+          yield* Effect.logWarning(`plugin ${hook.plugin} agent.tool.before crashed`, ran.cause)
+          continue
+        }
+      }
+
+      return undefined
+    })
+
     const list = Effect.sync(() => slots.map(info))
     const importing = (sources: ReadonlyArray<string>) => Effect.sync(() => void (loading = sources))
 
-    return { service: Service.of({ start, list, settled, machine }), activate, holdNow, importing }
+    return { service: Service.of({ start, guard, list, settled, machine }), activate, holdNow, importing }
   })
 
 export const makePlugins = (

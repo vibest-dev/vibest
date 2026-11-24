@@ -14,7 +14,7 @@ import { Hooks } from "./hooks.ts"
 
 type Short = keyof VibestPlugin.AgentHooks
 
-const HOOKS: ReadonlyArray<Short> = ["start.before"]
+const HOOKS: ReadonlyArray<Short> = ["start.before", "tool.before"]
 
 type AgentRegistrations = {
   readonly [S in Short]: (
@@ -100,6 +100,7 @@ export const make = Effect.gen(function* () {
 
     const agentRegistrations: AgentRegistrations = {
       "start.before": (callback) => register("agent.start.before", callback),
+      "tool.before": (callback) => register("agent.tool.before", callback),
     }
 
     const hook: VibestPlugin.AgentDomain["hook"] = (short, callback) => {

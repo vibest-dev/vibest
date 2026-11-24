@@ -132,3 +132,7 @@ The plugin checks again at the moment it stops a session, and a session that did
 execution open or a message waiting, keeps running and its creator hears nothing. The entry session, a session with an
 open execution, and a session started from another machine (its creator is not on this machine) keep running. The
 plugin keeps no state of its own: it reads each session's last activity, so a vibestd restart changes nothing.
+
+## G21. A plugin guards tool calls with `agent.tool.before`
+
+Both an Effect plugin and a Promise plugin can register `ctx.agent.hook("tool.before", ...)`. Each receives `{ session, tool, input, cwd }`, can refuse a tool call with `ToolRefused({ reason })` (surfacing that exact reason to the harness pre-tool hook), and increments `calls` and `refused` in `vibest plugins`. The builtin `vibest.guard` enforces only `VIBEST_SESSION_ID` tampering and `vibest integration stop|prompt|ready`; other commands are allowed by default unless a plugin refuses them.

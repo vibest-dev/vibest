@@ -3,7 +3,7 @@ import path from "node:path"
 import url from "node:url"
 
 import type { Check } from "../check.ts"
-import { expect, until, type World } from "../world.ts"
+import { binary, expect, until, type World } from "../world.ts"
 import pluginSessions from "./plugin-sessions.ts"
 
 type Info = {
@@ -379,6 +379,140 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       )
       await fs.rm(dotted, { recursive: true })
       await fs.rm(escaping, { recursive: true })
+    },
+  },
+  {
+    id: "G21",
+    title:
+      "Effect and Promise tool.before plugins receive session/tool/input/cwd, refuse tool calls with ToolRefused, count calls and refusals, and vibest.guard blocks only protocol invariants while allowing hc and ~/.vibest paths",
+    entry: true,
+    run: async (w) => {
+      const seenLog = path.join(w.root, "tool-before-seen.jsonl")
+      const effectFile = path.join(w.vibestHome, "plugins", "tool-effect.ts")
+      const promiseFile = path.join(w.vibestHome, "plugins", "tool-promise.ts")
+
+      await write(
+        effectFile,
+        `import fs from "node:fs"
+import { Plugin, ToolRefused } from "@vibest/plugin/effect"
+import { Effect } from "effect"
+
+export default Plugin.define({
+  id: "tool-effect",
+  effect: (ctx) =>
+    ctx.agent.hook("tool.before", (event) =>
+      Effect.gen(function* () {
+        fs.appendFileSync(${JSON.stringify(seenLog)}, JSON.stringify({ by: "effect", ...event }) + "\\n")
+        if (event.tool === "Write" && event.input.file_path === "/forbidden-by-effect")
+          return yield* new ToolRefused({ reason: "e2e effect refused write" })
+      }),
+    ),
+})
+`,
+      )
+
+      await write(
+        promiseFile,
+        `import fs from "node:fs"
+import { Plugin, ToolRefused } from "@vibest/plugin"
+
+export default Plugin.define({
+  id: "tool-promise",
+  setup: async (ctx) => {
+    await ctx.agent.hook("tool.before", async (event) => {
+      fs.appendFileSync(${JSON.stringify(seenLog)}, JSON.stringify({ by: "promise", ...event }) + "\\n")
+      if (event.tool === "Shell" && event.input.command === "blocked-by-promise")
+        throw new ToolRefused({ reason: "e2e promise refused shell" })
+    })
+  },
+})
+`,
+      )
+
+      await until("both tool.before plugins active", async () => {
+        const all = await list(w)
+
+        return ["vibest.guard", "tool-effect", "tool-promise"].every((id) =>
+          all.some((p) => p.id === id && p.status === "active"),
+        )
+      })
+
+      const entry = (
+        await w.json<{ sessions: Array<{ id: string; projectId: string }> }>(["ls"]).then((l) => l.sessions)
+      )[0]!
+
+      const guard = async (tool: string, input: Record<string, string>) => {
+        const r = await w.run(w.repository, [binary, "integration", "guard", "--harness", "cursor"], {
+          env: { VIBEST_SESSION_ID: entry.id, VIBEST_PROJECT_ID: entry.projectId },
+          stdin: JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository }),
+        })
+
+        expect(r.code === 0, `guard exited ${r.code}: ${r.stderr}`)
+
+        return JSON.parse(r.stdout) as { permission: string; agent_message?: string }
+      }
+
+      const builtinIdentity = await guard("Shell", { command: "VIBEST_SESSION_ID=other vibest ls" })
+      expect(
+        builtinIdentity.permission === "deny" &&
+          builtinIdentity.agent_message ===
+            "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused.",
+        `identity refusal: ${JSON.stringify(builtinIdentity)}`,
+      )
+
+      const builtinHook = await guard("Shell", { command: "vibest integration stop" })
+      expect(
+        builtinHook.permission === "deny" &&
+          builtinHook.agent_message === "vibest integration stop is the harness's hook, not an agent command.",
+        `hook refusal: ${JSON.stringify(builtinHook)}`,
+      )
+
+      const relaxedHc = await guard("Shell", { command: "hc --version" })
+      expect(relaxedHc.permission === "allow", `hc --version refused: ${JSON.stringify(relaxedHc)}`)
+
+      const relaxedWorktree = await guard("Shell", { command: "ls ~/.vibest/worktrees/vibest/1234/src/*.ts" })
+      expect(relaxedWorktree.permission === "allow", `worktree path refused: ${JSON.stringify(relaxedWorktree)}`)
+
+      const effectDenied = await guard("Write", { file_path: "/forbidden-by-effect" })
+      expect(
+        effectDenied.permission === "deny" && effectDenied.agent_message === "e2e effect refused write",
+        `effect refusal: ${JSON.stringify(effectDenied)}`,
+      )
+
+      const promiseDenied = await guard("Shell", { command: "blocked-by-promise" })
+      expect(
+        promiseDenied.permission === "deny" && promiseDenied.agent_message === "e2e promise refused shell",
+        `promise refusal: ${JSON.stringify(promiseDenied)}`,
+      )
+
+      const seen = (await fs.readFile(seenLog, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { by: string; session: { id: string; project: string }; cwd: string })
+
+      expect(
+        seen.some((e) => e.by === "effect" && e.session.id === entry.id && e.session.project === entry.projectId),
+        `effect plugin did not receive session context: ${JSON.stringify(seen)}`,
+      )
+      expect(
+        seen.some((e) => e.by === "promise" && e.session.id === entry.id && e.session.project === entry.projectId),
+        `promise plugin did not receive session context: ${JSON.stringify(seen)}`,
+      )
+
+      const all = await list(w)
+      const effectStats = all.find((p) => p.id === "tool-effect")
+      const promiseStats = all.find((p) => p.id === "tool-promise")
+      expect(
+        effectStats !== undefined && effectStats.calls === 4 && effectStats.refused === 1,
+        `effect stats: ${JSON.stringify(effectStats)}`,
+      )
+      expect(
+        promiseStats !== undefined && promiseStats.calls === 3 && promiseStats.refused === 1,
+        `promise stats: ${JSON.stringify(promiseStats)}`,
+      )
+
+      await fs.rm(effectFile)
+      await fs.rm(promiseFile)
     },
   },
 ]

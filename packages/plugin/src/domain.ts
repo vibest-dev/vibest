@@ -5,6 +5,8 @@ import { Schema } from "effect"
 
 export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
 
+export class ToolRefused extends Schema.TaggedError<ToolRefused>()("ToolRefused", { reason: Schema.String }) {}
+
 export class SessionSendFailed extends Schema.TaggedError<SessionSendFailed>()("SessionSendFailed", {
   message: Schema.String,
 }) {}
@@ -98,33 +100,32 @@ export interface AgentStartBefore extends AgentContext {
   readonly machines: ReadonlyArray<MachineInfo>
 }
 
+export interface AgentToolBefore {
+  readonly session: {
+    readonly id: string
+    readonly agent: string
+    readonly project: string
+    readonly projectDir: string
+  }
+  readonly tool: string
+  readonly input: Schema.JsonObject
+  readonly cwd: string
+}
+
 export interface AgentHooks {
   readonly "start.before": AgentStartBefore
+  readonly "tool.before": AgentToolBefore
 }
 
 export interface AgentFailures extends Record<keyof AgentHooks, unknown> {
   readonly "start.before": AgentRefused
-}
-
-export interface GuardCall {
-  readonly tool: string
-  readonly input: Schema.JsonObject
-  readonly cwd: string
-  readonly programs: ReadonlyArray<ReadonlyArray<string>>
-  readonly writes: ReadonlyArray<string> | undefined
-  readonly session: {
-    readonly id: string
-    readonly projectFolder: string
-    readonly harnessBinaries: ReadonlySet<string>
-    readonly runtimePrograms: ReadonlySet<string>
-  }
+  readonly "tool.before": ToolRefused
 }
 
 export interface AgentDefinition {
   readonly id: string
   readonly description: string
   readonly system: string
-  readonly guard?: (call: GuardCall) => string | undefined
   readonly harness?: string
   readonly provider?: string
   readonly model?: string
