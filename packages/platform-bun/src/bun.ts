@@ -32,8 +32,9 @@ import { Load } from "@vibest/server/machine/load"
 import { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
+import * as Ws from "@vibest/server/ws"
 import * as effect from "effect"
-import { Cause, Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
+import { Cause, Duration, Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
 import { FetchHttpClient, type HttpClient } from "effect/http"
 import * as ChildProcess from "effect/process/ChildProcess"
@@ -454,6 +455,22 @@ export const replacements: LayerNode.Replacements = [
       ),
       deps: [PlatformNode.layout],
     }),
+  ),
+  Ws.wsServerLayer.replace(
+    Layer.succeed(
+      Ws.WsServerLayer,
+      BunHttpServer.layerServer({
+        hostname: "127.0.0.1",
+        port: 0,
+        gracefulShutdownTimeout: Duration.seconds(1),
+        websocket: {
+          maxPayloadLength: 64 * 1024,
+          backpressureLimit: 1024 * 1024,
+          closeOnBackpressureLimit: true,
+          idleTimeout: 120,
+        },
+      }),
+    ),
   ),
   Identity.hostFactsNode.replace(
     Layer.succeed(Identity.HostFacts, { name: os.hostname(), id: hostId, pid: process.pid }),

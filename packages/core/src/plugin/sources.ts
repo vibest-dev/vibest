@@ -57,6 +57,7 @@ const ConfigEntry = Schema.Union([
 const ConfigFile = Schema.Struct({
   plugins: Schema.optional(Schema.Array(ConfigEntry)),
   concurrency: Schema.optional(Schema.Json),
+  websocket: Schema.optional(Schema.Boolean),
 })
 
 type ConfigFile = typeof ConfigFile.Type

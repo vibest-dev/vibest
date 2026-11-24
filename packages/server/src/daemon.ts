@@ -129,6 +129,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
     yield* host.trimLog(layout.log)
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
+    yield* fs.remove(layout.wsInfo, { force: true })
 
     const facts = yield* Identity.HostFacts.pipe(
       Effect.provide(LayerNode.compile(Identity.hostFactsNode, { replacements })),
