@@ -10,7 +10,6 @@ import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Effect, Layer, Predicate, Queue, Schema, Stream } from "effect"
 import { Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
-import * as Socket from "effect/socket/Socket"
 
 import * as Platform from "#platform"
 
@@ -63,6 +62,7 @@ const FakePeerRpcs = RpcGroup.make(
     }),
   }),
   Rpc.make("Peer.Outbox", { success: Schema.Unknown, stream: true }),
+  Rpc.make("Watch", { success: Schema.Unknown, stream: true }),
 )
 
 const fakePeerSocket = (options: {
@@ -85,6 +85,7 @@ const fakePeerSocket = (options: {
         }),
       "Peer.Hello": () => Effect.succeed({ id: peerId, name: "legacy-box", version: options.version, runtimes: [] }),
       "Peer.Outbox": () => Stream.never,
+      Watch: () => Stream.never,
     })
 
     const server = RpcServer.layer(FakePeerRpcs).pipe(
@@ -221,47 +222,27 @@ describe("Watch with remote machines", () => {
 
   it.effect("offline or hung remote machine never blocks local Watch Snapshot", () =>
     Effect.gen(function* () {
-      const hungTransport = () =>
-        Effect.succeed({
-          socket: Socket.make({
-            reader: Effect.never,
-            writer: Effect.succeed({ write: () => Effect.void, writeAll: () => Effect.void }),
-          }),
-          exited: Effect.never,
-        })
+      const net = new Net()
+      const a = yield* makeStack(net)
+      const peer = yield* fakePeerSocket({ protocol: PROTOCOL, version: "0.0.2-dev", peerWatch: true })
+      net.route("offline-host", peer.socket)
+      yield* a.cli(a.raw["Machine.Add"]({ name: "offline-box", target: "offline-host" }))
 
-      const context = yield* Layer.build(served({ transport: hungTransport }))
-      const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideContext(effect, context)
-      const layout = yield* run(Layout)
-      const raw = yield* connect(layout.socket)
-
-      yield* run(
-        Effect.flatMap(Db.Service, (db) =>
-          db.remote.addMachine({ name: "offline-box", target: "hung-host", vibestdId: randomId() }),
-        ),
-      )
-
-      const restarted = yield* Layer.build(served({ transport: hungTransport }))
-      const restartedRun = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideContext(effect, restarted)
-      const restartedLayout = yield* restartedRun(Layout)
-      yield* restartedRun(
-        Effect.flatMap(Db.Service, (db) =>
-          db.remote.addMachine({ name: "offline-box", target: "hung-host", vibestdId: randomId() }),
-        ),
-      )
+      net.fail("offline-host", 255, "ssh: connect to host offline-host port 22: Connection refused")
+      yield* net.cutAll("offline-host")
+      yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "unreachable")
 
       const startedAt = Date.now()
-      const watch = yield* watchStream(raw, cliHeaders(layout.home))
+      const watch = yield* watchStream(a.raw, cliHeaders(a.layout.home))
       const snapshot = yield* watch.next(isSnapshot)
       const elapsedMs = Date.now() - startedAt
 
       assert.isBelow(elapsedMs, 2_000)
-      assert.isArray(snapshot.machines)
-
-      const raw2 = yield* connect(restartedLayout.socket)
-      const watch2 = yield* watchStream(raw2, cliHeaders(restartedLayout.home))
-      const snap2 = yield* watch2.next(isSnapshot)
-      assert.isArray(snap2.machines)
+      const offline = snapshot.machines.find((m) => m.name === "offline-box")
+      assert.isDefined(offline)
+      assert.strictEqual(offline!.state, "unreachable")
+      assert.isString(offline!.reason)
+      assert.isNotEmpty(offline!.reason)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 

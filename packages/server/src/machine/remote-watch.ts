@@ -1,11 +1,12 @@
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
 import { peerHeaders } from "@vibest/protocol/protocol"
-import type { ProjectRow, WatchEvent, WatchSession } from "@vibest/protocol/rpc"
+import { WatchLagged, type ProjectRow, type WatchEvent, type WatchSession } from "@vibest/protocol/rpc"
 import type { ListedMachine } from "@vibest/schema/machine"
-import { Cause, Context, Effect, Fiber, Layer, Match, PubSub, Stream } from "effect"
+import { Cause, Context, Effect, Fiber, Layer, Match, Queue, Stream } from "effect"
 
 import * as Listing from "../listing.ts"
+import { WATCH_BACKLOG } from "../watch-feed.ts"
 import { Machines } from "./machines.ts"
 
 export * as RemoteWatch from "./remote-watch.ts"
@@ -31,10 +32,24 @@ const make = Effect.gen(function* () {
   const machines = yield* Machines.Service
   const self = yield* Identity.Service
   const scope = yield* Effect.scope
-  const events = yield* PubSub.unbounded<WatchEvent>()
+  const watchers = new Set<Queue.Queue<WatchEvent, WatchLagged>>()
   const mirrors = new Map<string, Mirror>()
 
-  const publish = (event: WatchEvent) => PubSub.publish(events, event)
+  const publish = (event: WatchEvent) =>
+    Effect.sync(() => {
+      for (const watcher of watchers) {
+        if (Queue.offerUnsafe(watcher, event)) continue
+        watchers.delete(watcher)
+        Queue.failCauseUnsafe(
+          watcher,
+          Cause.fail(
+            new WatchLagged({
+              message: `Watch fell ${WATCH_BACKLOG} events behind; reconnect for a new Snapshot`,
+            }),
+          ),
+        )
+      }
+    })
 
   const stopMirrorFiber = (mirror: Mirror) =>
     Effect.gen(function* () {
@@ -191,7 +206,12 @@ const make = Effect.gen(function* () {
 
       return { projects, sessions, machines: listedMachines }
     }),
-    subscribe: Effect.map(PubSub.subscribe(events), Stream.fromSubscription),
+    subscribe: Effect.acquireRelease(
+      Queue.dropping<WatchEvent, WatchLagged>(WATCH_BACKLOG).pipe(
+        Effect.tap((queue) => Effect.sync(() => watchers.add(queue))),
+      ),
+      (queue) => Effect.sync(() => watchers.delete(queue)).pipe(Effect.andThen(Queue.shutdown(queue))),
+    ).pipe(Effect.map(Stream.fromQueue)),
   }
 })
 
