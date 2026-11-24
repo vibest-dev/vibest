@@ -1,0 +1,91 @@
+{
+  "id": "root",
+  "type": "row",
+  "titlebar": "none",
+  "theme": { "light": "vibest-light", "dark": "vibest-dark" },
+  "traffic_lights": [13, 12],
+  "preview": "layouts/vibest.svg",
+  "terminal_padding": [8, 8],
+  "background": "chrome",
+  "padding": [0, 8],
+  "children": [
+    {
+      "id": "sidebar",
+      "type": "column",
+      "size": { "px": 256 },
+      "min": 208,
+      "max": 480,
+      "background": "chrome",
+      "resizable": false,
+      "children": [
+        {
+          "id": "sidebar-header",
+          "type": "block",
+          "size": { "px": 32 },
+          "window_drag": true,
+          "content": { "mod": "vibest-sidebar-header" }
+        },
+        { "id": "sidebar-threads", "type": "block", "content": { "mod": "vibest-sidebar-threads" } },
+        {
+          "id": "sidebar-footer",
+          "type": "block",
+          "size": { "px": 69 },
+          "content": { "mod": "workspace-chrome", "props": { "footer": true } }
+        }
+      ]
+    },
+    {
+      "id": "workspace",
+      "type": "column",
+      "resizable": false,
+      "background": "chrome",
+      "children": [
+        {
+          "id": "topbar",
+          "type": "block",
+          "size": { "px": 32 },
+          "window_drag": true,
+          "content": { "mod": "vibest-topbar" }
+        },
+        {
+          "id": "workspace-body",
+          "type": "row",
+          "padding": [8, 0],
+          "gap": 8,
+          "children": [
+            {
+              "id": "terminals",
+              "type": "block",
+              "content": {
+                "tab": "active",
+                "pane": {
+                  "gap": 8,
+                  "radius": 10,
+                  "background": "background",
+                  "border": { "width": 1, "color": "border" },
+                  "focus": { "width": 1, "color": "border" },
+                  "lone": true,
+                  "header": { "content": { "mod": "vibest-pane" }, "height": 40, "position": "top", "reveal": "always" }
+                }
+              }
+            },
+            {
+              "id": "right-panel",
+              "type": "stack",
+              "hidden": true,
+              "size": { "px": 540 },
+              "min": 360,
+              "max": 900,
+              "active": "changes",
+              "children": [
+                { "id": "changes", "type": "block", "content": { "mod": "changes" } },
+                { "id": "files", "type": "block", "content": { "mod": "vibest-files" } },
+                { "id": "agents", "type": "block", "content": { "mod": "vibest-agents" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

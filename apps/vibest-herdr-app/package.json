@@ -1,0 +1,19 @@
+{
+  "name": "vibest-herdr-app",
+  "version": "0.0.1-beta.17",
+  "private": true,
+  "description": "Vibest's herdr-app interface: a layout, light and dark themes, and one mod per layout block that herdr-app's shipped mods do not cover: a T3 Code style sidebar and top bar, and a panel of vibest sessions.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vibest-dev/vibest.git",
+    "directory": "apps/vibest-herdr-app"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "bun build.ts",
+    "check": "for mod in dist/mods/*/; do herdr-app check \"$mod\" || exit 1; rm -f \"$mod\"gpui-kit.d.ts \"$mod\"herdr.d.ts \"$mod\"jsconfig.json; done",
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.build.json",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run apps/vibest-herdr-app"
+  }
+}
