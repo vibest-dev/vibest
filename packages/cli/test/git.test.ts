@@ -190,6 +190,34 @@ describe("git, the live layer: worktree add and remove", () => {
       assert.deepStrictEqual(yield* git.linkedWorktrees(repo), [])
     }),
   )
+
+  test(
+    "identityRemoteUrl picks origin over gh-resolved upstream, then gh-resolved, then first configured remote, skipping local remotes",
+    Effect.gen(function* () {
+      const git = yield* Git.Service
+
+      const fork = yield* makeRepository
+      assert.isUndefined(yield* git.identityRemoteUrl(fork))
+      yield* sh(fork, "remote", "add", "origin", "git@github.com:forker/repo.git")
+      yield* sh(fork, "remote", "add", "upstream", "https://github.com/org/repo.git")
+      yield* sh(fork, "config", "remote.upstream.gh-resolved", "base")
+      assert.strictEqual(yield* git.identityRemoteUrl(fork), "git@github.com:forker/repo.git")
+      assert.strictEqual(yield* git.remoteUrl(fork), "https://github.com/org/repo.git")
+
+      const noOrigin = yield* makeRepository
+      yield* sh(noOrigin, "remote", "add", "firstremote", "https://github.com/first/repo.git")
+      yield* sh(noOrigin, "remote", "add", "alpha", "https://github.com/alpha/repo.git")
+      assert.strictEqual(yield* git.identityRemoteUrl(noOrigin), "https://github.com/first/repo.git")
+      yield* sh(noOrigin, "remote", "add", "upstream", "https://github.com/org/repo.git")
+      yield* sh(noOrigin, "config", "remote.upstream.gh-resolved", "base")
+      assert.strictEqual(yield* git.identityRemoteUrl(noOrigin), "https://github.com/org/repo.git")
+
+      const localOnly = yield* makeRepository
+      yield* sh(localOnly, "remote", "add", "origin", "/tmp/bare.git")
+      yield* sh(localOnly, "remote", "add", "backup", "file:///tmp/bare.git")
+      assert.isUndefined(yield* git.identityRemoteUrl(localOnly))
+    }),
+  )
 })
 
 describe("git, the live layer: reading a worktree's git state", () => {

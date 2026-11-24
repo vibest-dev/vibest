@@ -5,7 +5,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
-import { parseRemote, rankedRemotes } from "./repository-url.ts"
+import { parseRemote, projectRemotes, rankedRemotes } from "./repository-url.ts"
 
 export * as Git from "./git.ts"
 
@@ -37,6 +37,7 @@ export interface Interface {
   readonly isMainCheckout: (dir: string) => Effect.Effect<boolean>
   readonly originUrl: (dir: string) => Effect.Effect<string | undefined>
   readonly remoteUrl: (dir: string) => Effect.Effect<string | undefined>
+  readonly identityRemoteUrl: (dir: string) => Effect.Effect<string | undefined>
   readonly currentBranch: (dir: string) => Effect.Effect<string, GitError>
   readonly uncommitted: (dir: string) => Effect.Effect<ReadonlyArray<string>, GitError>
   readonly copyRepository: (copy: RepositoryCopy) => Effect.Effect<void, GitError>
@@ -138,6 +139,17 @@ export const layer = Layer.effect(
         const config = yield* tryGit(dir, "config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$")
 
         for (const name of rankedRemotes(config ?? "")) {
+          const url = yield* tryGit(dir, "remote", "get-url", name)
+
+          if (url !== undefined && parseRemote(url) !== undefined) return url
+        }
+
+        return undefined
+      }),
+      identityRemoteUrl: Effect.fn("Git.identityRemoteUrl")(function* (dir) {
+        const config = yield* tryGit(dir, "config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$")
+
+        for (const name of projectRemotes(config ?? "")) {
           const url = yield* tryGit(dir, "remote", "get-url", name)
 
           if (url !== undefined && parseRemote(url) !== undefined) return url

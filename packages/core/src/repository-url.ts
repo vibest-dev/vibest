@@ -54,6 +54,33 @@ export const rankedRemotes = (config: string): ReadonlyArray<string> => {
   return [...urls.keys()].sort((a, b) => remoteRank(marked, a) - remoteRank(marked, b) || a.localeCompare(b))
 }
 
+export const projectRemotes = (config: string): ReadonlyArray<string> => {
+  const urls = new Map<string, string>()
+  const marked = new Set<string>()
+
+  for (const line of config.split("\n")) {
+    const m = REMOTE_KEY.exec(line.trim())
+
+    if (m === null) continue
+    const [, name, key, value = ""] = m
+
+    if (key === "gh-resolved") marked.add(name!)
+    else if (!urls.has(name!)) urls.set(name!, value)
+  }
+
+  const origin: string[] = []
+  const resolved: string[] = []
+  const rest: string[] = []
+
+  for (const name of urls.keys()) {
+    if (name === "origin") origin.push(name)
+    else if (marked.has(name)) resolved.push(name)
+    else rest.push(name)
+  }
+
+  return [...origin, ...resolved, ...rest]
+}
+
 export interface Interface {
   readonly hostName: (alias: string) => Effect.Effect<string>
 }

@@ -9,13 +9,22 @@ import {
   type SessionBrief,
   terminalOf,
 } from "@vibest/core/database/db-rows"
+import { Git } from "@vibest/core/git"
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
+import { listProjectRepositories } from "@vibest/core/project/create"
+import { RepositoryUrl, repositoryIdentity } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Session } from "@vibest/core/session"
 import { Starts } from "@vibest/core/session/starts"
-import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
+import {
+  type ProjectRepository,
+  type ProjectRow,
+  type SessionInfo,
+  type WatchEvent,
+  type WatchSession,
+} from "@vibest/protocol/rpc"
 import type { RuntimeAddress } from "@vibest/schema/session"
-import { Context, Data, Effect, Layer, Predicate } from "effect"
+import { Context, Data, Effect, FileSystem, Layer, Path, Predicate } from "effect"
 
 import { ListScope } from "./machine/remote.ts"
 
@@ -56,8 +65,12 @@ export const sessionListing = (deps: {
   readonly sessions: Session.Interface
   readonly runtimes: Runtimes.Interface
   readonly starts: Starts.Interface
+  readonly git: Git.Interface
+  readonly repositoryUrl: RepositoryUrl.Interface
+  readonly fs: FileSystem.FileSystem
+  readonly path: Path.Path
 }) => {
-  const { db, sessions, runtimes, starts } = deps
+  const { db, sessions, runtimes, starts, git, repositoryUrl, fs, path } = deps
 
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
     Effect.gen(function* () {
@@ -111,12 +124,85 @@ export const sessionListing = (deps: {
       )
     })
 
+  const real = (p: string) => fs.realPath(p).pipe(Effect.orElseSucceed(() => p))
+
+  const directoryPaths = (directory: string) =>
+    Effect.gen(function* () {
+      const root = yield* git.mainCheckout(directory).pipe(
+        Effect.flatMap(real),
+        Effect.orElseSucceed(() => undefined),
+      )
+
+      if (root !== undefined) return [root]
+
+      const children = yield* listProjectRepositories(directory).pipe(
+        Effect.provideService(Git.Service, git),
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+        Effect.orElseSucceed(() => undefined),
+      )
+
+      if (children === undefined || children.length === 0) return undefined
+
+      const paths = yield* Effect.forEach(
+        children,
+        (child) =>
+          git.mainCheckout(child.path).pipe(
+            Effect.flatMap(real),
+            Effect.catch(() => real(child.path)),
+          ),
+        { concurrency: 8 },
+      )
+
+      return [...new Set(paths)].sort()
+    })
+
+  const repositoryPaths = (id: string, directory: string | null) =>
+    Effect.gen(function* () {
+      if (directory !== null) {
+        const found = yield* directoryPaths(directory)
+
+        if (found !== undefined) return found
+      }
+
+      const recorded = yield* db.project.projectRemote(id)
+
+      return recorded.map((r) => r.path)
+    })
+
+  const projectRepositories = (id: string, directory: string | null) =>
+    Effect.gen(function* () {
+      const paths = yield* repositoryPaths(id, directory)
+
+      return yield* Effect.forEach(
+        paths,
+        (repoPath) =>
+          Effect.gen(function* () {
+            const url = yield* git.identityRemoteUrl(repoPath)
+
+            const identity =
+              url === undefined
+                ? undefined
+                : yield* repositoryIdentity(url).pipe(Effect.provideService(RepositoryUrl.Service, repositoryUrl))
+
+            return { path: repoPath, identity: identity ?? null } satisfies ProjectRepository
+          }),
+        { concurrency: 8 },
+      )
+    })
+
   const snapshotProjects = (sessions: ReadonlyArray<WatchSession>) =>
-    Effect.map(db.project.watchProjects(), (rows) =>
-      rows.map((row): ProjectRow => ({
-        ...row,
-        activity: projectActivity(sessions.flatMap((s) => (s.projectId === row.id ? [s.status] : []))),
-      })),
+    Effect.flatMap(db.project.watchProjects(), (rows) =>
+      Effect.forEach(
+        rows,
+        (row) =>
+          Effect.map(projectRepositories(row.id, row.directory), (repositories): ProjectRow => ({
+            ...row,
+            activity: projectActivity(sessions.flatMap((s) => (s.projectId === row.id ? [s.status] : []))),
+            repositories,
+          })),
+        { concurrency: 8 },
+      ),
     )
 
   const projectStatuses = (id: string) =>
@@ -161,7 +247,14 @@ export const sessionListing = (deps: {
       if (rows.length === 0) return []
       const activity = projectActivity(yield* projectStatuses(id))
 
-      return rows.map((row) => WatchEvents.Project({ project: { ...row, activity } }))
+      return yield* Effect.forEach(
+        rows,
+        (row) =>
+          Effect.map(projectRepositories(row.id, row.directory), (repositories) =>
+            WatchEvents.Project({ project: { ...row, activity, repositories } }),
+          ),
+        { concurrency: 8 },
+      )
     })
 
   const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
@@ -225,6 +318,10 @@ export const layer = Layer.effect(
       sessions: yield* Session.Service,
       runtimes: yield* Runtimes.Service,
       starts: yield* Starts.Service,
+      git: yield* Git.Service,
+      repositoryUrl: yield* RepositoryUrl.Service,
+      fs: yield* FileSystem.FileSystem,
+      path: yield* Path.Path,
     })
   }),
 )

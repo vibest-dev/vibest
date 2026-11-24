@@ -292,11 +292,19 @@ export const SessionStatusInfo = Schema.Struct({
   reply: Schema.optional(Schema.NullOr(SessionReply)),
 })
 
+export const ProjectRepository = Schema.Struct({
+  path: Schema.String,
+  identity: Schema.NullOr(Schema.String),
+})
+
+export type ProjectRepository = typeof ProjectRepository.Type
+
 export const ProjectRow = Schema.Struct({
   id: Schema.String,
   directory: Schema.NullOr(Schema.String),
   entrySessionId: Schema.NullOr(Schema.String),
   activity: ProjectActivity,
+  repositories: Schema.Array(ProjectRepository),
 })
 
 export type ProjectRow = typeof ProjectRow.Type
