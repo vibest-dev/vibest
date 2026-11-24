@@ -14,9 +14,9 @@ import { Effect, FileSystem } from "effect"
 
 import * as Platform from "#platform"
 
-describe("Peer.Spawn for a project of several repositories", () => {
+describe("Remote.Spawn for a project of several repositories", () => {
   it.effect(
-    "Peer.Spawn with a repository list: the one project of exactly those repositories, worktrees under A's folder names; a missing repository, a missing commit and two such projects without --project are refused; --project picks one by id prefix and still checks its repositories",
+    "Remote.Spawn with a repository list: the one project of exactly those repositories, worktrees under A's folder names; a missing repository, a missing commit and two such projects without --project are refused; --project picks one by id prefix and still checks its repositories",
     () =>
       Effect.gen(function* () {
         const b = yield* repoStack()
@@ -45,7 +45,7 @@ describe("Peer.Spawn for a project of several repositories", () => {
           project?: string,
         ) =>
           call(
-            b.raw["Peer.Spawn"]({
+            b.raw["Remote.Spawn"]({
               agent: "general",
               repositories,
               ...(project !== undefined && { project }),
@@ -130,7 +130,7 @@ describe("Peer.Spawn for a project of several repositories", () => {
                   ]
 
             const out = yield* Effect.result(
-              call(b.raw["Peer.Spawn"]({ agent: "general", prompt: "x", request: randomId(), repositories })),
+              call(b.raw["Remote.Spawn"]({ agent: "general", prompt: "x", request: randomId(), repositories })),
             )
 
             return { out, spawns: b.spawns, root }
@@ -174,7 +174,7 @@ describe("Peer.Spawn for a project of several repositories", () => {
             const call = yield* b.as(randomId(), "aproj")
 
             const spawn = call(
-              b.raw["Peer.Spawn"]({
+              b.raw["Remote.Spawn"]({
                 agent: "general",
                 prompt: "x",
                 request: randomId(),
@@ -264,7 +264,7 @@ describe("Peer.Spawn for a project of several repositories", () => {
         const call = yield* b.as(randomId(), "aproj")
 
         const spawned = yield* call(
-          b.raw["Peer.Spawn"]({
+          b.raw["Remote.Spawn"]({
             agent: "general",
             repository: x,
             identity: "host/o/x",

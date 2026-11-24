@@ -44,15 +44,15 @@ export const SessionCreated = fact("session.created", "session", {
   name: Text,
   directory: Schema.String,
   parent: optional(Text),
-  origin: optional(Schema.Struct({ peer: Text, project: Text, session: optional(Text) })),
+  origin: optional(Schema.Struct({ remote: Text, project: Text, session: optional(Text) })),
   message: optional(Seq),
 })
 
 export const SessionRenamed = fact("session.renamed", "session", { name: Text })
 export const SessionDirectoryChanged = fact("session.directory_changed", "session", { directory: Text })
 export const SessionEnded = fact("session.ended", "session", { reason: Schema.Literals(["archived", "replaced"]) })
-export const SessionLinked = fact("session.linked", "session", { to: Text })
-export const SessionUnlinked = fact("session.unlinked", "session", { to: Text })
+export const SessionLinked = fact("session.linked", "session", { to: Text, remote: optional(Text) })
+export const SessionUnlinked = fact("session.unlinked", "session", { to: Text, remote: optional(Text) })
 
 export const ProcessStarted = fact("process.started", "session", {
   harness: Text,
@@ -229,15 +229,15 @@ export const InboxUnresolved = fact("inbox.unresolved", "session", {
   aboutSessionId: optional(Text),
 })
 
-export const MachineAdded = fact("machine.added", "ledger", { name: Text, target: Text, vibestd: Text })
+export const MachineAdded = fact("machine.added", "ledger", { name: Text, target: Text, remote: Text })
 export const MachineConnected = fact("machine.connected", "ledger", { name: Text })
 export const MachineRemoved = fact("machine.removed", "ledger", { name: Text })
 
-export const PeerSeen = fact("peer.seen", "ledger", { id: Text, name: Text })
+export const RemoteSeen = fact("remote.seen", "ledger", { id: Text, name: Text })
 
 export const OutboxQueued = fact("outbox.queued", "ledger", {
   id: Text,
-  peer: Text,
+  remote: Text,
   session: Text,
   recipient: optional(Text),
   kind: optional(Schema.Literals(["send", "notice"])),
@@ -246,7 +246,7 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   execution: optional(Seq),
 })
 
-export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })
+export const OutboxAcked = fact("outbox.acked", "ledger", { remote: Text, ids: Schema.NonEmptyArray(Text) })
 
 export const Catalog = {
   [ProjectCreated.type]: ProjectCreated,
@@ -282,7 +282,7 @@ export const Catalog = {
   [MachineAdded.type]: MachineAdded,
   [MachineConnected.type]: MachineConnected,
   [MachineRemoved.type]: MachineRemoved,
-  [PeerSeen.type]: PeerSeen,
+  [RemoteSeen.type]: RemoteSeen,
   [OutboxQueued.type]: OutboxQueued,
   [OutboxAcked.type]: OutboxAcked,
 } as const
@@ -293,7 +293,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 12
+export const CATALOG_VERSION = 13
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

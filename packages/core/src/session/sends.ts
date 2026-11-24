@@ -1,5 +1,5 @@
 import { type Sender } from "@vibest/schema/event"
-import { NoSuchSession } from "@vibest/schema/session"
+import { AmbiguousSession, NoSuchSession } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, Schema } from "effect"
 
 import { archived } from "../database/db-rows.ts"
@@ -72,15 +72,18 @@ export const make = Effect.gen(function* () {
     message: string,
     request?: string,
   ) {
-    const toOrigin = yield* db.remote.sendToOrigin(sender.sessionId, input, message, request)
+    const toRemote = yield* db.remote.sendToLinkedRemote(sender.sessionId, input, message, request)
 
-    if (toOrigin === false)
+    if (toRemote === "unknown")
       return yield* new NoSuchSession({
         id: input,
         message: `${input} is on another machine that vibestd does not know; nothing was sent`,
       })
 
-    if (toOrigin === true) return { id: input }
+    if (toRemote !== undefined && "ambiguous" in toRemote)
+      return yield* new AmbiguousSession({ prefix: input, matches: toRemote.ambiguous })
+
+    if (toRemote !== undefined && "sent" in toRemote) return { id: toRemote.sent }
     const id = yield* db.session.resolveSession(input)
 
     if (id === sender.sessionId)
@@ -119,8 +122,8 @@ export const make = Effect.gen(function* () {
         message: `${id} has ended and no session above it is running; the user reads your last reply with vibest result`,
       })
 
-    if ("peer" in heir) {
-      if (!(yield* db.remote.sendToPeer(sender.sessionId, heir.peer, heir.session, message, request)))
+    if ("remote" in heir) {
+      if (!(yield* db.remote.sendToRemote(sender.sessionId, heir.remote, heir.session, message, request)))
         return yield* new NoSuchSession({
           id,
           message: `${id} has ended and the session above it is on another machine that vibestd does not know; nothing was sent`,
@@ -161,7 +164,7 @@ export const make = Effect.gen(function* () {
     if (heir === undefined)
       return yield* new NoSuchSession({ id: to, message: `${to} has ended and no session above it is running` })
 
-    if ("peer" in heir)
+    if ("remote" in heir)
       return yield* new SendRefused({
         message: `${to} has ended and the session above it is on another machine; this send goes only to sessions on this machine`,
       })

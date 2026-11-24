@@ -237,12 +237,12 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       }),
     )
 
-  const outboxOf = (peer: string, after: number, limit: number) =>
+  const outboxOf = (remote: string, after: number, limit: number) =>
     sql<Omit<OutboxRow, "from"> & FromSql>`SELECT o.id, o.seq, o.session_id, o.kind, o.content,
         o.from_session, o.from_agent, o.from_title, o.from_machine, o.created_at,
         coalesce(o.recipient, s.origin_session) AS report_to
       FROM outbox o LEFT JOIN session s ON s.id = o.session_id
-      WHERE o.peer_id = ${peer} AND o.acked_at IS NULL AND o.seq > ${after}
+      WHERE o.remote_id = ${remote} AND o.acked_at IS NULL AND o.seq > ${after}
         AND coalesce(o.recipient, s.origin_session) IS NOT NULL
       ORDER BY o.seq LIMIT ${limit}`.pipe(
       Effect.map((rows) =>
@@ -261,8 +261,8 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     outboxOf,
     sessionRows,
     inboxWhere,
-    hasPeerItem: (item: string) =>
+    hasRemoteItem: (item: string) =>
       sql`SELECT 1 FROM inbox WHERE transfer_id = ${item}`.pipe(Effect.map((rows) => rows.length > 0)),
-    machines: sql<MachineRow>`SELECT name, target, vibestd_id, connected_at, created_at FROM machine ORDER BY name`,
+    machines: sql<MachineRow>`SELECT name, target, remote_id, connected_at, created_at FROM machine ORDER BY name`,
   }
 }

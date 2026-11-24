@@ -1,7 +1,7 @@
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
 import { Host } from "@vibest/plugin/host"
-import { peerHeaders } from "@vibest/protocol/protocol"
+import { remoteHeaders } from "@vibest/protocol/protocol"
 import { type ProjectRow, type WatchEvent, type WatchSession } from "@vibest/protocol/rpc"
 import type { ListedMachine } from "@vibest/schema/machine"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, Stream } from "effect"
@@ -22,7 +22,7 @@ interface Mirror {
 }
 
 const listedFor = (machine: ListedMachine, link: Machines.Link | undefined): ListedMachine =>
-  machine.state === "connected" && link !== undefined && link.capabilities.peerWatch !== true
+  machine.state === "connected" && link !== undefined && link.capabilities.remoteWatch !== true
     ? {
         name: machine.name,
         state: "incompatible",
@@ -113,7 +113,7 @@ const make = Effect.gen(function* () {
     )
 
   const watchRemote = (name: string, mirror: Mirror, link: Machines.Link) =>
-    link.stream(link.client.Watch(undefined, { headers: peerHeaders(self.id) })).pipe(
+    link.stream(link.client.Watch(undefined, { headers: remoteHeaders(self.id) })).pipe(
       Stream.runForEach((event) => applyRemoteEvent(name, mirror, event)),
       Effect.tap(() => Effect.logWarning("remote watch stream ended; reconnecting", { machine: name })),
       Effect.catchCause((cause) =>

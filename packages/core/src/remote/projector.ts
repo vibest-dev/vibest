@@ -4,7 +4,7 @@ import {
   MachineRemoved,
   OutboxAcked,
   OutboxQueued,
-  PeerSeen,
+  RemoteSeen,
 } from "@vibest/schema/event"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -18,8 +18,8 @@ export const layer = Layer.effectDiscard(
     yield* bus.project(
       MachineAdded,
       (fact) =>
-        sql`INSERT INTO machine (name, target, vibestd_id, connected_at, created_at)
-          VALUES (${fact.data.name}, ${fact.data.target}, ${fact.data.vibestd}, ${fact.at}, ${fact.at})`,
+        sql`INSERT INTO machine (name, target, remote_id, connected_at, created_at)
+          VALUES (${fact.data.name}, ${fact.data.target}, ${fact.data.remote}, ${fact.at}, ${fact.at})`,
     )
     yield* bus.project(
       MachineConnected,
@@ -27,18 +27,18 @@ export const layer = Layer.effectDiscard(
     )
     yield* bus.project(MachineRemoved, (fact) => sql`DELETE FROM machine WHERE name = ${fact.data.name}`)
     yield* bus.project(
-      PeerSeen,
+      RemoteSeen,
       (fact) =>
-        sql`INSERT INTO peer (id, name, connected_at)
+        sql`INSERT INTO remote (id, name, connected_at)
           VALUES (${fact.data.id}, ${fact.data.name}, ${fact.at})
           ON CONFLICT (id) DO UPDATE SET name = excluded.name, connected_at = excluded.connected_at`,
     )
     yield* bus.project(
       OutboxQueued,
       (fact) =>
-        sql`INSERT INTO outbox (id, seq, peer_id, session_id, recipient, kind, content, from_session, from_agent,
+        sql`INSERT INTO outbox (id, seq, remote_id, session_id, recipient, kind, content, from_session, from_agent,
             from_title, from_machine, execution_id, created_at)
-          VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.peer}, ${fact.data.session}, ${fact.data.recipient ?? null},
+          VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.remote}, ${fact.data.session}, ${fact.data.recipient ?? null},
             ${fact.data.kind ?? "notice"}, ${fact.data.content}, ${fact.data.from?.session ?? null},
             ${fact.data.from?.agent ?? null}, ${fact.data.from?.title ?? null}, ${fact.data.from?.machine ?? null},
             ${fact.data.execution ?? null}, ${fact.at})`,
@@ -47,7 +47,7 @@ export const layer = Layer.effectDiscard(
       OutboxAcked,
       (fact) =>
         sql`UPDATE outbox SET acked_at = ${fact.at}
-          WHERE peer_id = ${fact.data.peer} AND acked_at IS NULL AND ${sql.in("id", fact.data.ids)}`,
+          WHERE remote_id = ${fact.data.remote} AND acked_at IS NULL AND ${sql.in("id", fact.data.ids)}`,
     )
   }),
 )

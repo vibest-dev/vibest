@@ -41,7 +41,7 @@ runtime only when one arrives, and once at start and on a reset), and on termina
 beside the placement (`project`, `cwd`, `argv`, `env`, `label`) carries `near` (beside that terminal when possible),
 `split` (a split beside `near` instead of a tab of its own, `vibest run --share`), `focus` (the user is waiting to
 see it), `target` (where the caller sits in this runtime, the value its own `caller.target` gave; herdr: the
-caller's herdr session or socket) and `remote` (another machine's vibestd started the agent, `Peer.Spawn`; herdr then opens it in its default
+caller's herdr session or socket) and `remote` (another machine's vibestd started the agent, `Remote.Spawn`; herdr then opens it in its default
 session `default` and ignores `near`); each is the runtime's to honor as it can.
 
 `name` is optional: the word a place uses for this runtime. A place reads `<name> <address>`, or `<name> (not placed)` when the address is empty, and a remote address keeps its `@machine`. With no `name`, the place uses `id`. herdr leaves `name` unset, so a place says `herdr`. herdr-core sets `herdr-core` and keeps id `hc` (`--runtime hc`, and the id stored on a row, do not change).
@@ -55,7 +55,7 @@ session `default` and ignores `near`); each is the runtime's to honor as it can.
 | `seen`, `see`               | —                                                                                                                              | —                          | —                      | never `done` in Watch                    |
 | `attach(target, terminal?)` | `herdr session attach <session>` (the caller's session, else the terminal's); hc: `env HC_SOCKET=<socket> hc attach <address>` | — (Rex.app)                | `tern`                 | none                                     |
 | `link()`                    | `{session, version}`: `default`, where remote agents open; `ping` on its socket                                                | —                          | —                      | other machines cannot show its terminals |
-| `locate(peer, sessions)`    | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                                  | —                          | —                      | remote rows: "cannot be shown here"      |
+| `locate(remote, sessions)`  | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                                  | —                          | —                      | remote rows: "cannot be shown here"      |
 | `doctor(harnesses)`         | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>`               | what rex needs             | what tern needs        | `vibest doctor` shows `status` only      |
 
 How the required members map: herdr `tab.create` (env) + `pane.send_text`, `pane.send_*`, `pane.read`,
@@ -63,10 +63,10 @@ How the required members map: herdr `tab.create` (env) + `pane.send_text`, `pane
 `terminal.format`, `terminal.process`, `block.close`; tern `split|new tab -- argv` (env via `/usr/bin/env`), `send`,
 `capture`, `process --json`, `close`.
 
-`link()` and `locate(peer, sessions)` let one machine show another's terminals (hc implements both:
+`link()` and `locate(remote, sessions)` let one machine show another's terminals (hc implements both:
 [runtime-herdr-core.md](runtime-herdr-core.md), [multi-machine.md](multi-machine.md#terminals-on-other-machines)):
-`link` is what the same runtime elsewhere needs to reach this machine's terminals, sent in `Peer.Hello`; `locate`
-gets the peer (`{ id: its name, target: its ssh target, link: what it reported }`) and each session id with the terminal id that machine reported for it, and answers `missing` when the runtime has no
+`link` is what the same runtime elsewhere needs to reach this machine's terminals, sent in `Remote.Hello`; `locate`
+gets the remote (`{ id: its name, target: its ssh target, link: what it reported }`) and each session id with the terminal id that machine reported for it, and answers `missing` when the runtime has no
 machine with the link's id, else the local terminal ids of those sessions,
 `as` (its name for the machine) and a `note` when it cannot show them. It is read-only and runs inside `vibest ls`.
 
@@ -250,19 +250,19 @@ every machine runs its own vibestd, and machine A reaches machine B's vibestd ov
 machine, and vibest never installs, prepares or reaches another machine through a runtime.
 
 - `vibest machine add <name> <ssh target>`, `vibest machine ls` and `vibest machine rm <name>` (user only) are core's:
-  `add` runs `Ping` and `Peer.Hello` over `ssh <target> … vibest connect` and stores the machine row. Which runtimes
+  `add` runs `Ping` and `Remote.Hello` over `ssh <target> … vibest connect` and stores the machine row. Which runtimes
   and harnesses B has is B's own `vibest.json`; nothing is copied there.
-- `status()` is the runtime on this machine. `vibest machine ls` shows B's runtimes from B's last `Peer.Hello`, which
+- `status()` is the runtime on this machine. `vibest machine ls` shows B's runtimes from B's last `Remote.Hello`, which
   B's vibestd read from its own runtimes.
 - A runtime takes part in other machines only as an optional view of B's terminals from A: `link()` (what the same
-  runtime on A needs to reach B's terminals, sent in `Peer.Hello`), `locate(peer, sessions)` (§3), and the machine hooks
+  runtime on A needs to reach B's terminals, sent in `Remote.Hello`), `locate(remote, sessions)` (§3), and the machine hooks
   `connect` and `remove`, with which a runtime plugin keeps its own record of B (an hc machine, a saved herdr
   machine) in step with vibest's machine list. Without them B's rows read "cannot be shown here", and
   `vibest peek <name>/<id>` reads B's terminal through B's vibestd.
 
 ## 7. Running an Agent on another machine
 
-- `vibest run --machine <name>` (the user or the entry session) sends `Peer.Spawn` to B's vibestd with the project's
+- `vibest run --machine <name>` (the user or the entry session) sends `Remote.Spawn` to B's vibestd with the project's
   repository identity, its `HEAD`, and a runtime kind: `--runtime`, else the runtime of the caller's terminal, else
   that of A's entry session. The caller's environment is not sent; it names a terminal on A. A stores nothing for the
   session.

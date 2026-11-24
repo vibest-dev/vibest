@@ -1,5 +1,6 @@
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
+import { archived } from "@vibest/core/database/db-rows"
 import type { OutboxRow } from "@vibest/core/database/remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
@@ -17,10 +18,10 @@ import {
   PROMPT_MAX,
   PromptTooLarge,
 } from "@vibest/schema/machine"
-import { NoRuntime } from "@vibest/schema/session"
+import { NoRuntime, NoSuchSession } from "@vibest/schema/session"
 import { Context, Effect, Layer, Option, Queue, Stream } from "effect"
 
-export * as Peer from "./peer.ts"
+export * as Inbound from "./inbound.ts"
 
 export const OUTBOX_PAGE = 100
 
@@ -37,7 +38,7 @@ type Checkout = Effect.Success<Db.Interface["remote"]["projectCheckouts"]>[numbe
 
 type Paired = { readonly wanted: Wanted; readonly row: Checkout }
 
-const wantedOf = (input: PayloadOf<"Peer.Spawn">): ReadonlyArray<Wanted> =>
+const wantedOf = (input: PayloadOf<"Remote.Spawn">): ReadonlyArray<Wanted> =>
   input.repositories ??
   (input.repository === undefined || input.commit === undefined
     ? []
@@ -74,12 +75,36 @@ const make = Effect.gen(function* () {
   const self = yield* Identity.Service
   const git = yield* Git.Service
 
+  const resolveLiveLocal = (ref: string) =>
+    Effect.gen(function* () {
+      const id = yield* db.session.resolveSession(ref)
+      const row = yield* db.session.getSession(id)
+
+      if (row === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
+
+      if (archived(row)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+
+      return id
+    })
+
+  const resolveEdges = (
+    edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>,
+  ) =>
+    Effect.forEach(edges, (edge) =>
+      Effect.gen(function* () {
+        const from = yield* resolveLiveLocal(edge.from)
+        const to = edge.remote === undefined ? yield* resolveLiveLocal(edge.to) : edge.to
+
+        return { from, to, ...(edge.remote !== undefined && { remote: edge.remote }) }
+      }),
+    )
+
   return {
-    spawn: Effect.fn("Peer.spawn")(function* (
-      peer: string,
+    spawn: Effect.fn("Inbound.spawn")(function* (
+      remote: string,
       project: string,
       reportTo: string,
-      input: PayloadOf<"Peer.Spawn">,
+      input: PayloadOf<"Remote.Spawn">,
     ) {
       const bytes = new TextEncoder().encode(input.prompt).length
 
@@ -96,7 +121,7 @@ const make = Effect.gen(function* () {
 
       const rows: ReadonlyArray<Checkout> = yield* Effect.forEach(
         yield* db.remote.projectCheckouts,
-        (row) => Effect.map(git.remoteUrl(row.path), (remote) => ({ ...row, remote })),
+        (row) => Effect.map(git.remoteUrl(row.path), (remoteUrl) => ({ ...row, remote: remoteUrl })),
         { concurrency: 8 },
       )
 
@@ -238,7 +263,7 @@ const make = Effect.gen(function* () {
           ...(input.repositories === undefined && target.pairs[0]!.row.path === target.directory
             ? { commit: target.pairs[0]!.wanted.commit }
             : { folders: target.pairs.map(pinned) }),
-          origin: { peer, project, reportTo },
+          origin: { remote, project, reportTo },
           files: input.files,
         })
         .pipe(
@@ -258,20 +283,20 @@ const make = Effect.gen(function* () {
       }
     }),
 
-    outbox: (peer: string): Stream.Stream<OutboxItem> =>
+    outbox: (remote: string): Stream.Stream<OutboxItem> =>
       Stream.unwrap(
         Effect.gen(function* () {
           const subscription = yield* bus.subscribe([OutboxQueued])
           const slot = yield* Queue.sliding<void>(1)
           yield* Stream.fromSubscription(subscription).pipe(
-            Stream.filter((event) => event.data.peer === peer),
+            Stream.filter((event) => event.data.remote === remote),
             Stream.runForEach(() => Queue.offer(slot, undefined)),
             Effect.forkScoped,
           )
           let cursor = 0
 
           const pages = Stream.paginate(undefined, () =>
-            db.remote.outboxOf(peer, cursor, OUTBOX_PAGE).pipe(
+            db.remote.outboxOf(remote, cursor, OUTBOX_PAGE).pipe(
               Effect.map((rows) => {
                 cursor = rows.at(-1)?.seq ?? cursor
 
@@ -289,13 +314,29 @@ const make = Effect.gen(function* () {
         }),
       ),
 
-    ack: Effect.fn("Peer.ack")((peer: string, ids: ReadonlyArray<string>) => db.remote.ackOutbox(peer, ids)),
+    ack: Effect.fn("Inbound.ack")((remote: string, ids: ReadonlyArray<string>) => db.remote.ackOutbox(remote, ids)),
+
+    link: Effect.fn("Inbound.link")(
+      (edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>) =>
+        resolveEdges(edges).pipe(
+          Effect.flatMap(db.session.linkSessions),
+          Effect.map((linked) => ({ edges: linked })),
+        ),
+    ),
+
+    unlink: Effect.fn("Inbound.unlink")(
+      (edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>) =>
+        resolveEdges(edges).pipe(
+          Effect.flatMap(db.session.unlinkSessions),
+          Effect.map((unlinked) => ({ edges: unlinked })),
+        ),
+    ),
   }
 })
 
 export type Interface = Effect.Success<typeof make>
 
-export class Service extends Context.Service<Service, Interface>()("vibest/Peers") {}
+export class Service extends Context.Service<Service, Interface>()("vibest/Inbound") {}
 
 export const layer = Layer.effect(Service, make)
 

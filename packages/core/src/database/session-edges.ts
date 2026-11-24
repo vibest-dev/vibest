@@ -1,34 +1,141 @@
 import { SessionLinked, SessionUnlinked } from "@vibest/schema/event"
-import { Effect } from "effect"
+import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 
+export const SESSION_PREFIX = /^[0-9a-f-]{8,36}$/
+
 export type SessionEdge = {
   readonly from: string
   readonly to: string
+  readonly remote?: string | undefined
+}
+
+export interface SpawnLinks {
+  readonly from?: ReadonlyArray<string> | undefined
+  readonly to?: ReadonlyArray<string> | undefined
+  readonly with?: ReadonlyArray<string> | undefined
+}
+
+export type EdgeSpec =
+  | { readonly _tag: "Mutual"; readonly ids: ReadonlyArray<string> }
+  | { readonly _tag: "Directed"; readonly from: ReadonlyArray<string>; readonly to: ReadonlyArray<string> }
+  | { readonly _tag: "Chain"; readonly ids: ReadonlyArray<string> }
+
+export const expandEdgeSpec = <T, E1, E2, R>(
+  spec: EdgeSpec,
+  resolve: (ref: string) => Effect.Effect<T, E1, R>,
+  keyOf: (item: T) => string,
+  fail: (message: string) => Effect.Effect<never, E2>,
+): Effect.Effect<ReadonlyArray<readonly [T, T]>, E1 | E2, R> =>
+  Effect.gen(function* () {
+    const pairs: Array<readonly [T, T]> = []
+    const seen = new Set<string>()
+
+    const push = (from: T, to: T) => {
+      const fk = keyOf(from)
+      const tk = keyOf(to)
+
+      if (fk === tk) return
+      const key = `${fk}\0${tk}`
+
+      if (seen.has(key)) return
+      seen.add(key)
+      pairs.push([from, to])
+    }
+
+    if (Predicate.isTagged(spec, "Mutual")) {
+      const resolved = yield* Effect.forEach(spec.ids, resolve)
+      const unique = new Map<string, T>()
+
+      for (const item of resolved) if (!unique.has(keyOf(item))) unique.set(keyOf(item), item)
+      const items = [...unique.values()]
+
+      if (items.length < 2) return yield* fail("give at least two distinct sessions")
+
+      for (const a of items) for (const b of items) push(a, b)
+
+      return pairs
+    }
+
+    if (Predicate.isTagged(spec, "Directed")) {
+      const from = yield* Effect.forEach(spec.from, resolve)
+      const to = yield* Effect.forEach(spec.to, resolve)
+
+      if (from.length === 0 || to.length === 0) return yield* fail("give at least one source and one target session")
+
+      if (from.length === 1 && to.length === 1 && keyOf(from[0]!) === keyOf(to[0]!))
+        return yield* fail("a session cannot target itself")
+
+      for (const a of from) for (const b of to) push(a, b)
+
+      if (pairs.length === 0) return yield* fail("a session cannot target itself")
+
+      return pairs
+    }
+
+    const items = yield* Effect.forEach(spec.ids, resolve)
+
+    if (items.length < 2) return yield* fail("give at least two sessions for --chain")
+
+    for (let i = 0; i + 1 < items.length; i++) {
+      const a = items[i]!
+      const b = items[i + 1]!
+
+      if (keyOf(a) === keyOf(b)) return yield* fail("a session cannot target itself")
+      push(a, b)
+    }
+
+    return pairs
+  })
+
+export const queryRemoteEdges = (
+  sql: SqlClient.SqlClient,
+  fromSessionId: string,
+  target: string,
+  remoteId?: string,
+) => {
+  if (!SESSION_PREFIX.test(target)) return Effect.succeed<ReadonlyArray<{ remote: string; session: string }>>([])
+
+  return sql<{ remote: string; session: string }>`SELECT to_remote_id AS remote, to_session_id AS session
+    FROM session_edge
+    WHERE from_session_id = ${fromSessionId}
+      ${remoteId === undefined ? sql`AND to_remote_id != ''` : sql`AND to_remote_id = ${remoteId}`}
+      AND to_session_id >= ${target} AND to_session_id < ${`${target}~`}
+    ORDER BY to_session_id LIMIT 11`
 }
 
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const { publish, transaction: tx } = yield* Bus.Service
 
-  const mutateEdges = (edges: ReadonlyArray<readonly [string, string]>, add: boolean) =>
+  const mutateEdges = (edges: ReadonlyArray<SessionEdge>, add: boolean) =>
     tx(
       Effect.gen(function* () {
         const out: Array<SessionEdge> = []
 
-        for (const [from, to] of edges) {
-          if (from === to) continue
+        for (const edge of edges) {
+          const remote = edge.remote ?? ""
+
+          if (remote === "" && edge.from === edge.to) continue
 
           const exists =
-            (yield* sql`SELECT 1 FROM session_edge WHERE from_session_id = ${from} AND to_session_id = ${to}`).length >
-            0
+            (yield* sql`SELECT 1 FROM session_edge WHERE from_session_id = ${edge.from}
+                AND to_remote_id = ${remote} AND to_session_id = ${edge.to}`).length > 0
 
-          if (add && !exists) yield* publish(SessionLinked, { sessionId: from, data: { to } })
-          else if (!add && exists) yield* publish(SessionUnlinked, { sessionId: from, data: { to } })
+          if (add && !exists)
+            yield* publish(SessionLinked, {
+              sessionId: edge.from,
+              data: { to: edge.to, ...(remote !== "" && { remote }) },
+            })
+          else if (!add && exists)
+            yield* publish(SessionUnlinked, {
+              sessionId: edge.from,
+              data: { to: edge.to, ...(remote !== "" && { remote }) },
+            })
 
-          out.push({ from, to })
+          out.push({ from: edge.from, to: edge.to, ...(remote !== "" && { remote }) })
         }
 
         return out
@@ -75,7 +182,7 @@ export const make = Effect.gen(function* () {
         FROM session_edge e
         JOIN session s ON s.id = e.to_session_id
         JOIN project p ON p.id = s.project_id
-        WHERE e.from_session_id = ${id} AND s.ended_at IS NULL
+        WHERE e.from_session_id = ${id} AND e.to_remote_id = '' AND s.ended_at IS NULL
           ${exclude === undefined ? sql`` : sql`AND e.to_session_id != ${exclude}`}
         ORDER BY s.created_at, s.rowid`.pipe(
         Effect.map((rows) =>
@@ -88,11 +195,14 @@ export const make = Effect.gen(function* () {
       ),
     ),
 
-    linkSessions: Effect.fn("Db.session.linkSessions")((edges: ReadonlyArray<readonly [string, string]>) =>
-      mutateEdges(edges, true),
+    resolveRemoteEdges: Effect.fn("Db.session.resolveRemoteEdges")(
+      (fromSessionId: string, target: string, remoteId?: string) =>
+        queryRemoteEdges(sql, fromSessionId, target, remoteId).pipe(Effect.orDie),
     ),
 
-    unlinkSessions: Effect.fn("Db.session.unlinkSessions")((edges: ReadonlyArray<readonly [string, string]>) =>
+    linkSessions: Effect.fn("Db.session.linkSessions")((edges: ReadonlyArray<SessionEdge>) => mutateEdges(edges, true)),
+
+    unlinkSessions: Effect.fn("Db.session.unlinkSessions")((edges: ReadonlyArray<SessionEdge>) =>
       mutateEdges(edges, false),
     ),
   }

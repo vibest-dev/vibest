@@ -40,22 +40,17 @@ import {
 import type * as Inbox from "./inbox.ts"
 import type * as Remote from "./remote.ts"
 import * as SessionEdges from "./session-edges.ts"
+import type { SpawnLinks } from "./session-edges.ts"
 import type * as Session from "./session-statements.ts"
 
-export type { SessionEdge } from "./session-edges.ts"
-
-export interface SpawnLinks {
-  readonly from?: ReadonlyArray<string> | undefined
-  readonly to?: ReadonlyArray<string> | undefined
-  readonly with?: ReadonlyArray<string> | undefined
-}
+export type { SessionEdge, SpawnLinks } from "./session-edges.ts"
 
 export const LIVE_PROCESS_COUNT = "SELECT count(*) AS n FROM process WHERE ended_at IS NULL"
 
 export type SessionFilter = {
   readonly projectId?: string
   readonly stopped?: boolean
-  readonly peer?: Remote.PeerScope | undefined
+  readonly remote?: Remote.RemoteScope | undefined
   readonly waiting?: ReadonlyArray<string>
 }
 
@@ -136,8 +131,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         }>`SELECT id, project_id, name, directory, ended_at FROM session WHERE directory != ''`.pipe(Effect.orDie),
       ),
 
-      startedByPeer: Effect.fn("Db.session.startedByPeer")((id: string) =>
-        sql`SELECT 1 FROM session WHERE id = ${id} AND origin_peer IS NOT NULL`.pipe(
+      startedByRemote: Effect.fn("Db.session.startedByRemote")((id: string) =>
+        sql`SELECT 1 FROM session WHERE id = ${id} AND origin_remote IS NOT NULL`.pipe(
           Effect.map((rows) => rows.length > 0),
           Effect.orDie,
         ),
@@ -174,7 +169,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
           if (creator === undefined) return undefined
 
-          if ("peer" in creator) return { id: creator.session, label: "the agent that started you", remote: true }
+          if ("remote" in creator)
+            return { id: creator.session, label: "the agent that started you", remote: creator.remote }
 
           const [row] = yield* sql<{ entry: string | null; name: string | null }>`SELECT
               p.entry_session_id AS entry, c.name AS name
@@ -188,7 +184,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 ? `agent ${row.name}`
                 : "the agent that started you"
 
-          return { id: creator.local, label, remote: false }
+          return { id: creator.local, label, remote: undefined }
         }).pipe(Effect.orDie),
       ),
 
@@ -209,7 +205,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly task?: string
             readonly parentSessionId?: string | undefined
             readonly request?: string | undefined
-            readonly origin?: Remote.PeerStart | undefined
+            readonly origin?: Remote.RemoteStart | undefined
             readonly max?: number | undefined
             readonly links?: SpawnLinks | undefined
           } = {},
@@ -243,7 +239,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                             ? {
                                 type: "agent",
                                 session: origin.reportTo,
-                                machine: (yield* remote.peerName(origin.peer)) ?? origin.peer,
+                                machine: (yield* remote.remoteName(origin.remote)) ?? origin.remote,
                               }
                             : { type: "user" },
                       content: task,
@@ -262,7 +258,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   ...(parentSessionId !== undefined && { parent: parentSessionId }),
                   ...(origin !== undefined && {
                     origin: {
-                      peer: origin.peer,
+                      remote: origin.remote,
                       project: origin.project,
                       ...(origin.reportTo !== undefined && { session: origin.reportTo }),
                     },
@@ -273,14 +269,18 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               const seen = new Set<string>()
 
-              const link = (from: string, to: string) => {
-                if (from === to) return Effect.void
-                const key = `${from}\0${to}`
+              const link = (from: string, to: string, remoteId?: string) => {
+                if (remoteId === undefined && from === to) return Effect.void
+                const key = `${from}\0${remoteId ?? ""}\0${to}`
 
                 if (seen.has(key)) return Effect.void
                 seen.add(key)
 
-                return publish(SessionLinked, { sessionId: from, at: row.createdAt, data: { to } }).pipe(Effect.asVoid)
+                return publish(SessionLinked, {
+                  sessionId: from,
+                  at: row.createdAt,
+                  data: { to, ...(remoteId !== undefined && { remote: remoteId }) },
+                }).pipe(Effect.asVoid)
               }
 
               if (parentSessionId !== undefined) {
@@ -288,13 +288,15 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 yield* link(row.id, parentSessionId)
               }
 
+              if (origin?.reportTo !== undefined) yield* link(row.id, origin.reportTo, origin.remote)
+
               for (const fromId of links?.from ?? []) yield* link(fromId, row.id)
 
               for (const toId of links?.to ?? []) yield* link(row.id, toId)
 
-              for (const peerId of links?.with ?? []) {
-                yield* link(peerId, row.id)
-                yield* link(row.id, peerId)
+              for (const targetId of links?.with ?? []) {
+                yield* link(targetId, row.id)
+                yield* link(row.id, targetId)
               }
 
               const processAt = row.startedAt ?? row.createdAt
@@ -338,7 +340,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           ).pipe(Effect.orDie),
       ),
 
-      resolveSession: Effect.fn("Db.session.resolveSession")((input: string, scope?: Remote.PeerScope) =>
+      resolveSession: Effect.fn("Db.session.resolveSession")((input: string, scope?: Remote.RemoteScope) =>
         Effect.gen(function* () {
           if (!/^[0-9a-f-]{8,36}$/.test(input))
             return yield* new NoSuchSession({
@@ -351,7 +353,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           const rows = yield* sql<{
             id: string
           }>`SELECT s.id FROM session s WHERE s.id >= ${input} AND s.id < ${`${input}~`}
-            ${scope === undefined ? sql`` : sql`AND ${remote.ofPeer(sql`s.id`, scope)}`} ORDER BY s.id LIMIT 11`.pipe(
+            ${scope === undefined ? sql`` : sql`AND ${remote.ofRemote(sql`s.id`, scope)}`} ORDER BY s.id LIMIT 11`.pipe(
             Effect.orDie,
           )
 
@@ -389,7 +391,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         selectSessions(
           [
             ...(filter.projectId === undefined ? [] : [sql`s.project_id = ${filter.projectId}`]),
-            ...(filter.peer === undefined ? [] : [remote.ofPeer(sql`s.id`, filter.peer)]),
+            ...(filter.remote === undefined ? [] : [remote.ofRemote(sql`s.id`, filter.remote)]),
           ],
           filter.stopped
             ? undefined

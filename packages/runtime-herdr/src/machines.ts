@@ -76,14 +76,14 @@ const NONE: ReadonlyMap<string, Terminal> = new Map()
 
 export const locate = (
   cli: Cli,
-  peer: VibestPlugin.Runtime.Peer,
+  remote: VibestPlugin.Runtime.Remote,
   sessions: ReadonlyMap<string, string>,
 ): Effect.Effect<VibestPlugin.Runtime.Located> =>
   Effect.gen(function* () {
-    const session = peer.link.session
-    const target = peer.target
+    const session = remote.link.session
+    const target = remote.target
 
-    if (session === undefined) return { missing: false, terminals: NONE, note: `${peer.id} gave no herdr link` }
+    if (session === undefined) return { missing: false, terminals: NONE, note: `${remote.id} gave no herdr link` }
     const rows = yield* profiles(cli)
     const profile = mirrorOf(rows, target, session)
 
@@ -110,7 +110,7 @@ export const locate = (
       terminals,
       as: profile.label,
       ...(terminals.size < sessions.size && {
-        note: `herdr here has no enabled saved machine for that agent's herdr session on ${peer.id}`,
+        note: `herdr here has no enabled saved machine for that agent's herdr session on ${remote.id}`,
       }),
     }
   }).pipe(Effect.catch((note) => Effect.succeed({ missing: false, terminals: NONE, note })))

@@ -19,6 +19,7 @@ import { migration as limitedEndIsExited } from "./migration/20261120000000_limi
 import { migration as inboxV1 } from "./migration/20261121000000_inbox_v1.ts"
 import { migration as executionLifecycle } from "./migration/20261122000000_execution_lifecycle.ts"
 import { migration as sessionEdges } from "./migration/20261124000000_session_edges.ts"
+import { migration as remoteAndCrossMachineEdges } from "./migration/20261124020000_remote_and_cross_machine_edges.ts"
 
 export type Migration = {
   readonly id: string
@@ -31,6 +32,7 @@ export const migrations: ReadonlyArray<Migration> = [
   inboxV1,
   executionLifecycle,
   sessionEdges,
+  remoteAndCrossMachineEdges,
 ]
 
 const createTable = (sql: SqlClient.SqlClient) =>
