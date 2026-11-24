@@ -2,7 +2,12 @@ import { Schema } from "effect"
 
 import { MachineName } from "./id.ts"
 
-export const TerminalTarget = Schema.Record(Schema.NonEmptyString, Schema.NonEmptyString)
+export const TerminalTarget = Schema.Record(Schema.NonEmptyString, Schema.NonEmptyString).check(
+  Schema.makeFilter((record) => Object.keys(record).length > 0, {
+    title: "nonEmptyTerminalTarget",
+    description: "a terminal target with at least one field",
+  }),
+)
 
 export type TerminalTarget = typeof TerminalTarget.Type
 
@@ -14,11 +19,13 @@ export const canonicalTarget = (target: TerminalTarget): string => {
   return JSON.stringify(sorted)
 }
 
-export const formatTerminalTarget = (target: TerminalTarget): string =>
-  Object.keys(target)
-    .sort()
-    .map((key) => target[key]!)
-    .join("/")
+export const formatTerminalTarget = (target: TerminalTarget): string => {
+  const keys = Object.keys(target).sort()
+
+  if (keys.length === 1) return target[keys[0]!]!
+
+  return keys.map((key) => `${key}=${target[key]!}`).join(" ")
+}
 
 export const Terminal = Schema.Struct({
   runtime: Schema.NonEmptyString,

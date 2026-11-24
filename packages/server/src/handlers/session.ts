@@ -1,7 +1,7 @@
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { terminalOf } from "@vibest/core/database/db-rows"
-import { expandEdgeSpec, SESSION_PREFIX } from "@vibest/core/database/session-edges"
+import { dedupePairs, expandEdgeSpec, SESSION_PREFIX } from "@vibest/core/database/session-edges"
 import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
 import { Identity } from "@vibest/core/identity"
 import { Integration } from "@vibest/core/integration"
@@ -237,29 +237,17 @@ export const make = Effect.gen(function* () {
     toEndpoints: ReadonlyArray<ResolvedEndpoint>,
     withEndpoints: ReadonlyArray<ResolvedEndpoint>,
   ) => {
-    const pairs: Array<readonly [ResolvedEndpoint, ResolvedEndpoint]> = []
-    const seen = new Set<string>()
-
-    const push = (from: ResolvedEndpoint, to: ResolvedEndpoint) => {
-      const fk = endpointKey(from)
-      const tk = endpointKey(to)
-
-      if (fk === tk) return
-      const key = `${fk}\0${tk}`
-
-      if (seen.has(key)) return
-      seen.add(key)
-      pairs.push([from, to])
-    }
-
-    for (const from of fromEndpoints) push(from, spawnedEp)
-
-    for (const to of toEndpoints) push(spawnedEp, to)
-
-    for (const target of withEndpoints) {
-      push(target, spawnedEp)
-      push(spawnedEp, target)
-    }
+    const pairs = dedupePairs(
+      [
+        ...fromEndpoints.map((from): readonly [ResolvedEndpoint, ResolvedEndpoint] => [from, spawnedEp]),
+        ...toEndpoints.map((to): readonly [ResolvedEndpoint, ResolvedEndpoint] => [spawnedEp, to]),
+        ...withEndpoints.flatMap((target): ReadonlyArray<readonly [ResolvedEndpoint, ResolvedEndpoint]> => [
+          [target, spawnedEp],
+          [spawnedEp, target],
+        ]),
+      ],
+      endpointKey,
+    )
 
     return pairs.length > 0 ? applyEndpointPairs(pairs, "link") : Effect.void
   }

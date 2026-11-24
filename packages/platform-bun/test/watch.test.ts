@@ -357,10 +357,16 @@ describe("Watch", () => {
       assert.strictEqual((first["result"] as Array<WatchEvent>)[0]!._tag, "Snapshot")
 
       const read = db.session.sessionIdentity
-      const ids = Array.from({ length: WATCH_BACKLOG + 500 }, (_, i) => `ended-${i}`)
+
+      const ids = Array.from(
+        { length: WATCH_BACKLOG + 500 },
+        (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      )
+
+      const idSet = new Set(ids)
 
       Object.assign(db.session, {
-        sessionIdentity: (id: string) => (id.startsWith("ended-") ? Effect.succeed({ projectId: project }) : read(id)),
+        sessionIdentity: (id: string) => (idSet.has(id) ? Effect.succeed({ projectId: project }) : read(id)),
       })
 
       for (const id of ids) yield* bus.observe({ type: "session.changed", sessionId: id })
@@ -539,7 +545,7 @@ describe("Watch", () => {
   )
 
   test(
-    "exited unarchived sessions report empty address.id and are excluded from Snapshot project.activity",
+    "exited unarchived sessions report null terminal and are excluded from Snapshot project.activity",
     Effect.gen(function* () {
       const db = yield* Db.Service
       const { repo, entryId, entryClient } = yield* withEntry

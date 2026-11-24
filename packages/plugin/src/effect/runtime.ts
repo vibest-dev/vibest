@@ -1,3 +1,4 @@
+import { formatTerminalTarget } from "@vibest/schema/terminal"
 import { Effect, Option, PubSub, Schema, Stream } from "effect"
 
 import type { Launch } from "./launch.ts"
@@ -166,12 +167,7 @@ export const define = <T>(spec: TypedRuntimeDefinition<T>): RuntimeDefinition =>
       format: (raw: TerminalTarget) => {
         const parsed = decodeOpt(raw)
 
-        return Option.isSome(parsed)
-          ? spec.format!(parsed.value)
-          : Object.keys(raw)
-              .sort()
-              .map((key) => raw[key]!)
-              .join("/")
+        return Option.isSome(parsed) ? spec.format!(parsed.value) : formatTerminalTarget(raw)
       },
     }),
     open: (input) =>

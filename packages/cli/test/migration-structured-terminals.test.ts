@@ -7,7 +7,7 @@ import { database } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { Runtime } from "@vibest/plugin/effect"
 import { SessionReply } from "@vibest/protocol/rpc"
 import { ArchiveOutcome } from "@vibest/schema/archive"
-import { canonicalTarget, Terminal } from "@vibest/schema/terminal"
+import { canonicalTarget, formatTerminalTarget, Terminal, TerminalTarget } from "@vibest/schema/terminal"
 import { Effect, Layer, Option, Path, Schema, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -123,9 +123,17 @@ describe("structured terminal and session schemas", () => {
     assert.strictEqual(canonicalTarget({ z: "1", a: "2" }), '{"a":"2","z":"1"}')
   })
 
-  it("parseSessionRef handles local and remote refs", () => {
+  it("parseSessionRef handles local, remote, and trailing-slash refs", () => {
     assert.deepStrictEqual(parseSessionRef("abcd1234"), { id: "abcd1234" })
     assert.deepStrictEqual(parseSessionRef("mac-mini/abcd1234"), { id: "abcd1234", machine: "mac-mini" })
+    assert.deepStrictEqual(parseSessionRef("mac-mini/"), { id: "mac-mini/" })
+  })
+
+  it("TerminalTarget rejects empty objects and formatTerminalTarget formats single and multi-key targets cleanly", () => {
+    assert.isTrue(Option.isNone(Schema.decodeUnknownOption(TerminalTarget)({})))
+    assert.isTrue(Option.isSome(Schema.decodeUnknownOption(TerminalTarget)({ address: "t1" })))
+    assert.strictEqual(formatTerminalTarget({ address: "t1" }), "t1")
+    assert.strictEqual(formatTerminalTarget({ address: "t1", socket: "/other.sock" }), "address=t1 socket=/other.sock")
   })
 
   it("Terminal, SessionReply, and ArchiveOutcome schemas enforce structured contracts", () => {

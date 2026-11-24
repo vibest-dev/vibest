@@ -158,7 +158,7 @@ const makeRouting = Effect.gen(function* () {
           ),
         ),
       Get: <A, E, R2>(p: PayloadOf<"Get">, local: Local<A, E, R2>) =>
-        routed("Get", p, local, (at, project, by) => remote.get(at, project, by, p)),
+        routed("Get", p, local, (at, project, by) => remote.get(at, project, by)),
       Peek: <A, E, R2>(p: PayloadOf<"Peek">, local: Local<A, E, R2>) =>
         routed("Peek", p, local, (at, project, by) => remote.peek(at, project, by, p)),
     },

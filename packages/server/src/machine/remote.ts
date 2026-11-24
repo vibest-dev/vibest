@@ -239,7 +239,7 @@ const make = Effect.gen(function* () {
         .sessions
     }),
 
-    get: Effect.fn("Remote.get")((at: At, project: string, by: string, _p: PayloadOf<"Get">) =>
+    get: Effect.fn("Remote.get")((at: At, project: string, by: string) =>
       relay(at, project, by, (c, { id }, o) => c.Get({ id }, o)).pipe(
         Effect.flatMap((row) => Effect.map(view(at.machine, [row]), (rows) => rows[0]!)),
       ),

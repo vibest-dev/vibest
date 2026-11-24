@@ -542,7 +542,6 @@ export const statements = Effect.gen(function* () {
         AND s.origin_remote IS NULL
         AND p.runtime = ${runtime}
         AND p.terminal IS NOT NULL
-        AND p.terminal != ''
       ORDER BY p.ended_at IS NOT NULL, p.started_at DESC, p.rowid DESC
       LIMIT 1`.pipe(
       Effect.map((rows): TerminalTarget | undefined =>

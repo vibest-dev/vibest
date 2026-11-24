@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-import { MachineName } from "./id.ts"
+import { MachineName, SessionId } from "./id.ts"
 
 export const ArchivedBranch = Schema.Struct({
   repository: Schema.NonEmptyString,
@@ -10,7 +10,7 @@ export const ArchivedBranch = Schema.Struct({
 export type ArchivedBranch = typeof ArchivedBranch.Type
 
 export const ArchiveOutcome = Schema.Struct({
-  id: Schema.String,
+  id: SessionId,
   machine: Schema.optional(MachineName),
   processes: Schema.Literals(["exited", "alive", "unknown"]),
   pane: Schema.Literals(["closed", "kept", "none"]),

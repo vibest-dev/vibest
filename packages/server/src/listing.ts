@@ -10,6 +10,7 @@ import {
   type SessionBrief,
   terminalOf,
 } from "@vibest/core/database/db-rows"
+import { resolveEdgeRefs } from "@vibest/core/database/session-edges"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Project } from "@vibest/core/project"
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
@@ -23,7 +24,7 @@ import {
   type WatchEvent,
   type WatchSession,
 } from "@vibest/protocol/rpc"
-import { canonicalTarget, type SessionRef, type Terminal, type TerminalTarget } from "@vibest/schema/terminal"
+import { canonicalTarget, type Terminal, type TerminalTarget } from "@vibest/schema/terminal"
 import { Context, Data, Effect, Layer, Predicate } from "effect"
 
 import { ListScope } from "./machine/remote.ts"
@@ -130,14 +131,6 @@ export const sessionListing = (deps: {
       const edges = yield* db.session.sessionEdges(ids)
       const machineByRemote = new Map((yield* db.remote.machines).map((row) => [row.remoteId, row.name]))
 
-      const toRefs = (id: string): ReadonlyArray<SessionRef> =>
-        (edges.get(id) ?? []).map((edge) => {
-          if (edge.remote === undefined) return { id: edge.id }
-          const machine = machineByRemote.get(edge.remote) ?? edge.remote
-
-          return { id: edge.id, machine }
-        })
-
       return yield* Effect.forEach(
         infos,
         (info) =>
@@ -146,7 +139,7 @@ export const sessionListing = (deps: {
             status: unseenDone(info.status, seen),
             parentId: parents.get(info.id) ?? null,
             finished: seen?.finished ?? null,
-            to: toRefs(info.id),
+            to: resolveEdgeRefs(edges.get(info.id) ?? [], machineByRemote),
           })),
         { concurrency: "unbounded" },
       )
