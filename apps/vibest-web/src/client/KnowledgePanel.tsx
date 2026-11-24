@@ -13,6 +13,15 @@ import {
 import { useMemo, useState } from "react"
 
 import type { KnowledgeCategory, ProjectFileEntry } from "../types.ts"
+import { Badge } from "./components/ui/badge.tsx"
+import { Button } from "./components/ui/button.tsx"
+import { Empty, EmptyDescription, EmptyTitle } from "./components/ui/empty.tsx"
+import { Frame, FrameHeader, FramePanel } from "./components/ui/frame.tsx"
+import { InputGroup, InputGroupAddon, InputGroupInput } from "./components/ui/input-group.tsx"
+import { ScrollArea } from "./components/ui/scroll-area.tsx"
+import { Tabs, TabsList, TabsTab } from "./components/ui/tabs.tsx"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./components/ui/tooltip.tsx"
+import { cn } from "./lib/utils.ts"
 
 type TabKey = Exclude<KnowledgeCategory, "preferences">
 
@@ -27,15 +36,15 @@ function formatSize(bytes: number): string {
 function FileKindIcon(props: { readonly kind: ProjectFileEntry["kind"] }) {
   switch (props.kind) {
     case "html":
-      return <FileCode2 size={13} className="file-icon is-html" aria-hidden="true" />
+      return <FileCode2 className="size-3.5 shrink-0 text-warning-foreground" aria-hidden="true" />
     case "excalidraw":
-      return <Package size={13} className="file-icon is-excalidraw" aria-hidden="true" />
+      return <Package className="size-3.5 shrink-0 text-info-foreground" aria-hidden="true" />
     case "image":
-      return <FileImage size={13} className="file-icon is-media" aria-hidden="true" />
+      return <FileImage className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
     case "video":
-      return <Film size={13} className="file-icon is-media" aria-hidden="true" />
+      return <Film className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
     default:
-      return <FileText size={13} className="file-icon is-md" aria-hidden="true" />
+      return <FileText className="size-3.5 shrink-0 text-success-foreground" aria-hidden="true" />
   }
 }
 
@@ -76,107 +85,133 @@ export function KnowledgePanel(props: {
   }, [files, tab, query])
 
   return (
-    <section className="panel panel-knowledge" data-testid="knowledge-panel">
-      <header className="panel-header knowledge-header">
-        <div className="segmented" role="tablist" aria-label="Knowledge and outputs">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "artifacts"}
-            data-testid="tab-artifacts"
-            className={`segmented-btn ${tab === "artifacts" ? "is-active" : ""}`}
-            onClick={() => setTab("artifacts")}
-          >
-            <Package size={11} aria-hidden="true" />
-            Artifacts <span className="tabular-nums">{counts.artifacts}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "docs"}
-            data-testid="tab-docs"
-            className={`segmented-btn ${tab === "docs" ? "is-active" : ""}`}
-            onClick={() => setTab("docs")}
-          >
-            <BookOpen size={11} aria-hidden="true" />
-            Docs <span className="tabular-nums">{counts.docs}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "memories"}
-            data-testid="tab-memories"
-            className={`segmented-btn ${tab === "memories" ? "is-active" : ""}`}
-            onClick={() => setTab("memories")}
-          >
-            <Brain size={11} aria-hidden="true" />
-            Memories <span className="tabular-nums">{counts.memories}</span>
-          </button>
-        </div>
+    <Frame className="h-full min-h-0 flex-1 overflow-hidden" data-testid="knowledge-panel">
+      <FrameHeader className="flex-row items-center justify-between gap-2 px-2.5 py-1.5">
+        <Tabs
+          value={tab}
+          onValueChange={(val) => {
+            if (val === "artifacts" || val === "docs" || val === "memories") {
+              setTab(val)
+            }
+          }}
+        >
+          <TabsList size="sm">
+            <TabsTab value="artifacts" className="gap-1 text-[11px]" data-testid="tab-artifacts">
+              <Package className="size-3" aria-hidden="true" />
+              Artifacts <span className="tabular-nums opacity-70">{counts.artifacts}</span>
+            </TabsTab>
+            <TabsTab value="docs" className="gap-1 text-[11px]" data-testid="tab-docs">
+              <BookOpen className="size-3" aria-hidden="true" />
+              Docs <span className="tabular-nums opacity-70">{counts.docs}</span>
+            </TabsTab>
+            <TabsTab value="memories" className="gap-1 text-[11px]" data-testid="tab-memories">
+              <Brain className="size-3" aria-hidden="true" />
+              Memories <span className="tabular-nums opacity-70">{counts.memories}</span>
+            </TabsTab>
+          </TabsList>
+        </Tabs>
 
         {preferencesFile && (
-          <button
-            type="button"
-            className={`icon-btn ${activeFileId === preferencesFile.id ? "is-active" : ""}`}
-            data-testid="open-preferences-btn"
-            title="Open preferences.md"
-            onClick={() => onOpenFile(preferencesFile)}
-          >
-            <SlidersHorizontal size={13} aria-hidden="true" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant={activeFileId === preferencesFile.id ? "secondary" : "ghost"}
+                  size="icon-xs"
+                  data-testid="open-preferences-btn"
+                  aria-label="Open preferences.md"
+                  onClick={() => onOpenFile(preferencesFile)}
+                >
+                  <SlidersHorizontal className="size-3.5" aria-hidden="true" />
+                </Button>
+              }
+            />
+            <TooltipPopup>Open preferences.md</TooltipPopup>
+          </Tooltip>
         )}
-      </header>
+      </FrameHeader>
 
-      <div className="knowledge-search">
-        <div className="search-input-wrap">
-          <Search size={12} className="search-icon" aria-hidden="true" />
-          <input
-            type="text"
-            className="search-input"
-            data-testid="knowledge-search-input"
-            placeholder={`Filter ${tab}...`}
-            value={query}
-            onChange={(ev) => setQuery(ev.target.value)}
-          />
+      <FramePanel className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
+        <div className="border-b border-border p-2">
+          <InputGroup>
+            <InputGroupAddon align="inline-start">
+              <Search className="size-3.5 text-muted-foreground" aria-hidden="true" />
+            </InputGroupAddon>
+            <InputGroupInput
+              type="text"
+              size="sm"
+              data-testid="knowledge-search-input"
+              placeholder={`Filter ${tab}...`}
+              value={query}
+              onChange={(ev) => setQuery(ev.target.value)}
+            />
+          </InputGroup>
         </div>
-      </div>
 
-      <div className="panel-scroll knowledge-list">
-        {filtered.map((file) => {
-          const active = file.id === activeFileId
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="flex flex-col gap-1 p-2">
+            {filtered.map((file) => {
+              const active = file.id === activeFileId
 
-          return (
-            <div
-              key={file.id}
-              className={`file-row ${active ? "is-selected" : ""}`}
-              data-testid={`knowledge-file-${file.name}`}
-            >
-              <button type="button" className="file-row-main" onClick={() => onOpenFile(file)}>
-                <FileKindIcon kind={file.kind} />
-                <div className="file-row-text">
-                  <span className="file-row-name">{file.name}</span>
-                  <span className="file-row-sub">
-                    {file.relativePath} · <span className="tabular-nums">{formatSize(file.size)}</span>
-                  </span>
+              return (
+                <div
+                  key={file.id}
+                  className={cn(
+                    "flex items-center gap-1 rounded-lg border pr-1 transition-colors",
+                    active
+                      ? "border-border bg-accent text-accent-foreground shadow-xs/5"
+                      : "border-transparent hover:bg-accent/60",
+                  )}
+                  data-testid={`knowledge-file-${file.name}`}
+                >
+                  <button
+                    type="button"
+                    className="file-row-main flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 py-1.5 text-left"
+                    onClick={() => onOpenFile(file)}
+                  >
+                    <FileKindIcon kind={file.kind} />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-xs font-medium text-foreground">{file.name}</span>
+                      <span className="truncate font-mono text-[10px] text-muted-foreground">
+                        {file.relativePath} · <span className="tabular-nums">{formatSize(file.size)}</span>
+                      </span>
+                    </div>
+                    <Badge variant="outline" size="sm" className="shrink-0 font-mono text-[10px]">
+                      {file.extension}
+                    </Badge>
+                  </button>
+
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          data-testid={`attach-file-${file.name}`}
+                          aria-label={`Attach @${file.relativePath}`}
+                          onClick={() => onAttachFile(file.relativePath)}
+                        >
+                          <AtSign className="size-3" aria-hidden="true" />
+                        </Button>
+                      }
+                    />
+                    <TooltipPopup>Attach @{file.relativePath} to Composer</TooltipPopup>
+                  </Tooltip>
                 </div>
-                <span className="file-ext-pill">{file.extension}</span>
-              </button>
+              )
+            })}
 
-              <button
-                type="button"
-                className="icon-btn file-attach-btn"
-                title={`Attach @${file.relativePath} to Composer`}
-                data-testid={`attach-file-${file.name}`}
-                onClick={() => onAttachFile(file.relativePath)}
-              >
-                <AtSign size={12} aria-hidden="true" />
-              </button>
-            </div>
-          )
-        })}
-
-        {filtered.length === 0 && <div className="empty-state">No files in {tab}/.</div>}
-      </div>
-    </section>
+            {filtered.length === 0 && (
+              <Empty className="py-8">
+                <EmptyTitle className="text-xs">No files in {tab}/</EmptyTitle>
+                <EmptyDescription className="text-xs">Agent outputs appear here live.</EmptyDescription>
+              </Empty>
+            )}
+          </div>
+        </ScrollArea>
+      </FramePanel>
+    </Frame>
   )
 }

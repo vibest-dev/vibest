@@ -3,6 +3,8 @@ import { Maximize2, RefreshCw, Terminal } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import type { ThemeMode } from "../types.ts"
+import { Button } from "./components/ui/button.tsx"
+import { cn } from "./lib/utils.ts"
 
 function stripAnsiEscapeCodes(input: string): string {
   const esc = String.fromCharCode(27)
@@ -40,7 +42,7 @@ export function WtermView(props: {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<WTerm | null>(null)
   const [ready, setReady] = useState(false)
-  const [fallbackText, setFallbackText] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
 
   useEffect(() => {
     const container = hostRef.current
@@ -65,12 +67,12 @@ export function WtermView(props: {
       .then(() => {
         if (cancelled) return
         setReady(true)
-        setFallbackText(null)
+        setFailed(false)
       })
       .catch(() => {
         if (cancelled) return
         setReady(false)
-        setFallbackText(stripAnsiEscapeCodes(content))
+        setFailed(true)
       })
 
     return () => {
@@ -94,31 +96,41 @@ export function WtermView(props: {
 
   return (
     <div
-      className={`wterm-shell ${compact ? "is-compact" : "is-stage"}`}
+      className={cn(
+        "flex flex-col overflow-hidden rounded-lg border border-border bg-[#0c0d10] dark:bg-[#0c0d10]",
+        theme === "light" && "bg-[#fafafa]",
+        !compact && "h-full",
+      )}
       data-testid={compact ? "inline-wterm-peek" : "stage-wterm-view"}
     >
-      <div className="wterm-toolbar">
-        <span className="wterm-title">
-          <Terminal size={12} aria-hidden="true" />
-          <span>{title ?? "@wterm/dom Live Terminal"}</span>
+      <div className="flex h-7 shrink-0 items-center justify-between border-b border-border bg-muted/40 px-2">
+        <span className="inline-flex min-w-0 items-center gap-1.5 truncate font-mono text-[11px] text-muted-foreground">
+          <Terminal className="size-3 shrink-0" aria-hidden="true" />
+          <span className="truncate">{title ?? "@wterm/dom Live Terminal"}</span>
         </span>
-        <div className="wterm-actions">
+        <div className="flex items-center gap-0.5">
           {onRefresh && (
-            <button type="button" className="icon-btn" title="Refresh terminal output" onClick={onRefresh}>
-              <RefreshCw size={12} aria-hidden="true" />
-            </button>
+            <Button type="button" variant="ghost" size="icon-xs" title="Refresh terminal output" onClick={onRefresh}>
+              <RefreshCw className="size-3" aria-hidden="true" />
+            </Button>
           )}
           {onExpand && (
-            <button type="button" className="icon-btn" title="Open in Center Stage" onClick={onExpand}>
-              <Maximize2 size={12} aria-hidden="true" />
-            </button>
+            <Button type="button" variant="ghost" size="icon-xs" title="Open in Center Stage" onClick={onExpand}>
+              <Maximize2 className="size-3" aria-hidden="true" />
+            </Button>
           )}
         </div>
       </div>
-      {fallbackText !== null ? (
-        <pre className="wterm-fallback">{fallbackText}</pre>
+
+      {failed ? (
+        <pre className="m-0 overflow-auto p-2.5 font-mono text-xs leading-relaxed text-foreground">
+          {stripAnsiEscapeCodes(content)}
+        </pre>
       ) : (
-        <div ref={hostRef} className={`wterm-host ${themeClass}`} />
+        <div
+          ref={hostRef}
+          className={cn("wterm-host w-full overflow-auto", compact ? "h-48" : "min-h-0 flex-1", themeClass)}
+        />
       )}
     </div>
   )

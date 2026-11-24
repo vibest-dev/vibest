@@ -13,7 +13,9 @@ import type {
 } from "../types.ts"
 import { webApi } from "./api.ts"
 import { ChatPanel } from "./ChatPanel.tsx"
+import { TooltipProvider } from "./components/ui/tooltip.tsx"
 import { KnowledgePanel } from "./KnowledgePanel.tsx"
+import { cn } from "./lib/utils.ts"
 import { ProjectsPanel } from "./ProjectsPanel.tsx"
 import { SessionsPanel } from "./SessionsPanel.tsx"
 import { StagePanel } from "./StagePanel.tsx"
@@ -48,16 +50,23 @@ export function App() {
   const [sending, setSending] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
 
-  const [leftWidth, setLeftWidth] = useState(256)
-  const [rightWidth, setRightWidth] = useState(404)
+  const [leftWidth, setLeftWidth] = useState(264)
+  const [rightWidth, setRightWidth] = useState(408)
   const [rightSplitPercent, setRightSplitPercent] = useState(52)
+  const [draggingSplit, setDraggingSplit] = useState(false)
 
   const rightColumnRef = useRef<HTMLDivElement | null>(null)
   const activeSessionIdRef = useRef<string | null>(activeSessionId)
   activeSessionIdRef.current = activeSessionId
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme)
+    const root = document.documentElement
+
+    if (theme === "dark") {
+      root.classList.add("dark")
+    } else {
+      root.classList.remove("dark")
+    }
   }, [theme])
 
   const showToast = useCallback((message: string) => {
@@ -316,6 +325,7 @@ export function App() {
 
   const startHorizontalDrag = (side: "left" | "right", startX: number) => {
     const startWidth = side === "left" ? leftWidth : rightWidth
+    setDraggingSplit(true)
 
     const onMove = (ev: MouseEvent) => {
       const delta = ev.clientX - startX
@@ -328,6 +338,7 @@ export function App() {
     }
 
     const onUp = () => {
+      setDraggingSplit(false)
       window.removeEventListener("mousemove", onMove)
       window.removeEventListener("mouseup", onUp)
     }
@@ -342,6 +353,7 @@ export function App() {
     if (!container) return
     const totalHeight = container.clientHeight || 1
     const startPct = rightSplitPercent
+    setDraggingSplit(true)
 
     const onMove = (ev: MouseEvent) => {
       const deltaPct = ((ev.clientY - startY) / totalHeight) * 100
@@ -349,6 +361,7 @@ export function App() {
     }
 
     const onUp = () => {
+      setDraggingSplit(false)
       window.removeEventListener("mousemove", onMove)
       window.removeEventListener("mouseup", onUp)
     }
@@ -363,126 +376,154 @@ export function App() {
     stageItem?.kind === "terminal" ? (peekCache[stageItem.sessionId] ?? "Loading terminal...") : ""
 
   return (
-    <div className="workspace-canvas" data-testid="workspace-canvas">
-      <div className="col-left" style={{ width: leftWidth }}>
-        <ProjectsPanel
-          projects={projects}
-          selectedProjectId={selectedProjectId}
-          daemon={daemon}
-          theme={theme}
-          onSelectProject={(id) => {
-            setSelectedProjectId(id)
-            setStageItem(null)
-            setStageMode("chat")
-            setExpandedPeekId(null)
-          }}
-          onToggleTheme={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-        />
-      </div>
-
+    <TooltipProvider>
       <div
-        className="split-handle-v"
-        role="separator"
-        aria-orientation="vertical"
-        onMouseDown={(ev) => startHorizontalDrag("left", ev.clientX)}
-      />
-
-      <main className={`col-center is-${stageMode}`}>
-        {stageMode !== "stage" && (
-          <ChatPanel
-            project={selectedProject}
-            sessions={projectSessions}
-            activeSessionId={activeSessionId}
-            targetSessionId={targetSessionId}
-            timeline={timeline}
-            projectFiles={projectFiles}
-            stageMode={stageMode}
-            hasStageItem={stageItem !== null}
-            composerText={composerText}
-            attachedPaths={attachedPaths}
-            sending={sending}
-            onStageModeChange={setStageMode}
-            onTargetSessionChange={setTargetSessionId}
-            onComposerTextChange={setComposerText}
-            onAddAttachment={handleAddAttachment}
-            onRemoveAttachment={(rel) => setAttachedPaths((prev) => prev.filter((p) => p !== rel))}
-            onSend={() => void handleSend()}
-            onPeekSession={handleOpenTerminalStage}
-            onFocusSession={(id) => {
-              setExpandedPeekId(id)
-              void fetchPeek(id)
-              setTargetSessionId(id)
-            }}
-          />
+        className={cn(
+          "flex h-dvh w-full overflow-hidden bg-sidebar p-2 text-foreground select-none",
+          draggingSplit && "[&_iframe]:pointer-events-none",
         )}
-
-        {stageItem && stageMode !== "chat" && (
-          <StagePanel
-            item={stageItem}
+        data-testid="workspace-canvas"
+      >
+        <aside className="flex h-full shrink-0 flex-col" style={{ width: leftWidth }}>
+          <ProjectsPanel
+            projects={projects}
+            selectedProjectId={selectedProjectId}
+            daemon={daemon}
             theme={theme}
-            sessions={projectSessions}
-            peekText={activeStagePeekText}
-            onRefreshPeek={(id) => void fetchPeek(id)}
-            onAddToComposer={handleAddToComposer}
-            onClose={() => {
+            onSelectProject={(id) => {
+              setSelectedProjectId(id)
               setStageItem(null)
               setStageMode("chat")
+              setExpandedPeekId(null)
             }}
+            onToggleTheme={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
           />
-        )}
-      </main>
-
-      <div
-        className="split-handle-v"
-        role="separator"
-        aria-orientation="vertical"
-        onMouseDown={(ev) => startHorizontalDrag("right", ev.clientX)}
-      />
-
-      <div ref={rightColumnRef} className="col-right" style={{ width: rightWidth }}>
-        <div className="right-slot-top" style={{ height: `calc(${rightSplitPercent}% - 4px)` }}>
-          <SessionsPanel
-            sessions={projectSessions}
-            theme={theme}
-            expandedPeekId={expandedPeekId}
-            peekCache={peekCache}
-            onTogglePeek={handleTogglePeek}
-            onRefreshPeek={(id) => void fetchPeek(id)}
-            onOpenTerminalStage={handleOpenTerminalStage}
-            onSelectForSend={(id) => {
-              setTargetSessionId(id)
-              showToast("Composer target switched to branch session")
-            }}
-            onInterrupt={(id) => void handleInterrupt(id)}
-            onArchive={(id) => void handleArchive(id)}
-          />
-        </div>
+        </aside>
 
         <div
-          className="split-handle-h"
+          className="group relative flex w-2 shrink-0 cursor-col-resize items-center justify-center"
           role="separator"
-          aria-orientation="horizontal"
-          onMouseDown={(ev) => startRightVerticalDrag(ev.clientY)}
-        />
-
-        <div className="right-slot-bottom" style={{ height: `calc(${100 - rightSplitPercent}% - 4px)` }}>
-          <KnowledgePanel
-            files={projectFiles}
-            activeFileId={activeStageFileId}
-            onOpenFile={handleOpenFile}
-            onAttachFile={(rel) => {
-              handleAddAttachment(rel)
-              showToast(`Attached @${rel}`)
-            }}
-          />
+          aria-orientation="vertical"
+          onMouseDown={(ev) => startHorizontalDrag("left", ev.clientX)}
+        >
+          <span className="h-7 w-0.5 rounded-full bg-transparent transition-colors group-hover:bg-ring" />
         </div>
+
+        <main className="flex h-full min-w-0 flex-1 gap-2 overflow-hidden select-text">
+          {stageMode !== "stage" && (
+            <div className="flex min-w-0 flex-1 flex-col">
+              <ChatPanel
+                project={selectedProject}
+                sessions={projectSessions}
+                activeSessionId={activeSessionId}
+                targetSessionId={targetSessionId}
+                timeline={timeline}
+                projectFiles={projectFiles}
+                stageMode={stageMode}
+                hasStageItem={stageItem !== null}
+                composerText={composerText}
+                attachedPaths={attachedPaths}
+                sending={sending}
+                onStageModeChange={setStageMode}
+                onTargetSessionChange={setTargetSessionId}
+                onComposerTextChange={setComposerText}
+                onAddAttachment={handleAddAttachment}
+                onRemoveAttachment={(rel) => setAttachedPaths((prev) => prev.filter((p) => p !== rel))}
+                onSend={() => void handleSend()}
+                onPeekSession={handleOpenTerminalStage}
+                onFocusSession={(id) => {
+                  setExpandedPeekId(id)
+                  void fetchPeek(id)
+                  setTargetSessionId(id)
+                }}
+              />
+            </div>
+          )}
+
+          {stageItem && stageMode !== "chat" && (
+            <div className="flex min-w-0 flex-[1.1] flex-col">
+              <StagePanel
+                item={stageItem}
+                theme={theme}
+                sessions={projectSessions}
+                peekText={activeStagePeekText}
+                onRefreshPeek={(id) => void fetchPeek(id)}
+                onAddToComposer={handleAddToComposer}
+                onClose={() => {
+                  setStageItem(null)
+                  setStageMode("chat")
+                }}
+              />
+            </div>
+          )}
+        </main>
+
+        <div
+          className="group relative flex w-2 shrink-0 cursor-col-resize items-center justify-center"
+          role="separator"
+          aria-orientation="vertical"
+          onMouseDown={(ev) => startHorizontalDrag("right", ev.clientX)}
+        >
+          <span className="h-7 w-0.5 rounded-full bg-transparent transition-colors group-hover:bg-ring" />
+        </div>
+
+        <div ref={rightColumnRef} className="flex h-full shrink-0 flex-col select-text" style={{ width: rightWidth }}>
+          <div
+            className="flex min-h-36 flex-col overflow-hidden"
+            style={{ height: `calc(${rightSplitPercent}% - 4px)` }}
+          >
+            <SessionsPanel
+              sessions={projectSessions}
+              theme={theme}
+              expandedPeekId={expandedPeekId}
+              peekCache={peekCache}
+              onTogglePeek={handleTogglePeek}
+              onRefreshPeek={(id) => void fetchPeek(id)}
+              onOpenTerminalStage={handleOpenTerminalStage}
+              onSelectForSend={(id) => {
+                setTargetSessionId(id)
+                showToast("Composer target switched to branch session")
+              }}
+              onInterrupt={(id) => void handleInterrupt(id)}
+              onArchive={(id) => void handleArchive(id)}
+            />
+          </div>
+
+          <div
+            className="group relative flex h-2 shrink-0 cursor-row-resize items-center justify-center"
+            role="separator"
+            aria-orientation="horizontal"
+            onMouseDown={(ev) => startRightVerticalDrag(ev.clientY)}
+          >
+            <span className="h-0.5 w-8 rounded-full bg-transparent transition-colors group-hover:bg-ring" />
+          </div>
+
+          <div
+            className="flex min-h-36 flex-col overflow-hidden"
+            style={{ height: `calc(${100 - rightSplitPercent}% - 4px)` }}
+          >
+            <KnowledgePanel
+              files={projectFiles}
+              activeFileId={activeStageFileId}
+              onOpenFile={handleOpenFile}
+              onAttachFile={(rel) => {
+                handleAddAttachment(rel)
+                showToast(`Attached @${rel}`)
+              }}
+            />
+          </div>
+        </div>
+
+        {toast && (
+          <div
+            className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-border bg-popover px-3.5 py-1.5 text-xs font-medium text-popover-foreground shadow-lg"
+            role="status"
+            data-testid="toast-pill"
+          >
+            {toast}
+          </div>
+        )}
       </div>
-
-      {toast && (
-        <div className="toast-pill" role="status" data-testid="toast-pill">
-          {toast}
-        </div>
-      )}
-    </div>
+    </TooltipProvider>
   )
 }

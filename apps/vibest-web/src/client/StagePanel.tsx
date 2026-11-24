@@ -18,6 +18,14 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEven
 import { renderSafeMarkdownHtml } from "../markdown-safe.ts"
 import type { ProjectFileEntry, SessionItem, StageItem, ThemeMode } from "../types.ts"
 import { webApi } from "./api.ts"
+import { Badge } from "./components/ui/badge.tsx"
+import { Button } from "./components/ui/button.tsx"
+import { Frame, FrameHeader, FramePanel, FrameTitle } from "./components/ui/frame.tsx"
+import { Input } from "./components/ui/input.tsx"
+import { ScrollArea } from "./components/ui/scroll-area.tsx"
+import { ToggleGroup, ToggleGroupItem } from "./components/ui/toggle-group.tsx"
+import { Toolbar, ToolbarGroup } from "./components/ui/toolbar.tsx"
+import { cn } from "./lib/utils.ts"
 import { WtermView } from "./WtermView.tsx"
 
 type ExcalidrawPropsType = Parameters<typeof Excalidraw>[0]
@@ -135,12 +143,12 @@ function MermaidDiagram(props: { readonly chart: string; readonly index: number;
   }, [chart, index, theme])
 
   if (error) {
-    return <pre className="stage-code-fallback">{chart}</pre>
+    return <pre className="rounded-lg border border-border bg-code p-3 font-mono text-xs">{chart}</pre>
   }
 
   return (
     <div
-      className="mermaid-card"
+      className="my-3 flex justify-center overflow-x-auto rounded-xl border border-border bg-muted/30 p-3.5"
       data-testid={`stage-mermaid-${index}`}
       dangerouslySetInnerHTML={{ __html: svgHtml }}
     />
@@ -187,12 +195,15 @@ function MarkdownStage(props: {
   }
 
   return (
-    <div className="stage-markdown-wrap" onMouseUp={captureSelection} data-testid="stage-markdown-view">
-      <div className="stage-subbar">
-        <span className="stage-hint">Select text or click Comment to send structured feedback to Composer.</span>
-        <button
+    <div className="flex min-h-0 flex-1 flex-col" onMouseUp={captureSelection} data-testid="stage-markdown-view">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted/25 px-3 py-1.5">
+        <span className="truncate text-[11px] text-muted-foreground">
+          Select text or click Comment to send structured feedback to Composer.
+        </span>
+        <Button
           type="button"
-          className="btn-ghost btn-xs"
+          variant="outline"
+          size="xs"
           data-testid="md-comment-btn"
           onClick={() => {
             captureSelection()
@@ -208,27 +219,31 @@ function MarkdownStage(props: {
             }
           }}
         >
-          <MessageSquarePlus size={12} aria-hidden="true" />
+          <MessageSquarePlus className="size-3" aria-hidden="true" />
           Comment to Composer
-        </button>
+        </Button>
       </div>
 
       {selectedQuote && (
-        <div className="stage-inline-popover" data-testid="md-composer-popover">
-          <div className="popover-quote">“{selectedQuote}”</div>
-          <div className="popover-row">
-            <input
+        <div
+          className="flex shrink-0 flex-col gap-2 border-b border-border bg-muted/40 p-2.5"
+          data-testid="md-composer-popover"
+        >
+          <div className="truncate font-mono text-[11px] text-info-foreground">“{selectedQuote}”</div>
+          <div className="flex items-center gap-1.5">
+            <Input
               type="text"
-              className="search-input"
+              size="sm"
+              className="flex-1"
               data-testid="md-note-input"
               placeholder="Write feedback for this section..."
               value={note}
               onChange={(ev) => setNote(ev.target.value)}
               autoFocus
             />
-            <button
+            <Button
               type="button"
-              className="btn-primary btn-xs"
+              size="xs"
               data-testid="md-add-to-composer-btn"
               onClick={() => {
                 const payload = `[Feedback on @${file.relativePath}]\n> "${selectedQuote}"\n${note.trim() || "Please refine this section."}`
@@ -238,23 +253,25 @@ function MarkdownStage(props: {
               }}
             >
               Add to Composer
-            </button>
-            <button type="button" className="icon-btn" onClick={() => setSelectedQuote(null)}>
-              <X size={13} aria-hidden="true" />
-            </button>
+            </Button>
+            <Button type="button" variant="ghost" size="icon-xs" onClick={() => setSelectedQuote(null)}>
+              <X className="size-3.5" aria-hidden="true" />
+            </Button>
           </div>
         </div>
       )}
 
-      <div ref={bodyRef} className="panel-scroll stage-markdown-body markdown-prose">
-        {segments.map((seg, idx) =>
-          seg.kind === "mermaid" ? (
-            <MermaidDiagram key={`m-${idx}`} chart={seg.raw} index={idx} theme={theme} />
-          ) : (
-            <SanitizedSegment key={`md-${idx}`} html={seg.html} />
-          ),
-        )}
-      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div ref={bodyRef} className="markdown-prose px-5 py-4 text-[13px] text-foreground">
+          {segments.map((seg, idx) =>
+            seg.kind === "mermaid" ? (
+              <MermaidDiagram key={`m-${idx}`} chart={seg.raw} index={idx} theme={theme} />
+            ) : (
+              <SanitizedSegment key={`md-${idx}`} html={seg.html} />
+            ),
+          )}
+        </div>
+      </ScrollArea>
     </div>
   )
 }
@@ -402,71 +419,59 @@ function HtmlPreviewStage(props: {
       : null
 
   return (
-    <div className="stage-html-wrap" data-testid="stage-html-view">
-      <div className="stage-subbar">
-        <div className="segmented" role="group" aria-label="HTML preview annotation mode">
-          <button
-            type="button"
-            data-testid="html-mode-interact"
-            className={`segmented-btn ${mode === "interact" ? "is-active" : ""}`}
-            onClick={() => {
-              setMode("interact")
-              setHoverTarget(null)
-            }}
-          >
-            <Hand size={12} aria-hidden="true" />
-            Interact
-          </button>
-          <button
-            type="button"
-            data-testid="html-mode-pick"
-            className={`segmented-btn ${mode === "pick" ? "is-active" : ""}`}
-            onClick={() => setMode("pick")}
-          >
-            <Crosshair size={12} aria-hidden="true" />
-            Pick Element
-          </button>
-          <button
-            type="button"
-            data-testid="html-mode-circle"
-            className={`segmented-btn ${mode === "circle" ? "is-active" : ""}`}
-            onClick={() => {
-              setMode("circle")
-              setHoverTarget(null)
-            }}
-          >
-            <Circle size={12} aria-hidden="true" />
-            Circle
-          </button>
-          <button
-            type="button"
-            data-testid="html-mode-box"
-            className={`segmented-btn ${mode === "box" ? "is-active" : ""}`}
-            onClick={() => {
-              setMode("box")
-              setHoverTarget(null)
-            }}
-          >
-            <SquareDashedMousePointer size={12} aria-hidden="true" />
-            Box
-          </button>
-        </div>
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="stage-html-view">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted/25 px-2.5 py-1.5">
+        <Toolbar className="border-none bg-transparent p-0">
+          <ToolbarGroup>
+            <ToggleGroup
+              size="sm"
+              variant="outline"
+              value={[mode]}
+              onValueChange={(vals) => {
+                const next = vals[0]
 
-        <span className="stage-hint">{htmlModeHint(mode)}</span>
+                if (next === "interact" || next === "pick" || next === "circle" || next === "box") {
+                  setMode(next)
+
+                  if (next !== "pick") setHoverTarget(null)
+                }
+              }}
+            >
+              <ToggleGroupItem value="interact" className="gap-1 text-[11px]" data-testid="html-mode-interact">
+                <Hand className="size-3" aria-hidden="true" />
+                Interact
+              </ToggleGroupItem>
+              <ToggleGroupItem value="pick" className="gap-1 text-[11px]" data-testid="html-mode-pick">
+                <Crosshair className="size-3" aria-hidden="true" />
+                Pick Element
+              </ToggleGroupItem>
+              <ToggleGroupItem value="circle" className="gap-1 text-[11px]" data-testid="html-mode-circle">
+                <Circle className="size-3" aria-hidden="true" />
+                Circle
+              </ToggleGroupItem>
+              <ToggleGroupItem value="box" className="gap-1 text-[11px]" data-testid="html-mode-box">
+                <SquareDashedMousePointer className="size-3" aria-hidden="true" />
+                Box
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </ToolbarGroup>
+        </Toolbar>
+
+        <span className="hidden truncate text-[11px] text-muted-foreground lg:inline">{htmlModeHint(mode)}</span>
       </div>
 
-      <div ref={wrapperRef} className="html-iframe-stage">
+      <div ref={wrapperRef} className="relative min-h-0 flex-1 bg-white">
         <iframe
           ref={iframeRef}
           src={previewUrl}
           title={file.name}
           sandbox="allow-scripts"
-          className="html-preview-iframe"
+          className="html-preview-iframe block size-full border-0"
         />
 
         {mode !== "interact" && (
           <div
-            className={`html-overlay is-${mode}`}
+            className={cn("absolute inset-0 z-10", mode === "pick" ? "cursor-crosshair" : "cursor-cell")}
             data-testid="html-annotation-overlay"
             onMouseMove={handleMouseMove}
             onMouseDown={handleMouseDown}
@@ -476,7 +481,7 @@ function HtmlPreviewStage(props: {
           >
             {mode === "pick" && hoverTarget && (
               <div
-                className="html-hover-box"
+                className="pointer-events-none absolute rounded-sm border-2 border-info bg-info/15"
                 style={{
                   left: hoverTarget.left,
                   top: hoverTarget.top,
@@ -484,13 +489,18 @@ function HtmlPreviewStage(props: {
                   height: hoverTarget.height,
                 }}
               >
-                <span className="html-selector-tag">{hoverTarget.selector}</span>
+                <span className="absolute -top-5 left-0 rounded bg-info px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap text-white">
+                  {hoverTarget.selector}
+                </span>
               </div>
             )}
 
             {activeDragBox && (
               <div
-                className={`html-region-shape ${mode === "circle" ? "is-circle" : ""}`}
+                className={cn(
+                  "pointer-events-none absolute border-2 border-dashed border-warning bg-warning/15",
+                  mode === "circle" ? "rounded-full" : "rounded-sm",
+                )}
                 style={{
                   left: activeDragBox.left,
                   top: activeDragBox.top,
@@ -502,7 +512,10 @@ function HtmlPreviewStage(props: {
 
             {pending && (
               <div
-                className={`html-region-shape is-pinned ${pending.kind === "circle" ? "is-circle" : ""}`}
+                className={cn(
+                  "pointer-events-none absolute border-2 border-solid border-warning bg-warning/15",
+                  pending.kind === "circle" ? "rounded-full" : "rounded-sm",
+                )}
                 style={{
                   left: pending.left,
                   top: pending.top,
@@ -515,21 +528,27 @@ function HtmlPreviewStage(props: {
         )}
 
         {pending && (
-          <div className="html-feedback-popover" data-testid="html-feedback-popover">
-            <div className="popover-target-label">{pending.label}</div>
-            <div className="popover-row">
-              <input
+          <div
+            className="absolute inset-x-3 bottom-3 z-20 flex flex-col gap-2 rounded-xl border border-border bg-popover p-2.5 text-popover-foreground shadow-lg"
+            data-testid="html-feedback-popover"
+          >
+            <div className="popover-target-label truncate font-mono text-[11px] text-info-foreground">
+              {pending.label}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Input
                 type="text"
-                className="search-input"
+                size="sm"
+                className="flex-1"
                 data-testid="html-feedback-input"
                 placeholder="Describe visual adjustment..."
                 value={note}
                 onChange={(ev) => setNote(ev.target.value)}
                 autoFocus
               />
-              <button
+              <Button
                 type="button"
-                className="btn-primary btn-xs"
+                size="xs"
                 data-testid="html-add-to-composer-btn"
                 onClick={() => {
                   const formatted = `[Visual Feedback @${file.relativePath}]\nTarget: ${pending.label}\nNote: ${note.trim() || "Tighten spacing and contrast here."}`
@@ -539,10 +558,10 @@ function HtmlPreviewStage(props: {
                 }}
               >
                 Add to Composer
-              </button>
-              <button type="button" className="icon-btn" onClick={() => setPending(null)}>
-                <X size={13} aria-hidden="true" />
-              </button>
+              </Button>
+              <Button type="button" variant="ghost" size="icon-xs" onClick={() => setPending(null)}>
+                <X className="size-3.5" aria-hidden="true" />
+              </Button>
             </div>
           </div>
         )}
@@ -559,7 +578,7 @@ function restoreExcalidrawScene(raw: string, theme: ThemeMode) {
     return {
       elements,
       appState: {
-        viewBackgroundColor: theme === "dark" ? "#13161b" : "#ffffff",
+        viewBackgroundColor: theme === "dark" ? "#111215" : "#ffffff",
         theme,
       },
       scrollToContent: true,
@@ -568,7 +587,7 @@ function restoreExcalidrawScene(raw: string, theme: ThemeMode) {
     return {
       elements: restoreElements([], null),
       appState: {
-        viewBackgroundColor: theme === "dark" ? "#13161b" : "#ffffff",
+        viewBackgroundColor: theme === "dark" ? "#111215" : "#ffffff",
         theme,
       },
       scrollToContent: true,
@@ -655,30 +674,27 @@ function ExcalidrawStage(props: {
   }
 
   return (
-    <div className="stage-excalidraw-wrap" data-testid="stage-excalidraw-view">
-      <div className="stage-subbar">
-        <div className="btn-row">
-          <button
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="stage-excalidraw-view">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted/25 px-2.5 py-1.5">
+        <div className="flex items-center gap-1.5">
+          <Button
             type="button"
-            className="btn-ghost btn-xs"
+            variant="outline"
+            size="xs"
             data-testid="excalidraw-add-node-btn"
             onClick={handleAddNode}
           >
-            <PlusCircle size={12} aria-hidden="true" />
+            <PlusCircle className="size-3" aria-hidden="true" />
             Add Node
-          </button>
-          <button
-            type="button"
-            className="btn-primary btn-xs"
-            data-testid="excalidraw-save-btn"
-            onClick={() => void handleSave()}
-          >
-            <Save size={12} aria-hidden="true" />
+          </Button>
+          <Button type="button" size="xs" data-testid="excalidraw-save-btn" onClick={() => void handleSave()}>
+            <Save className="size-3" aria-hidden="true" />
             Save to Artifacts
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="btn-ghost btn-xs"
+            variant="ghost"
+            size="xs"
             onClick={() =>
               onAddToComposer(
                 `[Architecture Board @${file.relativePath}]\nUpdated board diagram — align implementation with these panel boundaries.`,
@@ -686,16 +702,17 @@ function ExcalidrawStage(props: {
               )
             }
           >
-            <MessageSquarePlus size={12} aria-hidden="true" />
+            <MessageSquarePlus className="size-3" aria-hidden="true" />
             Add to Composer
-          </button>
+          </Button>
         </div>
-        <span className="meta-chip" data-testid="excalidraw-save-state">
+
+        <Badge variant={saveLabel === "Saved" ? "success" : "warning"} size="sm" data-testid="excalidraw-save-state">
           {saveLabel}
-        </span>
+        </Badge>
       </div>
 
-      <div className="excalidraw-canvas-host">
+      <div className="relative min-h-0 flex-1">
         <Excalidraw
           key={file.id}
           excalidrawAPI={handleApi}
@@ -753,26 +770,32 @@ export function StagePanel(props: {
     const session = sessions.find((s) => s.id === item.sessionId)
 
     return (
-      <section className="panel panel-stage" data-testid="stage-panel">
-        <header className="panel-header">
-          <div className="panel-title-group">
-            <Terminal size={14} className="panel-icon" aria-hidden="true" />
-            <span className="panel-title">Terminal · {session?.name ?? item.sessionId.slice(0, 8)}</span>
-            {session?.git?.branch ? <span className="meta-chip meta-branch">{session.git.branch}</span> : null}
+      <Frame className="h-full min-h-0 flex-1 overflow-hidden" data-testid="stage-panel">
+        <FrameHeader className="flex-row items-center justify-between gap-2 px-3 py-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <FrameTitle className="truncate text-xs font-semibold">
+              Terminal · {session?.name ?? item.sessionId.slice(0, 8)}
+            </FrameTitle>
+            {session?.git?.branch ? (
+              <Badge variant="outline" size="sm" className="font-mono text-[10px]">
+                {session.git.branch}
+              </Badge>
+            ) : null}
           </div>
-          <button type="button" className="icon-btn" title="Close Stage" onClick={onClose}>
-            <X size={14} aria-hidden="true" />
-          </button>
-        </header>
-        <div className="stage-body">
+          <Button type="button" variant="ghost" size="icon-xs" title="Close Stage" onClick={onClose}>
+            <X className="size-3.5" aria-hidden="true" />
+          </Button>
+        </FrameHeader>
+        <FramePanel className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
           <WtermView
             content={peekText}
             theme={theme}
             title={`${session?.harness ?? "harness"} · ${session?.name ?? item.sessionId.slice(0, 8)}`}
             onRefresh={() => onRefreshPeek(item.sessionId)}
           />
-        </div>
-      </section>
+        </FramePanel>
+      </Frame>
     )
   }
 
@@ -780,23 +803,34 @@ export function StagePanel(props: {
   const rawUrl = `/api/projects/${encodeURIComponent(file.projectId)}/file?path=${encodeURIComponent(file.relativePath)}&raw=1`
 
   return (
-    <section className="panel panel-stage" data-testid="stage-panel">
-      <header className="panel-header">
-        <div className="panel-title-group">
-          <FileCode2 size={14} className="panel-icon" aria-hidden="true" />
-          <span className="panel-title" title={file.relativePath}>
+    <Frame className="h-full min-h-0 flex-1 overflow-hidden" data-testid="stage-panel">
+      <FrameHeader className="flex-row items-center justify-between gap-2 px-3 py-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <FrameTitle className="truncate text-xs font-semibold" title={file.relativePath}>
             {file.name}
-          </span>
-          <span className="file-ext-pill">{file.category}</span>
+          </FrameTitle>
+          <Badge variant="outline" size="sm" className="font-mono text-[10px]">
+            {file.category}
+          </Badge>
         </div>
-        <button type="button" className="icon-btn" data-testid="stage-close-btn" title="Close Stage" onClick={onClose}>
-          <X size={14} aria-hidden="true" />
-        </button>
-      </header>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          data-testid="stage-close-btn"
+          title="Close Stage"
+          onClick={onClose}
+        >
+          <X className="size-3.5" aria-hidden="true" />
+        </Button>
+      </FrameHeader>
 
-      <div className="stage-body">
+      <FramePanel className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
         {loading ? (
-          <div className="empty-state">Loading {file.name}...</div>
+          <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
+            Loading {file.name}...
+          </div>
         ) : file.kind === "markdown" ? (
           <MarkdownStage file={file} content={content} theme={theme} onAddToComposer={onAddToComposer} />
         ) : file.kind === "html" ? (
@@ -804,17 +838,19 @@ export function StagePanel(props: {
         ) : file.kind === "excalidraw" ? (
           <ExcalidrawStage file={file} initialContent={content} theme={theme} onAddToComposer={onAddToComposer} />
         ) : file.kind === "image" ? (
-          <div className="stage-media-wrap">
-            <img src={rawUrl} alt={file.name} className="stage-image" />
+          <div className="flex flex-1 items-center justify-center bg-code p-4">
+            <img src={rawUrl} alt={file.name} className="max-h-full max-w-full rounded-lg" />
           </div>
         ) : file.kind === "video" ? (
-          <div className="stage-media-wrap">
-            <video src={rawUrl} controls className="stage-video" />
+          <div className="flex flex-1 items-center justify-center bg-code p-4">
+            <video src={rawUrl} controls className="max-h-full max-w-full rounded-lg" />
           </div>
         ) : (
-          <pre className="panel-scroll stage-text-body">{content}</pre>
+          <ScrollArea className="min-h-0 flex-1">
+            <pre className="m-0 p-4 font-mono text-xs text-foreground">{content}</pre>
+          </ScrollArea>
         )}
-      </div>
-    </section>
+      </FramePanel>
+    </Frame>
   )
 }

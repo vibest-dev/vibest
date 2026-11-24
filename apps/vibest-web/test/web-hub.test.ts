@@ -507,4 +507,17 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
     const badUri = await fetch(`${server.url}/api/projects/%E0%A4%A/files`)
     expect(badUri.status).toBe(400)
   })
+
+  it("serves compiled Tailwind v4 and coss ui CSS tokens from dist/styles.css", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-css-"))
+    tempDirs.push(home)
+    const server = await createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
+    servers.push(server)
+
+    const cssRes = await fetch(`${server.url}/styles.css`)
+    expect(cssRes.status).toBe(200)
+    const css = await cssRes.text()
+    expect(css).toContain("--background")
+    expect(css).toContain("--sidebar")
+  })
 })

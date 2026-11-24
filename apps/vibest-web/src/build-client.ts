@@ -1,3 +1,4 @@
+import childProcess from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import url from "node:url"
@@ -52,14 +53,17 @@ export async function buildClientAssets(): Promise<string> {
     fs.copyFileSync(wtermCssSrc, path.join(distDir, "wterm.css"))
   }
 
+  const tailwindBin = path.join(ROOT_DIR, "node_modules", ".bin", "tailwindcss")
   const appCssSrc = path.join(MODULE_DIR, "client", "styles.css")
+  const appCssOut = path.join(distDir, "styles.css")
 
-  if (fs.existsSync(appCssSrc)) {
-    fs.copyFileSync(appCssSrc, path.join(distDir, "styles.css"))
-  }
+  childProcess.execFileSync(tailwindBin, ["-i", appCssSrc, "-o", appCssOut, "--minify"], {
+    cwd: ROOT_DIR,
+    stdio: "pipe",
+  })
 
   const indexHtml = `<!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />

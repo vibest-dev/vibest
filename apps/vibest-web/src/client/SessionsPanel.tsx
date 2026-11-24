@@ -12,6 +12,15 @@ import {
 import { useMemo, useState } from "react"
 
 import type { SessionFilter, SessionItem, ThemeMode } from "../types.ts"
+import { Badge } from "./components/ui/badge.tsx"
+import { Button } from "./components/ui/button.tsx"
+import { Collapsible, CollapsiblePanel } from "./components/ui/collapsible.tsx"
+import { Empty, EmptyDescription, EmptyTitle } from "./components/ui/empty.tsx"
+import { Frame, FrameHeader, FramePanel, FrameTitle } from "./components/ui/frame.tsx"
+import { ScrollArea } from "./components/ui/scroll-area.tsx"
+import { Tabs, TabsList, TabsTab } from "./components/ui/tabs.tsx"
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./components/ui/tooltip.tsx"
+import { cn } from "./lib/utils.ts"
 import { WtermView } from "./WtermView.tsx"
 
 function formatElapsed(createdAt: number, lastActive: number): string {
@@ -27,13 +36,24 @@ function formatElapsed(createdAt: number, lastActive: number): string {
 }
 
 function statusDotClass(session: SessionItem): string {
-  if (session.needsYou) return "is-needs-you"
+  if (session.needsYou) return "bg-warning shadow-[0_0_0_2px_color-mix(in_srgb,var(--warning)_24%,transparent)]"
 
-  if (session.status === "working") return "is-working"
+  if (session.status === "working")
+    return "bg-info shadow-[0_0_0_2px_color-mix(in_srgb,var(--info)_24%,transparent)] animate-pulse"
 
-  if (session.status === "done") return "is-done"
+  if (session.status === "done") return "bg-success"
 
-  return "is-idle"
+  return "bg-muted-foreground/50"
+}
+
+function statusBadgeVariant(session: SessionItem): "warning" | "info" | "success" | "secondary" {
+  if (session.needsYou) return "warning"
+
+  if (session.status === "working") return "info"
+
+  if (session.status === "done") return "success"
+
+  return "secondary"
 }
 
 function statusLabel(session: SessionItem): string {
@@ -100,169 +120,194 @@ export function SessionsPanel(props: {
   }, [branchSessions, filter])
 
   return (
-    <section className="panel panel-sessions" data-testid="sessions-panel">
-      <header className="panel-header">
-        <div className="panel-title-group">
-          <Layers size={14} className="panel-icon" aria-hidden="true" />
-          <span className="panel-title">Sessions</span>
-          <span className="count-pill tabular-nums">{counts.all}</span>
+    <Frame className="h-full min-h-0 flex-1 overflow-hidden" data-testid="sessions-panel">
+      <FrameHeader className="flex-row items-center justify-between gap-2 px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          <Layers className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <FrameTitle className="text-xs font-semibold tracking-tight">Sessions</FrameTitle>
+          <Badge variant="outline" size="sm" className="tabular-nums">
+            {counts.all}
+          </Badge>
         </div>
-        <span className="live-indicator" title="Live via vibestd Watch SSE">
-          <span className="status-dot is-working" />
+
+        <Badge variant="info" size="sm" className="gap-1.5" title="Live via vibestd Watch SSE">
+          <span className="size-1.5 animate-pulse rounded-full bg-info" />
           Watch
-        </span>
-      </header>
+        </Badge>
+      </FrameHeader>
 
-      <div className="filter-bar" role="tablist" aria-label="Filter branch sessions">
-        <button
-          type="button"
-          className={`filter-pill ${filter === "all" ? "is-active" : ""}`}
-          data-testid="sessions-filter-all"
-          onClick={() => setFilter("all")}
-        >
-          All <span className="tabular-nums">{counts.all}</span>
-        </button>
-        <button
-          type="button"
-          className={`filter-pill ${filter === "needs_you" ? "is-active" : ""}`}
-          data-testid="sessions-filter-needs-you"
-          onClick={() => setFilter("needs_you")}
-        >
-          Needs You <span className="tabular-nums">{counts.needsYou}</span>
-        </button>
-        <button
-          type="button"
-          className={`filter-pill ${filter === "working" ? "is-active" : ""}`}
-          data-testid="sessions-filter-working"
-          onClick={() => setFilter("working")}
-        >
-          Working <span className="tabular-nums">{counts.working}</span>
-        </button>
-        <button
-          type="button"
-          className={`filter-pill ${filter === "done" ? "is-active" : ""}`}
-          data-testid="sessions-filter-done"
-          onClick={() => setFilter("done")}
-        >
-          Done <span className="tabular-nums">{counts.done}</span>
-        </button>
-      </div>
+      <FramePanel className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
+        <div className="border-b border-border px-2.5 py-1.5">
+          <Tabs
+            value={filter}
+            onValueChange={(val) => {
+              if (val === "all" || val === "needs_you" || val === "working" || val === "done") {
+                setFilter(val)
+              }
+            }}
+          >
+            <TabsList className="w-full" size="sm">
+              <TabsTab value="all" className="flex-1 text-[11px]" data-testid="sessions-filter-all">
+                All <span className="tabular-nums opacity-70">{counts.all}</span>
+              </TabsTab>
+              <TabsTab value="needs_you" className="flex-1 text-[11px]" data-testid="sessions-filter-needs-you">
+                Needs You <span className="tabular-nums opacity-70">{counts.needsYou}</span>
+              </TabsTab>
+              <TabsTab value="working" className="flex-1 text-[11px]" data-testid="sessions-filter-working">
+                Working <span className="tabular-nums opacity-70">{counts.working}</span>
+              </TabsTab>
+              <TabsTab value="done" className="flex-1 text-[11px]" data-testid="sessions-filter-done">
+                Done <span className="tabular-nums opacity-70">{counts.done}</span>
+              </TabsTab>
+            </TabsList>
+          </Tabs>
+        </div>
 
-      <div className="panel-scroll sessions-list">
-        {filtered.map((session) => {
-          const isExpanded = expandedPeekId === session.id
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="flex flex-col gap-2 p-2">
+            {filtered.map((session) => {
+              const isExpanded = expandedPeekId === session.id
 
-          return (
-            <div
-              key={session.id}
-              className={`session-card ${isExpanded ? "is-expanded" : ""}`}
-              data-testid={`session-card-${session.id.slice(0, 8)}`}
-            >
-              <button
-                type="button"
-                className="session-card-main"
-                onClick={() => onTogglePeek(session.id)}
-                aria-expanded={isExpanded}
-              >
-                <div className="session-card-top">
-                  {isExpanded ? (
-                    <ChevronDown size={13} className="session-chevron" aria-hidden="true" />
-                  ) : (
-                    <ChevronRight size={13} className="session-chevron" aria-hidden="true" />
+              return (
+                <Collapsible
+                  key={session.id}
+                  open={isExpanded}
+                  onOpenChange={() => onTogglePeek(session.id)}
+                  className={cn(
+                    "overflow-hidden rounded-xl border bg-background/80 transition-colors",
+                    isExpanded ? "border-ring/50 shadow-xs" : "border-border",
                   )}
-                  <span className={`status-dot ${statusDotClass(session)}`} />
-                  <span className="session-title">{session.name}</span>
-                  <span className="session-elapsed tabular-nums">
-                    {formatElapsed(session.createdAt, session.lastActive)}
-                  </span>
-                </div>
-
-                <div className="session-badges">
-                  <span
-                    className={`badge ${session.needsYou ? "badge-amber" : session.status === "working" ? "badge-blue" : "badge-muted"}`}
+                  data-testid={`session-card-${session.id.slice(0, 8)}`}
+                >
+                  <button
+                    type="button"
+                    className="flex w-full cursor-pointer flex-col gap-1.5 px-2.5 pt-2.5 pb-2 text-left transition-colors hover:bg-accent/50"
+                    onClick={() => onTogglePeek(session.id)}
+                    aria-expanded={isExpanded}
                   >
-                    {statusLabel(session)}
-                  </span>
-                  {session.git?.branch ? (
-                    <span className="meta-chip meta-branch">
-                      <GitBranch size={10} aria-hidden="true" />
-                      {session.git.branch}
-                    </span>
-                  ) : null}
-                  {session.git?.pushed ? (
-                    <span className="meta-chip meta-pushed">
-                      <CloudUpload size={10} aria-hidden="true" />
-                      pushed
-                    </span>
-                  ) : session.git?.saved ? (
-                    <span className="meta-chip">saved</span>
-                  ) : null}
-                  <span className="meta-chip">
-                    {session.harness}
-                    {session.model ? `/${session.model}` : ""}
-                  </span>
-                </div>
+                    <div className="flex items-center gap-1.5">
+                      {isExpanded ? (
+                        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      ) : (
+                        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      )}
+                      <span className={cn("size-2 shrink-0 rounded-full", statusDotClass(session))} />
+                      <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
+                        {session.name}
+                      </span>
+                      <span className="font-mono text-[10.5px] text-muted-foreground tabular-nums">
+                        {formatElapsed(session.createdAt, session.lastActive)}
+                      </span>
+                    </div>
 
-                {session.summary.length > 0 && <div className="session-summary">{session.summary}</div>}
-              </button>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Badge variant={statusBadgeVariant(session)} size="sm">
+                        {statusLabel(session)}
+                      </Badge>
+                      {session.git?.branch ? (
+                        <Badge variant="outline" size="sm" className="max-w-44 gap-1 truncate font-mono text-[10px]">
+                          <GitBranch className="size-2.5 shrink-0" aria-hidden="true" />
+                          <span className="truncate">{session.git.branch}</span>
+                        </Badge>
+                      ) : null}
+                      {session.git?.pushed ? (
+                        <Badge variant="success" size="sm" className="gap-1">
+                          <CloudUpload className="size-2.5" aria-hidden="true" />
+                          pushed
+                        </Badge>
+                      ) : session.git?.saved ? (
+                        <Badge variant="secondary" size="sm">
+                          saved
+                        </Badge>
+                      ) : null}
+                      <Badge variant="outline" size="sm" className="font-mono text-[10px] text-muted-foreground">
+                        {session.harness}
+                        {session.model ? `/${session.model}` : ""}
+                      </Badge>
+                    </div>
 
-              <div className="session-actions">
-                <button
-                  type="button"
-                  className="btn-ghost btn-xs"
-                  data-testid={`session-peek-btn-${session.id.slice(0, 8)}`}
-                  onClick={() => onTogglePeek(session.id)}
-                >
-                  <Terminal size={11} aria-hidden="true" />
-                  Peek
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost btn-xs"
-                  data-testid={`session-send-btn-${session.id.slice(0, 8)}`}
-                  onClick={() => onSelectForSend(session.id)}
-                >
-                  <Send size={11} aria-hidden="true" />
-                  Send
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost btn-xs"
-                  data-testid={`session-interrupt-btn-${session.id.slice(0, 8)}`}
-                  onClick={() => onInterrupt(session.id)}
-                >
-                  <Square size={10} aria-hidden="true" />
-                  Interrupt
-                </button>
-                <button
-                  type="button"
-                  className="btn-ghost btn-xs is-danger"
-                  data-testid={`session-archive-btn-${session.id.slice(0, 8)}`}
-                  onClick={() => onArchive(session.id)}
-                >
-                  <Archive size={11} aria-hidden="true" />
-                  Archive
-                </button>
-              </div>
+                    {session.summary.length > 0 && (
+                      <p className="line-clamp-2 text-[11.5px] leading-snug text-muted-foreground">{session.summary}</p>
+                    )}
+                  </button>
 
-              {isExpanded && (
-                <div className="session-inline-peek">
-                  <WtermView
-                    content={peekCache[session.id] ?? "Connecting to terminal stream..."}
-                    theme={theme}
-                    compact
-                    title={`@wterm/dom · ${session.git?.branch || session.name}`}
-                    onRefresh={() => onRefreshPeek(session.id)}
-                    onExpand={() => onOpenTerminalStage(session.id)}
-                  />
-                </div>
-              )}
-            </div>
-          )
-        })}
+                  <div className="flex items-center gap-1 border-t border-border/70 bg-muted/25 px-2 py-1.5">
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="xs"
+                            data-testid={`session-peek-btn-${session.id.slice(0, 8)}`}
+                            onClick={() => onTogglePeek(session.id)}
+                          >
+                            <Terminal className="size-3" aria-hidden="true" />
+                            Peek
+                          </Button>
+                        }
+                      />
+                      <TooltipPopup>Toggle live @wterm/dom terminal peek</TooltipPopup>
+                    </Tooltip>
 
-        {filtered.length === 0 && <div className="empty-state">No branch sessions in this filter.</div>}
-      </div>
-    </section>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      data-testid={`session-send-btn-${session.id.slice(0, 8)}`}
+                      onClick={() => onSelectForSend(session.id)}
+                    >
+                      <Send className="size-3" aria-hidden="true" />
+                      Send
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      data-testid={`session-interrupt-btn-${session.id.slice(0, 8)}`}
+                      onClick={() => onInterrupt(session.id)}
+                    >
+                      <Square className="size-2.5" aria-hidden="true" />
+                      Interrupt
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      className="ml-auto text-muted-foreground hover:text-destructive-foreground"
+                      data-testid={`session-archive-btn-${session.id.slice(0, 8)}`}
+                      onClick={() => onArchive(session.id)}
+                    >
+                      <Archive className="size-3" aria-hidden="true" />
+                      Archive
+                    </Button>
+                  </div>
+
+                  <CollapsiblePanel className="border-t border-border/70 bg-muted/20 p-1.5">
+                    <WtermView
+                      content={peekCache[session.id] ?? "Connecting to terminal stream..."}
+                      theme={theme}
+                      compact
+                      title={`@wterm/dom · ${session.git?.branch || session.name}`}
+                      onRefresh={() => onRefreshPeek(session.id)}
+                      onExpand={() => onOpenTerminalStage(session.id)}
+                    />
+                  </CollapsiblePanel>
+                </Collapsible>
+              )
+            })}
+
+            {filtered.length === 0 && (
+              <Empty className="py-8">
+                <EmptyTitle className="text-xs">No branch sessions</EmptyTitle>
+                <EmptyDescription className="text-xs">No subagents match this filter.</EmptyDescription>
+              </Empty>
+            )}
+          </div>
+        </ScrollArea>
+      </FramePanel>
+    </Frame>
   )
 }
