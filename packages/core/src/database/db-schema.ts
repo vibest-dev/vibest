@@ -120,7 +120,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 23
+export const PROJECTION_VERSION = 24
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -144,7 +144,6 @@ export const PROJECTION_SCHEMA = [
     origin_peer           TEXT,
     origin_project        TEXT,
     origin_session        TEXT,
-    team                  TEXT,
     created_at            INTEGER NOT NULL,
     ended_at              INTEGER,
     process_id            INTEGER,
@@ -155,6 +154,12 @@ export const PROJECTION_SCHEMA = [
   `CREATE INDEX session_parent ON session (parent_session_id)`,
   `CREATE INDEX session_live ON session (directory) WHERE ended_at IS NULL`,
   `CREATE INDEX session_origin ON session (origin_peer, origin_project) WHERE origin_peer IS NOT NULL`,
+  `CREATE TABLE session_edge (
+    from_session_id TEXT NOT NULL,
+    to_session_id   TEXT NOT NULL,
+    PRIMARY KEY (from_session_id, to_session_id)
+  ) STRICT`,
+  `CREATE INDEX session_edge_to ON session_edge (to_session_id)`,
   `CREATE TABLE process (
     session_id           TEXT NOT NULL,
     id                   INTEGER NOT NULL,
@@ -254,6 +259,7 @@ export const PROJECTION_TABLES = {
   project: "id",
   project_repository: "path",
   session: "id",
+  session_edge: "from_session_id, to_session_id",
   process: "session_id, id",
   execution: "session_id, id",
   inbox: "recipient_session_id, id",

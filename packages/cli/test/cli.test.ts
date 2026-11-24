@@ -2,12 +2,12 @@ import net from "node:net"
 
 import { assert, describe, it } from "@effect/vitest"
 import { runVibest as vibest, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
+import { EdgeChain, EdgeDirected, EdgeMutual } from "@vibest/protocol/rpc"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Effect, FileSystem, Path, Schema } from "effect"
 
 import * as Platform from "#platform"
 
-import { bareTeam } from "../src/commands/commands.ts"
 import { VERSION } from "../src/version.ts"
 
 const TIMEOUT = 30_000
@@ -159,19 +159,25 @@ describe("vibest CLI without vibestd", () => {
   )
 })
 
-describe("vibest run --team", () => {
-  type SpawnCall = { harness?: string | null; prompt?: string; team?: string; newTeam?: boolean }
+describe("vibest run links and vibest session link/unlink", () => {
+  type SpawnCall = {
+    harness?: string | null
+    prompt?: string
+    from?: ReadonlyArray<string>
+    to?: ReadonlyArray<string>
+    with?: ReadonlyArray<string>
+  }
 
-  type TeamListCall = { team?: string }
+  type LinkCall = { method: "Session.Link" | "Session.Unlink"; spec: Schema.Json }
 
   const agentEnv = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }
   const spawnedId = "11111111-1111-4111-8111-111111111111"
 
-  const teamDaemon = (capabilities: Record<string, boolean>) =>
+  const linkDaemon = () =>
     Effect.gen(function* () {
-      const home = yield* tempDirectory("vibest-team-cli-")
+      const home = yield* tempDirectory("vibest-link-cli-")
       const spawns: Array<SpawnCall> = []
-      const teamLists: Array<TeamListCall> = []
+      const links: Array<LinkCall> = []
 
       const server = net.createServer((sock) => {
         let buf = ""
@@ -179,14 +185,21 @@ describe("vibest run --team", () => {
           buf += chunk.toString()
 
           for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
-            const req = JSON.parse(buf.slice(0, nl)) as { id?: string; method?: string; params?: SpawnCall }
+            const req = JSON.parse(buf.slice(0, nl)) as {
+              id?: string
+              method?: string
+              params?: SpawnCall & { spec?: Schema.Json }
+            }
+
             buf = buf.slice(nl + 1)
 
             const reply = (body: Schema.JsonObject) =>
               sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, ...body }) + "\n")
 
             if (req.method === "Ping")
-              reply({ result: { protocol: PROTOCOL, version: VERSION, runtimes: [], capabilities } })
+              reply({
+                result: { protocol: PROTOCOL, version: VERSION, runtimes: [], capabilities: { requests: true } },
+              })
             else if (req.method === "Harnesses.List") reply({ result: [] })
             else if (req.method === "Spawn") {
               const params = req.params ?? {}
@@ -197,20 +210,11 @@ describe("vibest run --team", () => {
                   harness: params.harness ?? "pi",
                   decidedBy: {},
                   trace: [],
-                  ...(params.newTeam === true && { team: "t-1234" }),
-                  ...(params.team !== undefined && { team: params.team }),
                 },
               })
-            } else if (req.method === "Team.List") {
-              if (capabilities.teams !== true) {
-                sock.write(
-                  `{"jsonrpc":"2.0","id":${JSON.stringify(req.id)},"error":{"_tag":"Cause","code":0,"message":"Unknown request tag: Team.List","data":[{"_tag":"Die","defect":"Unknown request tag: Team.List"}]}}\n`,
-                )
-              } else {
-                const params: TeamListCall = req.params ?? {}
-                teamLists.push(params)
-                reply({ result: { team: params.team ?? "t-1234", members: [] } })
-              }
+            } else if (req.method === "Session.Link" || req.method === "Session.Unlink") {
+              links.push({ method: req.method, spec: req.params?.spec ?? null })
+              reply({ result: { edges: [{ from: "a", to: "b" }] } })
             }
           }
         })
@@ -224,120 +228,72 @@ describe("vibest run --team", () => {
       const run = (args: ReadonlyArray<string>, extra: Record<string, string> = agentEnv) =>
         vibest(home, { HOME: home, VIBEST_HOME: home, ...extra }, args)
 
-      return { home, spawns, teamLists, run }
+      return { home, spawns, links, run }
     })
 
-  it("takes the next word as the team id only when it has the id's form", () => {
-    assert.deepStrictEqual(bareTeam(["run", "--team", "pi", "--", "task"]), ["run", "--team=", "pi", "--", "task"])
-    assert.deepStrictEqual(bareTeam(["run", "pi", "--team", "--", "task"]), ["run", "pi", "--team=", "--", "task"])
-    assert.deepStrictEqual(bareTeam(["run", "--team", "--env", "A=1", "pi"]), ["run", "--team=", "--env", "A=1", "pi"])
-    assert.deepStrictEqual(bareTeam(["run", "--team", "t-3f2a", "pi"]), ["run", "--team", "t-3f2a", "pi"])
-    assert.deepStrictEqual(bareTeam(["run", "pi", "--", "--team"]), ["run", "pi", "--", "--team"])
-    assert.deepStrictEqual(bareTeam(["ls", "--team", "t-3f2a"]), ["ls", "--team", "t-3f2a"])
-  })
-
   it.effect(
-    "refuses repeated --team flags on vibest run instead of dropping one",
+    "passes repeatable --from, --to, and --with on vibest run",
     () =>
       Effect.gen(function* () {
-        const d = yield* teamDaemon({ requests: true, teams: true })
+        const d = yield* linkDaemon()
 
-        for (const args of [
-          ["run", "--team", "--team", "t-1234", "pi", "--", "do work"],
-          ["run", "--team", "t-1234", "--team", "pi", "--", "do work"],
-          ["run", "--team", "t-1234", "--team", "t-5678", "pi", "--", "do work"],
-        ]) {
-          const r = yield* d.run(args)
-          assert.notStrictEqual(r.code, 0, `${args.join(" ")}: ${r.stdout}`)
-          assert.include(r.stderr, "EmptyInput: give --team only once")
-        }
-
-        assert.lengthOf(d.spawns, 0)
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
-
-  it.effect(
-    "refuses vibest ls --team with LaunchFailed when vibestd lacks capabilities.teams",
-    () =>
-      Effect.gen(function* () {
-        const d = yield* teamDaemon({ requests: true })
-        const r = yield* d.run(["ls", "--team"])
-        assert.strictEqual(r.code, 1, r.stdout)
-        assert.strictEqual(
-          r.stderr.trim(),
-          "LaunchFailed: this vibestd does not take --team on vibest ls; run vibest update",
-        )
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
-
-  it.effect(
-    "rewrites bare --team when a value-taking global flag precedes run",
-    () =>
-      Effect.gen(function* () {
-        assert.deepStrictEqual(bareTeam(["--log-level", "debug", "run", "--team", "pi", "--", "do work"]), [
-          "--log-level",
-          "debug",
+        const r = yield* d.run([
           "run",
-          "--team=",
+          "--from",
+          "aaaa1111",
+          "--from",
+          "bbbb2222",
+          "--to",
+          "cccc3333",
+          "--with",
+          "dddd4444",
           "pi",
           "--",
           "do work",
         ])
-        assert.deepStrictEqual(bareTeam(["--log-level", "info", "run", "--team", "--", "do work"]), [
-          "--log-level",
-          "info",
-          "run",
-          "--team=",
-          "--",
-          "do work",
+
+        assert.strictEqual(r.code, 0, r.stderr)
+        assert.deepStrictEqual(JSON.parse(r.stdout), { id: spawnedId })
+        assert.deepInclude(d.spawns[0], {
+          harness: "pi",
+          prompt: "do work",
+          from: ["aaaa1111", "bbbb2222"],
+          to: ["cccc3333"],
+          with: ["dddd4444"],
+        })
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
+
+  it.effect(
+    "parses vibest session link and unlink for mutual, directed, and chain modes",
+    () =>
+      Effect.gen(function* () {
+        const d = yield* linkDaemon()
+
+        const mutual = yield* d.run(["session", "link", "a", "b", "c"])
+        assert.strictEqual(mutual.code, 0, mutual.stderr)
+        assert.deepStrictEqual(JSON.parse(mutual.stdout), { edges: [{ from: "a", to: "b" }] })
+
+        const directed = yield* d.run(["session", "link", "a", "b", "--to", "c", "--to", "d"])
+        assert.strictEqual(directed.code, 0, directed.stderr)
+
+        const chain = yield* d.run(["session", "link", "--chain", "a", "b", "c"])
+        assert.strictEqual(chain.code, 0, chain.stderr)
+
+        const unlinked = yield* d.run(["session", "unlink", "a", "--to", "b"])
+        assert.strictEqual(unlinked.code, 0, unlinked.stderr)
+
+        assert.deepStrictEqual(d.links, [
+          { method: "Session.Link", spec: EdgeMutual.make({ ids: ["a", "b", "c"] }) },
+          { method: "Session.Link", spec: EdgeDirected.make({ from: ["a", "b"], to: ["c", "d"] }) },
+          { method: "Session.Link", spec: EdgeChain.make({ ids: ["a", "b", "c"] }) },
+          { method: "Session.Unlink", spec: EdgeDirected.make({ from: ["a"], to: ["b"] }) },
         ])
-        const d = yield* teamDaemon({ requests: true, teams: true })
-        const r1 = yield* d.run(["--log-level", "debug", "run", "--team", "pi", "--", "do work"])
-        assert.strictEqual(r1.code, 0, r1.stderr)
-        assert.deepInclude(d.spawns[0], { harness: "pi", newTeam: true, prompt: "do work" })
-        assert.isUndefined(d.spawns[0]?.team)
-        const r2 = yield* d.run(["--log-level", "info", "run", "--team", "--", "do work"])
-        assert.strictEqual(r2.code, 0, r2.stderr)
-        assert.deepInclude(d.spawns[1], { harness: null, newTeam: true, prompt: "do work" })
-        assert.isUndefined(d.spawns[1]?.team)
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
 
-  it.effect(
-    "refuses vibest ls --team outside an agent session without claiming vibest run was called",
-    () =>
-      Effect.gen(function* () {
-        const d = yield* teamDaemon({ requests: true, teams: true })
-        const r = yield* d.run(["ls", "--team"], {})
-        assert.strictEqual(r.code, 1, r.stdout)
-        assert.strictEqual(r.stderr.trim(), "Forbidden: vibest ls --team is run by an agent in a session")
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
-
-  it.effect(
-    "vibest ls rejects positional arguments without team-name wording and accepts --team=<id>",
-    () =>
-      Effect.gen(function* () {
-        const d = yield* teamDaemon({ requests: true, teams: true })
-        const bad = yield* d.run(["ls", "foo"])
+        const bad = yield* d.run(["session", "link", "--chain", "a", "--to", "b"])
         assert.notStrictEqual(bad.code, 0, bad.stdout)
-        assert.notInclude(bad.stderr, "takes a name")
-
-        const eq = yield* d.run(["ls", "--team=t-1234"])
-        assert.strictEqual(eq.code, 0, eq.stderr)
-        const sp = yield* d.run(["ls", "--team", "t-1234"])
-        assert.strictEqual(sp.code, 0, sp.stderr)
-        const bare = yield* d.run(["ls", "--team"])
-        assert.strictEqual(bare.code, 0, bare.stderr)
-        assert.deepStrictEqual(d.teamLists, [{ team: "t-1234" }, { team: "t-1234" }, {}])
-
-        const twice = yield* d.run(["ls", "--team", "--team", "t-1234"])
-        assert.notStrictEqual(twice.code, 0, twice.stdout)
-        assert.include(twice.stderr, "EmptyInput: give --team only once")
+        assert.include(bad.stderr, "EmptyInput: give --chain or --to, not both")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     TIMEOUT,
   )

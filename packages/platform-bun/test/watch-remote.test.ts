@@ -319,6 +319,7 @@ describe("Watch with remote machines", () => {
           latest: null,
           parentId: null,
           finished: null,
+          to: [],
         })
 
         const peer = yield* fakePeerSocket({

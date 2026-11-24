@@ -23,7 +23,9 @@ import {
   SessionCreated,
   SessionDirectoryChanged,
   SessionEnded,
+  SessionLinked,
   SessionRenamed,
+  SessionUnlinked,
 } from "@vibest/schema/event"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -51,10 +53,10 @@ export const layer = Layer.effectDiscard(
       const origin = data.origin
 
       return sql`INSERT INTO session (id, project_id, parent_session_id, agent, name, directory, origin_peer,
-          origin_project, origin_session, team, created_at, active_at, message_id)
+          origin_project, origin_session, created_at, active_at, message_id)
         VALUES (${sessionIdOf(fact)}, ${data.project}, ${data.parent ?? null}, ${data.agent}, ${data.name},
           ${data.directory}, ${origin?.peer ?? null}, ${origin?.project ?? null}, ${origin?.session ?? null},
-          ${data.team ?? null}, ${fact.at}, ${origin === undefined ? null : fact.at}, ${data.message ?? null})`
+          ${fact.at}, ${origin === undefined ? null : fact.at}, ${data.message ?? null})`
     })
     yield* bus.project(
       SessionRenamed,
@@ -69,6 +71,17 @@ export const layer = Layer.effectDiscard(
         sql`UPDATE session SET ended_at = coalesce(ended_at, ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
         sql`UPDATE outbox SET peer_id = '' WHERE session_id = ${sessionIdOf(fact)} AND acked_at IS NULL`,
       ),
+    )
+    yield* bus.project(
+      SessionLinked,
+      (fact) =>
+        sql`INSERT OR IGNORE INTO session_edge (from_session_id, to_session_id)
+          VALUES (${sessionIdOf(fact)}, ${fact.data.to})`,
+    )
+    yield* bus.project(
+      SessionUnlinked,
+      (fact) =>
+        sql`DELETE FROM session_edge WHERE from_session_id = ${sessionIdOf(fact)} AND to_session_id = ${fact.data.to}`,
     )
 
     yield* bus.project(
