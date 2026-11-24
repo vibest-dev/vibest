@@ -5,6 +5,7 @@
     "handoff": true,
     "requests": true,
     "watch": true,
+    "peerWatch": true,
     "events": true,
     "projects": true,
     "spawnRuntime": true,
@@ -5101,6 +5102,7 @@
                     "connecting",
                     "connected",
                     "unreachable",
+                    "incompatible",
                     "different"
                   ]
                 },
@@ -5656,6 +5658,7 @@
                 "connecting",
                 "connected",
                 "unreachable",
+                "incompatible",
                 "different"
               ]
             },
@@ -16839,7 +16842,10 @@
       }
     },
     "Watch": {
-      "access": "cli",
+      "access": [
+        "cli",
+        "peer"
+      ],
       "stream": true,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -16892,6 +16898,16 @@
                         "done",
                         "working",
                         "idle"
+                      ]
+                    },
+                    "machine": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
                       ]
                     }
                   },
@@ -17399,12 +17415,65 @@
                   ],
                   "additionalProperties": true
                 }
+              },
+              "machines": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "connecting",
+                        "connected",
+                        "unreachable",
+                        "incompatible",
+                        "different"
+                      ]
+                    },
+                    "since": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "Infinity",
+                            "-Infinity",
+                            "NaN"
+                          ]
+                        }
+                      ]
+                    },
+                    "reason": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "state",
+                    "since"
+                  ],
+                  "additionalProperties": true
+                }
               }
             },
             "required": [
               "_tag",
               "projects",
-              "sessions"
+              "sessions",
+              "machines"
             ],
             "additionalProperties": true
           },
@@ -17450,6 +17519,16 @@
                       "done",
                       "working",
                       "idle"
+                    ]
+                  },
+                  "machine": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   }
                 },
@@ -17991,12 +18070,106 @@
               },
               "projectId": {
                 "type": "string"
+              },
+              "machine": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
               "_tag",
               "id",
               "projectId"
+            ],
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Machine"
+                ]
+              },
+              "machine": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "connecting",
+                      "connected",
+                      "unreachable",
+                      "incompatible",
+                      "different"
+                    ]
+                  },
+                  "since": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "state",
+                  "since"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "machine"
+            ],
+            "additionalProperties": true
+          },
+          {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineRemoved"
+                ]
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "name"
             ],
             "additionalProperties": true
           }

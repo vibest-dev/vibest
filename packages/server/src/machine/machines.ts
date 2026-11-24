@@ -13,6 +13,7 @@ import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/pr
 import { shortId } from "@vibest/schema/id"
 import {
   AlreadyAdded,
+  type ListedMachine,
   MachineFailed,
   MachineIncompatible,
   type MachineInfo,
@@ -27,6 +28,7 @@ import { PROTOCOL } from "@vibest/schema/version"
 import {
   Clock,
   Context,
+  Data,
   Duration,
   Effect,
   Exit,
@@ -35,6 +37,7 @@ import {
   Match,
   Option,
   Predicate,
+  PubSub,
   Schedule,
   Schema,
   Scope,
@@ -157,7 +160,7 @@ const isLineError = (e: unknown): e is LineError =>
 const alreadyNamed = (name: string) =>
   `a machine named ${name} is already added; remove it first (vibest machine rm ${name})`
 
-interface Link {
+export interface Link {
   readonly client: PipeClient
   readonly call: <A, E>(
     effect: Effect.Effect<A, E | LineError>,
@@ -168,6 +171,18 @@ interface Link {
   readonly exited: Effect.Effect<PipeExit>
   readonly capabilities: Readonly<Record<string, boolean>>
 }
+
+export type MachineChange = Data.TaggedEnum<{
+  readonly Updated: {
+    readonly machine: ListedMachine
+    readonly link: Link | undefined
+  }
+  readonly Removed: {
+    readonly name: string
+  }
+}>
+
+const MachineChanges = Data.taggedEnum<MachineChange>()
 
 type Entry = {
   readonly state: MachineState
@@ -192,6 +207,7 @@ const make = Effect.gen(function* () {
   const noted = new Map<string, Map<string, { readonly notes: ReadonlyArray<PluginNote>; readonly at: number }>>()
   const repairs = new Map<string, { readonly at: number; readonly note: string }>()
   const lock = yield* KeyedMutex.make<string>()
+  const changes = yield* PubSub.unbounded<MachineChange>()
 
   const heard = (name: string, runtimes: ReadonlyArray<RuntimeThere> | undefined) =>
     Effect.map(Clock.currentTimeMillis, (at) => void there.set(name, { runtimes: runtimes ?? [], at }))
@@ -294,10 +310,27 @@ const make = Effect.gen(function* () {
   const set = (name: string, entry: Omit<Entry, "since">) =>
     Effect.gen(function* () {
       const before = entries.get(name)
-      entries.set(name, { ...entry, since: yield* Clock.currentTimeMillis })
+      const since = yield* Clock.currentTimeMillis
+      const updated: Entry = { ...entry, since }
+      entries.set(name, updated)
 
       if (before?.state !== entry.state || before.reason !== entry.reason)
         yield* Effect.logInfo(`machine ${name}: ${entry.state}${entry.reason ? ` (${entry.reason})` : ""}`)
+
+      const listed: ListedMachine = {
+        name,
+        state: updated.state,
+        since: updated.since,
+        ...(updated.reason !== undefined && updated.state !== "connected" && { reason: updated.reason }),
+      }
+
+      yield* PubSub.publish(
+        changes,
+        MachineChanges.Updated({
+          machine: listed,
+          link: updated.state === "connected" ? updated.link : undefined,
+        }),
+      )
     })
 
   const open = (name: string, target: string) =>
@@ -476,7 +509,7 @@ const make = Effect.gen(function* () {
 
         if (down.stop !== undefined) {
           yield* set(name, {
-            state: down.stop === "different" ? "different" : "unreachable",
+            state: down.stop === "different" ? "different" : "incompatible",
             reason: down.message,
             stop: down.stop,
           })
@@ -646,6 +679,8 @@ const make = Effect.gen(function* () {
 
     states,
 
+    subscribeChanges: PubSub.subscribe(changes),
+
     remove: Effect.fn("Machines.remove")(function* (name: string) {
       const row = yield* db.remote.machineNamed(name)
       const fiber = fibers.get(name)
@@ -664,6 +699,7 @@ const make = Effect.gen(function* () {
       noted.delete(name)
 
       for (const key of repairs.keys()) if (key.startsWith(`${name}\0`)) repairs.delete(key)
+      yield* PubSub.publish(changes, MachineChanges.Removed({ name }))
 
       return { notes }
     }),

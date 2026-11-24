@@ -106,6 +106,7 @@ export const CAPABILITIES = {
   handoff: true,
   requests: true,
   watch: true,
+  peerWatch: true,
   events: true,
   projects: true,
   spawnRuntime: true,

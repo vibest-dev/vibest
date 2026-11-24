@@ -297,6 +297,7 @@ export const ProjectRow = Schema.Struct({
   directory: Schema.NullOr(Schema.String),
   entrySessionId: Schema.NullOr(Schema.String),
   activity: ProjectActivity,
+  machine: Schema.optional(Schema.String),
 })
 
 export type ProjectRow = typeof ProjectRow.Type
@@ -310,10 +311,20 @@ export const WatchSession = Schema.Struct({
 export type WatchSession = typeof WatchSession.Type
 
 export const WatchEvent = Schema.Union([
-  Schema.TaggedStruct("Snapshot", { projects: Schema.Array(ProjectRow), sessions: Schema.Array(WatchSession) }),
+  Schema.TaggedStruct("Snapshot", {
+    projects: Schema.Array(ProjectRow),
+    sessions: Schema.Array(WatchSession),
+    machines: Schema.Array(ListedMachine),
+  }),
   Schema.TaggedStruct("Project", { project: ProjectRow }),
   Schema.TaggedStruct("Session", { session: WatchSession }),
-  Schema.TaggedStruct("SessionEnded", { id: Schema.String, projectId: Schema.String }),
+  Schema.TaggedStruct("SessionEnded", {
+    id: Schema.String,
+    projectId: Schema.String,
+    machine: Schema.optional(Schema.String),
+  }),
+  Schema.TaggedStruct("Machine", { machine: ListedMachine }),
+  Schema.TaggedStruct("MachineRemoved", { name: Schema.String }),
 ])
 
 export type WatchEvent = typeof WatchEvent.Type

@@ -30,6 +30,7 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
 import { Peer } from "./machine/peer.ts"
+import { RemoteWatch } from "./machine/remote-watch.ts"
 import { Remote } from "./machine/remote.ts"
 
 export const services = LayerNode.group([
@@ -63,5 +64,6 @@ export const services = LayerNode.group([
   EntrySession.node,
   Load.node,
   Machines.node,
+  RemoteWatch.node,
   Remote.node,
 ])

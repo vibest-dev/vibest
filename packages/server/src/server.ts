@@ -40,6 +40,7 @@ import * as Listing from "./listing.ts"
 import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
 import { Peer } from "./machine/peer.ts"
+import { RemoteWatch } from "./machine/remote-watch.ts"
 import { Remote } from "./machine/remote.ts"
 import { services } from "./services.ts"
 import { UpdateCheck } from "./update-check.ts"
@@ -106,6 +107,7 @@ export const node = LayerNode.make({
     EntrySession.node,
     Load.node,
     Machines.node,
+    RemoteWatch.node,
     Peer.node,
     Plugins.node,
     Processes.node,

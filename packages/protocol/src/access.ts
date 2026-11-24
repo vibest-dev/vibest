@@ -24,7 +24,7 @@ export const ACCESS = {
   Get: ["agent", "peer"],
   "Inbox.Subscribe": "session",
   "Inbox.Take": "session",
-  Watch: "cli",
+  Watch: ["cli", "peer"],
   Events: "cli",
   "Session.Seen": "cli",
   "Project.Open": "cli",
@@ -74,6 +74,7 @@ export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
       method !== "Machine.Load" &&
       method !== "Worktree.List" &&
       method !== "Project.Clone" &&
+      method !== "Watch" &&
       !method.startsWith("Peer."),
   ),
 )
