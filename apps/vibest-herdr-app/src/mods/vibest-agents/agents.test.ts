@@ -66,22 +66,25 @@ describe("agents panel", () => {
     assert.equal(commandNote({ code: 0, stdout: '{"sessions":[],"machines":[]}', stderr: "" }, "vibest ls failed"), "")
   })
 
-  it("reads the CLI list object and legacy array and rejects malformed payloads", () => {
+  it("reads the CLI list object and rejects malformed or legacy payloads", () => {
     const row = session()
 
     assert.deepEqual(parseSessions(JSON.stringify({ sessions: [listed(row)], machines: [] })), [row])
-    assert.deepEqual(parseSessions(JSON.stringify([listed(row)])), [row])
     assert.deepEqual(
       parseSessions(JSON.stringify({ sessions: [{ ...listed(row), name: "ignored", title: row.title }] })),
       [row],
     )
     assert.deepEqual(parseSessions(JSON.stringify({ sessions: [], machines: [] })), [])
-    assert.deepEqual(parseSessions("[]"), [])
+    assert.equal(parseSessions("[]"), undefined)
+    assert.equal(parseSessions(JSON.stringify([listed(row)])), undefined)
     assert.equal(parseSessions("{"), undefined)
     assert.equal(parseSessions(JSON.stringify({ sessions: "bad" })), undefined)
     assert.equal(parseSessions(JSON.stringify({ other: [] })), undefined)
-    assert.equal(parseSessions(JSON.stringify([{ id: row.id }])), undefined)
-    assert.equal(parseSessions(JSON.stringify([{ ...listed(row), address: { id: row.addressId } }])), undefined)
+    assert.equal(parseSessions(JSON.stringify({ sessions: [{ id: row.id }] })), undefined)
+    assert.equal(
+      parseSessions(JSON.stringify({ sessions: [{ ...listed(row), address: { id: row.addressId } }] })),
+      undefined,
+    )
     assert.equal(parseSessions("["), undefined)
     assert.equal(parseOwnedAddress("w1:p1"), undefined)
     assert.deepEqual(parseOwnedAddress(`t7@${socket}`), { address: "t7", socket })
@@ -182,7 +185,7 @@ describe("readLsResult", () => {
 
   it("says so when nothing is live, when the output is not understood, and when the command fails", () => {
     assert.strictEqual(readLsResult(ok('{"sessions":[],"machines":[]}'), at).note, "No live sessions.")
-    assert.strictEqual(readLsResult(ok("[]"), at).note, "No live sessions.")
+    assert.strictEqual(readLsResult(ok("[]"), at).note, "vibest ls was not understood")
     assert.strictEqual(readLsResult(ok("{"), at).note, "vibest ls was not understood")
     assert.strictEqual(readLsResult({ code: 2, stdout: "", stderr: "vibestd refused\n" }, at).note, "vibestd refused")
     assert.strictEqual(lsFailure(new Error("no such file")).note, "no such file")

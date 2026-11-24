@@ -43,7 +43,7 @@ const none: PaneInfo[] = []
 
 describe("topbarState", () => {
   it("names the shown project, thread and branch, and the shown right panel child", () => {
-    expect(topbarState(layout({ hidden: false, active: "agents" }), [space], none)).toEqual({
+    expect(topbarState(layout({ hidden: false, active: "agents" }), [{ ...space, name: "Vibest/api" }], none)).toEqual({
       breadcrumb: { project: "api", thread: "fix login", branch: "main" },
       shownPanel: "agents",
       sidebarHidden: false,

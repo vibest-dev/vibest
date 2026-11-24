@@ -71,7 +71,7 @@ const sessionRow = (item: JsonObject): SessionRow | undefined => {
     agent: text(item.agent) ?? "",
     harness: text(item.harness) ?? "",
     status: text(item.status) ?? "unknown",
-    executionState: text(item.executionState) ?? text(item.turnState) ?? "",
+    executionState: text(item.executionState) ?? "",
     branch: git ? (text(git.branch) ?? "") : "",
     runtime: text(item.runtime) ?? "",
     machine,
@@ -83,8 +83,6 @@ const sessionRow = (item: JsonObject): SessionRow | undefined => {
 }
 
 const sessionItems = (value: JsonValue): readonly JsonValue[] | undefined => {
-  if (Array.isArray(value)) return value
-
   if (isObject(value) && Array.isArray(value.sessions)) return value.sessions
 
   return undefined

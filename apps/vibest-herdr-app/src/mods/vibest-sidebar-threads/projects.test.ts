@@ -109,7 +109,8 @@ describe("projects", () => {
         tabs: [
           tab({ id: "tb1", active: true, status: "working", changed_at: 5, working_since: 2 }),
           tab({ id: "tb2", index: 2, settled: true }),
-          tab({ id: "tb3", index: 3, name: "Vibest/api", named: true, changed_at: 9 }),
+          tab({ id: "tb4", index: 3, name: "Vibest/other", named: true, changed_at: 7 }),
+          tab({ id: "tb3", index: 4, name: "Vibest/api", named: true, changed_at: 9 }),
         ],
       },
     ]
@@ -122,6 +123,7 @@ describe("projects", () => {
     expect(api?.workingSince).toBe(2)
     expect(api?.threads.map((t) => [t.id, t.title, t.active])).toEqual([
       ["tb1", "Plan", true],
+      ["tb4", "Vibest/other", false],
       ["tb3", "Vibest/api", false],
     ])
   })

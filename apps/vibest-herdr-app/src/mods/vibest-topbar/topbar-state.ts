@@ -1,6 +1,7 @@
 import type { PaneInfo, SpaceInfo } from "herdr"
 
 import { findNode, type LayoutNode } from "../../shared/layout-tree.ts"
+import { projectName } from "../../shared/project-name.ts"
 import { threadTitle } from "../../shared/thread-title.ts"
 
 export const RIGHT_PANEL = "right-panel"
@@ -30,7 +31,7 @@ export const topbarState = (
   return {
     breadcrumb: space
       ? {
-          project: space.name,
+          project: projectName(space.name),
           thread: tab
             ? threadTitle(
                 tab,

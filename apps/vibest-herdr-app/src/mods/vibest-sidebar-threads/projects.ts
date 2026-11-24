@@ -1,6 +1,9 @@
 import type { PaneInfo, SpaceInfo, Status } from "herdr"
 
+import { projectName, VIBEST_PREFIX } from "../../shared/project-name.ts"
 import { threadTitle } from "../../shared/thread-title.ts"
+
+export { projectName }
 
 export interface Thread {
   readonly id: string
@@ -21,16 +24,6 @@ export interface Project {
   readonly workingSince: number | null
   readonly primaryTabId: string | null
   readonly threads: readonly Thread[]
-}
-
-const VIBEST_PREFIX = "Vibest/"
-
-export const projectName = (name: string): string => {
-  if (!name.startsWith(VIBEST_PREFIX)) return name
-
-  const stripped = name.slice(VIBEST_PREFIX.length).trim()
-
-  return stripped === "" ? name : stripped
 }
 
 type JsonItem =
@@ -78,9 +71,13 @@ const earliestWorking = (threads: readonly Thread[]): number | null => {
 
 const selectPrimaryTab = (name: string, threads: readonly Thread[], activeTabId: string | null): string | null => {
   const entryLabel = `${VIBEST_PREFIX}${name}`
-  const entry = threads.find((t) => t.title === entryLabel || t.title.startsWith(VIBEST_PREFIX))
+  const exact = threads.find((t) => t.title === entryLabel)
 
-  if (entry) return entry.id
+  if (exact) return exact.id
+
+  const prefixed = threads.find((t) => t.title.startsWith(VIBEST_PREFIX))
+
+  if (prefixed) return prefixed.id
 
   if (activeTabId !== null) return activeTabId
 
