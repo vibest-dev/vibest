@@ -46,12 +46,13 @@ export const SessionCreated = fact("session.created", "session", {
   parent: optional(Text),
   origin: optional(Schema.Struct({ peer: Text, project: Text, session: optional(Text) })),
   message: optional(Seq),
-  team: optional(Text),
 })
 
 export const SessionRenamed = fact("session.renamed", "session", { name: Text })
 export const SessionDirectoryChanged = fact("session.directory_changed", "session", { directory: Text })
 export const SessionEnded = fact("session.ended", "session", { reason: Schema.Literals(["archived", "replaced"]) })
+export const SessionLinked = fact("session.linked", "session", { to: Text })
+export const SessionUnlinked = fact("session.unlinked", "session", { to: Text })
 
 export const ProcessStarted = fact("process.started", "session", {
   harness: Text,
@@ -256,6 +257,8 @@ export const Catalog = {
   [SessionRenamed.type]: SessionRenamed,
   [SessionDirectoryChanged.type]: SessionDirectoryChanged,
   [SessionEnded.type]: SessionEnded,
+  [SessionLinked.type]: SessionLinked,
+  [SessionUnlinked.type]: SessionUnlinked,
   [ProcessStarted.type]: ProcessStarted,
   [ProcessPlaced.type]: ProcessPlaced,
   [ProcessReady.type]: ProcessReady,
@@ -290,7 +293,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 11
+export const CATALOG_VERSION = 12
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

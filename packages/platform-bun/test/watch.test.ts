@@ -6,7 +6,7 @@ import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { Project } from "@vibest/core/project"
 import { sessionHeaders } from "@vibest/protocol/protocol"
-import type { WatchEvent } from "@vibest/protocol/rpc"
+import { EdgeDirected, type WatchEvent } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import * as Listing from "@vibest/server/listing"
 import * as Server from "@vibest/server/server"
@@ -466,6 +466,43 @@ describe("Watch", () => {
         { path: repoB, identity: "git.internal.example/team/service" },
         { path: repoC, identity: "gitlab.com/team/newly-added" },
       ])
+    }),
+  )
+
+  test(
+    "WatchSession.to reflects spawn edges in Snapshot and live Session deltas on Session.Link and Session.Unlink",
+    Effect.gen(function* () {
+      const { repo, entryId, entryClient } = yield* withEntry
+      const cli = authed(yield* client, cliHeaders(repo))
+
+      const a = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "a" })
+      const b = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "b" })
+
+      const { next } = yield* watching(repo)
+      const snapshot = yield* next(isSnapshot)
+      const snapA = snapshot.sessions.find((s) => s.id === a.id)
+      const snapB = snapshot.sessions.find((s) => s.id === b.id)
+
+      assert.deepStrictEqual(snapA?.to, [entryId])
+      assert.deepStrictEqual(snapB?.to, [entryId])
+
+      yield* cli["Session.Link"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) })
+
+      const linked = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
+          Predicate.isTagged(e, "Session") && e.session.id === a.id && e.session.to.includes(b.id),
+      )
+
+      assert.deepStrictEqual([...linked.session.to].sort(), [b.id, entryId].sort())
+
+      yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) })
+
+      const unlinked = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
+          Predicate.isTagged(e, "Session") && e.session.id === a.id && !e.session.to.includes(b.id),
+      )
+
+      assert.deepStrictEqual(unlinked.session.to, [entryId])
     }),
   )
 })

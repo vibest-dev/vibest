@@ -122,13 +122,15 @@ export const make = Effect.gen(function* () {
   })
 
   const systemPromptOf = Effect.fn("Placement.systemPromptOf")(function* (session: SessionRow) {
+    const creator = yield* db.session.creatorLabel(session.id)
+
     return systemPrompt({
       system: (yield* definitionIn(agents, session.agent)).system,
       id: session.id,
       checkout: (yield* db.session.sessionIdentity(session.id))?.entry,
       sharer: yield* db.session.earlierSharer(session.id),
-      creator: yield* db.session.creatorLabel(session.id),
-      team: (yield* db.session.sessionIdentity(session.id))?.team ?? undefined,
+      creator,
+      linkedTo: yield* db.session.linkedTargets(session.id, creator?.id),
       projectDir: layout.project(session.projectId),
       agents: agents.all,
       ...(yield* projectText(layout.project(session.projectId))),

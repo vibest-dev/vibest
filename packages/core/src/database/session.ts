@@ -7,6 +7,7 @@ import {
   SessionCreated,
   SessionDirectoryChanged,
   SessionEnded,
+  SessionLinked,
   type Sender,
 } from "@vibest/schema/event"
 import { entryLabel } from "@vibest/schema/id"
@@ -38,14 +39,16 @@ import {
 } from "./db-rows.ts"
 import type * as Inbox from "./inbox.ts"
 import type * as Remote from "./remote.ts"
+import * as SessionEdges from "./session-edges.ts"
 import type * as Session from "./session-statements.ts"
 
-export type TeamStart = "new" | { readonly join: string }
+export type { SessionEdge } from "./session-edges.ts"
 
-export type TeamRefusal =
-  | { readonly team: string; readonly teamOwner: string }
-  | { readonly teamUnknown: string }
-  | { readonly teamEnded: string }
+export interface SpawnLinks {
+  readonly from?: ReadonlyArray<string> | undefined
+  readonly to?: ReadonlyArray<string> | undefined
+  readonly with?: ReadonlyArray<string> | undefined
+}
 
 export const LIVE_PROCESS_COUNT = "SELECT count(*) AS n FROM process WHERE ended_at IS NULL"
 
@@ -111,21 +114,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         }
       })
 
+    const edges = yield* SessionEdges.make
+
     return {
-      mayListTeam: Effect.fn("Db.session.mayListTeam")(session.mayListTeam),
-
-      teamMembers: Effect.fn("Db.session.teamMembers")(session.teamMembers),
-
-      sessionParents: Effect.fn("Db.session.sessionParents")((ids: ReadonlyArray<string>) =>
-        (ids.length === 0
-          ? Effect.succeed<ReadonlyArray<{ id: string; parentSessionId: string | null }>>([])
-          : sql<{ id: string; parentSessionId: string | null }>`SELECT id, parent_session_id FROM session
-              WHERE ${sql.in("id", ids)}`
-        ).pipe(
-          Effect.map((rows) => new Map(rows.map((row) => [row.id, row.parentSessionId]))),
-          Effect.orDie,
-        ),
-      ),
+      ...edges,
 
       sessionDirectory: Effect.fn("Db.session.sessionDirectory")((id: string) =>
         sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${id}`.pipe(
@@ -211,7 +203,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             request,
             origin,
             max,
-            team,
+            links,
           }: {
             readonly cwd?: string
             readonly task?: string
@@ -219,9 +211,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly request?: string | undefined
             readonly origin?: Remote.PeerStart | undefined
             readonly max?: number | undefined
-            readonly team?: TeamStart | undefined
+            readonly links?: SpawnLinks | undefined
           } = {},
-        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended" | TeamRefusal> =>
+        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended"> =>
           tx(
             Effect.gen(function* () {
               if (request !== undefined) {
@@ -235,19 +227,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 (yield* sql`SELECT 1 FROM session WHERE id = ${parentSessionId} AND ended_at IS NOT NULL`).length > 0
               )
                 return "parent-ended" as const
-
-              const teamId =
-                team === undefined ? undefined : team === "new" ? yield* session.unusedTeamId(project) : team.join
-
-              if (team !== undefined && team !== "new") {
-                const owner = yield* session.teamOwner(project, team.join)
-
-                if (owner === undefined) return { teamUnknown: team.join }
-
-                if (!(yield* session.teamLive(project, team.join))) return { teamEnded: team.join }
-
-                if (owner !== parentSessionId) return { team: team.join, teamOwner: owner }
-              }
 
               const message =
                 task === undefined
@@ -289,9 +268,34 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     },
                   }),
                   ...(message !== undefined && { message }),
-                  ...(teamId !== undefined && { team: teamId }),
                 },
               })
+
+              const seen = new Set<string>()
+
+              const link = (from: string, to: string) => {
+                if (from === to) return Effect.void
+                const key = `${from}\0${to}`
+
+                if (seen.has(key)) return Effect.void
+                seen.add(key)
+
+                return publish(SessionLinked, { sessionId: from, at: row.createdAt, data: { to } }).pipe(Effect.asVoid)
+              }
+
+              if (parentSessionId !== undefined) {
+                yield* link(parentSessionId, row.id)
+                yield* link(row.id, parentSessionId)
+              }
+
+              for (const fromId of links?.from ?? []) yield* link(fromId, row.id)
+
+              for (const toId of links?.to ?? []) yield* link(row.id, toId)
+
+              for (const peerId of links?.with ?? []) {
+                yield* link(peerId, row.id)
+                yield* link(row.id, peerId)
+              }
 
               const processAt = row.startedAt ?? row.createdAt
               const admitted = yield* roomFor(max)
@@ -367,9 +371,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           projectId: string
           agent: string
           harness: string
-          team: string | null
           entry: number
-        }>`SELECT a.id, a.project_id, a.agent, a.team,
+        }>`SELECT a.id, a.project_id, a.agent,
             coalesce(p.harness, '') AS harness,
             q.entry_session_id = a.id AS entry
           FROM session a JOIN project q ON q.id = a.project_id

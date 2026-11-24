@@ -110,8 +110,8 @@ session id (an old entry session after a switch) changes nothing. ACCESS roles: 
 session with an inbox), `agent` (a session or the command line), `owner` (the session that started the target, or the command
 line; a forwarded call from another machine passes the same rule for the session that made it) and `self` (a session's
 own terminal for its own id, or the command line at the Project root for its entry session, its start after a restart).
-A session sends only to the session that started it, to sessions it started and to the unfinished members of its team
-(never to itself); when the creator it names has ended,
+A session sends only to sessions it has a directed link to (`session_edge`, initialized bidirectionally with its creator
+and extended with `vibest run --from/--to/--with` or `vibest session link`, never to itself); when the creator it names has ended,
 vibestd hands the message to the nearest session above it that is still running, on this machine or another, and when none
 is left the send is refused (the user reads the last reply). It manages (interrupts, removes) the sessions whose nearest
 living creator it is. One entry session per Project: every start passes one check that holds the

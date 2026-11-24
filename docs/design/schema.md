@@ -127,7 +127,6 @@ CREATE TABLE session (
   origin_peer           TEXT,                         -- started by another vibestd: its id
   origin_project        TEXT,                         -- and its project there
   origin_session        TEXT,                         -- and the session there its notices and sends go to (that project's entry session)
-  team                  TEXT,                         -- team id (t-xxxx) from a bare vibest run --team; written once, never inherited. Members of one team in a project may send to each other
   created_at            INTEGER NOT NULL,
   ended_at              INTEGER,                      -- archived, or replaced by vibest --new
   process_id            INTEGER,                      -- its current process; its latest execution is its highest execution id
@@ -138,6 +137,13 @@ CREATE INDEX session_project ON session (project_id);
 CREATE INDEX session_parent  ON session (parent_session_id);
 CREATE INDEX session_live    ON session (directory) WHERE ended_at IS NULL;
 CREATE INDEX session_origin  ON session (origin_peer, origin_project) WHERE origin_peer IS NOT NULL;
+
+CREATE TABLE session_edge (                           -- directed messaging graph; projected from session.linked / session.unlinked
+  from_session_id       TEXT NOT NULL,
+  to_session_id         TEXT NOT NULL,
+  PRIMARY KEY (from_session_id, to_session_id)
+) STRICT;
+CREATE INDEX session_edge_to ON session_edge (to_session_id);
 
 CREATE TABLE process (                                -- id: the seq of its process.started in the session
   session_id           TEXT    NOT NULL,
@@ -253,7 +259,9 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | project.moved                       | from, to, repositories                                                                                                                                                   |
 | project.repositories_changed        | repositories                                                                                                                                                             |
 | project.entry_changed               | session? (none: the project has no entry session)                                                                                                                        |
-| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}, team?, message? (the original delegation seq)                                               |
+| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}, message? (the original delegation seq)                                                      |
+| session.linked                      | to (target session id for directed messaging edge from this session)                                                                                                     |
+| session.unlinked                    | to (target session id removed from directed messaging edges of this session)                                                                                             |
 | session.renamed                     | name                                                                                                                                                                     |
 | session.directory_changed           | directory                                                                                                                                                                |
 | session.ended                       | reason: archived, replaced (vibest --new)                                                                                                                                |

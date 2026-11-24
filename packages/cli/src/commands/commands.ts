@@ -24,9 +24,6 @@ const providerFlag = Flag.String("provider").pipe(
   Flag.optional,
 )
 
-const teamFlag = (description: string) =>
-  Flag.String("team").pipe(Flag.withMetavar("[<team id>]"), Flag.withDescription(description), Flag.atLeast(0))
-
 const hookHarness = Flag.String("harness").pipe(Flag.withDescription("Which harness this hook is for"))
 
 export const entryFlags = {
@@ -160,8 +157,19 @@ const run = Spec.make("run", {
       ),
       Flag.atLeast(0),
     ),
-    team: teamFlag(
-      "Bare: start a new team with this session as its first member; its id (such as t-3f2a) is printed with the session id. With a team id: add this session to that team; only the session that created it may. Members may message each other; vibest ls --team lists them",
+    from: Flag.String("from").pipe(
+      Flag.withDescription("Allow this session to send messages to the new session. Repeat for each session"),
+      Flag.atLeast(0),
+    ),
+    to: Flag.String("to").pipe(
+      Flag.withDescription("Allow the new session to send messages to this session. Repeat for each session"),
+      Flag.atLeast(0),
+    ),
+    with: Flag.String("with").pipe(
+      Flag.withDescription(
+        "Allow bidirectional messages between this session and the new session. Repeat for each session",
+      ),
+      Flag.atLeast(0),
     ),
     session: sessionFlag,
   },
@@ -229,8 +237,38 @@ const ls = Spec.make("ls", {
       Flag.withDescription("Include exited sessions"),
       Flag.withDefault(false),
     ),
-    team: teamFlag("Instead: the unfinished members of a team (default your own) with who started each, as JSON"),
   },
+})
+
+const linkParams = {
+  ids: Argument.String("id").pipe(
+    Argument.withDescription("Session ids, or unique prefixes of at least 8 characters"),
+    Argument.atLeast(1),
+  ),
+  to: Flag.String("to").pipe(
+    Flag.withDescription("Link or unlink directed edges from the positional sessions to each --to session"),
+    Flag.atLeast(0),
+  ),
+  chain: Flag.Boolean("chain").pipe(
+    Flag.withDescription("Link or unlink directed edges in sequence: id1 -> id2 -> id3"),
+    Flag.withDefault(false),
+  ),
+}
+
+const session = Spec.make("session", {
+  description: "Manage messaging links between sessions in a project",
+  commands: [
+    Spec.make("link", {
+      description:
+        "Add messaging links between sessions: positional ids for all-to-all mutual links, --to for directed links, or --chain for a directed chain",
+      params: linkParams,
+    }),
+    Spec.make("unlink", {
+      description:
+        "Remove messaging links between sessions: positional ids for all-to-all mutual links, --to for directed links, or --chain for a directed chain",
+      params: linkParams,
+    }),
+  ],
 })
 
 const events = Spec.make("events", {
@@ -483,64 +521,6 @@ const machine = Spec.make("machine", {
   ],
 })
 
-const TEAM_ID = /^t-[0-9a-f]{4}$/
-const NEGATIVE_NUMBER = /^-(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/
-
-const ROOT_VALUE_FLAGS = new Set([
-  "--log-level",
-  "--completions",
-  "--harness",
-  "--provider",
-  "--model",
-  "--agent",
-  "--session",
-  "--runtime",
-])
-
-const ROOT_BOOLEAN_FLAGS = new Set(["--help", "-h", "--version", "-v", "--wizard", "--new", "--headless"])
-const BOOLEAN_LITERALS = new Set(["true", "false", "yes", "no", "on", "off", "1", "0", "y", "n"])
-
-const isValueToken = (arg: string) => !arg.startsWith("-") || arg === "-" || NEGATIVE_NUMBER.test(arg)
-
-const firstPositionalIndex = (args: ReadonlyArray<string>, end: number) => {
-  for (let i = 0; i < end; i++) {
-    const arg = args[i]!
-    const next = i + 1 < end ? args[i + 1] : undefined
-
-    if (ROOT_VALUE_FLAGS.has(arg)) {
-      if (next !== undefined && isValueToken(next)) i++
-      continue
-    }
-
-    if (ROOT_BOOLEAN_FLAGS.has(arg)) {
-      if (next !== undefined && BOOLEAN_LITERALS.has(next.toLowerCase())) i++
-      continue
-    }
-
-    if (!isValueToken(arg)) continue
-
-    return i
-  }
-
-  return -1
-}
-
-export const bareTeam = (args: ReadonlyArray<string>) => {
-  const end = args.includes("--") ? args.indexOf("--") : args.length
-  const subAt = firstPositionalIndex(args, end)
-  const sub = subAt < 0 ? undefined : args[subAt]
-
-  if (sub !== "run" && sub !== "ls") return args
-
-  return args.map((arg, i) => {
-    if (i <= subAt || i >= end || arg !== "--team") return arg
-    const next = i + 1 < end ? args[i + 1] : undefined
-    const hasId = next !== undefined && (sub === "run" ? TEAM_ID.test(next) : isValueToken(next))
-
-    return hasId ? arg : "--team="
-  })
-}
-
 export const Commands = Spec.make("vibest", {
   description: "In a project directory, open its entry session in this terminal. --new starts a new conversation",
   params: entryFlags,
@@ -555,6 +535,7 @@ export const Commands = Spec.make("vibest", {
     peek,
     archive,
     ls,
+    session,
     events,
     models,
     harness,
