@@ -1,9 +1,10 @@
 import fs from "node:fs"
+import http from "node:http"
 import os from "node:os"
 import path from "node:path"
 import url from "node:url"
 
-import { Option, Schema } from "effect"
+import { Option, Predicate, Schema } from "effect"
 
 import { injectHtmlPreviewBridge } from "./preview-bridge.ts"
 import {
@@ -159,12 +160,81 @@ function serveStaticFile(distDir: string, pathname: string): Response | null {
 
   if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) return null
 
-  return new Response(Bun.file(candidate), {
+  return new Response(fs.readFileSync(candidate), {
     headers: { "content-type": contentTypeFor(candidate), "x-content-type-options": "nosniff" },
   })
 }
 
-export function createWebServer(options: WebServerOptions = {}): RunningWebServer {
+function readNodeRequestBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    req.on("data", (chunk: Buffer) => {
+      chunks.push(chunk)
+    })
+    req.on("end", () => {
+      resolve(Buffer.concat(chunks).toString("utf8"))
+    })
+    req.on("error", reject)
+  })
+}
+
+async function toWebRequest(req: http.IncomingMessage, fallbackHost: string, signal: AbortSignal): Promise<Request> {
+  const method = req.method ?? "GET"
+  const host = req.headers.host ?? fallbackHost
+  const targetUrl = `http://${host}${req.url ?? "/"}`
+  const headers = new Headers()
+
+  for (const [key, val] of Object.entries(req.headers)) {
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        headers.append(key, item)
+      }
+    } else if (val !== undefined) {
+      headers.set(key, val)
+    }
+  }
+
+  if (method === "GET" || method === "HEAD") {
+    return new Request(targetUrl, { method, headers, signal })
+  }
+
+  const body = await readNodeRequestBody(req)
+
+  return new Request(targetUrl, { method, headers, body, signal })
+}
+
+async function writeWebResponse(res: http.ServerResponse, response: Response): Promise<void> {
+  const headerObj: Record<string, string> = {}
+  response.headers.forEach((value, key) => {
+    headerObj[key] = value
+  })
+  res.writeHead(response.status, headerObj)
+
+  if (!response.body) {
+    res.end()
+
+    return
+  }
+
+  const reader = response.body.getReader()
+
+  try {
+    while (true) {
+      const next = await reader.read()
+
+      if (next.done) break
+      res.write(next.value)
+    }
+  } catch {
+    return
+  } finally {
+    reader.releaseLock()
+
+    if (!res.writableEnded) res.end()
+  }
+}
+
+export async function createWebServer(options: WebServerOptions = {}): Promise<RunningWebServer> {
   const vibestHome = options.vibestHome ?? process.env.VIBEST_HOME ?? path.join(os.homedir(), ".vibest")
   const repositoryRoot = options.repositoryRoot ?? process.cwd()
   const distDir = options.distDir ?? DIST_DIR
@@ -178,305 +248,333 @@ export function createWebServer(options: WebServerOptions = {}): RunningWebServe
     safeActions,
   })
 
+  const host = options.host ?? "127.0.0.1"
   const bound = { port: options.port ?? Number(process.env.PORT ?? "4320") }
 
-  const server = Bun.serve({
-    hostname: options.host ?? "127.0.0.1",
-    port: bound.port,
-    idleTimeout: 120,
-    fetch: async (request) => {
-      const reqUrl = new URL(request.url)
-      const pathname = reqUrl.pathname
+  const handleFetch = async (request: Request): Promise<Response> => {
+    const reqUrl = new URL(request.url)
+    const pathname = reqUrl.pathname
 
-      if (pathname.startsWith("/api/")) {
-        if (!isAllowedHost(request, bound.port)) {
-          return jsonResponse({ error: "Forbidden host" }, 403)
+    if (pathname.startsWith("/api/")) {
+      if (!isAllowedHost(request, bound.port)) {
+        return jsonResponse({ error: "Forbidden host" }, 403)
+      }
+
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        if (!isAllowedMutationOrigin(request, bound.port)) {
+          return jsonResponse({ error: "Forbidden origin" }, 403)
+        }
+      }
+    }
+
+    if (request.method === "GET" && pathname === "/api/health") {
+      return jsonResponse({ ok: true, daemon: bridge.snapshot().daemon })
+    }
+
+    if (request.method === "GET" && pathname === "/api/state") {
+      return jsonResponse(bridge.snapshot())
+    }
+
+    if (request.method === "GET" && pathname === "/api/stream") {
+      const encoder = new TextEncoder()
+      let unsubscribe: (() => void) | null = null
+      let keepalive: ReturnType<typeof setInterval> | null = null
+
+      const cleanup = () => {
+        if (keepalive !== null) {
+          clearInterval(keepalive)
+          keepalive = null
         }
 
-        if (request.method !== "GET" && request.method !== "HEAD") {
-          if (!isAllowedMutationOrigin(request, bound.port)) {
-            return jsonResponse({ error: "Forbidden origin" }, 403)
-          }
+        if (unsubscribe !== null) {
+          unsubscribe()
+          unsubscribe = null
         }
       }
 
-      if (request.method === "GET" && pathname === "/api/health") {
-        return jsonResponse({ ok: true, daemon: bridge.snapshot().daemon })
-      }
-
-      if (request.method === "GET" && pathname === "/api/state") {
-        return jsonResponse(bridge.snapshot())
-      }
-
-      if (request.method === "GET" && pathname === "/api/stream") {
-        const encoder = new TextEncoder()
-        let unsubscribe: (() => void) | null = null
-        let keepalive: ReturnType<typeof setInterval> | null = null
-
-        const cleanup = () => {
-          if (keepalive !== null) {
-            clearInterval(keepalive)
-            keepalive = null
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const writeEvent = (payload: StreamPayload) => {
+            const chunk = `event: ${payload.type}\ndata: ${JSON.stringify(payload.data)}\n\n`
+            controller.enqueue(encoder.encode(chunk))
           }
 
-          if (unsubscribe !== null) {
-            unsubscribe()
-            unsubscribe = null
-          }
-        }
-
-        const stream = new ReadableStream<Uint8Array>({
-          start(controller) {
-            const writeEvent = (payload: StreamPayload) => {
-              const chunk = `event: ${payload.type}\ndata: ${JSON.stringify(payload.data)}\n\n`
-              controller.enqueue(encoder.encode(chunk))
+          writeEvent({ type: "snapshot", data: bridge.snapshot() })
+          unsubscribe = bridge.subscribe((event) => {
+            try {
+              writeEvent(event)
+            } catch {
+              cleanup()
             }
-
-            writeEvent({ type: "snapshot", data: bridge.snapshot() })
-            unsubscribe = bridge.subscribe((event) => {
-              try {
-                writeEvent(event)
-              } catch {
-                cleanup()
-              }
-            })
-
-            keepalive = setInterval(() => {
-              try {
-                controller.enqueue(encoder.encode(": keepalive\n\n"))
-              } catch {
-                cleanup()
-              }
-            }, 25_000)
-
-            request.signal.addEventListener("abort", cleanup, { once: true })
-          },
-          cancel() {
-            cleanup()
-          },
-        })
-
-        return new Response(stream, {
-          headers: {
-            "content-type": "text/event-stream; charset=utf-8",
-            "cache-control": "no-cache",
-            connection: "keep-alive",
-            "x-content-type-options": "nosniff",
-          },
-        })
-      }
-
-      const timelineMatch = /^\/api\/projects\/([^/]+)\/timeline$/.exec(pathname)
-
-      if (request.method === "GET" && timelineMatch) {
-        const projectId = decodeRouteParam(timelineMatch[1])
-
-        if (projectId === null || !isValidProjectId(projectId)) {
-          return jsonResponse({ error: "Invalid project id" }, 400)
-        }
-
-        const sessionId = reqUrl.searchParams.get("sessionId") ?? ""
-        const entries = await bridge.getTimeline(projectId, sessionId)
-
-        return jsonResponse({ projectId, sessionId, entries })
-      }
-
-      const filesListMatch = /^\/api\/projects\/([^/]+)\/files$/.exec(pathname)
-
-      if (request.method === "GET" && filesListMatch) {
-        const projectId = decodeRouteParam(filesListMatch[1])
-
-        if (projectId === null || !isValidProjectId(projectId)) {
-          return jsonResponse({ error: "Invalid project id" }, 400)
-        }
-
-        const files = bridge.refreshFiles(projectId)
-
-        return jsonResponse({ projectId, files })
-      }
-
-      const fileItemMatch = /^\/api\/projects\/([^/]+)\/file$/.exec(pathname)
-
-      if (request.method === "GET" && fileItemMatch) {
-        const projectId = decodeRouteParam(fileItemMatch[1])
-
-        if (projectId === null || !isValidProjectId(projectId)) {
-          return jsonResponse({ error: "Invalid project id" }, 400)
-        }
-
-        const relPath = reqUrl.searchParams.get("path") ?? ""
-        const rawMode = reqUrl.searchParams.get("raw") === "1"
-
-        if (rawMode) {
-          const abs = resolveSafeProjectFilePath(vibestHome, projectId, relPath)
-
-          if (abs === null || !fs.existsSync(abs)) {
-            return jsonResponse({ error: "File not found" }, 404)
-          }
-
-          return new Response(Bun.file(abs), {
-            headers: {
-              "content-type": contentTypeFor(abs),
-              "content-security-policy": "sandbox",
-              "x-content-type-options": "nosniff",
-            },
           })
-        }
 
-        const content = readProjectTextFile(vibestHome, projectId, relPath)
+          keepalive = setInterval(() => {
+            try {
+              controller.enqueue(encoder.encode(": keepalive\n\n"))
+            } catch {
+              cleanup()
+            }
+          }, 25_000)
 
-        if (content === null) {
+          request.signal.addEventListener("abort", cleanup, { once: true })
+        },
+        cancel() {
+          cleanup()
+        },
+      })
+
+      return new Response(stream, {
+        headers: {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+          "x-content-type-options": "nosniff",
+        },
+      })
+    }
+
+    const timelineMatch = /^\/api\/projects\/([^/]+)\/timeline$/.exec(pathname)
+
+    if (request.method === "GET" && timelineMatch) {
+      const projectId = decodeRouteParam(timelineMatch[1])
+
+      if (projectId === null || !isValidProjectId(projectId)) {
+        return jsonResponse({ error: "Invalid project id" }, 400)
+      }
+
+      const sessionId = reqUrl.searchParams.get("sessionId") ?? ""
+      const entries = await bridge.getTimeline(projectId, sessionId)
+
+      return jsonResponse({ projectId, sessionId, entries })
+    }
+
+    const filesListMatch = /^\/api\/projects\/([^/]+)\/files$/.exec(pathname)
+
+    if (request.method === "GET" && filesListMatch) {
+      const projectId = decodeRouteParam(filesListMatch[1])
+
+      if (projectId === null || !isValidProjectId(projectId)) {
+        return jsonResponse({ error: "Invalid project id" }, 400)
+      }
+
+      const files = bridge.refreshFiles(projectId)
+
+      return jsonResponse({ projectId, files })
+    }
+
+    const fileItemMatch = /^\/api\/projects\/([^/]+)\/file$/.exec(pathname)
+
+    if (request.method === "GET" && fileItemMatch) {
+      const projectId = decodeRouteParam(fileItemMatch[1])
+
+      if (projectId === null || !isValidProjectId(projectId)) {
+        return jsonResponse({ error: "Invalid project id" }, 400)
+      }
+
+      const relPath = reqUrl.searchParams.get("path") ?? ""
+      const rawMode = reqUrl.searchParams.get("raw") === "1"
+
+      if (rawMode) {
+        const abs = resolveSafeProjectFilePath(vibestHome, projectId, relPath)
+
+        if (abs === null || !fs.existsSync(abs)) {
           return jsonResponse({ error: "File not found" }, 404)
         }
 
-        return jsonResponse({ projectId, path: relPath, content })
-      }
-
-      if (request.method === "PUT" && fileItemMatch) {
-        const projectId = decodeRouteParam(fileItemMatch[1])
-
-        if (projectId === null || !isValidProjectId(projectId)) {
-          return jsonResponse({ error: "Invalid project id" }, 400)
-        }
-
-        if (!hasJsonContentType(request)) {
-          return jsonResponse({ error: "Content-Type must be application/json" }, 415)
-        }
-
-        const decoded = await decodeRequestJson(request, decodeSaveFileBody)
-
-        if (Option.isNone(decoded)) {
-          return jsonResponse({ error: "Invalid file save payload" }, 400)
-        }
-
-        const saved = writeProjectTextFile(vibestHome, projectId, decoded.value.path, decoded.value.content)
-
-        if (!saved) {
-          return jsonResponse({ error: "Invalid target path" }, 400)
-        }
-
-        const files = bridge.refreshFiles(projectId)
-
-        return jsonResponse({ ok: true, path: decoded.value.path, files })
-      }
-
-      const previewMatch = /^\/api\/projects\/([^/]+)\/preview$/.exec(pathname)
-
-      if (request.method === "GET" && previewMatch) {
-        const projectId = decodeRouteParam(previewMatch[1])
-
-        if (projectId === null || !isValidProjectId(projectId)) {
-          return jsonResponse({ error: "Invalid project id" }, 400)
-        }
-
-        const relPath = reqUrl.searchParams.get("path") ?? ""
-        const content = readProjectTextFile(vibestHome, projectId, relPath)
-
-        if (content === null) {
-          return new Response("Not found", { status: 404 })
-        }
-
-        return new Response(injectHtmlPreviewBridge(content), {
+        return new Response(fs.readFileSync(abs), {
           headers: {
-            "content-type": "text/html; charset=utf-8",
-            "cache-control": "no-store",
-            "content-security-policy": "sandbox allow-scripts",
+            "content-type": contentTypeFor(abs),
+            "content-security-policy": "sandbox",
             "x-content-type-options": "nosniff",
           },
         })
       }
 
-      const peekMatch = /^\/api\/sessions\/([^/]+)\/peek$/.exec(pathname)
+      const content = readProjectTextFile(vibestHome, projectId, relPath)
 
-      if (request.method === "GET" && peekMatch) {
-        const sessionId = decodeRouteParam(peekMatch[1])
-
-        if (sessionId === null) {
-          return jsonResponse({ error: "Invalid session id" }, 400)
-        }
-
-        const result = await bridge.peekSession(sessionId)
-
-        return jsonResponse(result)
+      if (content === null) {
+        return jsonResponse({ error: "File not found" }, 404)
       }
 
-      const sendMatch = /^\/api\/sessions\/([^/]+)\/send$/.exec(pathname)
+      return jsonResponse({ projectId, path: relPath, content })
+    }
 
-      if (request.method === "POST" && sendMatch) {
-        const sessionId = decodeRouteParam(sendMatch[1])
+    if (request.method === "PUT" && fileItemMatch) {
+      const projectId = decodeRouteParam(fileItemMatch[1])
 
-        if (sessionId === null) {
-          return jsonResponse({ error: "Invalid session id" }, 400)
-        }
-
-        if (!hasJsonContentType(request)) {
-          return jsonResponse({ error: "Content-Type must be application/json" }, 415)
-        }
-
-        const decoded = await decodeRequestJson(request, decodeSendBody)
-
-        if (Option.isNone(decoded)) {
-          return jsonResponse({ error: "Invalid send payload" }, 400)
-        }
-
-        const result = await bridge.sendToSession(sessionId, decoded.value.message, decoded.value.attachments ?? [])
-
-        return jsonResponse(result, result.ok ? 200 : 400)
+      if (projectId === null || !isValidProjectId(projectId)) {
+        return jsonResponse({ error: "Invalid project id" }, 400)
       }
 
-      const interruptMatch = /^\/api\/sessions\/([^/]+)\/interrupt$/.exec(pathname)
-
-      if (request.method === "POST" && interruptMatch) {
-        const sessionId = decodeRouteParam(interruptMatch[1])
-
-        if (sessionId === null) {
-          return jsonResponse({ error: "Invalid session id" }, 400)
-        }
-
-        const result = await bridge.interruptSession(sessionId)
-
-        return jsonResponse(result, result.ok ? 200 : 400)
+      if (!hasJsonContentType(request)) {
+        return jsonResponse({ error: "Content-Type must be application/json" }, 415)
       }
 
-      const archiveMatch = /^\/api\/sessions\/([^/]+)\/archive$/.exec(pathname)
+      const decoded = await decodeRequestJson(request, decodeSaveFileBody)
 
-      if (request.method === "POST" && archiveMatch) {
-        const sessionId = decodeRouteParam(archiveMatch[1])
-
-        if (sessionId === null) {
-          return jsonResponse({ error: "Invalid session id" }, 400)
-        }
-
-        const result = await bridge.archiveSession(sessionId)
-
-        return jsonResponse(result, result.ok ? 200 : 400)
+      if (Option.isNone(decoded)) {
+        return jsonResponse({ error: "Invalid file save payload" }, 400)
       }
 
-      const staticResponse = serveStaticFile(distDir, pathname)
+      const saved = writeProjectTextFile(vibestHome, projectId, decoded.value.path, decoded.value.content)
 
-      if (staticResponse) return staticResponse
+      if (!saved) {
+        return jsonResponse({ error: "Invalid target path" }, 400)
+      }
 
-      const indexFallback = serveStaticFile(distDir, "/index.html")
+      const files = bridge.refreshFiles(projectId)
 
-      if (indexFallback) return indexFallback
+      return jsonResponse({ ok: true, path: decoded.value.path, files })
+    }
 
-      return new Response("Not found", { status: 404 })
-    },
+    const previewMatch = /^\/api\/projects\/([^/]+)\/preview$/.exec(pathname)
+
+    if (request.method === "GET" && previewMatch) {
+      const projectId = decodeRouteParam(previewMatch[1])
+
+      if (projectId === null || !isValidProjectId(projectId)) {
+        return jsonResponse({ error: "Invalid project id" }, 400)
+      }
+
+      const relPath = reqUrl.searchParams.get("path") ?? ""
+      const content = readProjectTextFile(vibestHome, projectId, relPath)
+
+      if (content === null) {
+        return new Response("Not found", { status: 404 })
+      }
+
+      return new Response(injectHtmlPreviewBridge(content), {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "content-security-policy": "sandbox allow-scripts",
+          "x-content-type-options": "nosniff",
+        },
+      })
+    }
+
+    const peekMatch = /^\/api\/sessions\/([^/]+)\/peek$/.exec(pathname)
+
+    if (request.method === "GET" && peekMatch) {
+      const sessionId = decodeRouteParam(peekMatch[1])
+
+      if (sessionId === null) {
+        return jsonResponse({ error: "Invalid session id" }, 400)
+      }
+
+      const result = await bridge.peekSession(sessionId)
+
+      return jsonResponse(result)
+    }
+
+    const sendMatch = /^\/api\/sessions\/([^/]+)\/send$/.exec(pathname)
+
+    if (request.method === "POST" && sendMatch) {
+      const sessionId = decodeRouteParam(sendMatch[1])
+
+      if (sessionId === null) {
+        return jsonResponse({ error: "Invalid session id" }, 400)
+      }
+
+      if (!hasJsonContentType(request)) {
+        return jsonResponse({ error: "Content-Type must be application/json" }, 415)
+      }
+
+      const decoded = await decodeRequestJson(request, decodeSendBody)
+
+      if (Option.isNone(decoded)) {
+        return jsonResponse({ error: "Invalid send payload" }, 400)
+      }
+
+      const result = await bridge.sendToSession(sessionId, decoded.value.message, decoded.value.attachments ?? [])
+
+      return jsonResponse(result, result.ok ? 200 : 400)
+    }
+
+    const interruptMatch = /^\/api\/sessions\/([^/]+)\/interrupt$/.exec(pathname)
+
+    if (request.method === "POST" && interruptMatch) {
+      const sessionId = decodeRouteParam(interruptMatch[1])
+
+      if (sessionId === null) {
+        return jsonResponse({ error: "Invalid session id" }, 400)
+      }
+
+      const result = await bridge.interruptSession(sessionId)
+
+      return jsonResponse(result, result.ok ? 200 : 400)
+    }
+
+    const archiveMatch = /^\/api\/sessions\/([^/]+)\/archive$/.exec(pathname)
+
+    if (request.method === "POST" && archiveMatch) {
+      const sessionId = decodeRouteParam(archiveMatch[1])
+
+      if (sessionId === null) {
+        return jsonResponse({ error: "Invalid session id" }, 400)
+      }
+
+      const result = await bridge.archiveSession(sessionId)
+
+      return jsonResponse(result, result.ok ? 200 : 400)
+    }
+
+    const staticResponse = serveStaticFile(distDir, pathname)
+
+    if (staticResponse) return staticResponse
+
+    const indexFallback = serveStaticFile(distDir, "/index.html")
+
+    if (indexFallback) return indexFallback
+
+    return new Response("Not found", { status: 404 })
+  }
+
+  const server = http.createServer((req, res) => {
+    const abortController = new AbortController()
+    req.on("close", () => abortController.abort())
+
+    void toWebRequest(req, `${host}:${bound.port}`, abortController.signal)
+      .then((webReq) => handleFetch(webReq))
+      .then((webRes) => writeWebResponse(res, webRes))
+      .catch(() => {
+        if (!res.headersSent) {
+          res.writeHead(500, { "content-type": "application/json; charset=utf-8" })
+        }
+
+        if (!res.writableEnded) {
+          res.end(JSON.stringify({ error: "Internal server error" }))
+        }
+      })
   })
 
-  bound.port = server.port ?? 4320
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject)
+    server.listen(bound.port, host, () => {
+      server.off("error", reject)
+      resolve()
+    })
+  })
+
+  const addr = server.address()
+
+  if (addr !== null && !Predicate.isString(addr)) {
+    bound.port = addr.port
+  }
 
   return {
     port: bound.port,
-    url: `http://${server.hostname}:${bound.port}`,
+    url: `http://${host}:${bound.port}`,
     stop: () => {
       bridge.stop()
-      void server.stop(true)
+      server.closeAllConnections()
+      server.close()
     },
   }
 }
 
 if (import.meta.main) {
-  const started = createWebServer()
-  console.log(`vibest-web listening on ${started.url}`)
+  void createWebServer().then((started) => {
+    console.log(`vibest-web listening on ${started.url}`)
+  })
 }

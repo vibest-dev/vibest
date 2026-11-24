@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import http from "node:http"
 import net from "node:net"
 import os from "node:os"
 import path from "node:path"
@@ -212,7 +213,7 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
 
     fs.writeFileSync(path.join(home, "web-demo-state.json"), JSON.stringify(demoState), "utf8")
 
-    const server = createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
+    const server = await createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
     servers.push(server)
 
     const stateRes = await fetch(`${server.url}/api/state`)
@@ -277,7 +278,7 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
     expect(resolveSafeProjectFilePath(vibestHome, "../../outside-secret", "docs/secret.txt")).toBeNull()
     expect(resolveSafeProjectFilePath(vibestHome, "legit", "artifacts/link.txt")).toBeNull()
 
-    const server = createWebServer({ port: 0, vibestHome, demoMode: true, safeActions: true })
+    const server = await createWebServer({ port: 0, vibestHome, demoMode: true, safeActions: true })
     servers.push(server)
 
     const escapedId = encodeURIComponent("../../outside-secret")
@@ -297,14 +298,29 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
   it("B2: rejects non-loopback Host, cross-origin Origin, and non-JSON Content-Type on mutations", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-b2-"))
     tempDirs.push(home)
-    const server = createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
+    const server = await createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
     servers.push(server)
 
-    const badHost = await fetch(`${server.url}/api/state`, {
-      headers: { host: "evil.attacker.com" },
+    const badHostStatus = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: server.port,
+          path: "/api/state",
+          method: "GET",
+          headers: { host: "evil.attacker.com" },
+        },
+        (res) => {
+          res.resume()
+          resolve(res.statusCode ?? 0)
+        },
+      )
+
+      req.on("error", reject)
+      req.end()
     })
 
-    expect(badHost.status).toBe(403)
+    expect(badHostStatus).toBe(403)
 
     const badOrigin = await fetch(`${server.url}/api/sessions/any-session/send`, {
       method: "POST",
@@ -339,7 +355,7 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
     fs.writeFileSync(path.join(base, "artifacts", "demo.html"), "<html><body><h1>Hi</h1></body></html>", "utf8")
     fs.writeFileSync(path.join(base, "artifacts", "pic.svg"), "<svg><script>alert(1)</script></svg>", "utf8")
 
-    const server = createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
+    const server = await createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
     servers.push(server)
 
     const previewRes = await fetch(`${server.url}/api/projects/${projectId}/preview?path=artifacts/demo.html`)
@@ -359,11 +375,25 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
     const sockPath = path.join(tmp, "vibest.sock")
     let open = 0
     let closed = 0
+    let resolveOpened: (() => void) | null = null
+    let resolveClosed: (() => void) | null = null
+
+    const opened = new Promise<void>((resolve) => {
+      resolveOpened = resolve
+    })
+
+    const allClosed = new Promise<void>((resolve) => {
+      resolveClosed = resolve
+    })
 
     const netSrv = net.createServer((socket) => {
       open += 1
+      socket.resume()
+      resolveOpened?.()
       socket.on("close", () => {
         closed += 1
+
+        if (closed >= open) resolveClosed?.()
       })
     })
 
@@ -372,10 +402,25 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
     })
 
     const bridge = createVibestBridge({ vibestHome: tmp, repositoryRoot: tmp, demoMode: false, safeActions: true })
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    bridge.stop()
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    netSrv.close()
+
+    try {
+      await Promise.race([
+        opened,
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("timed out waiting for socket open")), 3000),
+        ),
+      ])
+      bridge.stop()
+      await Promise.race([
+        allClosed,
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error("timed out waiting for socket close")), 3000),
+        ),
+      ])
+    } finally {
+      bridge.stop()
+      netSrv.close()
+    }
 
     expect(open).toBeGreaterThanOrEqual(1)
     expect(closed).toBe(open)
@@ -456,7 +501,7 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
   it("B6: returns HTTP 400 instead of 500 on malformed percent-encoding in route params", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-b6-"))
     tempDirs.push(home)
-    const server = createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
+    const server = await createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
     servers.push(server)
 
     const badUri = await fetch(`${server.url}/api/projects/%E0%A4%A/files`)
