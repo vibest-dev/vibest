@@ -1,6 +1,6 @@
 import { Host } from "@vibest/plugin/host"
 import { NotInRepository } from "@vibest/schema/session"
-import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, Stream } from "effect"
+import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, Semaphore, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
@@ -8,6 +8,8 @@ import { PlatformNode } from "./effect/platform.ts"
 import { parseRemote, rankedRemotes } from "./repository-url.ts"
 
 export * as Git from "./git.ts"
+
+export const GIT_CONCURRENCY = 16
 
 export class GitError extends Schema.TaggedError<GitError>()("GitError", {
   args: Schema.Array(Schema.String),
@@ -59,21 +61,24 @@ export const layer = Layer.effect(
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
+    const gitSemaphore = yield* Semaphore.make(GIT_CONCURRENCY)
 
     const gitRaw = (cwd: string, args: ReadonlyArray<string>, input?: string, ok: ReadonlyArray<number> = [0]) =>
-      Host.capture("git", ["--no-optional-locks", ...args], {
-        cwd,
-        ...(input !== undefined && { stdin: Stream.make(new TextEncoder().encode(input)) }),
-      }).pipe(
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-        Effect.flatMap((run) =>
-          run === undefined
-            ? Effect.die("Host.capture without a timeout returned undefined")
-            : ok.includes(run.exitCode)
-              ? Effect.succeed(run.stdout)
-              : Effect.fail(new GitError({ args, message: run.stderr.trim() || `exit ${run.exitCode}` })),
+      gitSemaphore.withPermits(1)(
+        Host.capture("git", ["--no-optional-locks", ...args], {
+          cwd,
+          ...(input !== undefined && { stdin: Stream.make(new TextEncoder().encode(input)) }),
+        }).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.flatMap((run) =>
+            run === undefined
+              ? Effect.die("Host.capture without a timeout returned undefined")
+              : ok.includes(run.exitCode)
+                ? Effect.succeed(run.stdout)
+                : Effect.fail(new GitError({ args, message: run.stderr.trim() || `exit ${run.exitCode}` })),
+          ),
+          Effect.catchTag("PlatformError", (e) => Effect.fail(new GitError({ args, message: e.message }))),
         ),
-        Effect.catchTag("PlatformError", (e) => Effect.fail(new GitError({ args, message: e.message }))),
       )
 
     const git = (cwd: string, ...args: string[]) => gitRaw(cwd, args).pipe(Effect.map((out) => out.trim()))
@@ -251,8 +256,17 @@ export const layer = Layer.effect(
       ignored,
       state: Effect.fn("Git.state")(function* (worktree) {
         if ((yield* gitDirectory(worktree)) === undefined) return undefined
-        const branch = (yield* tryGit(worktree, "branch", "--show-current")) ?? ""
-        const dirty = !!(yield* tryGit(worktree, "status", "--porcelain", "--untracked-files=all"))
+
+        const [rawBranch, rawStatus] = yield* Effect.all(
+          [
+            tryGit(worktree, "branch", "--show-current"),
+            tryGit(worktree, "status", "--porcelain", "--untracked-files=all"),
+          ],
+          { concurrency: 2 },
+        )
+
+        const branch = rawBranch ?? ""
+        const dirty = !!rawStatus
 
         const contained =
           !!branch || !!(yield* tryGit(worktree, "for-each-ref", "--contains", "HEAD", "refs/heads", "refs/remotes"))
