@@ -41,6 +41,7 @@ export interface RuntimeCalls {
     readonly argv: ReadonlyArray<string>
     readonly env: Record<string, string>
     readonly label: string
+    readonly parent: string | undefined
     readonly near: string | undefined
     readonly split: boolean | undefined
     readonly focus: boolean | undefined
@@ -377,6 +378,7 @@ export class FakeRuntime extends Context.Service<
               argv: input.launch.argv,
               env: { ...input.launch.env },
               label: input.label,
+              parent: input.parent?.id,
               near: input.near?.id,
               split: input.split,
               focus: input.focus,

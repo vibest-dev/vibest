@@ -130,7 +130,7 @@ describe("Watch", () => {
         repositories: [{ path: other, identity: null }],
       })
 
-      yield* c.Remove({ id })
+      yield* c.Archive({ id })
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "SessionEnded" }> =>
           Predicate.isTagged(e, "SessionEnded") && e.id === id && e.projectId === project,

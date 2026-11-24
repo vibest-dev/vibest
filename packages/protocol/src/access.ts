@@ -44,7 +44,7 @@ export const ACCESS = {
   Interrupt: ["owner", "peer"],
   Stop: ["owner", "peer"],
   Peek: ["owner", "peer"],
-  Remove: ["owner", "peer"],
+  Archive: ["owner", "peer"],
   "Daemon.Stop": "cli",
   "Daemon.Handoff": "cli",
   "Session.Ready": "self",

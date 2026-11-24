@@ -168,7 +168,7 @@ describe("vibest.sock", () => {
 
       assert.strictEqual(yield* queued("spawn-1"), 1)
       const sent = yield* c.Send({ id: first.id, message: "more", request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" })
-      yield* c.Remove({ id: first.id })
+      yield* c.Archive({ id: first.id })
       assert.deepStrictEqual(
         yield* c.Send({ id: first.id, message: "more", request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" }),
         sent,
@@ -525,7 +525,7 @@ describe("vibest.sock", () => {
         b.Send({ id, message: "x" }),
         b.Interrupt({ id }),
         b.Peek({ id }),
-        b.Remove({ id }),
+        b.Archive({ id }),
       ]
 
       for (const call of others) {
@@ -561,7 +561,7 @@ describe("vibest.sock", () => {
         ["from its own entry session", "from the user"],
       )
       assert.strictEqual(
-        failureTag(yield* Effect.exit(user.Remove({ id }))),
+        failureTag(yield* Effect.exit(user.Archive({ id }))),
         "success",
         "the user's command line archives it even while it works",
       )
@@ -629,7 +629,7 @@ describe("vibest.sock", () => {
         ["Interrupt", c.Interrupt({ id })],
         ["Stop", c.Stop({ id })],
         ["Peek", c.Peek({ id })],
-        ["Remove", c.Remove({ id })],
+        ["Archive", c.Archive({ id })],
         ["Daemon.Stop", c["Daemon.Stop"]({ instance: "x" })],
         ["Daemon.Handoff", c["Daemon.Handoff"]({ instance: "x", command: ["vibest"] })],
         ["Session.Ready", c["Session.Ready"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],

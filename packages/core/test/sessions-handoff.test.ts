@@ -125,7 +125,7 @@ test(
     const second = yield* sessions.spawn(input)
     yield* until((yield* Starts.Service).waiting, (keys) => keys.length === 2)
     yield* sessions.interrupt(first.id)
-    yield* sessions.remove(second.id)
+    yield* sessions.archive(second.id)
 
     assert.deepStrictEqual(
       yield* sql<{ status: string; processes: number }>`SELECT i.status AS status,
@@ -273,7 +273,7 @@ test(
     const sql = yield* SqlClient.SqlClient
     const { id, entryId, sessions } = yield* idleSession(yield* makeRepository)
     assert.deepStrictEqual(yield* inboxStatus(id), [{ status: "delivered" }])
-    yield* sessions.remove(id)
+    yield* sessions.archive(id)
 
     const dropped = yield* sql<{ type: string }>`SELECT type FROM event
       WHERE aggregate = ${id} AND type = 'inbox.dropped'`

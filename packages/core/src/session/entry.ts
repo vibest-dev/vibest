@@ -27,11 +27,11 @@ import { entryIdle } from "../inbox.ts"
 import * as Launch from "../launch.ts"
 import { Plugins } from "../plugin.ts"
 import { Processes } from "../processes.ts"
-import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks, terminalLock } from "./locks.ts"
 import { runtimeEnv } from "./placement.ts"
+import { HARNESS_EXIT_WAIT, stopAgent } from "./release.ts"
 
 export * as EntrySession from "./entry.ts"
 

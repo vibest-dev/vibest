@@ -61,7 +61,7 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "Remove names the resolved session when the runtime is unreachable, not the prefix typed",
+    "Archive names the resolved session when the runtime is unreachable, not the prefix typed",
     Effect.gen(function* () {
       const db = yield* Db.Service
       const herdr = yield* FakeRuntime
@@ -74,7 +74,7 @@ describe("vibest.sock", () => {
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
       yield* Ref.set(herdr.reachable, false)
-      const failed = yield* Effect.flip(c.Remove({ id: id.slice(0, 8) }))
+      const failed = yield* Effect.flip(c.Archive({ id: id.slice(0, 8) }))
       assert.strictEqual(failed._tag, "RuntimeUnreachable")
       assert.strictEqual("session" in failed ? failed.session : failed._tag, id)
     }),
@@ -98,7 +98,7 @@ describe("vibest.sock", () => {
         { agent: "coordinator" },
       )
       const entry = (yield* db.session.entryOf(projectId))!
-      const failed = yield* Effect.flip(asCli(yield* client, repo).Remove({ id: entry.id }))
+      const failed = yield* Effect.flip(asCli(yield* client, repo).Archive({ id: entry.id }))
       assert.strictEqual(failed._tag, "NoSuchSession")
       assert.strictEqual(
         "message" in failed ? failed.message : "",

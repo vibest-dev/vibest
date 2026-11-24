@@ -1,3 +1,4 @@
+import { ArchiveOutcome } from "@vibest/schema/archive"
 import { AgentFrom } from "@vibest/schema/event"
 import { RequestId } from "@vibest/schema/id"
 import {
@@ -28,7 +29,6 @@ import {
   ProjectInfoResult,
   ProjectSearchInput,
 } from "@vibest/schema/project"
-import { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AgentStatus,
   AllocationFailed,
@@ -544,9 +544,9 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(
     admitted(
-      Rpc.make("Remove", {
+      Rpc.make("Archive", {
         payload: { id: Schema.String, keepWorktree: Schema.optional(Schema.Boolean) },
-        success: Schema.NullOr(RemoveOutcome),
+        success: Schema.NullOr(ArchiveOutcome),
         error: PROCESS_ERRORS,
       }),
     ),

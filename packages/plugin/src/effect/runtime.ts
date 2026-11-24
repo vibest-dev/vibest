@@ -84,6 +84,7 @@ export interface RuntimeDefinition {
     readonly cwd: string
     readonly launch: Launch
     readonly label: string
+    readonly parent?: Terminal
     readonly near?: Terminal
     readonly split?: boolean
     readonly focus?: boolean

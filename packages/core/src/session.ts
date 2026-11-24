@@ -1,7 +1,7 @@
+import type { ArchiveOutcome } from "@vibest/schema/archive"
 import { messageOf } from "@vibest/schema/error"
 import type { Sender } from "@vibest/schema/event"
 import type { AgentRefused, PluginsNotActive } from "@vibest/schema/plugin"
-import type { RemoveOutcome } from "@vibest/schema/remove"
 import {
   AllocationFailed,
   type AmbiguousSession,
@@ -140,11 +140,11 @@ export interface Interface {
   readonly interrupt: (
     id: string,
   ) => Effect.Effect<{ message: string }, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable>
-  readonly remove: (
+  readonly archive: (
     id: string,
     options?: { readonly keepWorktree?: boolean | undefined },
   ) => Effect.Effect<
-    RemoveOutcome | undefined,
+    ArchiveOutcome | undefined,
     NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable | RuntimeError
   >
   readonly stop: (
@@ -187,7 +187,7 @@ export const make = Effect.gen(function* () {
   const { send, deliverTo, admit, interrupt, userPrompt, typeTaken } = yield* Delivery.Service
   const reconcile = yield* Reconcile.Service
   const { spawn } = yield* Spawn.Service
-  const { remove, stop } = yield* Archive.Service
+  const { archive, stop } = yield* Archive.Service
   const { outdated, restart, restartLater } = yield* Restart.Service
 
   const getRow = (id: string) =>
@@ -369,7 +369,7 @@ export const make = Effect.gen(function* () {
     admit,
     interrupt,
     peek,
-    remove,
+    archive,
     stop,
     get,
     list,
