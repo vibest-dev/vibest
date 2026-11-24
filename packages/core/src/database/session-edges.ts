@@ -13,6 +13,28 @@ export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const { publish, transaction: tx } = yield* Bus.Service
 
+  const mutateEdges = (edges: ReadonlyArray<readonly [string, string]>, add: boolean) =>
+    tx(
+      Effect.gen(function* () {
+        const out: Array<SessionEdge> = []
+
+        for (const [from, to] of edges) {
+          if (from === to) continue
+
+          const exists =
+            (yield* sql`SELECT 1 FROM session_edge WHERE from_session_id = ${from} AND to_session_id = ${to}`).length >
+            0
+
+          if (add && !exists) yield* publish(SessionLinked, { sessionId: from, data: { to } })
+          else if (!add && exists) yield* publish(SessionUnlinked, { sessionId: from, data: { to } })
+
+          out.push({ from, to })
+        }
+
+        return out
+      }),
+    ).pipe(Effect.orDie)
+
   return {
     sessionParents: Effect.fn("Db.session.sessionParents")((ids: ReadonlyArray<string>) =>
       (ids.length === 0
@@ -67,45 +89,11 @@ export const make = Effect.gen(function* () {
     ),
 
     linkSessions: Effect.fn("Db.session.linkSessions")((edges: ReadonlyArray<readonly [string, string]>) =>
-      tx(
-        Effect.gen(function* () {
-          const out: Array<SessionEdge> = []
-
-          for (const [from, to] of edges) {
-            if (from === to) continue
-
-            const exists =
-              (yield* sql`SELECT 1 FROM session_edge WHERE from_session_id = ${from} AND to_session_id = ${to}`)
-                .length > 0
-
-            if (!exists) yield* publish(SessionLinked, { sessionId: from, data: { to } })
-            out.push({ from, to })
-          }
-
-          return out
-        }),
-      ).pipe(Effect.orDie),
+      mutateEdges(edges, true),
     ),
 
     unlinkSessions: Effect.fn("Db.session.unlinkSessions")((edges: ReadonlyArray<readonly [string, string]>) =>
-      tx(
-        Effect.gen(function* () {
-          const out: Array<SessionEdge> = []
-
-          for (const [from, to] of edges) {
-            if (from === to) continue
-
-            const exists =
-              (yield* sql`SELECT 1 FROM session_edge WHERE from_session_id = ${from} AND to_session_id = ${to}`)
-                .length > 0
-
-            if (exists) yield* publish(SessionUnlinked, { sessionId: from, data: { to } })
-            out.push({ from, to })
-          }
-
-          return out
-        }),
-      ).pipe(Effect.orDie),
+      mutateEdges(edges, false),
     ),
   }
 })

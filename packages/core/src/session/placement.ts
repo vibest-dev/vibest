@@ -124,12 +124,15 @@ export const make = Effect.gen(function* () {
   const systemPromptOf = Effect.fn("Placement.systemPromptOf")(function* (session: SessionRow) {
     const creator = yield* db.session.creatorLabel(session.id)
 
+    const creatorLinked =
+      creator !== undefined && (creator.id.includes("/") || (yield* db.inbox.maySend(session.id, creator.id)))
+
     return systemPrompt({
       system: (yield* definitionIn(agents, session.agent)).system,
       id: session.id,
       checkout: (yield* db.session.sessionIdentity(session.id))?.entry,
       sharer: yield* db.session.earlierSharer(session.id),
-      creator,
+      creator: creator === undefined ? undefined : { ...creator, linked: creatorLinked },
       linkedTo: yield* db.session.linkedTargets(session.id, creator?.id),
       projectDir: layout.project(session.projectId),
       agents: agents.all,

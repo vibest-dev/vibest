@@ -111,22 +111,10 @@ export const make = Effect.gen(function* () {
     })
 
   const linkProject = (method: "Session.Link" | "Session.Unlink") =>
-    Effect.gen(function* () {
-      const c = yield* Caller
-
-      if (Predicate.isTagged(c, "Peer")) {
-        if (c.projectId === undefined)
-          return yield* new Forbidden({ method, message: `${method} needs the calling project` })
-
-        return c.projectId
-      }
-
-      const project = yield* scope(method).pipe(
-        Effect.catchTag("NotInRepository", (e) => Effect.fail(new Forbidden({ method, message: e.message }))),
-      )
-
-      return project.id
-    })
+    scope(method).pipe(
+      Effect.map((project) => project.id),
+      Effect.catchTag("NotInRepository", (e) => Effect.fail(new Forbidden({ method, message: e.message }))),
+    )
 
   return {
     Spawn: (input) =>
