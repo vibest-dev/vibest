@@ -531,7 +531,7 @@ const make = Effect.gen(function* () {
 
         if (rt.present !== undefined)
           yield* rt
-            .present(address, { entrySession: claimed.sessionId, projectId, title: entryLabel(directory) })
+            .present(address, { session: claimed.sessionId, projectId, title: entryLabel(directory) })
             .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
 
         const typed = yield* Launch.launchLine(command).pipe(

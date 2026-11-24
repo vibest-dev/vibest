@@ -72,7 +72,7 @@ export const seenOf = (t: api.Terminal): VibestPlugin.Runtime.Seen => {
   return { finished: t.turn ?? 0, seen }
 }
 
-export const PRESENT_ENTRY_SESSION = "entrySession"
+export const PRESENT_SESSION = "session"
 export const PRESENT_PROJECT_ID = "projectId"
 
 const INTERACTIVE_SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "nu"])
@@ -563,11 +563,10 @@ export const make = (deps: {
       )
 
     const present: Runtime["present"] = (terminal, info) => {
-      const entrySession = info[PRESENT_ENTRY_SESSION]
+      const session = info[PRESENT_SESSION]
       const project = info[PRESENT_PROJECT_ID]
 
-      if (entrySession === undefined || entrySession === "" || project === undefined || project === "")
-        return Effect.void
+      if (session === undefined || session === "" || project === undefined || project === "") return Effect.void
 
       return reach(terminal).pipe(
         Effect.flatMap(({ hc, address }) =>
@@ -577,7 +576,7 @@ export const make = (deps: {
               labels: {
                 [LABEL.runtime]: KIND,
                 [LABEL.project]: project,
-                [LABEL.session]: entrySession,
+                [LABEL.session]: session,
                 "herdr.space": "",
                 "herdr.tab": "",
                 [LABEL.typed]: String(Date.now()),
