@@ -12,7 +12,7 @@ import { listProjectRepositories } from "@vibest/core/project/create"
 import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
-import { remoteHeaders } from "@vibest/protocol/protocol"
+import { REMOTE_BY_USER, remoteHeaders } from "@vibest/protocol/protocol"
 import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
@@ -244,6 +244,13 @@ const make = Effect.gen(function* () {
       )
 
       return { sessions: each.flatMap((e) => e.sessions), machines: each.map((e) => e.machine) }
+    }),
+
+    liveSessions: Effect.fn("Remote.liveSessions")(function* (machine: string, project: string) {
+      const link = yield* machines.link(machine)
+
+      return (yield* link.call(link.client.List({}, { headers: remoteHeaders(self.id, project, REMOTE_BY_USER) })))
+        .sessions
     }),
 
     get: Effect.fn("Remote.get")((at: At, project: string, by: string, p: PayloadOf<"Get">) =>

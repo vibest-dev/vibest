@@ -24,7 +24,6 @@ import * as Server from "@vibest/server/server"
 import {
   Cause,
   ConfigProvider,
-  Crypto,
   Effect,
   Exit,
   FileSystem,
@@ -38,6 +37,7 @@ import {
   Terminal,
 } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
+import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -722,6 +722,7 @@ describe("wizard entry", () => {
         const terminal = Terminal.make({
           columns: Effect.succeed(80),
           rows: Effect.succeed(24),
+          size: Queue.unbounded(),
           readInput: Effect.succeed(keys),
           readLine: Effect.die("readline"),
           display: () => Effect.void,
@@ -762,13 +763,8 @@ describe("wizard entry", () => {
 
             return Effect.die("socket")
           }),
-          Effect.provideService(
-            Crypto.Crypto,
-            Crypto.make({
-              randomBytes: (size) => new Uint8Array(size),
-              digest: (_algorithm, data) => Effect.succeed(data),
-            }),
-          ),
+          Effect.provide(Digest.layerWebCrypto),
+          Effect.provide(SecureRandom.layerWebCrypto),
           Effect.provide(FileSystem.layerNoop({})),
           Effect.provide(Stdio.layerTest({ args: Effect.succeed(["--wizard"]) })),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),

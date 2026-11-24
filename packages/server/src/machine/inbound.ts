@@ -1,5 +1,6 @@
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
+import { archived } from "@vibest/core/database/db-rows"
 import type { OutboxRow } from "@vibest/core/database/remote"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
@@ -17,7 +18,7 @@ import {
   PROMPT_MAX,
   PromptTooLarge,
 } from "@vibest/schema/machine"
-import { NoRuntime } from "@vibest/schema/session"
+import { NoRuntime, NoSuchSession } from "@vibest/schema/session"
 import { Context, Effect, Layer, Option, Queue, Stream } from "effect"
 
 export * as Inbound from "./inbound.ts"
@@ -74,13 +75,25 @@ const make = Effect.gen(function* () {
   const self = yield* Identity.Service
   const git = yield* Git.Service
 
+  const resolveLiveLocal = (ref: string) =>
+    Effect.gen(function* () {
+      const id = yield* db.session.resolveSession(ref)
+      const row = yield* db.session.getSession(id)
+
+      if (row === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
+
+      if (archived(row)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+
+      return id
+    })
+
   const resolveEdges = (
     edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>,
   ) =>
     Effect.forEach(edges, (edge) =>
       Effect.gen(function* () {
-        const from = yield* db.session.resolveSession(edge.from)
-        const to = edge.remote === undefined ? yield* db.session.resolveSession(edge.to) : edge.to
+        const from = yield* resolveLiveLocal(edge.from)
+        const to = edge.remote === undefined ? yield* resolveLiveLocal(edge.to) : edge.to
 
         return { from, to, ...(edge.remote !== undefined && { remote: edge.remote }) }
       }),

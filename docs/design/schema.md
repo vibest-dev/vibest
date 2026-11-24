@@ -12,14 +12,14 @@ appending facts.
   `position` is the file's local order of all rows; only the bus reads it (to replay, to copy the log, and as the order `Events` reads the whole log in), and no
   fact or read-model row stores it (oxlint rule `vibest/event-reads`).
 - Aggregates: a `session` (its id; every `session.*`, `process.*`, `execution.*` and `inbox.*` fact), a `project`
-  (its id; `project.*`), and the `ledger` (`meta.ledger`, a UUID made when the file is created; `machine.*`, `peer.*`,
+  (its id; `project.*`), and the `ledger` (`meta.ledger`, a UUID made when the file is created; `machine.*`, `remote.*`,
   `outbox.*`). Which aggregate a type belongs to is part of its catalog definition.
 - `meta`: `catalog` (the newest catalog version that wrote to this file), `projection` (the read model's version) and
   `ledger` (this file's ledger aggregate id).
 - `migration`: the ids of the migrations applied to this file.
 - The read model, one purpose per table: `project`, `project_repository`, `session`, `process` (one harness run of a
   session), `execution` (one input a session handled until it ended), `inbox` (text for a session, and whether it was
-  delivered), `machine` and `peer` (other vibestds), `outbox` (notices waiting for another vibestd).
+  delivered), `machine` and `remote` (other vibestds), `outbox` (notices waiting for another vibestd).
 
 ## Rules
 
@@ -220,7 +220,7 @@ CREATE UNIQUE INDEX inbox_request ON inbox (sender_key, request_id) WHERE reques
 CREATE UNIQUE INDEX inbox_transfer ON inbox (transfer_id) WHERE transfer_id IS NOT NULL;
 ```
 
-`machine`, `peer` and `outbox` are in [multi-machine.md](multi-machine.md). There are no foreign keys and no other
+`machine`, `remote` and `outbox` are in [multi-machine.md](multi-machine.md). There are no foreign keys and no other
 triggers: the projectors keep the read model whole, and one live process and one open execution per session are
 unique indexes, so a fact that would break them fails its transaction.
 
@@ -245,10 +245,10 @@ message.
 - A send from a local agent session names the execution it had open (`senderExecutionId` on `inbox.enqueued`,
   `execution` on `outbox.queued`). `ctx.session.sentIn` counts those rows, including an outbox row whose session has
   since ended or been acknowledged, without counting the original delegation. Ending a session does not delete the
-  outbox row; a peer is not offered rows for an ended session. It is not evidence the recipient was handed the message.
+  outbox row; a remote is not offered rows for an ended session. It is not evidence the recipient was handed the message.
   A send forwarded straight to a session on another machine writes no local inbox fact and is not counted. A
   cross-machine transfer reuses the sender's existing item id as `transferId`; a local message leaves it empty. An
-  outbox acknowledgement means the peer accepted the item, not that the agent was handed it.
+  outbox acknowledgement means the remote accepted the item, not that the agent was handed it.
 - An execution end writes no inbox row. The recipient of a `notice` is `parent_session_id` while it lives, then the entry
   session, then `origin_session` through the outbox; an undeliverable `send` notifies its sender.
 

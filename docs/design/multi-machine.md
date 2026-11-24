@@ -36,7 +36,7 @@ A home copied or restored onto another host gets a new id at its first start the
 same id, except where neither can read a host id (a container without `/etc/machine-id`). Data is kept: the new id only
 changes what this vibestd presents to others.
 
-## The peer caller and `vibest connect`
+## The remote caller and `vibest connect`
 
 Machine A's vibestd reaches machine B's vibestd through one long-lived pipe: `ssh <target> … vibest connect` on B
 joins its stdin and stdout to B's vibestd socket, starting B's vibestd when it is not running. Over the pipe A speaks
@@ -67,7 +67,7 @@ this one, else `MachineIncompatible` "<name> runs vibest <v> (protocol <n>); run
 supervised one (add dials once); a failure records nothing. It is refused when B answers this vibestd's
 own id ("<name> is this vibestd") or an id another row already has (`AlreadyAdded`: "this is the vibestd already
 added as <name> (<id8>); use that name"), decided from the result of the `INSERT … ON CONFLICT DO NOTHING`.
-`vibest machine ls` shows each row with its connection state and its load, and `vibest status` shows this machine's load (`Machine.Load` with no machine). Another machine is asked over the peer link (capability `load`) and measures itself; one that is not connected, runs an older vibestd or does not answer in 3 s fails with `MachineUnavailable` or `MachineIncompatible`, which `machine ls` shows as `loadError` instead of `load`. A reading is cached for 5 seconds and not stored. `vibest
+`vibest machine ls` shows each row with its connection state and its load, and `vibest status` shows this machine's load (`Machine.Load` with no machine). Another machine is asked over the remote link (capability `load`) and measures itself; one that is not connected, runs an older vibestd or does not answer in 3 s fails with `MachineUnavailable` or `MachineIncompatible`, which `machine ls` shows as `loadError` instead of `load`. A reading is cached for 5 seconds and not stored. `vibest
 machine rm` stops the connection and deletes the row (`UnknownMachine` when there is none), with no checks: agents and undelivered messages stay on B.
 
 The ssh command is `ssh -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 [-p <port>] <target>
@@ -113,7 +113,7 @@ Then B checks every commit before creating anything (`Git.hasCommit`: `git cat-f
 a list, or a single repository inside a project folder, gets the multi-repository layout, one detached worktree per repository at A's commit under A's folder name, so paths in the task stay valid.
 Folder names that are not safe directory names, or repeat, are refused. B never clones, fetches or pulls. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
-started it is the `origin` of its `session.created` fact (peer, project, reportTo), kept in the session's
+started it is the `origin` of its `session.created` fact (remote, project, reportTo), kept in the session's
 `origin_*` columns (`reportTo` as `origin_session`): the session on A that ran `vibest run --machine`, carried in
 `vibest-remote-by`. `Remote.Spawn` for the user (`vibest-remote-by: user`) is refused with `Forbidden`. The forwarded `request` finds the session
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
@@ -122,15 +122,15 @@ notices go to B's own inbox delivery and no outbox row is written for it.
 Every notice of a remote session with a `reportTo` goes to B's `outbox` as a `notice`, and every `vibest send` it makes to a linked remote session goes as a `send`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. A forward writes no local inbox row: the outbox item is the receipt, and it is not an inbox delivery. With no `remote` row nothing is queued. `Remote.Outbox` streams
 the remote's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
 `Remote.Ack { ids }` appends `outbox.acked`, which sets their `acked_at`; an acknowledged row stays, so a retry of the
-same request id finds it and queues nothing. Archiving a peer session (`session.ended`) deletes its unacknowledged
+same request id finds it and queues nothing. Archiving a remote session (`session.ended`) deletes its unacknowledged
 rows.
 
-`List`, `Get`, `Send`, `Interrupt`, `Archive` and `Peek` from a peer resolve a session id only among sessions whose
-origin has that peer and that project; any other session is `NoSuchSession`.
+`List`, `Get`, `Send`, `Interrupt`, `Archive` and `Peek` from a remote resolve a session id only among sessions whose
+origin has that remote and that project; any other session is `NoSuchSession`.
 
 ## Cloning a project
 
-`vibest project clone <url> [--machine <B>] [--dir <folder>]` (`Project.Clone`, the user or a session; a peer for its
+`vibest project clone <url> [--machine <B>] [--dir <folder>]` (`Project.Clone`, the user or a session; a remote for its
 own machine only) clones a repository and records it as a project, and is the only way vibest clones: `vibest run`
 never clones, fetches or pulls. Without `--machine` it runs in this vibestd; with it, A forwards the call to B over
 the machine's connection (a B without the `projectClone` capability is refused, "run vibest update on <B>"). The

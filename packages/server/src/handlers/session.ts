@@ -1,15 +1,16 @@
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
-import { archived, runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
+import { runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
+import { expandEdgeSpec, SESSION_PREFIX } from "@vibest/core/database/session-edges"
 import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
 import { Identity } from "@vibest/core/identity"
 import { Integration } from "@vibest/core/integration"
 import { raisesSeen } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
-import { defaultSessionName, type EdgeSpec, NoSuchSession, Session } from "@vibest/core/session"
+import { defaultSessionName, NoSuchSession, Session } from "@vibest/core/session"
+import { resolveLiveTarget } from "@vibest/core/session/spawn"
 import { Starts } from "@vibest/core/session/starts"
-import { REMOTE_BY_USER } from "@vibest/protocol/protocol"
-import { Caller, type CallerIdentity, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
+import { Caller, type CallerIdentity, type EdgeSpec, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
 import type { AgentFrom, AgentSender } from "@vibest/schema/event"
 import { MachineFailed, UnknownMachine } from "@vibest/schema/machine"
 import { AmbiguousSession, NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
@@ -28,9 +29,6 @@ import { Routing } from "./remote.ts"
 type ResolvedEndpoint =
   | { readonly local: true; readonly id: string; readonly remoteId: string }
   | { readonly local: false; readonly machine: string; readonly id: string; readonly remoteId: string }
-
-const sameEndpoint = (a: ResolvedEndpoint, b: ResolvedEndpoint) =>
-  a.local === b.local && a.id === b.id && (a.local || (!b.local && a.machine === b.machine))
 
 const formatEndpoint = (ep: ResolvedEndpoint) => (ep.local ? ep.id : `${ep.machine}/${ep.id}`)
 
@@ -144,19 +142,15 @@ export const make = Effect.gen(function* () {
       const at = address(ref)
 
       if (Predicate.isTagged(at, "Local")) {
-        const id = yield* db.session.resolveSession(at.id)
-        const row = yield* db.session.getSession(id)
-
-        if (row === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
-
-        if (row.projectId !== projectId)
-          return yield* new Forbidden({ method, message: `${id} belongs to another project` })
-
-        if (archived(row)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+        const id = yield* resolveLiveTarget(
+          db,
+          projectId,
+        )(at.id).pipe(Effect.catchTag("LinkRefused", (e) => Effect.fail(new Forbidden({ method, message: e.message }))))
 
         return { local: true as const, id, remoteId: selfIdentity.id }
       }
 
+      if (!SESSION_PREFIX.test(at.id)) return yield* new NoSuchSession({ id: ref, message: `no session ${ref}` })
       const machineRow = yield* db.remote.machineNamed(at.machine)
 
       if (machineRow === undefined)
@@ -165,8 +159,10 @@ export const make = Effect.gen(function* () {
           machines: (yield* db.remote.machines).map((m) => m.name),
         })
 
-      const snap = yield* remoteWatch.snapshot
-      const matches = snap.sessions.filter((s) => s.machine === at.machine && s.id.startsWith(at.id))
+      const liveRemote = yield* remoteService.liveSessions(at.machine, projectId)
+      const matches = liveRemote.filter((s) => s.id.startsWith(at.id))
+
+      if (matches.length === 0) return yield* new NoSuchSession({ id: ref, message: `no session ${ref}` })
 
       if (matches.length > 1)
         return yield* new AmbiguousSession({
@@ -174,14 +170,7 @@ export const make = Effect.gen(function* () {
           matches: matches.map((s) => `${at.machine}/${s.id}`),
         })
 
-      if (matches.length === 1)
-        return { local: false as const, machine: at.machine, id: matches[0]!.id, remoteId: machineRow.remoteId }
-
-      const fetched = yield* remoteService.get(at, projectId, REMOTE_BY_USER, { id: at.id })
-      const prefix = `${at.machine}/`
-      const fullId = fetched.id.startsWith(prefix) ? fetched.id.slice(prefix.length) : fetched.id
-
-      return { local: false as const, machine: at.machine, id: fullId, remoteId: machineRow.remoteId }
+      return { local: false as const, machine: at.machine, id: matches[0]!.id, remoteId: machineRow.remoteId }
     })
 
   const applyEndpointPairs = (
@@ -217,91 +206,18 @@ export const make = Effect.gen(function* () {
       return { edges: pairs.map(([from, to]) => ({ from: formatEndpoint(from), to: formatEndpoint(to) })) }
     })
 
-  const applyDirectedEdges = (
-    method: "Session.Link" | "Session.Unlink" | "Spawn",
-    projectId: string,
-    fromRefs: ReadonlyArray<string>,
-    toRefs: ReadonlyArray<string>,
-    mode: "link" | "unlink",
-  ) =>
-    Effect.gen(function* () {
-      const resolve = (ref: string) => resolveEndpoint(method, projectId, ref)
-      const froms = yield* Effect.forEach(fromRefs, resolve)
-      const tos = yield* Effect.forEach(toRefs, resolve)
-
-      if (froms.length === 0 || tos.length === 0)
-        return yield* new Forbidden({ method, message: "give at least one source and one target session" })
-
-      const pairs: Array<readonly [ResolvedEndpoint, ResolvedEndpoint]> = []
-      const seen = new Set<string>()
-
-      for (const a of froms) {
-        for (const b of tos) {
-          if (sameEndpoint(a, b)) return yield* new Forbidden({ method, message: "a session cannot target itself" })
-          const key = `${formatEndpoint(a)}\0${formatEndpoint(b)}`
-
-          if (seen.has(key)) continue
-          seen.add(key)
-          pairs.push([a, b])
-        }
-      }
-
-      return yield* applyEndpointPairs(pairs, mode)
-    })
-
   const applyCrossMachineEdges = (
-    method: "Session.Link" | "Session.Unlink" | "Spawn",
+    method: "Session.Link" | "Session.Unlink",
     projectId: string,
     spec: EdgeSpec,
     mode: "link" | "unlink",
   ) =>
-    Effect.gen(function* () {
-      if (Predicate.isTagged(spec, "Directed"))
-        return yield* applyDirectedEdges(method, projectId, spec.from, spec.to, mode)
-
-      const resolve = (ref: string) => resolveEndpoint(method, projectId, ref)
-      const pairs: Array<readonly [ResolvedEndpoint, ResolvedEndpoint]> = []
-      const seen = new Set<string>()
-
-      const push = (from: ResolvedEndpoint, to: ResolvedEndpoint) => {
-        const key = `${formatEndpoint(from)}\0${formatEndpoint(to)}`
-
-        if (seen.has(key)) return
-        seen.add(key)
-        pairs.push([from, to])
-      }
-
-      const endpoints = yield* Effect.forEach(spec.ids, resolve)
-
-      if (Predicate.isTagged(spec, "Mutual")) {
-        if (endpoints.length < 2)
-          return yield* new Forbidden({ method, message: "give at least two distinct sessions" })
-
-        for (let i = 0; i < endpoints.length; i++) {
-          for (let j = i + 1; j < endpoints.length; j++) {
-            const a = endpoints[i]!
-            const b = endpoints[j]!
-
-            if (sameEndpoint(a, b)) return yield* new Forbidden({ method, message: "a session cannot target itself" })
-            push(a, b)
-            push(b, a)
-          }
-        }
-      } else {
-        if (endpoints.length < 2)
-          return yield* new Forbidden({ method, message: "give at least two sessions for --chain" })
-
-        for (let i = 0; i + 1 < endpoints.length; i++) {
-          const a = endpoints[i]!
-          const b = endpoints[i + 1]!
-
-          if (sameEndpoint(a, b)) return yield* new Forbidden({ method, message: "a session cannot target itself" })
-          push(a, b)
-        }
-      }
-
-      return yield* applyEndpointPairs(pairs, mode)
-    })
+    expandEdgeSpec(
+      spec,
+      (ref) => resolveEndpoint(method, projectId, ref),
+      formatEndpoint,
+      (message) => Effect.fail(new Forbidden({ method, message })),
+    ).pipe(Effect.flatMap((pairs) => applyEndpointPairs(pairs, mode)))
 
   return {
     Spawn: (input) =>
@@ -312,17 +228,49 @@ export const make = Effect.gen(function* () {
         const project = yield* projectOf(c, "Spawn")
 
         if (input.machine !== undefined) {
+          const resolve = (ref: string) => resolveEndpoint("Spawn", project.id, ref)
+          const fromEndpoints = yield* Effect.forEach(input.from ?? [], resolve)
+          const toEndpoints = yield* Effect.forEach(input.to ?? [], resolve)
+          const withEndpoints = yield* Effect.forEach(input.with ?? [], resolve)
           const spawned = yield* spawnOn(input.machine, input, c.sessionId, project.id)
 
-          if ((input.from?.length ?? 0) > 0)
-            yield* applyDirectedEdges("Spawn", project.id, input.from!, [spawned.id], "link")
+          if (fromEndpoints.length > 0 || toEndpoints.length > 0 || withEndpoints.length > 0) {
+            const machineRow = (yield* db.remote.machineNamed(input.machine))!
+            const prefix = `${input.machine}/`
+            const spawnedId = spawned.id.startsWith(prefix) ? spawned.id.slice(prefix.length) : spawned.id
 
-          if ((input.to?.length ?? 0) > 0)
-            yield* applyDirectedEdges("Spawn", project.id, [spawned.id], input.to!, "link")
+            const spawnedEp: ResolvedEndpoint = {
+              local: false,
+              machine: input.machine,
+              id: spawnedId,
+              remoteId: machineRow.remoteId,
+            }
 
-          if ((input.with?.length ?? 0) > 0) {
-            yield* applyDirectedEdges("Spawn", project.id, input.with!, [spawned.id], "link")
-            yield* applyDirectedEdges("Spawn", project.id, [spawned.id], input.with!, "link")
+            const pairs: Array<readonly [ResolvedEndpoint, ResolvedEndpoint]> = []
+            const seen = new Set<string>()
+
+            const push = (from: ResolvedEndpoint, to: ResolvedEndpoint) => {
+              const fk = formatEndpoint(from)
+              const tk = formatEndpoint(to)
+
+              if (fk === tk) return
+              const key = `${fk}\0${tk}`
+
+              if (seen.has(key)) return
+              seen.add(key)
+              pairs.push([from, to])
+            }
+
+            for (const from of fromEndpoints) push(from, spawnedEp)
+
+            for (const to of toEndpoints) push(spawnedEp, to)
+
+            for (const target of withEndpoints) {
+              push(target, spawnedEp)
+              push(spawnedEp, target)
+            }
+
+            if (pairs.length > 0) yield* applyEndpointPairs(pairs, "link")
           }
 
           return spawned

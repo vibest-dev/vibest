@@ -15,6 +15,7 @@ import { Bus } from "../bus.ts"
 import { noticeEnvelope, sessionEnvelope } from "../replies.ts"
 import type * as Inbox from "./inbox.ts"
 import { ledgerReads } from "./ledger-read.ts"
+import { queryRemoteEdges } from "./session-edges.ts"
 import type * as Session from "./session-statements.ts"
 
 export type RemoteScope = { readonly remote: string; readonly project: string; readonly session?: string }
@@ -330,14 +331,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         (sessionId: string, target: string, message: string, request?: string) =>
           tx(
             Effect.gen(function* () {
-              if (target.length < 8) return undefined
-
-              const matches = yield* sql<{ remote: string; session: string }>`SELECT to_remote_id AS remote,
-                  to_session_id AS session
-                FROM session_edge
-                WHERE from_session_id = ${sessionId} AND to_remote_id != ''
-                  AND to_session_id >= ${target} AND to_session_id < ${`${target}~`}
-                ORDER BY to_session_id LIMIT 11`
+              const matches = yield* queryRemoteEdges(sql, sessionId, target)
 
               if (matches.length === 0) return undefined
 

@@ -437,15 +437,33 @@ const make = Effect.gen(function* () {
         const targetLink = targetEntry?.state === "connected" ? targetEntry.link : undefined
 
         if (targetLink !== undefined) {
-          yield* targetLink
-            .call(
+          const outcome = yield* Effect.result(
+            targetLink.call(
               targetLink.client.Send(
                 { id: targetSessionId, message: content, request: item.id, from },
                 { headers: remoteHeaders(self.id, "relay", REMOTE_BY_USER) },
               ),
-            )
-            .pipe(Effect.ignore)
-          yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+            ),
+          )
+
+          if (Predicate.isTagged(outcome, "Success")) {
+            yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+
+            return
+          }
+
+          const err = outcome.failure
+
+          if (Predicate.isTagged(err, "NoSuchSession") || Predicate.isTagged(err, "Forbidden")) {
+            yield* Effect.logWarning(`${name}: dropped relayed ${item.kind} for ${targetSessionId}: ${err.message}`)
+            yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+
+            return
+          }
+
+          yield* Effect.logWarning(
+            `${name}: relay of ${item.kind} for ${targetSessionId} failed transiently; leaving unacked`,
+          )
 
           return
         }
