@@ -57,45 +57,51 @@ const make = Effect.gen(function* () {
     Match.value(event).pipe(
       Match.tagsExhaustive({
         Snapshot: ({ projects, sessions }) =>
-          Effect.uninterruptible(
-            Effect.gen(function* () {
-              const nextProjects = new Map<string, ProjectRow>()
-              const nextSessions = new Map<string, WatchSession>()
+          Effect.gen(function* () {
+            const mappedSessions = yield* machines.viewSessions(name, sessions)
 
-              for (const project of projects) nextProjects.set(project.id, { ...project, machine: name })
+            yield* Effect.uninterruptible(
+              Effect.gen(function* () {
+                const nextProjects = new Map<string, ProjectRow>()
+                const nextSessions = new Map<string, WatchSession>()
 
-              for (const session of sessions) nextSessions.set(session.id, { ...session, machine: name })
+                for (const project of projects) nextProjects.set(project.id, { ...project, machine: name })
 
-              const ended: Array<WatchSession> = []
+                for (const session of mappedSessions) nextSessions.set(session.id, session)
 
-              for (const [id, prev] of mirror.sessions) if (!nextSessions.has(id)) ended.push(prev)
-              mirror.projects = nextProjects
-              mirror.sessions = nextSessions
+                const ended: Array<WatchSession> = []
 
-              for (const prev of ended)
-                yield* fanout.publish(
-                  Listing.WatchEvents.SessionEnded({ id: prev.id, projectId: prev.projectId, machine: name }),
-                )
+                for (const [id, prev] of mirror.sessions) if (!nextSessions.has(id)) ended.push(prev)
+                mirror.projects = nextProjects
+                mirror.sessions = nextSessions
 
-              for (const project of nextProjects.values())
-                yield* fanout.publish(Listing.WatchEvents.Project({ project }))
+                for (const prev of ended)
+                  yield* fanout.publish(
+                    Listing.WatchEvents.SessionEnded({ id: prev.id, projectId: prev.projectId, machine: name }),
+                  )
 
-              for (const session of nextSessions.values())
-                yield* fanout.publish(Listing.WatchEvents.Session({ session }))
-            }),
-          ),
+                for (const project of nextProjects.values())
+                  yield* fanout.publish(Listing.WatchEvents.Project({ project }))
+
+                for (const session of nextSessions.values())
+                  yield* fanout.publish(Listing.WatchEvents.Session({ session }))
+              }),
+            )
+          }),
         Project: ({ project }) => {
           const tagged: ProjectRow = { ...project, machine: name }
           mirror.projects.set(tagged.id, tagged)
 
           return fanout.publish(Listing.WatchEvents.Project({ project: tagged }))
         },
-        Session: ({ session }) => {
-          const tagged: WatchSession = { ...session, machine: name }
-          mirror.sessions.set(tagged.id, tagged)
+        Session: ({ session }) =>
+          Effect.gen(function* () {
+            const [mapped] = yield* machines.viewSessions(name, [session])
+            const tagged: WatchSession = mapped!
+            mirror.sessions.set(tagged.id, tagged)
 
-          return fanout.publish(Listing.WatchEvents.Session({ session: tagged }))
-        },
+            return yield* fanout.publish(Listing.WatchEvents.Session({ session: tagged }))
+          }),
         SessionEnded: ({ id, projectId }) => {
           mirror.sessions.delete(id)
 

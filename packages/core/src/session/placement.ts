@@ -326,11 +326,12 @@ export const make = Effect.gen(function* () {
     },
   ) {
     const remote = yield* db.session.startedByPeer(session.id)
+    const creator = yield* nearCreator(session, h.id)
 
     const near =
       input.near !== undefined
         ? input.near
-        : ((yield* nearCreator(session, h.id)) ??
+        : (creator ??
           (!remote && (target === undefined || target === "")
             ? yield* db.session.lastProjectTerminal(session.projectId, h.id)
             : undefined))
@@ -347,6 +348,7 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         launch: { ...launch, env: { ...input.env, ...launch.env } },
         label: (session.entry ? entryLabel(input.project) : session.name).slice(0, 60),
+        ...(creator !== undefined && { parent: creator }),
         ...(near !== undefined && { near }),
         ...(input.split === true && { split: true }),
         ...(remote && { remote: true }),
