@@ -855,7 +855,6 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         const workspaces = yield* Effect.forEach(
           Array.from({ length: 6 }, (_, i) => path.join(workspacesRoot, `session-${i}`)),
           (ws) => createIsolatedWorktrees(repos, ws).pipe(Effect.as(ws)),
-          { concurrency: 4 },
         )
 
         yield* fs.writeFileString(path.join(workspaces[0]!, "repo-03", "dirty.txt"), "modified\n")
