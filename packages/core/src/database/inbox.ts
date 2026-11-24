@@ -345,7 +345,7 @@ export const make = (session: Session.Statements, inbox: Statements) =>
     const sql = yield* SqlClient.SqlClient
     const { transaction: tx } = yield* Bus.Service
     const now = Clock.currentTimeMillis
-    const { reads, openExecution, startedAt, observable, fromOldProcess, allocateExecution, creatorOf } = session
+    const { reads, openExecution, startedAt, observable, fromOldProcess, allocateExecution } = session
 
     const {
       inbox: inboxWhere,
@@ -407,17 +407,11 @@ export const make = (session: Session.Statements, inbox: Statements) =>
       ),
 
       maySend: Effect.fn("Db.inbox.maySend")((sender: string, recipient: string) =>
-        Effect.gen(function* () {
-          const local = (creator: Session.Creator) =>
-            creator !== undefined && "local" in creator ? creator.local : undefined
-
-          return (
-            local(yield* creatorOf(sender)) === recipient ||
-            local(yield* creatorOf(recipient)) === sender ||
-            (yield* sql`SELECT 1 FROM session a JOIN session b ON b.project_id = a.project_id AND b.team = a.team
-              WHERE a.id = ${sender} AND b.id = ${recipient} AND a.id != b.id`).length > 0
-          )
-        }).pipe(Effect.orDie),
+        sql`SELECT 1 FROM session_edge e JOIN session b ON b.id = e.to_session_id
+          WHERE e.from_session_id = ${sender} AND e.to_session_id = ${recipient}`.pipe(
+          Effect.map((rows) => rows.length > 0),
+          Effect.orDie,
+        ),
       ),
 
       linkTask: Effect.fn("Db.inbox.linkTask")((id: string) =>

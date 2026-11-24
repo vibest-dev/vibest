@@ -83,15 +83,15 @@ Two sends from the same session that are waiting together reach the entry sessio
 `vibest send` from a session to the entry session of its project queues one message from that session; the entry session gets
 it as an `<vibest-agent-message>` naming the session by id, once, whichever way its harness takes messages (a Claude entry session polls for it, a Pi entry session is pushed it).
 
-## S46. A session cannot send to a sibling
+## S46. A session cannot send to an unlinked sibling
 
-`vibest send` from a session to another session of the same project is refused when that session is not the one that
-started it, not one it started, and not a member of its own team (S67). Nothing is queued.
+`vibest send` from a session to another session of the same project is refused when there is no directed messaging link
+from the sender to that session (S67). Nothing is queued.
 
 ## S47. A send stays inside its project
 
-`vibest send` from a session to a session of another project is refused, and to a session that is neither its creator, its
-child nor its teammate (an archived sibling, say) is refused too; neither queues anything.
+`vibest send` from a session to a session of another project is refused, and to a session that is not linked from the
+sender (or an archived session) is refused too; neither queues anything.
 
 ## S48. An undeliverable send goes back to its sender
 

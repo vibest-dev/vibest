@@ -124,7 +124,9 @@ export const sessionListing = (deps: {
 
   const watched = (infos: ReadonlyArray<SessionInfo>) =>
     Effect.gen(function* () {
-      const parents = yield* db.session.sessionParents(infos.map((info) => info.id))
+      const ids = infos.map((info) => info.id)
+      const parents = yield* db.session.sessionParents(ids)
+      const edges = yield* db.session.sessionEdges(ids)
 
       return yield* Effect.forEach(
         infos,
@@ -134,6 +136,7 @@ export const sessionListing = (deps: {
             status: unseenDone(info.status, seen),
             parentId: parents.get(info.id) ?? null,
             finished: seen?.finished ?? null,
+            to: edges.get(info.id) ?? [],
           })),
         { concurrency: "unbounded" },
       )

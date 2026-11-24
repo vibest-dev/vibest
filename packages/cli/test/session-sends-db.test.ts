@@ -137,75 +137,49 @@ describe("sends from sessions", () => {
   )
 
   it.effect(
-    "a new team gets a fresh team id; only its creator adds members, an unknown id is refused, and only members of one team may send to each other",
+    "insertSession links from/to/with edges and linkSessions/unlinkSessions update directed messaging permissions",
     () =>
       memory(
         Effect.gen(function* () {
           const { db, project, entryId } = yield* setup
           const start = { cwd: "/w", task: "t", parentSessionId: entryId }
-          const teamOf = (id: string) => Effect.map(db.session.sessionIdentity(id), (row) => row?.team)
-          assert.isTrue(yield* db.session.insertSession(session(B), project, { ...start, team: "new" }))
-          const team = (yield* teamOf(B))!
-          assert.match(team, /^t-[0-9a-f]{4}$/)
-          const unknown = team === "t-0000" ? "t-0001" : "t-0000"
-          assert.isTrue(yield* db.session.insertSession(session(X), project, { ...start, team: { join: team } }))
-          assert.deepStrictEqual(
-            yield* db.session.insertSession(session("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), project, {
-              ...start,
-              parentSessionId: A,
-              team: { join: team },
-            }),
-            { team, teamOwner: entryId },
-          )
-          assert.deepStrictEqual(
-            yield* db.session.insertSession(session("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), project, {
-              ...start,
-              team: { join: unknown },
-            }),
-            { teamUnknown: unknown },
-          )
           assert.isTrue(
-            yield* db.session.insertSession(session("ffffffff-ffff-4fff-8fff-ffffffffffff"), project, {
+            yield* db.session.insertSession(session(B), project, {
               ...start,
-              parentSessionId: A,
-              team: "new",
+              links: { from: [A] },
             }),
           )
-          assert.notStrictEqual(yield* teamOf("ffffffff-ffff-4fff-8fff-ffffffffffff"), team)
-          assert.isTrue(yield* db.inbox.maySend(B, X))
-          assert.isTrue(yield* db.inbox.maySend(X, B))
-          assert.isFalse(yield* db.inbox.maySend(A, B))
-          assert.isFalse(yield* db.inbox.maySend("ffffffff-ffff-4fff-8fff-ffffffffffff", B))
-          assert.deepStrictEqual(
-            (yield* db.session.teamMembers(project, team)).map((m) => [m.id, m.parent]),
-            [
-              [B, entryId],
-              [X, entryId],
-            ],
+          assert.isTrue(yield* db.inbox.maySend(A, B))
+          assert.isFalse(yield* db.inbox.maySend(B, A))
+
+          assert.isTrue(
+            yield* db.session.insertSession(session(X), project, {
+              ...start,
+              links: { to: [B], with: [A] },
+            }),
           )
+          assert.isTrue(yield* db.inbox.maySend(X, B))
+          assert.isFalse(yield* db.inbox.maySend(B, X))
+          assert.isTrue(yield* db.inbox.maySend(A, X))
+          assert.isTrue(yield* db.inbox.maySend(X, A))
+
+          const targets = yield* db.session.linkedTargets(X, entryId)
+          assert.deepStrictEqual(targets.map((t) => t.id).sort(), [A, B].sort())
+
+          const edges = yield* db.session.sessionEdges([A, B, X])
+          assert.deepStrictEqual([...(edges.get(X) ?? [])].sort(), [A, B, entryId].sort())
+
+          yield* db.session.linkSessions([[B, X]])
+          assert.isTrue(yield* db.inbox.maySend(B, X))
+
+          yield* db.session.unlinkSessions([[A, X]])
+          assert.isFalse(yield* db.inbox.maySend(A, X))
+          assert.isTrue(yield* db.inbox.maySend(X, A))
         }),
       ),
   )
 
-  it.effect("a team whose members have all ended is over: adding to its id is refused", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, project, entryId } = yield* setup
-        const start = { cwd: "/w", task: "t", parentSessionId: entryId }
-        assert.isTrue(yield* db.session.insertSession(session(B), project, { ...start, team: "new" }))
-        const team = (yield* db.session.sessionIdentity(B))!.team!
-        yield* db.session.archive(B)
-        assert.deepStrictEqual(
-          yield* db.session.insertSession(session(X), project, { ...start, team: { join: team } }),
-          {
-            teamEnded: team,
-          },
-        )
-      }),
-    ),
-  )
-
-  it.effect("a team is listed only for its creator and its members", () =>
+  it.effect("Db.inbox.maySend refuses a session sending to itself", () =>
     memory(
       Effect.gen(function* () {
         const { db, project, entryId } = yield* setup
@@ -214,27 +188,6 @@ describe("sends from sessions", () => {
             cwd: "/w",
             task: "t",
             parentSessionId: entryId,
-            team: "new",
-          }),
-        )
-        const team = (yield* db.session.sessionIdentity(B))!.team!
-        assert.isTrue(yield* db.session.mayListTeam(project, team, entryId))
-        assert.isTrue(yield* db.session.mayListTeam(project, team, B))
-        assert.isFalse(yield* db.session.mayListTeam(project, team, A))
-      }),
-    ),
-  )
-
-  it.effect("Db.inbox.maySend refuses a session sending to itself, including a team member", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, project, entryId } = yield* setup
-        assert.isTrue(
-          yield* db.session.insertSession(session(B), project, {
-            cwd: "/w",
-            task: "t",
-            parentSessionId: entryId,
-            team: "new",
           }),
         )
         assert.isFalse(yield* db.inbox.maySend(B, B))
@@ -255,7 +208,7 @@ describe("sends from sessions", () => {
           assert.deepStrictEqual(yield* db.session.nearestAlive(B), { local: entryId })
           assert.isTrue(yield* db.inbox.maySend(B, A))
           const creator = yield* db.session.creatorLabel(B)
-          assert.deepStrictEqual(creator, { id: A, label: `agent ${session(A).name}` })
+          assert.deepStrictEqual(creator, { id: A, label: `agent ${session(A).name}`, remote: false })
 
           const prompt = systemPrompt({
             system: "",

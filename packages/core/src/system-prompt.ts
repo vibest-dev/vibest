@@ -208,8 +208,8 @@ export interface SystemPromptInput {
   readonly memories: string
   readonly checkout?: boolean | undefined
   readonly sharer?: string | undefined
-  readonly creator?: { readonly id: string; readonly label: string } | undefined
-  readonly team?: string | undefined
+  readonly creator?: { readonly id: string; readonly label: string; readonly linked?: boolean | undefined } | undefined
+  readonly linkedTo?: ReadonlyArray<{ readonly id: string; readonly label: string }> | undefined
   readonly agents: ReadonlyArray<{ readonly id: string; readonly description: string }>
 }
 
@@ -233,13 +233,15 @@ const facts = (r: SystemPromptInput) =>
   [
     `You are session ${r.id}.`,
     r.creator
-      ? `You were started by ${r.creator.id} (${r.creator.label}). It does not see your replies in the terminal. To send it your report, to report progress or to ask it a question, run \`vibest send ${r.creator.id} -- '<message>'\` in your shell. If it has ended, vibest hands your message to the nearest session above it that is still running; with none left, the user reads your last reply.`
+      ? r.creator.linked === false
+        ? `You were started by ${r.creator.id} (${r.creator.label}). It does not see your replies in the terminal, and you are not linked to message it directly.`
+        : `You were started by ${r.creator.id} (${r.creator.label}). It does not see your replies in the terminal. To send it your report, to report progress or to ask it a question, run \`vibest send ${r.creator.id} -- '<message>'\` in your shell. If it has ended, vibest hands your message to the nearest session above it that is still running; with none left, the user reads your last reply.`
       : "You were opened by the user in a terminal; the user reads your replies.",
     directoryFact(r),
-    ...(r.team === undefined
+    ...(r.linkedTo === undefined || r.linkedTo.length === 0
       ? []
       : [
-          `You are a member of team ${r.team}. Its unfinished members may be messaged directly with \`vibest send <id> -- '<message>'\`; \`vibest ls --team\` lists who they are now.`,
+          `Sessions you are linked to and may message directly with \`vibest send <id> -- '<message>'\`: ${r.linkedTo.map((s) => `${s.id} (${s.label})`).join(", ")}.`,
         ]),
     `The project folder is ${r.projectDir} (VIBEST_PROJECT_DIR).`,
     rosterFact(r.agents),

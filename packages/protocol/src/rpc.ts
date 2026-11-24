@@ -52,7 +52,6 @@ import {
   ExecutionState,
 } from "@vibest/schema/session"
 import { Subscription } from "@vibest/schema/subscription"
-import { TeamMember } from "@vibest/schema/team"
 import { WorktreeList } from "@vibest/schema/worktree"
 import { Context, Schema } from "effect"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
@@ -311,10 +310,31 @@ export const ProjectRow = Schema.Struct({
 
 export type ProjectRow = typeof ProjectRow.Type
 
+export const EdgeMutual = Schema.TaggedStruct("Mutual", { ids: Schema.Array(Schema.String) })
+
+export const EdgeDirected = Schema.TaggedStruct("Directed", {
+  from: Schema.Array(Schema.String),
+  to: Schema.Array(Schema.String),
+})
+
+export const EdgeChain = Schema.TaggedStruct("Chain", { ids: Schema.Array(Schema.String) })
+
+export const EdgeSpec = Schema.Union([EdgeMutual, EdgeDirected, EdgeChain])
+
+export type EdgeSpec = typeof EdgeSpec.Type
+
+export const SessionEdge = Schema.Struct({
+  from: Schema.String,
+  to: Schema.String,
+})
+
+export type SessionEdge = typeof SessionEdge.Type
+
 export const WatchSession = Schema.Struct({
   ...SessionInfo.fields,
   parentId: Schema.NullOr(Schema.String),
   finished: Schema.NullOr(Schema.Number),
+  to: Schema.Array(Schema.String),
 })
 
 export type WatchSession = typeof WatchSession.Type
@@ -373,8 +393,9 @@ export class VibestRpcs extends RpcGroup.make(
           machine: Schema.optional(Schema.String),
           project: Schema.optional(Schema.String),
           files: Attachments,
-          team: Schema.optional(Schema.String),
-          newTeam: Schema.optional(Schema.Boolean),
+          from: Schema.optional(Schema.Array(Schema.String)),
+          to: Schema.optional(Schema.Array(Schema.String)),
+          with: Schema.optional(Schema.Array(Schema.String)),
         },
         success: Schema.Struct({
           id: Schema.String,
@@ -383,7 +404,6 @@ export class VibestRpcs extends RpcGroup.make(
           model: Schema.optional(Schema.String),
           ...Routing.fields,
           notes: Schema.optional(Schema.Array(MachineNote)),
-          team: Schema.optional(Schema.String),
         }),
         error: Schema.Union([
           InvalidCaller,
@@ -539,11 +559,22 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
-    Rpc.make("Team.List", {
-      payload: { team: Schema.optional(Schema.String) },
-      success: Schema.Struct({ team: Schema.String, members: Schema.Array(TeamMember) }),
-      error: Schema.Union([Forbidden]),
-    }),
+    admitted(
+      Rpc.make("Session.Link", {
+        payload: { spec: EdgeSpec },
+        success: Schema.Struct({ edges: Schema.Array(SessionEdge) }),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
+      }),
+    ),
+  ),
+  scoped(
+    admitted(
+      Rpc.make("Session.Unlink", {
+        payload: { spec: EdgeSpec },
+        success: Schema.Struct({ edges: Schema.Array(SessionEdge) }),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
+      }),
+    ),
   ),
   scoped(
     Rpc.make("Get", {
