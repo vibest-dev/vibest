@@ -301,7 +301,7 @@ describe("observed execution end", () => {
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* herdr.updateAgent(id, (agent) => ({ ...agent, status: "working" }))
       const held = yield* herdr.hold("send", id)
-      const removing = yield* Effect.forkChild(sessions.remove(id))
+      const removing = yield* Effect.forkChild(sessions.archive(id))
       yield* held.reached
       yield* writeEnd(id, "pi", { type: "agent_settled", text: "", error: "aborted", aborted: true })
       yield* sessions.userPrompt(id, "typed during the archive")

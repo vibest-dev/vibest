@@ -87,7 +87,7 @@ describe.concurrent("Session", () => {
       yield* TestClock.adjust("10 seconds")
       assert.strictEqual((yield* sessions.inMemory).tracked, 2)
       assert.deepInclude(yield* db.session.getSession(id), { status: "idle" })
-      yield* sessions.remove(id)
+      yield* sessions.archive(id)
       assert.strictEqual((yield* (yield* SessionLive.Service).size).statuses, entryStatuses)
       yield* untilVirtual(sessions.inMemory, atMostEntryTracked)
     }),
@@ -202,7 +202,7 @@ describe.concurrent("Session", () => {
       const { exitedEntry, endEntry } = yield* entriesAtOneTerminal
       const old = yield* exitedEntry(false)
       yield* endEntry(yield* exitedEntry(true))
-      assert.include(yield* sessions.remove(old, { keepWorktree: true }), { pane: "none" })
+      assert.include(yield* sessions.archive(old, { keepWorktree: true }), { pane: "none" })
       assert.notDeepInclude(yield* herdr.callsTo("close"), { terminal: "test/coord" })
     }),
   )
@@ -216,7 +216,7 @@ describe.concurrent("Session", () => {
       const { exitedEntry } = yield* entriesAtOneTerminal
       const old = yield* exitedEntry(false)
       const looking = yield* herdr.hold("state", "test/coord")
-      const archiving = yield* Effect.forkChild(sessions.remove(old, { keepWorktree: true }))
+      const archiving = yield* Effect.forkChild(sessions.archive(old, { keepWorktree: true }))
       yield* looking.reached
       const taken = yield* Ref.make(false)
 

@@ -303,7 +303,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       const held = yield* (yield* FakeProcesses).holdCwd()
-      const removing = yield* Effect.forkScoped(sessions.remove(id))
+      const removing = yield* Effect.forkScoped(sessions.archive(id))
       yield* held.reached
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining

@@ -285,7 +285,7 @@ describe("a cap on live harness processes", () => {
       yield* until(waiting, (keys) => keys.length === 1 && keys[0] === b)
 
       const closing = yield* herdr.hold("close", a!)
-      const removing = yield* Effect.forkChild(sessions.remove(a!))
+      const removing = yield* Effect.forkChild(sessions.archive(a!))
       yield* closing.reached
       yield* closing.release("failed")
       assert.strictEqual((yield* Fiber.join(removing))?.pane, "kept")
@@ -327,7 +327,7 @@ describe("a cap on live harness processes", () => {
       const [b] = yield* spawnSome(repo, 1)
       yield* until(waiting, (keys) => keys.length === 1 && keys[0] === b)
 
-      yield* sessions.remove(b!)
+      yield* sessions.archive(b!)
       assert.deepStrictEqual(yield* waiting, [])
 
       const drain = yield* Drain.Service
@@ -393,7 +393,7 @@ describe("a cap on live harness processes", () => {
 
       assert.match((yield* sessions.interrupt(b!)).message, /will not start/)
       assert.strictEqual(executionStateOf((yield* db.session.getSession(b!))!), "not_started")
-      yield* sessions.remove(c!)
+      yield* sessions.archive(c!)
       assert.deepStrictEqual(yield* waiting, [d])
 
       const drain = yield* Drain.Service
@@ -520,7 +520,7 @@ describe("a cap on live harness processes", () => {
       yield* sessions.send(a, "resume")
       const [b] = yield* spawnSome(repo, 1)
       yield* until(waiting, (keys) => keys.length === 2)
-      yield* sessions.remove(b!)
+      yield* sessions.archive(b!)
 
       const listed = (yield* db.session.listSessions({ projectId, waiting: yield* waiting })).map((row) => row.id)
       assert.include(listed, a)
@@ -541,12 +541,12 @@ describe("a cap on live harness processes", () => {
 
       yield* Effect.forkChild(limitTo([{ max: 2 }]))
       yield* parkedForArchive.reached
-      const dropped = yield* Effect.forkChild(sessions.remove(b!))
+      const dropped = yield* Effect.forkChild(sessions.archive(b!))
       yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)))
       yield* Fiber.interrupt(dropped)
       yield* parkedForArchive.release
 
-      assert.strictEqual((yield* sessions.remove(b!))?.id, b)
+      assert.strictEqual((yield* sessions.archive(b!))?.id, b)
       assert.deepStrictEqual(yield* waiting, [])
     }),
     parkedForArchive.options,

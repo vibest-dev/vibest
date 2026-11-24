@@ -264,12 +264,12 @@ export const make = Effect.gen(function* () {
         ),
       ),
 
-    Remove: (p) =>
-      routed.Remove(p, (id) =>
-        managed("Remove", id).pipe(
+    Archive: (p) =>
+      routed.Archive(p, (id) =>
+        managed("Archive", id).pipe(
           Effect.flatMap((id) =>
             sessions
-              .remove(id, { keepWorktree: p.keepWorktree })
+              .archive(id, { keepWorktree: p.keepWorktree })
               .pipe(
                 Effect.catchTag("RuntimeError", (e) =>
                   e.code === "unreachable"
@@ -436,7 +436,7 @@ export const layer = group([
   "Send",
   "Interrupt",
   "Stop",
-  "Remove",
+  "Archive",
   "Get",
   "Peek",
   "Events",

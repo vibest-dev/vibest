@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export const RemoveOutcome = Schema.Struct({
+export const ArchiveOutcome = Schema.Struct({
   id: Schema.String,
   processes: Schema.Literals(["exited", "alive", "unknown"]),
   pane: Schema.Literals(["closed", "kept", "none"]),
@@ -11,4 +11,4 @@ export const RemoveOutcome = Schema.Struct({
   reasons: Schema.Array(Schema.String),
 })
 
-export type RemoveOutcome = typeof RemoveOutcome.Type
+export type ArchiveOutcome = typeof ArchiveOutcome.Type
