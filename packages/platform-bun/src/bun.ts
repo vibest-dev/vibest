@@ -312,7 +312,12 @@ export const lock: Host["lock"] = (file) =>
       try: () => {
         const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600)
 
-        if (libc.symbols.flock(fd, LOCK_EX_NB) === 0) return fd
+        if (libc.symbols.flock(fd, LOCK_EX_NB) === 0) {
+          fs.fchmodSync(fd, 0o600)
+
+          return fd
+        }
+
         fs.closeSync(fd)
 
         return undefined

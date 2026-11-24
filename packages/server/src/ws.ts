@@ -1,7 +1,6 @@
 import { App } from "@vibest/core/app"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
-import { writeAtomic } from "@vibest/core/paths"
 import { PluginLoader, pluginLoaderNode } from "@vibest/core/plugin"
 import { UI_WS_CALLS } from "@vibest/protocol/access"
 import { PROTOCOL_HEADER, protocolMismatch, TOKEN_HEADER } from "@vibest/protocol/protocol"
@@ -25,22 +24,19 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as NetAddress from "effect/net/NetAddress"
 import { RpcMessage, RpcSerialization, RpcServer } from "effect/rpc"
 
-import { DaemonHandlers } from "./handlers/daemon.ts"
 import { group } from "./handlers/group.ts"
 import { handlers, handlersNode } from "./server.ts"
 
-export const WsInfo = Schema.Struct({
+export const WsEndpoint = Schema.Struct({
   url: Schema.String,
   port: Schema.Number,
   token: Schema.String,
   protocol: Schema.Number,
-  version: Schema.String,
-  pid: Schema.Number,
 })
 
-export type WsInfo = typeof WsInfo.Type
+export type WsEndpoint = typeof WsEndpoint.Type
 
-const WsInfoJson = Schema.fromJsonString(WsInfo)
+export class Service extends Context.Service<Service, Option.Option<WsEndpoint>>()("vibest/Ws") {}
 
 const WsConfigFile = Schema.Struct({
   websocket: Schema.optional(Schema.Boolean),
@@ -72,12 +68,6 @@ const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 
 const randomHex = (byteLength: number): string => Hex.encode(crypto.getRandomValues(new Uint8Array(byteLength)))
-
-export const readWsInfo = (file: string) =>
-  Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString(file)).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(WsInfoJson)),
-    Effect.option,
-  )
 
 const tokenMatches = (expected: Uint8Array, candidate: string | undefined): boolean => {
   if (candidate === undefined) return false
@@ -230,19 +220,11 @@ export const wsServerLayer = LayerNode.unbound(WsServerLayer)
 
 const wsLayer = Layer.unwrap(
   Effect.gen(function* () {
-    const layout = yield* Layout
-    const fs = yield* FileSystem.FileSystem
-
     if (!(yield* wsEnabled)) {
-      yield* fs.remove(layout.wsInfo, { force: true }).pipe(Effect.ignore)
-
-      return Layer.empty
+      return Layer.succeed(Service, Option.none())
     }
 
     const wsServer = yield* WsServerLayer
-    const { version } = yield* App.Service
-    const identity = yield* DaemonHandlers.Identity
-    const pid = identity.pid ?? 0
     const token = randomHex(32)
     const expectedToken = textEncoder.encode(token)
     const ready = yield* Deferred.make<void>()
@@ -312,7 +294,8 @@ const wsLayer = Layer.unwrap(
       )
     })
 
-    const publish = Layer.effectDiscard(
+    const endpoint = Layer.effect(
+      Service,
       Effect.gen(function* () {
         const server = yield* HttpServer.HttpServer
 
@@ -322,23 +305,20 @@ const wsLayer = Layer.unwrap(
 
         yield* Deferred.await(ready)
 
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            closing = true
+          }),
+        )
+
         const port = server.address.port
 
-        const info: WsInfo = {
+        return Option.some({
           url: `ws://127.0.0.1:${port}`,
           port,
           token,
           protocol: PROTOCOL,
-          version,
-          pid,
-        }
-
-        yield* writeAtomic(layout.wsInfo, Schema.encodeSync(WsInfoJson)(info), { mode: 0o600 })
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            closing = true
-          }).pipe(Effect.andThen(fs.remove(layout.wsInfo, { force: true }).pipe(Effect.ignore))),
-        )
+        })
       }),
     )
 
@@ -348,7 +328,7 @@ const wsLayer = Layer.unwrap(
       Layer.provide(Layer.succeed(RpcServer.Protocol, wrappedProtocol)),
     )
 
-    const served = publish.pipe(Layer.provideMerge(HttpServer.serve(httpApp)))
+    const served = endpoint.pipe(Layer.provideMerge(HttpServer.serve(httpApp)))
 
     return Layer.mergeAll(served, rpcLayer).pipe(Layer.provide(wsServer))
   }),
@@ -357,16 +337,7 @@ const wsLayer = Layer.unwrap(
 export const layer = wsLayer.pipe(Layer.provide(handlers))
 
 export const node = LayerNode.make({
-  name: "vibest/WsServer",
+  service: Service,
   layer: wsLayer,
-  deps: [
-    handlersNode,
-    DaemonHandlers.identityNode,
-    pluginLoaderNode,
-    App.node,
-    wsServerLayer,
-    PlatformNode.fileSystem,
-    PlatformNode.layout,
-    PlatformNode.path,
-  ],
+  deps: [handlersNode, pluginLoaderNode, App.node, wsServerLayer, PlatformNode.fileSystem, PlatformNode.layout],
 })
