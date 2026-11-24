@@ -5,7 +5,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
-import { parseRemote, rankedRemotes } from "./repository-url.ts"
+import { parseRemote, projectRemotes, rankedRemotes } from "./repository-url.ts"
 
 export * as Git from "./git.ts"
 
@@ -32,13 +32,15 @@ export interface RepositoryCopy {
   readonly origin: string | undefined
 }
 
+export type RemoteOrder = "ranked" | "project"
+
 export interface Interface {
   readonly mainCheckout: (dir: string) => Effect.Effect<string, NotInRepository>
   readonly topLevel: (dir: string) => Effect.Effect<string, GitError>
   readonly insideWorkTree: (dir: string) => Effect.Effect<boolean>
   readonly isMainCheckout: (dir: string) => Effect.Effect<boolean>
   readonly originUrl: (dir: string) => Effect.Effect<string | undefined>
-  readonly remoteUrl: (dir: string) => Effect.Effect<string | undefined>
+  readonly remoteUrl: (dir: string, order?: RemoteOrder) => Effect.Effect<string | undefined>
   readonly currentBranch: (dir: string) => Effect.Effect<string, GitError>
   readonly uncommitted: (dir: string) => Effect.Effect<ReadonlyArray<string>, GitError>
   readonly copyRepository: (copy: RepositoryCopy) => Effect.Effect<void, GitError>
@@ -139,10 +141,11 @@ export const layer = Layer.effect(
       originUrl: Effect.fn("Git.originUrl")((dir) =>
         tryGit(dir, "config", "--get", "remote.origin.url").pipe(Effect.map((url) => url || undefined)),
       ),
-      remoteUrl: Effect.fn("Git.remoteUrl")(function* (dir) {
+      remoteUrl: Effect.fn("Git.remoteUrl")(function* (dir, order = "ranked") {
         const config = yield* tryGit(dir, "config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$")
+        const names = order === "project" ? projectRemotes(config ?? "") : rankedRemotes(config ?? "")
 
-        for (const name of rankedRemotes(config ?? "")) {
+        for (const name of names) {
           const url = yield* tryGit(dir, "remote", "get-url", name)
 
           if (url !== undefined && parseRemote(url) !== undefined) return url
