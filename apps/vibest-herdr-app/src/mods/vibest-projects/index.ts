@@ -2,7 +2,7 @@ import { type AsyncContext, type Context, type Element, View } from "gpui-kit"
 import { checking, nextCommand } from "herdr"
 
 import { projectGroups } from "../../shared/project-groups.ts"
-import { openProject, previousProject, selectedProject } from "../../shared/session-ui.ts"
+import { followProject, openProject, previousProject, restoreChat, selectedProject } from "../../shared/session-ui.ts"
 import { themeColors } from "../../shared/theme-colors.ts"
 import { VibestFeed } from "../../shared/vibest-source.ts"
 import { type ProjectsUi, ProjectsView } from "./view.ts"
@@ -23,9 +23,10 @@ export default class Projects extends View implements ProjectsUi {
     if (checking()) return
 
     this.feed.start(cx)
+    restoreChat()
 
-    cx.spawn(async () => {
-      for (;;) if ((await nextCommand()) === "recent") this.openRecent()
+    cx.spawn(async (task) => {
+      for (;;) if ((await nextCommand()) === "recent") this.openRecent(task)
     })
 
     cx.timer.every(CLOCK_MS, (ticked) => {
@@ -34,11 +35,11 @@ export default class Projects extends View implements ProjectsUi {
     })
   }
 
-  openRecent(): void {
+  openRecent(cx: Context): void {
     const g = projectGroups(this.feed.state).find((group) => group.key === previousProject())
     const first = g?.members[0]
 
-    if (g && first) openProject(g.key, first)
+    if (g && first) openProject(g.key, first, cx)
   }
 
   hover(id: string) {
@@ -52,9 +53,12 @@ export default class Projects extends View implements ProjectsUi {
 
   render(): Element {
     const state = this.feed.state
+    const groups = projectGroups(state)
 
     this.selected = selectedProject()
 
-    return new ProjectsView(themeColors(), this).render(projectGroups(state), state.note)
+    if (!checking()) followProject(groups)
+
+    return new ProjectsView(themeColors(), this).render(groups, state.note)
   }
 }

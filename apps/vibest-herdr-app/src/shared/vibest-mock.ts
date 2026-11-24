@@ -12,7 +12,6 @@ const project = (
   id,
   machine,
   directory,
-  entrySessionId: `${id}-entry`,
   activity,
   repositories: identities.map((identity, i) => ({
     path: identities.length > 1 ? `${directory}/r${i}` : directory,
@@ -38,7 +37,7 @@ const session = (
   harness: "claude",
   status,
   branch: name === "entry" ? "main" : `feat/${name.toLowerCase().replaceAll(" ", "-")}`,
-  terminal: "",
+  terminal: null,
   lastActive: now - ago * MIN,
 })
 

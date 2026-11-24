@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 
-import { groupKey, projectGroups } from "./project-groups.ts"
+import { agentTree, groupKey, mainSession, projectGroups } from "./project-groups.ts"
 import { mockState } from "./vibest-mock.ts"
-import { LOCAL, loudest, type VibestProject } from "./vibest-model.ts"
+import { LOCAL, loudest, type VibestProject, type VibestSession } from "./vibest-model.ts"
 
 const NOW = 1_800_000_000_000
 
@@ -10,7 +10,6 @@ const base: VibestProject = {
   id: "x",
   machine: LOCAL,
   directory: "/a/b",
-  entrySessionId: null,
   activity: "idle",
   repositories: [],
 }
@@ -59,10 +58,10 @@ describe("projectGroups", () => {
     expect(byLabel("notes")?.key).toBe("local:/Users/me/notes")
   })
 
-  it("splits each member into its entry and its other sessions, newest first", () => {
+  it("splits each member into its main conversation and its other sessions, newest first", () => {
     const local = groups.find((g) => g.key === "github.com/acme/vibest")?.members[0]
 
-    expect(local?.entry?.id).toBe("p-vibest-entry")
+    expect(local?.main?.id).toBe("p-vibest-entry")
     expect(local?.sessions.map((s) => s.name)).toEqual(["Fix slow session list", "Review web hub PR"])
   })
 
@@ -76,5 +75,36 @@ describe("loudest", () => {
     expect(loudest(["idle", "done", "unknown"])).toBe("done")
     expect(loudest(["working", "blocked"])).toBe("blocked")
     expect(loudest([])).toBe("idle")
+  })
+})
+
+describe("mainSession", () => {
+  const root = (id: string, lastActive: number, terminal: string | null): VibestSession => ({
+    ...mockState(NOW).sessions[0]!,
+    id,
+    parentId: null,
+    lastActive,
+    terminal,
+  })
+
+  it("is the newest root conversation, preferring one with a terminal", () => {
+    expect(mainSession([root("old", 1, "t1"), root("new", 2, null)])?.id).toBe("old")
+    expect(mainSession([root("old", 1, "t1"), root("new", 2, "t2")])?.id).toBe("new")
+    expect(mainSession([{ ...root("child", 3, "t3"), parentId: "old" }])).toBeNull()
+  })
+})
+
+describe("agentTree", () => {
+  const s = (id: string, parentId: string | null): VibestSession => ({ ...mockState(NOW).sessions[0]!, id, parentId })
+
+  it("nests each session under its parent and lifts children of the main conversation to the top", () => {
+    const rows = agentTree([s("a", "main"), s("b", null), s("a1", "a"), s("a11", "a1")])
+
+    expect(rows.map((r) => [r.session.id, r.depth])).toEqual([
+      ["a", 0],
+      ["a1", 1],
+      ["a11", 2],
+      ["b", 0],
+    ])
   })
 })

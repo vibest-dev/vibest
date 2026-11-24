@@ -12,7 +12,7 @@ const BAR = 32
 const PANE_HEADER = 24
 const BARS = ["topbar", "sidebar-header"]
 export const LEFT_GUTTER = "left-gutter"
-const MAIN = "main"
+export const MAIN = "main"
 const CHAT = "chat"
 const TABS = "terminals"
 
@@ -57,6 +57,8 @@ interface MutableLayoutNode {
   children?: readonly LayoutNode[]
 }
 
+export const mainChild = (chat: string | null): string => (chat ? CHAT : TABS)
+
 const resize = (node: LayoutNode, m: Metrics, sidebarHidden: boolean, chat: string | null): LayoutNode => {
   const pane = node.content?.pane
   const next: MutableLayoutNode = { ...node }
@@ -74,7 +76,7 @@ const resize = (node: LayoutNode, m: Metrics, sidebarHidden: boolean, chat: stri
   }
 
   if (node.id === MAIN) {
-    next.active = chat ? CHAT : TABS
+    next.active = mainChild(chat)
   }
 
   if (node.id === CHAT && chat) {

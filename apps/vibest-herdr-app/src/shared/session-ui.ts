@@ -1,13 +1,14 @@
 import { h_flex } from "gpui-base"
-import { div, type Element } from "gpui-kit"
+import { type Context, div, type Element } from "gpui-kit"
 import { panes, run, setShared, shared } from "herdr"
 
 import { liveLayout, liveMetrics } from "./live-metrics.ts"
-import { fitLayout } from "./metrics.ts"
-import type { MachineMember } from "./project-groups.ts"
+import { fitLayout, MAIN, mainChild } from "./metrics.ts"
+import type { MachineMember, ProjectGroup } from "./project-groups.ts"
 import { SMALL } from "./text-size.ts"
 import type { Theme } from "./theme-colors.ts"
 import { LOCAL, type VibestSession } from "./vibest-model.ts"
+import { launch } from "./vibest-source.ts"
 
 export const relativeTime = (at: number | null, now: number): string => {
   if (at === null) return ""
@@ -54,14 +55,6 @@ export const statusMark = (t: Theme, status: string, lastActive: number | null, 
     .child(label)
 }
 
-export const herdrTerminal = (s: VibestSession): string | null => {
-  const id = s.terminal.split("@")[0] ?? ""
-
-  if (!/^t[0-9a-z]+$/.test(id)) return null
-
-  return s.machine === LOCAL ? id : `${s.machine}/${id}`
-}
-
 const SELECTED = "vibest.project"
 
 export const selectedProject = (): string | null => {
@@ -70,12 +63,15 @@ export const selectedProject = (): string | null => {
   return key === undefined || key === null ? null : String(key)
 }
 
-export const selectProject = (key: string): void => {
+const MACHINE = "vibest.machine"
+
+const selectProject = (key: string | null, machine: string | null): void => {
   setShared(SELECTED, key)
+  setShared(MACHINE, machine)
 }
 
 export const showSession = (s: VibestSession): boolean => {
-  const terminal = herdrTerminal(s)
+  const terminal = s.terminal
 
   if (terminal === null) return false
 
@@ -109,20 +105,52 @@ export const applyLayout = (): void => {
   if (next) run("layout.set", { layout: next })
 }
 
-export const openProject = (key: string, m: MachineMember): void => {
-  const terminal = m.entry ? herdrTerminal(m.entry) : null
+const launching = new Set<string>()
 
-  selectProject(key)
-  setShared(RECENT, [key, ...recentProjects().filter((k) => k !== key)].slice(0, RECENT_KEEP))
+const launchMain = (m: MachineMember, cx: Context): void => {
+  if (m.machine !== LOCAL || launching.has(m.project.id)) return
+
+  launching.add(m.project.id)
+  cx.spawn(async (): Promise<void> => {
+    await launch({ projectId: m.project.id, sessionId: m.main?.id, runtime: "hc", focus: false }).catch(
+      (): undefined => undefined,
+    )
+    launching.delete(m.project.id)
+  })
+}
+
+const showChat = (terminal: string | null): void => {
   setShared(CHAT, terminal)
   applyLayout()
+  run("layout.select", { stack: MAIN, child: mainChild(terminal) })
 
   if (terminal) run("pane.focus", { terminal })
 }
 
+export const openProject = (key: string, m: MachineMember, cx: Context): void => {
+  selectProject(key, m.machine)
+  setShared(RECENT, [key, ...recentProjects().filter((k) => k !== key)].slice(0, RECENT_KEEP))
+  showChat(m.main?.terminal ?? null)
+
+  if (!m.main?.terminal) launchMain(m, cx)
+}
+
+export const followProject = (groups: readonly ProjectGroup[]): void => {
+  const key = selectedProject()
+  const group = groups.find((g) => g.key === key)
+
+  if (!group) return
+
+  const m = group.members.find((member) => member.machine === shared(MACHINE)) ?? group.members[0]
+  const terminal = m?.main?.terminal ?? null
+
+  if (terminal !== mainChat()) showChat(terminal)
+}
+
+export const restoreChat = (): void => showChat(mainChat())
+
 export const showSpace = (id: string): void => {
-  setShared(CHAT, null)
-  setShared(SELECTED, null)
-  applyLayout()
+  selectProject(null, null)
+  showChat(null)
   run("space.select", { id })
 }

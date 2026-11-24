@@ -1,6 +1,6 @@
 import type { AsyncContext } from "gpui-kit"
 import { appHome, home, readTextFile } from "herdr"
-import { WebSocket } from "websocket"
+import { WebSocket, type WebSocketSocket } from "websocket"
 
 import type { VibestState } from "./vibest-model.ts"
 import { applyFrame, emptyState, type WatchFrame } from "./watch-state.ts"
@@ -25,6 +25,34 @@ const vibestHome = async (): Promise<string> => {
 const frames = (text: string): WatchFrame[] =>
   text.split("\n").flatMap((line) => (line.trim() === "" ? [] : [JSON.parse(line)]))
 
+const connect = async (): Promise<WebSocketSocket | null> => {
+  const text = await readTextFile(`${await vibestHome()}/vibestd.pid`)
+  const info: DaemonInfo = text === null ? {} : JSON.parse(text)
+
+  if (!info.ws) return null
+
+  return WebSocket.connect(info.ws.url, {
+    headers: { "vibest-token": info.ws.token, "vibest-protocol": String(info.ws.protocol) },
+  })
+}
+
+interface LaunchParams {
+  readonly projectId: string
+  readonly sessionId: string | undefined
+  readonly runtime: string
+  readonly focus: boolean
+}
+
+export const launch = async (params: LaunchParams): Promise<void> => {
+  const socket = await connect()
+
+  if (!socket) return
+
+  await socket.write(JSON.stringify({ jsonrpc: "2.0", id: "launch", method: "Launch", params }))
+  await socket.read()
+  socket.close()
+}
+
 export class VibestFeed {
   state: VibestState = emptyState("Connecting…")
 
@@ -41,14 +69,9 @@ export class VibestFeed {
   }
 
   async watch(cx: AsyncContext): Promise<void> {
-    const text = await readTextFile(`${await vibestHome()}/vibestd.pid`)
-    const info: DaemonInfo = text === null ? {} : JSON.parse(text)
+    const socket = await connect()
 
-    if (!info.ws) return this.set(cx, emptyState("vibestd is not running or has no WebSocket"))
-
-    const socket = await WebSocket.connect(info.ws.url, {
-      headers: { "vibest-token": info.ws.token, "vibest-protocol": String(info.ws.protocol) },
-    })
+    if (!socket) return this.set(cx, emptyState("vibestd is not running or has no WebSocket"))
 
     await socket.write(JSON.stringify({ jsonrpc: "2.0", id: "watch", method: "Watch", params: {} }))
 

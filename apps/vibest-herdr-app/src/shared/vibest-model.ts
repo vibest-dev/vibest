@@ -11,7 +11,6 @@ export interface VibestProject {
   readonly id: string
   readonly machine: string
   readonly directory: string
-  readonly entrySessionId: string | null
   readonly activity: Activity
   readonly repositories: readonly Repository[]
 }
@@ -26,7 +25,7 @@ export interface VibestSession {
   readonly harness: string
   readonly status: string
   readonly branch: string
-  readonly terminal: string
+  readonly terminal: string | null
   readonly lastActive: number | null
 }
 

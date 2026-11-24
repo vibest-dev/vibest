@@ -15,10 +15,15 @@ interface WireRepository {
 interface WireProject {
   readonly id: string
   readonly directory: string | null
-  readonly entrySessionId: string | null
   readonly activity: Activity
   readonly repositories: readonly WireRepository[]
   readonly machine?: string
+}
+
+interface WireTerminal {
+  readonly runtime: string
+  readonly machine?: string
+  readonly target: { readonly address?: string }
 }
 
 interface WireSession {
@@ -28,7 +33,7 @@ interface WireSession {
   readonly harness: string
   readonly status: string
   readonly projectId: string
-  readonly address: { readonly machine: string; readonly id: string }
+  readonly terminal: WireTerminal | null
   readonly git: { readonly branch: string } | null
   readonly lastActive: number
   readonly parentId: string | null
@@ -66,10 +71,18 @@ const project = (p: WireProject): VibestProject => ({
   id: p.id,
   machine: p.machine ?? LOCAL,
   directory: p.directory ?? "",
-  entrySessionId: p.entrySessionId,
   activity: p.activity,
   repositories: p.repositories,
 })
+
+const herdrAddress = (t: WireTerminal | null, sessionMachine: string | undefined): string | null => {
+  const address = t?.runtime === "hc" ? t.target.address : undefined
+  const machine = t?.machine ?? sessionMachine
+
+  if (address === undefined) return null
+
+  return machine === undefined || address.includes("/") ? address : `${machine}/${address}`
+}
 
 const session = (s: WireSession): VibestSession => ({
   id: s.id,
@@ -81,7 +94,7 @@ const session = (s: WireSession): VibestSession => ({
   harness: s.harness,
   status: s.status,
   branch: s.git?.branch ?? "",
-  terminal: s.address.id,
+  terminal: herdrAddress(s.terminal, s.machine),
   lastActive: s.lastActive,
 })
 

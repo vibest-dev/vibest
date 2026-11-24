@@ -5,11 +5,11 @@ import { applyFrame, emptyState, type WatchFrame } from "./watch-state.ts"
 
 const wire = (text: string): WatchFrame => JSON.parse(text)
 
-const PROJECT = `{"id":"p1","directory":"/r","entrySessionId":"s1","activity":"working","repositories":[]}`
+const PROJECT = `{"id":"p1","directory":"/r","activity":"working","repositories":[]}`
 
 const SESSION = (status: string) =>
   `{"id":"s1","name":"entry","agent":"general","harness":"pi","status":"${status}","projectId":"p1",` +
-  `"address":{"machine":"local","id":"t1r"},"git":{"branch":"main"},"lastActive":5,"parentId":null}`
+  `"terminal":{"runtime":"hc","target":{"address":"t1r","socket":"/s"}},"git":{"branch":"main"},"lastActive":5,"parentId":null}`
 
 describe("applyFrame", () => {
   const snap = applyFrame(
@@ -21,6 +21,21 @@ describe("applyFrame", () => {
     expect(snap.note).toBe("")
     expect(snap.projects[0]).toMatchObject({ id: "p1", machine: LOCAL, directory: "/r" })
     expect(snap.sessions[0]).toMatchObject({ terminal: "t1r", branch: "main", machine: LOCAL })
+  })
+
+  it("prefixes a remote session's terminal with its machine, and drops other runtimes", () => {
+    const remote = SESSION("idle").replace('"parentId":null', '"parentId":null,"machine":"mac-mini"')
+    const rex = SESSION("idle").replace('"runtime":"hc"', '"runtime":"rex"')
+
+    const state = applyFrame(
+      snap,
+      wire(`{"result":[{"_tag":"Session","session":${remote}},{"_tag":"Session","session":${rex}}]}`),
+    )
+
+    expect(state.sessions.map((s) => [s.machine, s.terminal])).toEqual([
+      [LOCAL, null],
+      ["mac-mini", "mac-mini/t1r"],
+    ])
   })
 
   it("upserts sessions and drops ended ones by id and machine", () => {

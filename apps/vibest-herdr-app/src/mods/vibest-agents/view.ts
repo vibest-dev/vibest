@@ -3,24 +3,25 @@ import { div, type Element, svg } from "gpui-kit"
 
 import { icon } from "../../shared/icon-button.ts"
 import { liveMetrics } from "../../shared/live-metrics.ts"
-import type { ProjectGroup } from "../../shared/project-groups.ts"
+import { type AgentRow, agentTree, type ProjectGroup } from "../../shared/project-groups.ts"
 import { showSession, statusMark } from "../../shared/session-ui.ts"
 import { SMALL, TEXT } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
-import { LOCAL, type VibestSession, type VibestState } from "../../shared/vibest-model.ts"
+import { LOCAL, type VibestState } from "../../shared/vibest-model.ts"
 
-export const projectAgents = (group: ProjectGroup | undefined): VibestSession[] =>
-  (group?.members ?? []).flatMap((m) => m.sessions)
+export const projectAgents = (group: ProjectGroup | undefined): AgentRow[] =>
+  (group?.members ?? []).flatMap((m) => agentTree(m.sessions))
 
 export const shownGroup = (groups: readonly ProjectGroup[], selected: string | null): ProjectGroup | undefined =>
   groups.find((g) => g.key === selected) ?? groups[0]
 
 const machineLabel = (machine: string): string => (machine === LOCAL ? "This machine" : machine)
 
-const agentRow = (t: Theme, s: VibestSession, now: number): Element =>
+const agentRow = (t: Theme, { session: s, depth }: AgentRow, now: number): Element =>
   v_flex()
     .id(`agent-${s.machine}-${s.id}`)
-    .px(8)
+    .pl(8 + depth * 16)
+    .pr(8)
     .py(8)
     .gap(4)
     .rounded(8)
@@ -104,7 +105,7 @@ export const agentsView = (t: Theme, group: ProjectGroup | undefined, state: Vib
               .child(group ? "No agents in this project." : "No vibest projects yet."),
           ),
         )
-        .children(rows.map((s) => agentRow(t, s, now)))
+        .children(rows.map((row) => agentRow(t, row, now)))
         .children(
           offline.map((m) =>
             div()

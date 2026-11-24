@@ -10,7 +10,7 @@ import {
 export interface MachineMember {
   readonly machine: string
   readonly project: VibestProject
-  readonly entry: VibestSession | null
+  readonly main: VibestSession | null
   readonly sessions: readonly VibestSession[]
   readonly activity: Activity
 }
@@ -67,6 +67,11 @@ const byMachine = (a: MachineMember, b: MachineMember): number =>
 
 const recent = (a: VibestSession, b: VibestSession): number => (b.lastActive ?? 0) - (a.lastActive ?? 0)
 
+const shown = (s: VibestSession): number => (s.terminal === null ? 0 : 1)
+
+export const mainSession = (sessions: readonly VibestSession[]): VibestSession | null =>
+  sessions.filter((s) => s.parentId === null).sort((a, b) => shown(b) - shown(a) || recent(a, b))[0] ?? null
+
 export const projectGroups = (state: VibestState): ProjectGroup[] => {
   const sessionsOf = new Map<string, VibestSession[]>()
 
@@ -82,13 +87,13 @@ export const projectGroups = (state: VibestState): ProjectGroup[] => {
 
   for (const project of state.projects) {
     const all = sessionsOf.get(`${project.machine}:${project.id}`) ?? []
-    const entry = all.find((s) => s.id === project.entrySessionId) ?? null
-    const sessions = all.filter((s) => s !== entry).sort(recent)
+    const main = mainSession(all)
+    const sessions = all.filter((s) => s !== main).sort(recent)
 
     const member: MachineMember = {
       machine: project.machine,
       project,
-      entry,
+      main,
       sessions,
       activity: loudest([project.activity, ...all.map((s) => s.status)]),
     }
@@ -112,4 +117,22 @@ export const projectGroups = (state: VibestState): ProjectGroup[] => {
       }
     }),
   )
+}
+
+export interface AgentRow {
+  readonly session: VibestSession
+  readonly depth: number
+}
+
+const MAX_DEPTH = 3
+
+export const agentTree = (sessions: readonly VibestSession[]): AgentRow[] => {
+  const ids = new Set(sessions.map((s) => s.id))
+
+  const walk = (parentId: string | null, depth: number): AgentRow[] =>
+    sessions
+      .filter((s) => (depth === 0 ? s.parentId === null || !ids.has(s.parentId) : s.parentId === parentId))
+      .flatMap((s) => [{ session: s, depth: Math.min(depth, MAX_DEPTH) }, ...walk(s.id, depth + 1)])
+
+  return walk(null, 0)
 }

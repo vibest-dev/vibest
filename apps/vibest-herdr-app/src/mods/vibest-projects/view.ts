@@ -60,9 +60,11 @@ export class ProjectsView {
   }
 
   machineRow(g: ProjectGroup, m: MachineMember): Element {
-    const entry = m.entry
+    const main = m.main
 
-    return this.row(`machine-${m.machine}-${m.project.id}`, ROW, MACHINE_INDENT, false, () => openProject(g.key, m))
+    return this.row(`machine-${m.machine}-${m.project.id}`, ROW, MACHINE_INDENT, false, (cx) =>
+      openProject(g.key, m, cx),
+    )
       .child(
         svg(icon(m.machine === LOCAL ? "monitor" : "server"))
           .size(MACHINE_ICON)
@@ -70,16 +72,16 @@ export class ProjectsView {
           .text_color(this.t.muted),
       )
       .child(this.title(m.machine === LOCAL ? "This machine" : m.machine, false))
-      .child(statusMark(this.t, m.activity, entry?.lastActive ?? null, this.ui.now))
+      .child(statusMark(this.t, m.activity, main?.lastActive ?? null, this.ui.now))
   }
 
   groupRows(g: ProjectGroup): Element[] {
     const t = this.t
     const first = g.members[0]
-    const entry = first?.entry ?? null
+    const main = first?.main ?? null
 
-    const head = this.row(`group-${g.key}`, ROW, 0, this.ui.selected === g.key, () => {
-      if (first) openProject(g.key, first)
+    const head = this.row(`group-${g.key}`, ROW, 0, this.ui.selected === g.key, (cx) => {
+      if (first) openProject(g.key, first, cx)
     })
       .child(
         h_flex()
@@ -90,7 +92,7 @@ export class ProjectsView {
           .child(svg(icon("mods/vibest-projects/project.svg")).size(MARK).text_color(t.muted)),
       )
       .child(this.title(g.label, true))
-      .child(statusMark(t, g.activity, entry?.lastActive ?? null, this.ui.now))
+      .child(statusMark(t, g.activity, main?.lastActive ?? null, this.ui.now))
 
     return showMachines(g) ? [head, ...g.members.map((m) => this.machineRow(g, m))] : [head]
   }
