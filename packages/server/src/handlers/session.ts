@@ -23,7 +23,7 @@ import { group } from "./group.ts"
 import { Routing } from "./remote.ts"
 
 export const make = Effect.gen(function* () {
-  const { projectOf, machineFromCaller, cliOnly, self } = yield* CallerChecks.Service
+  const { projectOf, machineFromCaller, cliOnly, userOnly, self } = yield* CallerChecks.Service
   const { reach, routed, spawnOn } = yield* Routing
   const { listed, watched, snapshotProjects } = yield* Listing.Service
   const sessions = yield* Session.Service
@@ -344,7 +344,7 @@ export const make = Effect.gen(function* () {
     Watch: () =>
       Stream.unwrap(
         Effect.gen(function* () {
-          yield* cliOnly("Watch")
+          yield* userOnly("Watch")
           const changes = yield* watchFeed.subscribe
           const sessionRows = yield* watched(yield* listed(ListScope.All(), false))
 
