@@ -48,7 +48,7 @@ import { WatchFeed } from "./watch-feed.ts"
 
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
-export const handlers = Layer.mergeAll(
+export const handlersCore = Layer.mergeAll(
   DaemonHandlers.layer,
   SessionHandlers.layer,
   InboxHandlers.layer,
@@ -57,22 +57,19 @@ export const handlers = Layer.mergeAll(
   ProjectHandlers.layer,
   RemoteHandlers.layer,
   WorktreeHandlers.layer,
-).pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer)),
-      RemoteHandlers.routingLayer.pipe(Layer.provideMerge(CallerChecks.layer)),
-    ),
-  ),
+).pipe(Layer.provide(RemoteHandlers.routingLayer.pipe(Layer.provideMerge(CallerChecks.layer))))
+
+export const handlers = handlersCore.pipe(
+  Layer.provide(Layer.merge(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer)), RemoteWatch.layer)),
 )
 
-export const layer = RpcServer.layer(VibestRpcs).pipe(
-  Layer.provide(Layer.mergeAll(handlers, AdmissionLive)),
+const socketServerRpcLayer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(CallerGateLive),
-  Layer.provide(ProtocolGateLive),
   Layer.provide(RpcServer.layerProtocolSocketServer),
   Layer.provide(RpcSerialization.layerNdJsonRpc()),
 )
+
+export const layer = socketServerRpcLayer.pipe(Layer.provide(Layer.mergeAll(handlers, AdmissionLive, ProtocolGateLive)))
 
 export class SocketServerLayer extends Context.Service<
   SocketServerLayer,
@@ -87,9 +84,9 @@ export const socketServer = LayerNode.make({
   deps: [socketServerLayer],
 })
 
-export const node = LayerNode.make({
-  name: "vibest/RpcServer",
-  layer,
+export const handlersNode = LayerNode.make({
+  name: "vibest/RpcHandlers",
+  layer: handlersCore,
   deps: [
     services,
     Agents.node,
@@ -105,6 +102,7 @@ export const node = LayerNode.make({
     Inbox.node,
     Integration.node,
     EntrySession.node,
+    Listing.node,
     Load.node,
     Machines.node,
     RemoteWatch.node,
@@ -119,12 +117,30 @@ export const node = LayerNode.make({
     RepositoryUrl.node,
     Subscriptions.node,
     UpdateCheck.node,
+    WatchFeed.node,
     App.node,
     Identity.node,
-    socketServer,
     PlatformNode.childProcessSpawner,
     PlatformNode.fileSystem,
     PlatformNode.layout,
     PlatformNode.path,
   ],
+})
+
+export const admissionNode = LayerNode.make({
+  name: "vibest/Admission",
+  layer: AdmissionLive,
+  deps: [Drain.node],
+})
+
+export const protocolGateNode = LayerNode.make({
+  name: "vibest/ProtocolGate",
+  layer: ProtocolGateLive,
+  deps: [Db.node, App.node],
+})
+
+export const node = LayerNode.make({
+  name: "vibest/RpcServer",
+  layer: socketServerRpcLayer,
+  deps: [handlersNode, admissionNode, protocolGateNode, Db.node, socketServer],
 })

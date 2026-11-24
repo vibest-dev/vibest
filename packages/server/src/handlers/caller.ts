@@ -93,6 +93,13 @@ export const make = Effect.gen(function* () {
         : Effect.fail(new Forbidden({ method, message: `only the user runs ${method}` })),
     )
 
+  const userOnly = (method: MethodOf<"cli">) =>
+    Effect.flatMap(Caller, (c) =>
+      Predicate.isTagged(c, "Cli") || Predicate.isTagged(c, "Ui")
+        ? Effect.succeed(c)
+        : Effect.fail(new Forbidden({ method, message: `only the user runs ${method}` })),
+    )
+
   const self = (method: MethodOf<"self">, id: string) =>
     Effect.gen(function* () {
       const c = yield* Caller
@@ -102,7 +109,7 @@ export const make = Effect.gen(function* () {
       return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
     })
 
-  return { agent, atProject, resolveAt, findAt, projectOf, scope, machineFromCaller, cliOnly, self }
+  return { agent, atProject, resolveAt, findAt, projectOf, scope, machineFromCaller, cliOnly, userOnly, self }
 })
 
 export type Checks = Effect.Success<typeof make>

@@ -137,6 +137,7 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
 
 export type CallerIdentity =
   | { readonly _tag: "Cli"; readonly repositoryRoot: string }
+  | { readonly _tag: "Ui" }
   | {
       readonly _tag: "Session"
       readonly sessionId: string
@@ -188,7 +189,7 @@ export class Admission extends RpcMiddleware.Service<Admission>()("vibest/Admiss
 }) {}
 
 export class CallerGate extends RpcMiddleware.Service<CallerGate, { provides: Caller }>()("vibest/CallerGate", {
-  error: Schema.Union([InvalidCaller, NoSuchSession]),
+  error: Schema.Union([InvalidCaller, Forbidden, NoSuchSession]),
 }) {}
 
 const protocol = <
@@ -292,11 +293,19 @@ export const SessionStatusInfo = Schema.Struct({
   reply: Schema.optional(Schema.NullOr(SessionReply)),
 })
 
+export const ProjectRepository = Schema.Struct({
+  path: Schema.String,
+  identity: Schema.NullOr(Schema.String),
+})
+
+export type ProjectRepository = typeof ProjectRepository.Type
+
 export const ProjectRow = Schema.Struct({
   id: Schema.String,
   directory: Schema.NullOr(Schema.String),
   entrySessionId: Schema.NullOr(Schema.String),
   activity: ProjectActivity,
+  repositories: Schema.Array(ProjectRepository),
   machine: Schema.optional(Schema.String),
 })
 

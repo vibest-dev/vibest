@@ -115,7 +115,7 @@ export class FakeGit extends Context.Service<
         isMainCheckout: (dir) =>
           Effect.map(locate(dir), (found) => found !== undefined && found.path === found.repository.main),
         originUrl: (dir) => Effect.map(locate(dir), (found) => found?.repository.facts.origin),
-        remoteUrl: (dir) =>
+        remoteUrl: (dir, _order) =>
           Effect.map(locate(dir), (found) => {
             const origin = found?.repository.facts.origin
 

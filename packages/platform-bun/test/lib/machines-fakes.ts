@@ -95,7 +95,11 @@ export class Net {
 
         const socket = Socket.make({
           reader: Effect.map(inner.reader, (r) => ({
-            pull: Effect.suspend(() => (held.on ? Effect.never : r.pull)).pipe(Effect.raceFirst(failOnCut)),
+            pull: Effect.suspend(() =>
+              held.on
+                ? Effect.never
+                : r.pull.pipe(Effect.flatMap((chunk) => (held.on ? Effect.never : Effect.succeed(chunk)))),
+            ).pipe(Effect.raceFirst(failOnCut)),
             upgrade: r.upgrade,
           })),
           writer: Effect.map(inner.writer, (w) => ({

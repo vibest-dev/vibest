@@ -59,6 +59,8 @@ export const ACCESS = {
   "Machine.Remove": "cli",
 } as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly Access[]>
 
+export const UI_WS_CALLS: ReadonlySet<string> = new Set(["Watch"])
+
 export const PEER_CALLS: ReadonlySet<string> = new Set(
   Object.entries(ACCESS)
     .filter(([, access]) => [access].flat().includes("peer"))

@@ -9,11 +9,19 @@ import {
   type SessionBrief,
   terminalOf,
 } from "@vibest/core/database/db-rows"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import { Project } from "@vibest/core/project"
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Session } from "@vibest/core/session"
 import { Starts } from "@vibest/core/session/starts"
-import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
+import {
+  type ProjectRepository,
+  type ProjectRow,
+  type SessionInfo,
+  type WatchEvent,
+  type WatchSession,
+} from "@vibest/protocol/rpc"
 import type { RuntimeAddress } from "@vibest/schema/session"
 import { Context, Data, Effect, Layer, Predicate } from "effect"
 
@@ -51,13 +59,33 @@ export const toInfo = (session: SessionView, brief?: SessionBrief, waiting?: Pro
   ...(waiting !== undefined && { waitingToStart: true as const }),
 })
 
+interface CachedRepositories {
+  readonly directory: string | null
+  readonly repositories: ReadonlyArray<ProjectRepository>
+}
+
 export const sessionListing = (deps: {
   readonly db: Db.Interface
+  readonly projects: Project.Interface
   readonly sessions: Session.Interface
   readonly runtimes: Runtimes.Interface
   readonly starts: Starts.Interface
 }) => {
-  const { db, sessions, runtimes, starts } = deps
+  const { db, projects, sessions, runtimes, starts } = deps
+  const repositoryCache = new Map<string, CachedRepositories>()
+
+  const resolveRepositories = (id: string, directory: string | null, refresh: boolean) =>
+    Effect.gen(function* () {
+      const hit = repositoryCache.get(id)
+
+      if (!refresh && hit !== undefined && hit.directory === directory) return hit.repositories
+
+      const recorded = yield* db.project.projectRemote(id)
+      const repositories = yield* projects.repositories(directory, recorded)
+      repositoryCache.set(id, { directory, repositories })
+
+      return repositories
+    })
 
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
     Effect.gen(function* () {
@@ -112,11 +140,17 @@ export const sessionListing = (deps: {
     })
 
   const snapshotProjects = (sessions: ReadonlyArray<WatchSession>) =>
-    Effect.map(db.project.watchProjects(), (rows) =>
-      rows.map((row): ProjectRow => ({
-        ...row,
-        activity: projectActivity(sessions.flatMap((s) => (s.projectId === row.id ? [s.status] : []))),
-      })),
+    Effect.flatMap(db.project.watchProjects(), (rows) =>
+      Effect.forEach(
+        rows,
+        (row) =>
+          Effect.map(resolveRepositories(row.id, row.directory, true), (repositories): ProjectRow => ({
+            ...row,
+            activity: projectActivity(sessions.flatMap((s) => (s.projectId === row.id ? [s.status] : []))),
+            repositories,
+          })),
+        { concurrency: 8 },
+      ),
     )
 
   const projectStatuses = (id: string) =>
@@ -156,12 +190,13 @@ export const sessionListing = (deps: {
 
   const watchProject = (id: string) =>
     Effect.gen(function* () {
-      const rows = yield* db.project.watchProjects(id)
+      const [row] = yield* db.project.watchProjects(id)
 
-      if (rows.length === 0) return []
+      if (row === undefined) return []
       const activity = projectActivity(yield* projectStatuses(id))
+      const repositories = yield* resolveRepositories(row.id, row.directory, false)
 
-      return rows.map((row) => WatchEvents.Project({ project: { ...row, activity } }))
+      return [WatchEvents.Project({ project: { ...row, activity, repositories } })]
     })
 
   const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
@@ -185,8 +220,10 @@ export const sessionListing = (deps: {
 
       for (const event of events) {
         if (event.type === "session.changed") sessionIds.add(event.sessionId)
-        else if (event.type === "project.changed") projectIds.add(event.projectId)
-        else if (event.type === "terminal.state" || event.type === "terminal.exited") {
+        else if (event.type === "project.changed") {
+          repositoryCache.delete(event.projectId)
+          projectIds.add(event.projectId)
+        } else if (event.type === "terminal.state" || event.type === "terminal.exited") {
           const project = yield* db.session.entryAt(event.runtime, event.terminal)
           const entry = project === undefined ? undefined : yield* db.session.entryOf(project)
 
@@ -222,9 +259,16 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     return sessionListing({
       db: yield* Db.Service,
+      projects: yield* Project.Service,
       sessions: yield* Session.Service,
       runtimes: yield* Runtimes.Service,
       starts: yield* Starts.Service,
     })
   }),
 )
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Db.node, Project.node, Session.node, Runtimes.node, Starts.node],
+})

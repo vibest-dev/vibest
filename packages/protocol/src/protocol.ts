@@ -27,6 +27,7 @@ export const protocolMismatch = (
 })
 
 export const PROTOCOL_HEADER = "vibest-protocol"
+export const TOKEN_HEADER = "vibest-token"
 export const CALLER_HEADER = "vibest-caller"
 export const SESSION_HEADER = "vibest-session-id"
 export const REPOSITORY_HEADER = "vibest-repository"

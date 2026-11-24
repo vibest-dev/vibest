@@ -3,12 +3,13 @@ import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import type { NewSession } from "@vibest/core/database/db-rows"
 import * as Projectors from "@vibest/core/database/projectors"
-import { Git } from "@vibest/core/git"
+import { Git, GIT_CONCURRENCY } from "@vibest/core/git"
 import {
   createIsolatedWorktrees,
   createProject,
   listProjectRepositories,
   projectRoot,
+  workspaceGit,
 } from "@vibest/core/project/create"
 import { locateProject, moveProjectHere, resolveProject } from "@vibest/core/project/identity"
 import { SessionLive } from "@vibest/core/session/live"
@@ -188,6 +189,36 @@ describe("git, the live layer: worktree add and remove", () => {
       yield* git.removeWorktree(repo, linked)
       assert.isFalse(yield* fs.exists(linked))
       assert.deepStrictEqual(yield* git.linkedWorktrees(repo), [])
+    }),
+  )
+
+  test(
+    "remoteUrl with project order picks origin over gh-resolved upstream, then gh-resolved, then first configured remote, skipping local remotes and gh-resolved false",
+    Effect.gen(function* () {
+      const git = yield* Git.Service
+
+      const fork = yield* makeRepository
+      assert.isUndefined(yield* git.remoteUrl(fork, "project"))
+      yield* sh(fork, "remote", "add", "origin", "git@github.com:forker/repo.git")
+      yield* sh(fork, "remote", "add", "upstream", "https://github.com/org/repo.git")
+      yield* sh(fork, "config", "remote.upstream.gh-resolved", "base")
+      assert.strictEqual(yield* git.remoteUrl(fork, "project"), "git@github.com:forker/repo.git")
+      assert.strictEqual(yield* git.remoteUrl(fork), "https://github.com/org/repo.git")
+
+      const noOrigin = yield* makeRepository
+      yield* sh(noOrigin, "remote", "add", "firstremote", "https://github.com/first/my.url")
+      yield* sh(noOrigin, "remote", "add", "alpha", "https://github.com/alpha/repo.git")
+      assert.strictEqual(yield* git.remoteUrl(noOrigin, "project"), "https://github.com/first/my.url")
+      yield* sh(noOrigin, "remote", "add", "upstream", "https://github.com/org/repo.git")
+      yield* sh(noOrigin, "config", "remote.upstream.gh-resolved", "false")
+      assert.strictEqual(yield* git.remoteUrl(noOrigin, "project"), "https://github.com/first/my.url")
+      yield* sh(noOrigin, "config", "remote.upstream.gh-resolved", "base")
+      assert.strictEqual(yield* git.remoteUrl(noOrigin, "project"), "https://github.com/org/repo.git")
+
+      const localOnly = yield* makeRepository
+      yield* sh(localOnly, "remote", "add", "origin", "/tmp/bare.git")
+      yield* sh(localOnly, "remote", "add", "backup", "file:///tmp/bare.git")
+      assert.isUndefined(yield* git.remoteUrl(localOnly, "project"))
     }),
   )
 })
@@ -788,5 +819,86 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
       assert.sameMembers(yield* copyIncluded(repo, wt2), ["committed.env", "shared.dat", "abs.dat"])
       assert.strictEqual(yield* sh(wt2, "status", "--porcelain", "--untracked-files=all"), "")
     }),
+  )
+
+  it.effect(
+    "bounded git concurrency: 6 multi-repo worktrees x 10 real git repos runs in parallel, stays within GIT_CONCURRENCY, and finishes under 15s",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const baseSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        let inFlight = 0
+        let maxInFlight = 0
+
+        const countingSpawner = ChildProcessSpawner.make((command) =>
+          Effect.acquireRelease(
+            Effect.sync(() => {
+              maxInFlight = Math.max(maxInFlight, ++inFlight)
+            }),
+            () => Effect.sync(() => void inFlight--),
+          ).pipe(Effect.andThen(baseSpawner.spawn(command))),
+        )
+
+        const projectDir = yield* tempDirectory("vibest-bench-project-")
+        const names = Array.from({ length: 10 }, (_, i) => `repo-${String(i).padStart(2, "0")}`)
+
+        const repos = yield* Effect.forEach(
+          names,
+          (name) =>
+            repositoryWithOneCommitOnMain(projectDir, name).pipe(Effect.map((repoPath) => ({ name, path: repoPath }))),
+          { concurrency: 8 },
+        )
+
+        const workspacesRoot = yield* tempDirectory("vibest-bench-workspaces-")
+
+        const workspaces = yield* Effect.forEach(
+          Array.from({ length: 6 }, (_, i) => path.join(workspacesRoot, `session-${i}`)),
+          (ws) => createIsolatedWorktrees(repos, ws).pipe(Effect.as(ws)),
+        )
+
+        yield* fs.writeFileString(path.join(workspaces[0]!, "repo-03", "dirty.txt"), "modified\n")
+        inFlight = 0
+        maxInFlight = 0
+        const startedAt = Date.now()
+
+        const results = yield* Effect.forEach(
+          workspaces,
+          (ws) =>
+            Effect.gen(function* () {
+              const git = yield* workspaceGit(ws)
+              const root = yield* projectRoot(ws)
+
+              return { git, root: root.root }
+            }),
+          { concurrency: 8 },
+        ).pipe(
+          Effect.provide(
+            Layer.fresh(Git.layer).pipe(
+              Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, countingSpawner)),
+            ),
+          ),
+        )
+
+        const elapsedMs = Date.now() - startedAt
+        assert.strictEqual(results.length, 6)
+        assert.isAbove(maxInFlight, 1, `expected concurrent git processes, got max ${maxInFlight}`)
+        assert.isAtMost(maxInFlight, GIT_CONCURRENCY, `exceeded GIT_CONCURRENCY (${GIT_CONCURRENCY}): ${maxInFlight}`)
+        assert.isBelow(elapsedMs, 15_000, `6x10 multi-repo listing took ${elapsedMs}ms (>= 15000ms)`)
+
+        for (let i = 0; i < results.length; i++) {
+          const entry = results[i]!
+          assert.strictEqual(entry.root, projectDir)
+          assert.isDefined(entry.git)
+          assert.deepStrictEqual(
+            entry.git!.map((r) => r.name),
+            names,
+          )
+          const repo03 = entry.git!.find((r) => r.name === "repo-03")!
+          assert.strictEqual(repo03.saved, i !== 0)
+          assert.strictEqual(repo03.why, i === 0 ? "uncommitted changes" : "")
+        }
+      }),
+    30_000,
   )
 })

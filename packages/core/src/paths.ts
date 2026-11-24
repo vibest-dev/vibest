@@ -28,6 +28,8 @@ export const safeRepositoryDirectory = (name: string) =>
   !LEGACY_SESSION_DIRECTORY.test(caseFoldedWorktrees ? name.toLowerCase() : name) &&
   !ID.test(caseFoldedWorktrees ? name.toLowerCase() : name)
 
+const textEncoder = new TextEncoder()
+
 export const writeAtomic = Effect.fn("writeAtomic")(function* (
   file: string,
   content: string,
@@ -37,6 +39,17 @@ export const writeAtomic = Effect.fn("writeAtomic")(function* (
   const path = yield* Path.Path
   yield* fs.makeDirectory(path.dirname(file), { recursive: true })
   const tmp = `${file}.${yield* Random.nextIntBetween(0, 2 ** 31)}.tmp`
-  yield* fs.writeFileString(tmp, content, options?.mode === undefined ? undefined : { mode: options.mode })
-  yield* fs.rename(tmp, file)
+
+  yield* (
+    options?.mode === undefined
+      ? fs.writeFileString(tmp, content)
+      : Effect.scoped(
+          fs
+            .open(tmp, { flag: "wx", mode: options.mode })
+            .pipe(Effect.flatMap((handle) => handle.writeAll(textEncoder.encode(content)))),
+        ).pipe(Effect.andThen(fs.chmod(tmp, options.mode)))
+  ).pipe(
+    Effect.andThen(fs.rename(tmp, file)),
+    Effect.onError(() => fs.remove(tmp, { force: true }).pipe(Effect.ignore)),
+  )
 })

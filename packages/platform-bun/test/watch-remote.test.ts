@@ -331,7 +331,9 @@ describe("Watch with remote machines", () => {
               return Stream.concat(
                 Stream.make(
                   Listing.WatchEvents.Snapshot({
-                    projects: [{ id: p1, directory: "/remote/p1", entrySessionId: s1, activity: "idle" }],
+                    projects: [
+                      { id: p1, directory: "/remote/p1", entrySessionId: s1, activity: "idle", repositories: [] },
+                    ],
                     sessions: [makeSession(s1, p1, "sess-1")],
                     machines: [],
                   }),
@@ -342,7 +344,9 @@ describe("Watch with remote machines", () => {
             return Stream.concat(
               Stream.make(
                 Listing.WatchEvents.Snapshot({
-                  projects: [{ id: p2, directory: "/remote/p2", entrySessionId: s2, activity: "idle" }],
+                  projects: [
+                    { id: p2, directory: "/remote/p2", entrySessionId: s2, activity: "idle", repositories: [] },
+                  ],
                   sessions: [makeSession(s2, p2, "sess-2")],
                   machines: [],
                 }),

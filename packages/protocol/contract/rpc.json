@@ -403,6 +403,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -606,6 +609,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -954,6 +960,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -1257,6 +1266,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -1603,6 +1615,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -2474,6 +2489,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -3038,6 +3056,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -3363,6 +3384,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -3565,6 +3589,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -3604,6 +3631,29 @@
                 "type": "string",
                 "enum": [
                   "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
                 ]
               },
               "method": {
@@ -3790,6 +3840,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -4269,6 +4322,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -5163,6 +5219,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -5415,6 +5474,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -5900,6 +5962,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -6235,6 +6300,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -6535,6 +6603,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -6818,6 +6889,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -7143,6 +7217,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -7402,6 +7479,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -7641,6 +7721,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -8191,6 +8274,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -9239,6 +9325,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -9600,6 +9689,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -9906,6 +9998,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -10419,6 +10514,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -10794,6 +10892,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -11014,6 +11115,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -11256,6 +11360,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -11485,6 +11592,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -11728,6 +11838,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -11998,6 +12111,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -12438,6 +12554,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -12860,6 +12979,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -13369,6 +13491,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -14090,6 +14215,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -14464,6 +14592,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -14671,6 +14802,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -15335,6 +15469,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
@@ -16026,6 +16163,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -16693,6 +16833,9 @@
                 "$ref": "#/$defs/InvalidCallerEncoded"
               },
               {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
               }
             ]
@@ -16900,6 +17043,32 @@
                         "idle"
                       ]
                     },
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "identity": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "identity"
+                        ],
+                        "additionalProperties": true
+                      }
+                    },
                     "machine": {
                       "anyOf": [
                         {
@@ -16915,7 +17084,8 @@
                     "id",
                     "directory",
                     "entrySessionId",
-                    "activity"
+                    "activity",
+                    "repositories"
                   ],
                   "additionalProperties": true
                 }
@@ -17521,6 +17691,32 @@
                       "idle"
                     ]
                   },
+                  "repositories": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "identity": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "identity"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
                   "machine": {
                     "anyOf": [
                       {
@@ -17536,7 +17732,8 @@
                   "id",
                   "directory",
                   "entrySessionId",
-                  "activity"
+                  "activity",
+                  "repositories"
                 ],
                 "additionalProperties": true
               }
@@ -18195,6 +18392,9 @@
             "anyOf": [
               {
                 "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
               },
               {
                 "$ref": "#/$defs/NoSuchSessionEncoded"
