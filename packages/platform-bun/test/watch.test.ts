@@ -315,7 +315,7 @@ describe("Watch", () => {
   test(
     "a client that stops acknowledging falls behind, and the stream fails with WatchLagged instead of growing",
     Effect.gen(function* () {
-      const { repo, project } = yield* withEntry
+      const { repo, project, entryId } = yield* withEntry
       const db = yield* Db.Service
       const bus = yield* Bus.Service
       const w = yield* wire
@@ -323,23 +323,15 @@ describe("Watch", () => {
       const first = yield* w.recv
       assert.strictEqual((first["result"] as Array<WatchEvent>)[0]!._tag, "Snapshot")
 
-      const read = db.project.watchProjects
+      const read = db.session.sessionIdentity
+      const ids = Array.from({ length: WATCH_BACKLOG + 500 }, (_, i) => `ended-${i}`)
 
-      Object.assign(db.project, {
-        watchProjects: (id?: string) =>
-          id === project
-            ? Effect.succeed(
-                Array.from({ length: WATCH_BACKLOG * 2 + 500 }, () => ({
-                  id: project,
-                  directory: null,
-                  entrySessionId: null,
-                })),
-              )
-            : read(id),
-        projectRemote: () => Effect.succeed([]),
+      Object.assign(db.session, {
+        sessionIdentity: (id: string) => (id.startsWith("ended-") ? Effect.succeed({ projectId: project }) : read(id)),
       })
 
-      yield* bus.observe({ type: "project.changed", projectId: project })
+      for (const id of ids) yield* bus.observe({ type: "session.changed", sessionId: id })
+      yield* bus.observe({ type: "session.changed", sessionId: entryId })
       const ack = { jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: 1 } }
 
       for (;;) {
@@ -350,6 +342,66 @@ describe("Watch", () => {
         assert.include(JSON.stringify(line["error"]), "WatchLagged")
         break
       }
+    }),
+  )
+
+  test(
+    "session.changed ticks reuse cached project repositories without re-probing git, while project.changed invalidates the cache",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const bus = yield* Bus.Service
+      const fakeGit = yield* FakeGit
+      const { repo, project, entryId } = yield* withEntry
+      yield* fakeGit.update(repo, { origin: "git@github.com:Org/Cached.git" })
+
+      const { next } = yield* watching(repo)
+      const snapshot = yield* next(isSnapshot)
+
+      assert.deepStrictEqual(snapshot.projects, [
+        {
+          id: project,
+          directory: repo,
+          entrySessionId: entryId,
+          activity: "idle",
+          repositories: [{ path: repo, identity: "github.com/Org/Cached" }],
+        },
+      ])
+
+      const readRemote = fakeGit.git.remoteUrl
+      let remoteReads = 0
+
+      Object.assign(fakeGit.git, {
+        remoteUrl: (dir: string, order?: "ranked" | "project") => {
+          remoteReads++
+
+          return readRemote(dir, order)
+        },
+      })
+
+      yield* db.session.setStatus(entryId, "working")
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === "working",
+      )
+      yield* db.session.setStatus(entryId, "idle")
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === "idle",
+      )
+      assert.strictEqual(remoteReads, 0)
+
+      yield* fakeGit.update(repo, { origin: "git@github.com:Org/Updated.git" })
+      yield* bus.observe({ type: "project.changed", projectId: project })
+
+      const refreshed = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") &&
+          e.project.id === project &&
+          e.project.repositories[0]?.identity === "github.com/Org/Updated",
+      )
+
+      assert.strictEqual(remoteReads, 1)
+      assert.deepStrictEqual(refreshed.project.repositories, [{ path: repo, identity: "github.com/Org/Updated" }])
     }),
   )
 

@@ -4,6 +4,9 @@ import { Context, Effect, FileSystem, Layer, Path } from "effect"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
+import { Git } from "./git.ts"
+import { listProjectRepositoryDirs } from "./project/create.ts"
+import { RepositoryUrl, repositoryIdentity } from "./repository-url.ts"
 
 export * as Project from "./project.ts"
 
@@ -18,9 +21,23 @@ export interface ProjectScope {
   readonly id: string
 }
 
+export interface RecordedRepository {
+  readonly path: string
+  readonly remote: string | null
+}
+
+export interface RepositoryIdentityEntry {
+  readonly path: string
+  readonly identity: string | null
+}
+
 export interface Interface {
   readonly info: (scope: ProjectScope) => Effect.Effect<typeof ProjectInfoResult.Type>
   readonly search: (scope: ProjectScope, input: typeof ProjectSearchInput.Type) => Effect.Effect<ReadonlyArray<string>>
+  readonly repositories: (
+    directory: string | null,
+    recorded?: ReadonlyArray<RecordedRepository>,
+  ) => Effect.Effect<ReadonlyArray<RepositoryIdentityEntry>>
 }
 
 export class Service extends Context.Service<Service, Interface>()("vibest/Project") {}
@@ -31,8 +48,82 @@ export const layer = Layer.effect(
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
+    const git = yield* Git.Service
+    const repositoryUrl = yield* RepositoryUrl.Service
 
     const dir = (scope: ProjectScope, kind: ProjectKind) => path.join(layout.project(scope.id), kind)
+    const real = (p: string) => fs.realPath(p).pipe(Effect.orElseSucceed(() => p))
+
+    const identityOf = (url: string) =>
+      repositoryIdentity(url).pipe(Effect.provideService(RepositoryUrl.Service, repositoryUrl))
+
+    const livePaths = (directory: string) =>
+      Effect.gen(function* () {
+        const root = yield* git.mainCheckout(directory).pipe(
+          Effect.flatMap(real),
+          Effect.orElseSucceed(() => undefined),
+        )
+
+        if (root !== undefined) return [root]
+
+        const children = yield* listProjectRepositoryDirs(directory).pipe(
+          Effect.provideService(Git.Service, git),
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, path),
+          Effect.orElseSucceed(() => undefined),
+        )
+
+        if (children === undefined || children.length === 0) return undefined
+
+        const paths = yield* Effect.forEach(
+          children,
+          (child) =>
+            git.mainCheckout(child.path).pipe(
+              Effect.flatMap(real),
+              Effect.catch(() => real(child.path)),
+            ),
+          { concurrency: 8 },
+        )
+
+        return [...new Set(paths)].sort()
+      })
+
+    const repositories = Effect.fn("Project.repositories")(function* (
+      directory: string | null,
+      recorded: ReadonlyArray<RecordedRepository> = [],
+    ) {
+      const paths = directory === null ? undefined : yield* livePaths(directory)
+
+      if (paths !== undefined) {
+        return yield* Effect.forEach(
+          paths,
+          (repoPath) =>
+            Effect.gen(function* () {
+              const url = yield* git.remoteUrl(repoPath, "project")
+              const identity = url === undefined ? undefined : yield* identityOf(url)
+
+              return { path: repoPath, identity: identity ?? null } satisfies RepositoryIdentityEntry
+            }),
+          { concurrency: 8 },
+        )
+      }
+
+      return yield* Effect.forEach(
+        recorded,
+        (entry) =>
+          Effect.gen(function* () {
+            const stored = entry.remote === null ? undefined : yield* identityOf(entry.remote)
+
+            if (stored !== undefined) return { path: entry.path, identity: stored } satisfies RepositoryIdentityEntry
+
+            const url = yield* git.remoteUrl(entry.path, "project")
+            const identity = url === undefined ? undefined : yield* identityOf(url)
+
+            return { path: entry.path, identity: identity ?? null } satisfies RepositoryIdentityEntry
+          }),
+        { concurrency: 8 },
+      )
+    })
 
     const info = Effect.fn("Project.info")((scope: ProjectScope) =>
       Effect.succeed({
@@ -69,12 +160,12 @@ export const layer = Layer.effect(
       return hits
     })
 
-    return Service.of({ info, search })
+    return Service.of({ info, search, repositories })
   }),
 )
 
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [PlatformNode.fileSystem, PlatformNode.layout, PlatformNode.path],
+  deps: [Git.node, RepositoryUrl.node, PlatformNode.fileSystem, PlatformNode.layout, PlatformNode.path],
 })

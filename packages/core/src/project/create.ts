@@ -154,7 +154,12 @@ const ownGitCheckout = (dir: string) =>
     return (yield* fs.realPath(top.value)) === (yield* fs.realPath(dir))
   })
 
-export const listProjectRepositories = Effect.fn("Project.listProjectRepositories")(function* (directory: string) {
+export interface ProjectRepositoryDir {
+  readonly name: string
+  readonly path: string
+}
+
+export const listProjectRepositoryDirs = Effect.fn("Project.listProjectRepositoryDirs")(function* (directory: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
 
@@ -170,7 +175,7 @@ export const listProjectRepositories = Effect.fn("Project.listProjectRepositorie
   const names = yield* goneIsUndefined(fs.readDirectory(directory))
 
   if (names === undefined) return undefined
-  const found: ProjectRepository[] = []
+  const found: ProjectRepositoryDir[] = []
 
   for (const name of names.slice().sort()) {
     if (!safeRepositoryDirectory(name)) continue
@@ -181,11 +186,25 @@ export const listProjectRepositories = Effect.fn("Project.listProjectRepositorie
       .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
 
     if (stat === undefined || stat.type !== "Directory" || !(yield* ownGitCheckout(child))) continue
-    const branch = yield* git.currentBranch(child).pipe(Effect.orElseSucceed(() => ""))
-    found.push({ name, path: child, branch })
+    found.push({ name, path: child })
   }
 
   return found.length > 0 ? found : undefined
+})
+
+export const listProjectRepositories = Effect.fn("Project.listProjectRepositories")(function* (directory: string) {
+  const dirs = yield* listProjectRepositoryDirs(directory)
+
+  if (dirs === undefined) return undefined
+  const git = yield* Git.Service
+
+  return yield* Effect.forEach(dirs, ({ name, path }) =>
+    Effect.map(git.currentBranch(path).pipe(Effect.orElseSucceed(() => "")), (branch): ProjectRepository => ({
+      name,
+      path,
+      branch,
+    })),
+  )
 })
 
 const isMainCheckout = (dir: string) => Git.Service.use((git) => git.isMainCheckout(dir))

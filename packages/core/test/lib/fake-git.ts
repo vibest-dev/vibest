@@ -6,7 +6,6 @@ import { Context, Effect, FileSystem, Layer, PlatformError, Stream } from "effec
 export interface RepositoryFacts {
   readonly branch?: string
   readonly origin?: string
-  readonly identityRemote?: string
   readonly uncommitted?: ReadonlyArray<string>
   readonly includes?: ReadonlyArray<string>
   readonly files?: Readonly<Record<string, string>>
@@ -116,17 +115,11 @@ export class FakeGit extends Context.Service<
         isMainCheckout: (dir) =>
           Effect.map(locate(dir), (found) => found !== undefined && found.path === found.repository.main),
         originUrl: (dir) => Effect.map(locate(dir), (found) => found?.repository.facts.origin),
-        remoteUrl: (dir) =>
+        remoteUrl: (dir, _order) =>
           Effect.map(locate(dir), (found) => {
             const origin = found?.repository.facts.origin
 
             return origin !== undefined && parseRemote(origin) !== undefined ? origin : undefined
-          }),
-        identityRemoteUrl: (dir) =>
-          Effect.map(locate(dir), (found) => {
-            const url = found?.repository.facts.identityRemote ?? found?.repository.facts.origin
-
-            return url !== undefined && parseRemote(url) !== undefined ? url : undefined
           }),
         currentBranch: (dir) => Effect.map(inRepository(["branch", "--show-current"], dir), branchOf),
         uncommitted: (dir) =>

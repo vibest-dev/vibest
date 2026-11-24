@@ -54,6 +54,28 @@ describe("the remote a repository is known by", () => {
     assert.deepStrictEqual(projectRemotes(""), [])
   })
 
+  it("handles URLs containing .url or .gh-resolved and ignores gh-resolved set to false or empty", () => {
+    const dotUrl = config([
+      "remote.origin.url https://github.com/org/my.url",
+      "remote.backup.url https://github.com/org/repo.gh-resolved.git",
+      "remote.my.fork.url https://github.com/fork/my.url.git",
+    ])
+
+    assert.deepStrictEqual(projectRemotes(dotUrl), ["origin", "backup", "my.fork"])
+    assert.deepStrictEqual(rankedRemotes(dotUrl), ["origin", "backup", "my.fork"])
+
+    const declined = config([
+      "remote.firstremote.url https://github.com/first/repo.git",
+      "remote.upstream.url https://github.com/org/repo.git",
+      "remote.upstream.gh-resolved false",
+      "remote.empty.url https://github.com/empty/repo.git",
+      "remote.empty.gh-resolved ",
+    ])
+
+    assert.deepStrictEqual(projectRemotes(declined), ["firstremote", "upstream", "empty"])
+    assert.deepStrictEqual(rankedRemotes(declined), ["upstream", "empty", "firstremote"])
+  })
+
   it.effect("the identity is the host in lower case and the whole path, for any host", () =>
     Effect.gen(function* () {
       const cases = [

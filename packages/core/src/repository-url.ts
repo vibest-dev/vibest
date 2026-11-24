@@ -32,53 +32,44 @@ export const parseRemote = (url: string): ParsedRemote | undefined => {
   return m === null ? undefined : parsed(m[1]!, m[2]!, true)
 }
 
-const REMOTE_KEY = /^remote\.(.+)\.(url|gh-resolved)(?: (.*))?$/
+const REMOTE_KEY = /^remote\.(\S+)\.(url|gh-resolved)(?: (.*))?$/
+
+const parseRemoteConfig = (config: string) => {
+  const urls = new Map<string, string>()
+  const marked = new Set<string>()
+
+  for (const line of config.split("\n")) {
+    const m = REMOTE_KEY.exec(line.trim())
+
+    if (m === null) continue
+    const [, name, key, value = ""] = m
+
+    if (key === "gh-resolved") {
+      const trimmed = value.trim()
+
+      if (trimmed !== "" && trimmed.toLowerCase() !== "false") marked.add(name!)
+    } else if (!urls.has(name!)) urls.set(name!, value)
+  }
+
+  return { names: [...urls.keys()], marked }
+}
 
 const remoteRank = (marked: ReadonlySet<string>, name: string) =>
   marked.has(name) ? 0 : name === "upstream" ? 1 : name === "origin" ? 2 : 3
 
 export const rankedRemotes = (config: string): ReadonlyArray<string> => {
-  const urls = new Map<string, string>()
-  const marked = new Set<string>()
+  const { names, marked } = parseRemoteConfig(config)
 
-  for (const line of config.split("\n")) {
-    const m = REMOTE_KEY.exec(line.trim())
-
-    if (m === null) continue
-    const [, name, key, value = ""] = m
-
-    if (key === "gh-resolved") marked.add(name!)
-    else if (!urls.has(name!)) urls.set(name!, value)
-  }
-
-  return [...urls.keys()].sort((a, b) => remoteRank(marked, a) - remoteRank(marked, b) || a.localeCompare(b))
+  return names.sort((a, b) => remoteRank(marked, a) - remoteRank(marked, b) || a.localeCompare(b))
 }
 
+const projectRemoteRank = (marked: ReadonlySet<string>, name: string) =>
+  name === "origin" ? 0 : marked.has(name) ? 1 : 2
+
 export const projectRemotes = (config: string): ReadonlyArray<string> => {
-  const urls = new Map<string, string>()
-  const marked = new Set<string>()
+  const { names, marked } = parseRemoteConfig(config)
 
-  for (const line of config.split("\n")) {
-    const m = REMOTE_KEY.exec(line.trim())
-
-    if (m === null) continue
-    const [, name, key, value = ""] = m
-
-    if (key === "gh-resolved") marked.add(name!)
-    else if (!urls.has(name!)) urls.set(name!, value)
-  }
-
-  const origin: string[] = []
-  const resolved: string[] = []
-  const rest: string[] = []
-
-  for (const name of urls.keys()) {
-    if (name === "origin") origin.push(name)
-    else if (marked.has(name)) resolved.push(name)
-    else rest.push(name)
-  }
-
-  return [...origin, ...resolved, ...rest]
+  return names.sort((a, b) => projectRemoteRank(marked, a) - projectRemoteRank(marked, b))
 }
 
 export interface Interface {

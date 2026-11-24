@@ -192,30 +192,32 @@ describe("git, the live layer: worktree add and remove", () => {
   )
 
   test(
-    "identityRemoteUrl picks origin over gh-resolved upstream, then gh-resolved, then first configured remote, skipping local remotes",
+    "remoteUrl with project order picks origin over gh-resolved upstream, then gh-resolved, then first configured remote, skipping local remotes and gh-resolved false",
     Effect.gen(function* () {
       const git = yield* Git.Service
 
       const fork = yield* makeRepository
-      assert.isUndefined(yield* git.identityRemoteUrl(fork))
+      assert.isUndefined(yield* git.remoteUrl(fork, "project"))
       yield* sh(fork, "remote", "add", "origin", "git@github.com:forker/repo.git")
       yield* sh(fork, "remote", "add", "upstream", "https://github.com/org/repo.git")
       yield* sh(fork, "config", "remote.upstream.gh-resolved", "base")
-      assert.strictEqual(yield* git.identityRemoteUrl(fork), "git@github.com:forker/repo.git")
+      assert.strictEqual(yield* git.remoteUrl(fork, "project"), "git@github.com:forker/repo.git")
       assert.strictEqual(yield* git.remoteUrl(fork), "https://github.com/org/repo.git")
 
       const noOrigin = yield* makeRepository
-      yield* sh(noOrigin, "remote", "add", "firstremote", "https://github.com/first/repo.git")
+      yield* sh(noOrigin, "remote", "add", "firstremote", "https://github.com/first/my.url")
       yield* sh(noOrigin, "remote", "add", "alpha", "https://github.com/alpha/repo.git")
-      assert.strictEqual(yield* git.identityRemoteUrl(noOrigin), "https://github.com/first/repo.git")
+      assert.strictEqual(yield* git.remoteUrl(noOrigin, "project"), "https://github.com/first/my.url")
       yield* sh(noOrigin, "remote", "add", "upstream", "https://github.com/org/repo.git")
+      yield* sh(noOrigin, "config", "remote.upstream.gh-resolved", "false")
+      assert.strictEqual(yield* git.remoteUrl(noOrigin, "project"), "https://github.com/first/my.url")
       yield* sh(noOrigin, "config", "remote.upstream.gh-resolved", "base")
-      assert.strictEqual(yield* git.identityRemoteUrl(noOrigin), "https://github.com/org/repo.git")
+      assert.strictEqual(yield* git.remoteUrl(noOrigin, "project"), "https://github.com/org/repo.git")
 
       const localOnly = yield* makeRepository
       yield* sh(localOnly, "remote", "add", "origin", "/tmp/bare.git")
       yield* sh(localOnly, "remote", "add", "backup", "file:///tmp/bare.git")
-      assert.isUndefined(yield* git.identityRemoteUrl(localOnly))
+      assert.isUndefined(yield* git.remoteUrl(localOnly, "project"))
     }),
   )
 })
