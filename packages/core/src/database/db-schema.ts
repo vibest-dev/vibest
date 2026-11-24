@@ -120,13 +120,12 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 26
+export const PROJECTION_VERSION = 27
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
-    id               TEXT PRIMARY KEY CHECK (length(id) = 36),
-    directory        TEXT UNIQUE,
-    entry_session_id TEXT
+    id        TEXT PRIMARY KEY CHECK (length(id) = 36),
+    directory TEXT UNIQUE
   ) STRICT`,
   `CREATE TABLE project_repository (
     project_id TEXT NOT NULL,

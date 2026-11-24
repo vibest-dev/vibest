@@ -1,7 +1,7 @@
 import type { ArchiveOutcome } from "@vibest/schema/archive"
 import { messageOf } from "@vibest/schema/error"
 import type { Sender } from "@vibest/schema/event"
-import type { AgentRefused, PluginsNotActive } from "@vibest/schema/plugin"
+import type { SessionRefused, PluginsNotActive } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
   type AmbiguousSession,
@@ -104,19 +104,13 @@ export interface Interface {
     | UnknownAgent
     | NoHarnessChosen
     | NoRuntime
-    | AgentRefused
+    | SessionRefused
     | PluginsNotActive
     | NoSuchSession
     | AmbiguousSession
     | LinkRefused
   >
   readonly send: (id: string, message: string, sender?: Sender, request?: string) => Effect.Effect<void, NoSuchSession>
-  readonly deliverTo: (
-    id: string,
-    message: string,
-    sender?: Sender,
-    request?: string,
-  ) => Effect.Effect<void, NoSuchSession>
   readonly admit: (
     sender: { readonly sessionId: string; readonly projectId: string },
     input: string,
@@ -170,7 +164,7 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const git = yield* Git.Service
   const { worktreeOf, republish } = yield* Placement.Service
-  const { send, deliverTo, admit, interrupt, userPrompt, typeTaken } = yield* Delivery.Service
+  const { send, admit, interrupt, userPrompt, typeTaken } = yield* Delivery.Service
   const reconcile = yield* Reconcile.Service
   const { spawn } = yield* Spawn.Service
   const { archive, stop } = yield* Archive.Service
@@ -279,7 +273,6 @@ export const make = Effect.gen(function* () {
   return Service.of({
     spawn,
     send,
-    deliverTo,
     admit,
     interrupt,
     peek,

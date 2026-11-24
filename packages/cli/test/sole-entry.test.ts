@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit, Fiber, Sink, Stdio, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import { soleEntry } from "../src/commands/handlers/default.ts"
+import { resolveRunning, RunningActions } from "../src/commands/handlers/default.ts"
 
 const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>) =>
   Stdio.layerTest({
@@ -14,71 +14,47 @@ const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>) =>
 
 const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 
-const recordingClient = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped") => {
-  const calls: Array<string> = []
-
-  const running = { harness: "claude", place: "herdr w1:p1", runtime: "herdr", target: { id: "w1:p1" } }
-
-  const client = {
-    "Project.StopEntry": () =>
-      Effect.sync(() => {
-        calls.push("StopEntry")
-
-        return stop === "unsupported" ? { result: stop, reason: "it runs on another machine" } : { result: stop }
-      }),
-  } as Parameters<typeof soleEntry>[0]
-
-  const start = Effect.sync(() => {
-    calls.push("start")
-
-    return "started"
-  })
-
-  return { calls, run: soleEntry(client, running, start) }
+const running = {
+  sessionId: "sess-1",
+  harness: "claude",
+  place: "herdr w1:p1",
+  runtime: "herdr",
+  target: { id: "w1:p1" },
 }
 
-describe("soleEntry while the entry session runs in another terminal", () => {
+describe("resolveRunning while the root session runs in another terminal", () => {
   for (const [name, terminal, stdin] of [
-    ["N", true, typed("n\n")],
-    ["empty", true, typed("\n")],
+    ["Cancel (3)", true, typed("3\n")],
     ["EOF", true, Stream.empty],
-    ["not a terminal", false, typed("y\n")],
+    ["not a terminal", false, typed("1\n")],
   ] as const)
-    it.effect(`${name}: fails naming where it runs, starts nothing, stops nothing`, () =>
+    it.effect(`${name}: fails naming where it runs`, () =>
       Effect.gen(function* () {
-        const f = recordingClient()
-        const exit = yield* Effect.exit(f.run)
+        const exit = yield* Effect.exit(resolveRunning(running))
         assert.isTrue(Exit.isFailure(exit))
-        assert.include(String(exit), "the entry session (claude) runs in herdr w1:p1")
-        assert.deepStrictEqual(f.calls, [])
+        assert.include(String(exit), "session sess-1 (claude) runs in herdr w1:p1")
       }).pipe(Effect.provide(stdio(terminal, stdin))),
     )
 
-  it.effect("no answer within two minutes: fails, starts nothing, stops nothing", () =>
+  it.effect("choice 1 returns Move with the running sessionId", () =>
     Effect.gen(function* () {
-      const f = recordingClient()
-      const fiber = yield* Effect.forkChild(Effect.exit(f.run))
-      yield* TestClock.adjust("2 minutes")
-      assert.isTrue(Exit.isFailure(yield* Fiber.join(fiber)))
-      assert.deepStrictEqual(f.calls, [])
-    }).pipe(Effect.provide(stdio(true, Stream.never))),
+      const action = yield* resolveRunning(running)
+      assert.deepStrictEqual(action, RunningActions.Move({ sessionId: "sess-1" }))
+    }).pipe(Effect.provide(stdio(true, typed("1\n")))),
   )
 
-  it.effect(
-    "y without a finished stop (running, moved, unsupported) fails and starts nothing; unsupported says why",
-    () =>
-      Effect.gen(function* () {
-        for (const result of ["running", "moved", "unsupported"] as const) {
-          const f = recordingClient(result)
-          const exit = yield* Effect.exit(f.run)
-          assert.isTrue(Exit.isFailure(exit), result)
-          assert.deepStrictEqual(f.calls, ["StopEntry"], result)
+  it.effect("choice 2 returns New for a parallel conversation", () =>
+    Effect.gen(function* () {
+      const action = yield* resolveRunning(running)
+      assert.deepStrictEqual(action, RunningActions.New())
+    }).pipe(Effect.provide(stdio(true, typed("2\n")))),
+  )
 
-          if (result === "unsupported") {
-            assert.include(String(exit), "cannot be moved from here: it runs on another machine. Exit it there first")
-            assert.notInclude(String(exit), "did not exit")
-          }
-        }
-      }).pipe(Effect.provide(stdio(true, typed("y\n")))),
+  it.effect("no answer within two minutes: fails", () =>
+    Effect.gen(function* () {
+      const fiber = yield* Effect.forkChild(Effect.exit(resolveRunning(running)))
+      yield* TestClock.adjust("2 minutes")
+      assert.isTrue(Exit.isFailure(yield* Fiber.join(fiber)))
+    }).pipe(Effect.provide(stdio(true, Stream.never))),
   )
 })

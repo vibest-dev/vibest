@@ -42,7 +42,7 @@ describe("vibest.report-reminder", () => {
 
         const ctx: Context = {
           options: {},
-          agent: { hook: () => Effect.succeed(registration), transform: () => Effect.succeed(registration) },
+          agent: { transform: () => Effect.succeed(registration) },
           machine: { hook: () => Effect.succeed(registration) },
           runtime: { transform: () => Effect.succeed(registration) },
           harness: { transform: () => Effect.succeed(registration) },
@@ -51,12 +51,16 @@ describe("vibest.report-reminder", () => {
             subscribe: () => Stream.fromIterable([succeeded(4), succeeded(6), failed(8)]) as never,
           },
           session: {
+            hook: () => Effect.succeed(registration),
             list: () => Effect.succeed([]),
             get: () =>
               Effect.succeed({
                 id: S,
+                projectId: "p1",
+                agent: "general",
                 title: "sub",
                 parentId: E,
+                to: [E],
                 status: "idle",
                 lastActive: 0,
                 waiting: false,

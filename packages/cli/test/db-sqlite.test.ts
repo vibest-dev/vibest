@@ -169,7 +169,7 @@ describe("a vibestd restart", () => {
         const db = yield* Db.Service
         const place = { runtime: "fake", target: { id: "a" } }
 
-        const { sessionId } = yield* db.session.startEntry(yield* projectOf("a"), "claude", false, place, {
+        const { sessionId } = yield* db.session.startRoot(yield* projectOf("a"), "claude", false, place, {
           agent: "coordinator",
         })
 

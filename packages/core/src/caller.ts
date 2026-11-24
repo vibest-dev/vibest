@@ -12,16 +12,16 @@ export interface CallerHit {
 
 const shown = (id: string, name: string | undefined) => name ?? id
 
-export type EntryPlace =
+export type AttachPlace =
   | { readonly in: "terminal"; readonly runtime: string; readonly terminal: TerminalTarget }
   | { readonly in: "launch"; readonly runtime: string }
   | { readonly in: "refused"; readonly message: string }
 
-export const entryPlace = (o: {
+export const attachPlace = (o: {
   readonly runtime: string | undefined
   readonly hits: ReadonlyArray<CallerHit>
   readonly loaded?: ReadonlyArray<string>
-}): EntryPlace => {
+}): AttachPlace => {
   const named = (id: string) => o.hits.find((hit) => hit.id === id)
 
   if (o.runtime !== undefined) {

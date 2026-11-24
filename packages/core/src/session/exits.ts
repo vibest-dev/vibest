@@ -94,8 +94,9 @@ export const make = Effect.gen(function* () {
   ) {
     const cutOff = (session.process?.placedAt ?? null) === null
     const announce = !cutOff && (executionStateOf(session) === "open" || exitedAt(session) === null)
+    const root = (yield* db.session.creatorOf(session.id)) === undefined
 
-    if (announce && session.entry) {
+    if (announce && root) {
       if (execution !== undefined && (yield* db.session.executionAccepted(session.id)))
         yield* db.session.closeExecution(session.id, execution, "failed", {
           failure: { message: "the harness exited" },
@@ -105,13 +106,13 @@ export const make = Effect.gen(function* () {
 
     if (
       exitedAt(session) === null &&
-      (yield* db.session.endExited(session.id, cutOff ? "launch_failed" : "exited", session.process?.id))
+      (yield* db.session.endProcess(session.id, cutOff ? "launch_failed" : "exited", session.process?.id))
     )
       yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
 
     if (cutOff) yield* undoCutOffStart(h, session)
 
-    if (!announce) yield* inbox.dropQueue(session, "it exited; send it again to resume it")
+    if (!announce && !root) yield* inbox.dropQueue(session, "it exited; send it again to resume it")
   })
 
   const settle = Effect.fn("Exits.settle")(function* (h: Runtime, id: string, process: number | undefined) {

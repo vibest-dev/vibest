@@ -148,7 +148,7 @@ list` names the plugin that added each agent; a plugin loaded later replaces an 
 it and vibestd copies it to `<project folder>/sessions/<session id>/files/<file name>`; two files of the same name are
 both kept (the second as `<name>-2.<extension>`). The file content is not put into the task: the task ends with one line,
 `Attached files: <absolute path>, …`, naming the copies, and the agent reads them itself (every harness can read the
-project folder). A plugin sees that line in `agent.start.before` `prompt` and the copies' paths in `files`. Archiving the
+project folder). A plugin sees that line in `session.start.before` `prompt` and the copies' paths in `files`. Archiving the
 session removes `<project folder>/sessions/<session id>/`. A file over 10 MiB, one that cannot be read, or one that is
 not a regular file refuses the run. With `--machine`, the files go with the run and the vibestd there copies them into its own project folder, so
 the line names paths on that machine; a vibestd there that cannot take files refuses the run and says to run `vibest

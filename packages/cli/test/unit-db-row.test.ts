@@ -10,7 +10,7 @@ it.effect("a session row's open execution is the newest one and its last executi
     const db = yield* Db.Service
     const project = yield* projectOf("r")
     const child = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-    const parent = (yield* db.session.startEntry(project, "pi", false, place, { agent: "coordinator" })).sessionId
+    const parent = (yield* db.session.startRoot(project, "pi", false, place, { agent: "coordinator" })).sessionId
     yield* db.session.insertSession(session(child, { terminal: null }), project, {
       parentSessionId: parent,
     })

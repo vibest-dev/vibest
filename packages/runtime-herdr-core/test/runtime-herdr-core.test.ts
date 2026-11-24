@@ -10,7 +10,7 @@ import { Hc, SocketConnector } from "effect-herdr-core-sdk"
 import * as HcBun from "effect-herdr-core-sdk/bun"
 
 import { commandOf, note } from "../../../tools/reap.ts"
-import { KIND, LABEL, make, PRESENT_ENTRY_SESSION, PRESENT_PROJECT_ID } from "../src/terminal-runtime.ts"
+import { KIND, LABEL, make, PRESENT_SESSION, PRESENT_PROJECT_ID } from "../src/terminal-runtime.ts"
 
 const hcOnPath = childProcess.spawnSync("hc", ["--version"], { stdio: "ignore" }).status === 0
 
@@ -267,7 +267,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             terminal: mainAddress,
             labels: { "herdr.space": "stale-space", "herdr.tab": "stale-tab" },
           })
-          yield* runtime.present!(main, { [PRESENT_ENTRY_SESSION]: "session-1", [PRESENT_PROJECT_ID]: "project-1" })
+          yield* runtime.present!(main, { [PRESENT_SESSION]: "session-1", [PRESENT_PROJECT_ID]: "project-1" })
 
           const labels = (yield* hc.call("terminal.get", { terminal: mainAddress })).labels
 

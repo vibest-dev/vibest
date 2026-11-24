@@ -15,7 +15,7 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
 import { Archive } from "@vibest/core/session/archive"
 import { Delivery } from "@vibest/core/session/delivery"
-import { EntrySession } from "@vibest/core/session/entry"
+import { SessionLaunch } from "@vibest/core/session/entry"
 import { Executions } from "@vibest/core/session/executions"
 import { Exits } from "@vibest/core/session/exits"
 import { SessionLive } from "@vibest/core/session/live"
@@ -63,7 +63,7 @@ export const services = LayerNode.group([
   Session.node,
   Integration.node,
   Inbound.node,
-  EntrySession.node,
+  SessionLaunch.node,
   Load.node,
   Machines.node,
   RemoteWatch.node,

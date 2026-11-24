@@ -13,7 +13,7 @@ question 3 (§12, §17).
    vibest release and plugins update with it. Core checks whether an optional
    member exists, never which runtime it is. One error type with a `code`.
 2. **Runtimes are plugins, several at once.** A runtime plugin adds a `RuntimeDefinition` with an `id`
-   (`context.runtime.transform((editor) => editor.add(definition))`, beside `context.agent.hook`); another plugin may
+   (`context.runtime.transform((editor) => editor.add(definition))`, beside `context.session.hook`); another plugin may
    `update` or `remove` it the same way, and removing the plugin restores what it changed. It is a provider core calls, not a hook listener. herdr, rex and tern ship as builtin
    runtime plugins; a new product is a new plugin, never a core change.
 3. **Machines are vibest's, terminals are the runtime's.** Every machine runs its own vibestd, and vibestds reach
@@ -124,7 +124,7 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   worktree and splits a pane off it, so the default choice must not replace the shared session's. An explicit `--runtime` is kept,
   and a shared session on another runtime or machine is still refused. The parent lookup includes the entry session, because
   `getSession` leaves the live entry row out. If the runtime that was chosen is not online, the start fails with the
-  runtime's reason. No other fallback. A user plugin on `agent.start.before` may still return a `runtime`. A runtime
+  runtime's reason. No other fallback. A user plugin on `session.start.before` may still return a `runtime`. A runtime
   already set stands.
 - vibest.json's `runtime` key is not a choice. The first time vibestd reads a file that still has it, it warns once
   and ignores the key, pointing at `--runtime` and `defaultRuntime`.
@@ -267,12 +267,12 @@ machine, and vibest never installs, prepares or reaches another machine through 
   that of A's entry session. The caller's environment is not sent; it names a terminal on A. A stores nothing for the
   session.
 - B starts the agent as a local start in its own runtime of that kind (`NoRuntime` when it has none), with its own
-  `agent.start.before` hooks. B finds its checkout of the project by repository identity, needs the `HEAD` commit
+  `session.start.before` hooks. B finds its checkout of the project by repository identity, needs the `HEAD` commit
   there ("push first"), and makes the worktree as for a local agent; work comes back by the agent pushing its branch.
   herdr opens an agent another machine started in its default session `default` (`open`'s `remote`).
 - B reports the agent's results to A's entry session through B's outbox; `vibest result|send|interrupt|archive|peek
   <name>/<id>` are forwarded to B. A call to a machine that is not connected fails at once; nothing is queued.
-- `agent.start.before` on A lists only this machine in `machines[]`, with its runtimes and their `status()`; a hook
+- `session.start.before` on A lists only this machine in `machines[]`, with its runtimes and their `status()`; a hook
   that returns another `machine` does not move the start there. Core checks after the chain that the chosen runtime is
   online here, else refuses with the runtime's reason.
 

@@ -6,7 +6,7 @@ import { LIVE_PROCESS_COUNT } from "@vibest/core/database/session"
 import { Drain } from "@vibest/core/drain"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
-import { EntrySession } from "@vibest/core/session/entry"
+import { SessionLaunch } from "@vibest/core/session/entry"
 import { Starts } from "@vibest/core/session/starts"
 import { Deferred, Effect, Fiber, PubSub, Ref } from "effect"
 import { SqlClient } from "effect/sql"
@@ -61,18 +61,19 @@ const exit = (id: string) =>
 
 const claimEntry = (root: string, terminal: string, fresh = false) =>
   Effect.gen(function* () {
-    const entry = yield* EntrySession.Service
+    const entry = yield* SessionLaunch.Service
 
     return yield* entry.claim({
       projectId: yield* projectOf(root),
       directory: root,
+      sessionId: undefined,
       harness: "pulling-pi",
       fresh,
+      move: false,
       terminal: { id: terminal },
       runtime: "herdr",
       provider: undefined,
       model: undefined,
-      routing: undefined,
       pid: 50101,
       agent: { id: "coordinator", named: false },
     })
@@ -252,15 +253,15 @@ describe("a cap on live harness processes", () => {
     "a new entry session that replaces a stopped one takes the place of the one it replaces",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const entries = yield* EntrySession.Service
+      const entries = yield* SessionLaunch.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
       const entry = (yield* claimEntry(repo, "pane:a")).sessionId
       yield* herdr.seedAgent("pane:a")
       yield* limitTo([{ max: 1 }])
-      const running = (yield* entries.running(projectId, { id: "pane:b" }))!
-      assert.strictEqual((yield* entries.stop(projectId, running.runtime, running.target)).result, "stopped")
+      assert.isNotNull(yield* entries.running(projectId, { id: "pane:b" }))
+      yield* sessions.stop(entry, { type: "user" })
       yield* herdr.updateAgent("pane:a", (agent) => ({ ...agent, alive: false }))
       yield* sessions.check(entry)
 

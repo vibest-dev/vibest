@@ -7,6 +7,7 @@ import { awaitEvent, Bus } from "../bus.ts"
 import {
   type SessionRow,
   harnessIdOf,
+  isRoot,
   runtimeOf,
   terminalOf,
   exitedAt,
@@ -55,7 +56,7 @@ export const make = Effect.gen(function* () {
   const { prompt, interruptAgent } = yield* Executions.Service
   const exits = yield* Exits.Service
   const { notice, resume, taskInput } = yield* Placement.Service
-  const { send, deliverTo, admit } = yield* Sends.Service
+  const { send, admit } = yield* Sends.Service
   const reactor = yield* Reactor.make
   const starts = yield* Starts.Service
   const { locked } = locks
@@ -217,8 +218,10 @@ export const make = Effect.gen(function* () {
 
     if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
 
+    const localRoot = isRoot(session) && !(yield* db.session.startedByRemote(id))
+
     if (
-      (session.entry && inbox.pulls(harnessIdOf(session))) ||
+      (localRoot && exitedAt(session) === null && inbox.pulls(harnessIdOf(session))) ||
       executionStateOf(session) === "open" ||
       session.status === "blocked" ||
       ((session.process?.placedAt ?? null) === null && exitedAt(session) === null) ||
@@ -234,6 +237,8 @@ export const make = Effect.gen(function* () {
 
     if (state === undefined && (terminal === undefined || !(yield* alive(h, terminal)))) {
       if (exitedAt(session) === null) return yield* exits.settle(h, id, session.process?.id)
+
+      if (localRoot) return
 
       if ((yield* db.inbox.pendingInbox(id)).length === 0) return
 
@@ -421,11 +426,16 @@ export const make = Effect.gen(function* () {
   for (const id of yield* db.inbox.pendingRecipients()) {
     const session = yield* db.session.getSession(id)
 
-    if (session !== undefined && !archived(session) && exitedAt(session) !== null)
+    if (
+      session !== undefined &&
+      !archived(session) &&
+      exitedAt(session) !== null &&
+      !(isRoot(session) && !(yield* db.session.startedByRemote(id)))
+    )
       yield* wakes.wake(id, { rows: new Set(), ended: true })
   }
 
-  return { deliverQueued, send, deliverTo, admit, interrupt, userPrompt, typeTaken }
+  return { deliverQueued, send, admit, interrupt, userPrompt, typeTaken }
 })
 
 export type Interface = Effect.Success<typeof make>

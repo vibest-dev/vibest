@@ -88,7 +88,7 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
     yield* herdr.seedAgent("wC:p1")
     const raw = yield* client
 
-    const { sessionId, projectId } = yield* authed(raw, cliHeaders(repo))["Project.EntrySession"]({
+    const { sessionId, projectId } = yield* authed(raw, cliHeaders(repo))["Session.Claim"]({
       agent: "coordinator",
       harness,
       fresh: true,
@@ -130,7 +130,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       assert.strictEqual(
         tagOf(
           yield* Effect.exit(
-            user["Project.EntrySession"]({
+            user["Session.Claim"]({
               agent: "coordinator",
               harness: "claude",
               fresh: true,

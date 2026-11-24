@@ -15,19 +15,19 @@ const pkg = path.join(import.meta.dirname, "..")
 const binary = path.join(pkg, "dist", "vibest")
 
 const plugins = {
-  "shared.ts": `import { AgentRefused, Plugin } from "@vibest/plugin/effect"
+  "shared.ts": `import { SessionRefused, Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 import * as S from "effect/Schema"
 export default Plugin.define({
   id: "shared",
-  effect: (ctx) => S.is(S.String)("x") && new AgentRefused({ plugin: "shared", reason: "r" })._tag === "AgentRefused"
-    ? ctx.agent.hook("start.before", () => Effect.void)
+  effect: (ctx) => S.is(S.String)("x") && new SessionRefused({ plugin: "shared", reason: "r" })._tag === "SessionRefused"
+    ? ctx.session.hook("start.before", () => Effect.void)
     : Effect.die("effect/Schema or @vibest/plugin is not usable"),
 })
 `,
   "bundled/index.ts": `import { Plugin } from "@vibest/plugin/effect"
 import * as E from "effect"
-export default Plugin.define({ id: "bundled", effect: (ctx) => ("ownCopy" in E ? E.Effect.die("own copy") : ctx.agent.hook("start.before", () => E.Effect.void)) })
+export default Plugin.define({ id: "bundled", effect: (ctx) => ("ownCopy" in E ? E.Effect.die("own copy") : ctx.session.hook("start.before", () => E.Effect.void)) })
 `,
   "bundled/node_modules/effect/package.json": `{ "name": "effect", "version": "0.0.0", "type": "module", "main": "index.js" }`,
   "bundled/node_modules/effect/index.js": "export const ownCopy = true\n",

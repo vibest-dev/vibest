@@ -24,15 +24,12 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
     const sql = yield* SqlClient.SqlClient
     const { publish, transaction: tx } = yield* Bus.Service
     const now = Clock.currentTimeMillis
-    const { reads, openExecution, currentProcess, placed, findSession, nearestAlive, labelOf } = session
+    const { reads, openExecution, findSession, nearestAlive } = session
 
     const inbox = reads.inboxWhere
 
     const inboxIn = (recipient: string, ids: ReadonlyArray<number>) =>
       inbox(sql`m.recipient_session_id = ${recipient} AND ${sql.in("m.id", ids)}`)
-
-    const keysIn = (keys: ReadonlyArray<InboxKey>) =>
-      sql.or(keys.map((k) => sql`(recipient_session_id = ${k.session} AND id = ${k.id})`))
 
     const notDelegation = sql`NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)`
 
@@ -131,20 +128,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       })
 
     const liveRecipient = (id: string) =>
-      Effect.gen(function* () {
-        const [route] = yield* sql<{
-          project: string
-          entry: string | null
-        }>`SELECT s.project_id AS project, p.entry_session_id AS entry
-          FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${id}`
-
-        if (route === undefined) return false
-
-        if (route.entry === id) return placed(route.project, yield* currentProcess(id))
-        const found = yield* findSession(id)
-
-        return found !== undefined && !archived(found)
-      })
+      findSession(id).pipe(Effect.map((found) => found !== undefined && !archived(found)))
 
     const recorded = (sender: Sender) =>
       Effect.gen(function* () {
@@ -212,12 +196,6 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           return undefined
         }
 
-        const [route] = yield* sql<{ project: string; entry: string | null }>`SELECT
-            s.project_id AS project, p.entry_session_id AS entry
-          FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${heir.local}`
-
-        const present = route?.entry !== heir.local || placed(route.project, yield* currentProcess(heir.local))
-
         const id = yield* queueInbox({
           recipient: heir.local,
           sender: { type: "vibest" },
@@ -225,11 +203,6 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           content: noticeEnvelope(row.message),
           at,
         })
-
-        if (!present)
-          yield* moveInbox(sql`recipient_session_id = ${heir.local} AND id = ${id}`, "dropped", {
-            reason: "the entry session is not running",
-          })
 
         return (yield* inboxIn(heir.local, [id]))[0]
       })
@@ -240,30 +213,6 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
         if (yield* noticeTo(sender, content)) return
         yield* insertInboxRow({ sessionId: sender, message: content })
-      })
-
-    const tellSendersOf = (keys: ReadonlyArray<InboxKey>, reason: string) =>
-      Effect.gen(function* () {
-        if (keys.length === 0) return
-
-        const sends = yield* sql<{
-          sender: string
-          recipient: string
-          content: string
-        }>`SELECT sender_session_id AS sender, recipient_session_id AS recipient, content FROM inbox
-          WHERE (${keysIn(keys)}) AND sender_type = 'agent' AND sender_session_id IS NOT NULL AND sender_machine IS NULL
-            AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = inbox.recipient_session_id AND s.message_id = inbox.id)
-          ORDER BY recipient_session_id, id`
-
-        const groups = Map.groupBy(sends, (s) => `${s.sender}\n${s.recipient}`)
-
-        for (const group of groups.values()) {
-          const { sender, recipient } = group[0]!
-          yield* tellSender(
-            sender,
-            `A message to ${yield* labelOf(recipient)} was not delivered: ${reason}\n\n${group.map((s) => s.content).join("\n\n")}`,
-          )
-        }
       })
 
     const confirm = (sessionId: string, execution: number) =>
@@ -302,15 +251,6 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
         { reason },
       )
 
-    const dropWaiting = (entry: string) =>
-      Effect.gen(function* () {
-        const dropped = yield* moveInbox(sql`status = 'pending' AND recipient_session_id = ${entry}`, "dropped", {
-          reason: "the entry session is not running",
-        })
-
-        yield* tellSendersOf(dropped, "the entry session is not running")
-      })
-
     const waitingOn = (id: string) =>
       sql<{ id: number }>`SELECT id FROM inbox
         WHERE (recipient_session_id = ${id} OR sender_session_id = ${id} OR about_session_id = ${id})
@@ -333,7 +273,6 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       liveRecipient,
       tellSender,
       insertInboxRow,
-      dropWaiting,
       waitingOn,
     }
   })

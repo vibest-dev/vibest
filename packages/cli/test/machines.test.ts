@@ -87,7 +87,7 @@ describe("the remote caller", () => {
 
       const refused: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
         client.Spawn({ agent: "general", prompt: "x", callerEnv: {} }),
-        client.Launch({ agent: "coordinator", argv: [], focus: false, callerEnv: {} }),
+        client["Session.Claim"]({ agent: "coordinator", fresh: false, terminal: { id: "t1" } }),
         client["Daemon.Stop"]({ instance: "x" }),
       ]
 

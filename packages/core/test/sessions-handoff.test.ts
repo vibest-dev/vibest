@@ -157,7 +157,7 @@ test(
     const taken = yield* inbox.take(entryId, undefined)
     assert.deepStrictEqual(yield* inboxStatus(entryId, "hello"), [{ status: "delivering" }])
     yield* integration.prompt(
-      { id: entryId, entry: true, harness: "pulling-pi" },
+      { id: entryId, harness: "pulling-pi" },
       JSON.stringify({ type: "accepted", execution: taken!.execution, ids: taken!.ids }),
     )
     assert.deepStrictEqual(yield* inboxStatus(entryId, "hello"), [{ status: "delivered" }])
@@ -180,7 +180,7 @@ test(
     assert.deepStrictEqual(yield* inboxStatus(entryId, "one"), [{ status: "delivering" }])
     assert.deepStrictEqual(yield* inboxStatus(entryId, "two"), [{ status: "delivering" }])
     yield* integration.prompt(
-      { id: entryId, entry: true, harness: "pulling-pi" },
+      { id: entryId, harness: "pulling-pi" },
       JSON.stringify({ type: "accepted", execution: taken!.execution, ids: taken!.ids }),
     )
     assert.deepStrictEqual(yield* inboxStatus(entryId, "one"), [{ status: "delivered" }])
@@ -199,7 +199,7 @@ test(
     yield* runtime.seedAgent("test/coord")
     yield* runtime.updateAgent("test/coord", (agent) => ({ ...agent, status: "working" }))
 
-    const started = yield* db.session.startEntry(yield* projectOf(repo), "pi", false, here, {
+    const started = yield* db.session.startRoot(yield* projectOf(repo), "pi", false, here, {
       agent: "general",
       firstInput: "bootstrap",
     })

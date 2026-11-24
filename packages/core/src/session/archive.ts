@@ -192,9 +192,6 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const session = yield* getRow(id)
 
-        if (session.entry)
-          return yield* new NoSuchSession({ id, message: `${id} is an entry session; stop it in its terminal` })
-
         if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
 
         if ((session.process === null || session.process.endedAt !== null) && (yield* starts.isWaiting(id)))

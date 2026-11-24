@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", {
+export class SessionRefused extends Schema.TaggedError<SessionRefused>()("SessionRefused", {
   plugin: Schema.String,
   reason: Schema.String,
 }) {

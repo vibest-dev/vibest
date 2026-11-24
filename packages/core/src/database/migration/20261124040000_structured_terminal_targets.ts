@@ -66,7 +66,7 @@ type EventRow = {
 }
 
 export const migration = {
-  id: "20261124030000_structured_terminal_targets",
+  id: "20261124040000_structured_terminal_targets",
   up: (tx: SqlClient.SqlClient) =>
     Effect.gen(function* () {
       const runtimeByProcess = new Map<string, string>()

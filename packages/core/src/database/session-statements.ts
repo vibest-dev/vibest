@@ -104,7 +104,7 @@ export const statements = Effect.gen(function* () {
   const reads = ledgerReads(sql)
   const moving = new Set<string>()
 
-  const remember = (row: Pick<SessionRow, "id" | "status" | "entry" | "endedAt">) =>
+  const remember = (row: Pick<SessionRow, "id" | "status" | "endedAt">) =>
     archived(row) ? sessionLive.ended(row.id) : sessionLive.setStatus(row.id, row.status)
 
   const running = sql`p_ended IS NULL`
@@ -139,18 +139,11 @@ export const statements = Effect.gen(function* () {
       Effect.map((rows) => (rows[0] === undefined ? undefined : currentOf(rows[0]))),
     )
 
-  const placed = (projectIdValue: string, current: Current | undefined) =>
-    current !== undefined && current.ended === null && current.terminal !== null && !moving.has(projectIdValue)
-
-  const findEntrySessions = (project?: string) =>
-    selectSessions(project === undefined ? [] : [sql`s.project_id = ${project}`], sql`entry = 1`).pipe(
-      Effect.map((rows) =>
-        rows.map((row) =>
-          moving.has(row.projectId) && row.process !== null
-            ? { ...row, process: { ...row.process, terminal: null } }
-            : row,
-        ),
-      ),
+  const latestRoot = (project: string) =>
+    sql<{ id: string }>`SELECT id FROM session
+      WHERE project_id = ${project} AND parent_session_id IS NULL AND origin_remote IS NULL AND ended_at IS NULL
+      ORDER BY coalesce(active_at, created_at) DESC, rowid DESC LIMIT 1`.pipe(
+      Effect.flatMap((rows) => (rows[0] === undefined ? Effect.succeed(undefined) : findSession(rows[0].id))),
     )
 
   const openExecution = (sessionId: string) =>
@@ -235,8 +228,10 @@ export const statements = Effect.gen(function* () {
       Effect.map((rows) => rows.length > 0),
     )
 
-  const isEntry = (id: string) =>
-    sql`SELECT 1 FROM project WHERE entry_session_id = ${id}`.pipe(Effect.map((rows) => rows.length > 0))
+  const isRoot = (id: string) =>
+    sql`SELECT 1 FROM session WHERE id = ${id} AND parent_session_id IS NULL AND origin_remote IS NULL`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
 
   const fromOldProcess = (id: string, process: number | undefined) =>
     Effect.map(currentProcessId(id), (current) => process !== undefined && process !== current)
@@ -555,15 +550,14 @@ export const statements = Effect.gen(function* () {
       ),
     )
 
-  const entrySessionsAt = (runtime: string, target: TerminalTarget, except?: string) =>
+  const liveSessionsAt = (runtime: string, target: TerminalTarget, except?: string) =>
     Effect.gen(function* () {
-      const rows = yield* sql<{ id: string; project: string }>`SELECT s.id, s.project_id AS project FROM session s
-        JOIN project q ON q.entry_session_id = s.id
+      const rows = yield* sql<{ id: string }>`SELECT s.id FROM session s
         JOIN process p ON p.session_id = s.id AND p.id = s.process_id
         WHERE p.runtime = ${runtime} AND p.terminal = ${canonicalTarget(target)} AND p.ended_at IS NULL
-          ${except === undefined ? sql`` : sql`AND s.project_id != ${except}`}`
+          ${except === undefined ? sql`` : sql`AND s.id != ${except}`}`
 
-      return rows.filter((r) => !moving.has(r.project))
+      return rows.filter((r) => !moving.has(r.id))
     })
 
   const sessionPrefixTaken = (short: string) =>
@@ -628,7 +622,7 @@ export const statements = Effect.gen(function* () {
           AND p.harness_session_id = ${harnessSessionId}
       )
       OR (
-        EXISTS (SELECT 1 FROM project WHERE entry_session_id = ${sessionId})
+        EXISTS (SELECT 1 FROM session WHERE id = ${sessionId} AND parent_session_id IS NULL AND origin_remote IS NULL)
         AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND harness_session_id = ${harnessSessionId})
       )
     ) AS ok`.pipe(
@@ -659,8 +653,7 @@ export const statements = Effect.gen(function* () {
     findSession,
     currentProcess,
     currentProcessId,
-    placed,
-    findEntrySessions,
+    latestRoot,
     openExecution,
     workingExecutions,
     allocateExecution,
@@ -671,7 +664,7 @@ export const statements = Effect.gen(function* () {
     recordObservedEnd,
     accept,
     observable,
-    isEntry,
+    isRoot,
     fromOldProcess,
     endProcess,
     placeProcess,
@@ -682,7 +675,7 @@ export const statements = Effect.gen(function* () {
     archive,
     noteConversation,
     setStatus,
-    entrySessionsAt,
+    liveSessionsAt,
     processesAt,
     lastSessionAt,
     lastProjectTerminal,

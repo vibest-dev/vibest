@@ -135,7 +135,7 @@ import { Plugin } from "@vibest/plugin"
 export default Plugin.define({
   id: "promised",
   setup: async (ctx) => {
-    await ctx.agent.hook("start.before", async (e) => {
+    await ctx.session.hook("start.before", async (e) => {
       if (e.prompt.includes("done-promised")) e.provider = "second"
     })
     void (async () => {
@@ -151,7 +151,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G5",
     title:
-      "a routing plugin's agent.start.before changes the start: the run starts Pi, ls names the plugin as the decider of the field it changed, and its answer arrives",
+      "a routing plugin's session.start.before changes the start: the run starts Pi, ls names the plugin as the decider of the field it changed, and its answer arrives",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "route")
@@ -162,7 +162,7 @@ const checks: ReadonlyArray<Check> = [
         await writePlugin(
           w,
           "router",
-          `ctx.agent.hook("start.before", (e) => Effect.sync(() => { if (e.prompt.includes("done-routed")) e.provider = "second" }))`,
+          `ctx.session.hook("start.before", (e) => Effect.sync(() => { if (e.prompt.includes("done-routed")) e.provider = "second" }))`,
         )
         const id = await runId(w, ["--", ask("routed")])
         const e = await entry(w, id)
@@ -332,7 +332,7 @@ const checks: ReadonlyArray<Check> = [
         const router = await writePlugin(
           w,
           "router",
-          `ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.harness = "pi" }))`,
+          `ctx.session.hook("start.before", (e) => Effect.sync(() => { e.harness = "pi" }))`,
         )
 
         const pi = await startedIn("dflt-pi", { PI_CODING_AGENT_DIR: dir })

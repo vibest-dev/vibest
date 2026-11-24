@@ -186,7 +186,7 @@ const make = Effect.gen(function* () {
   const inbound = yield* Inbound.Service
   const remote = yield* Remote.Service
   const runtimes = yield* Runtimes.Service
-  const { cliOnly, findAt } = checks
+  const { cliOnly, userOnly, findAt } = checks
 
   const listScope = (all: boolean | undefined) =>
     Effect.gen(function* () {
@@ -196,7 +196,7 @@ const make = Effect.gen(function* () {
 
       if (Predicate.isTagged(c, "Session")) return ListScope.Project({ id: c.projectId })
 
-      if (all === true) return ListScope.All()
+      if (Predicate.isTagged(c, "Ui") || all === true) return ListScope.All()
 
       return yield* findAt(c.repositoryRoot).pipe(
         Effect.map((row): ListScope => (row === undefined ? ListScope.Nothing() : ListScope.Project({ id: row.id }))),
@@ -290,7 +290,7 @@ const make = Effect.gen(function* () {
         return yield* machines.reading(machine)
       }),
 
-    "Machine.List": () => cliOnly("Machine.List").pipe(Effect.andThen(machines.listing)),
+    "Machine.List": () => userOnly("Machine.List").pipe(Effect.andThen(machines.listing)),
 
     "Machine.Remove": ({ name }: PayloadOf<"Machine.Remove">) =>
       cliOnly("Machine.Remove").pipe(Effect.andThen(machines.remove(name))),

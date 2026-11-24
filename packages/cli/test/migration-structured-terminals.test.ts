@@ -23,11 +23,11 @@ const S_HERDR_HASH = "22222222-2222-4222-8222-222222222224"
 const S_REX = "22222222-2222-4222-8222-222222222225"
 const S_CUSTOM = "22222222-2222-4222-8222-222222222226"
 const S_UNPLACED = "22222222-2222-4222-8222-222222222227"
-const MIGRATION = "20261124030000_structured_terminal_targets"
+const MIGRATION = "20261124040000_structured_terminal_targets"
 
 const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
 
-describe("ledger migration 20261124030000_structured_terminal_targets", () => {
+describe("ledger migration 20261124040000_structured_terminal_targets", () => {
   it.effect("rewrites legacy terminal strings across runtimes and passes ledger replay", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path
@@ -37,7 +37,7 @@ describe("ledger migration 20261124030000_structured_terminal_targets", () => {
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         yield* sql`DELETE FROM migration WHERE id = ${MIGRATION}`
-        yield* sql`UPDATE meta SET value = '13' WHERE key = 'catalog'`
+        yield* sql`UPDATE meta SET value = '14' WHERE key = 'catalog'`
 
         const sessionEvent = (id: string, name: string) =>
           [id, 1, 10, "session.created", { project: P, agent: "general", name, directory: `/p/${name}` }] as const

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { callerTarget, entryPlace, specHits, type CallerHit } from "@vibest/core/caller"
+import { callerTarget, attachPlace, specHits, type CallerHit } from "@vibest/core/caller"
 import { Builtins, builtinsNode } from "@vibest/core/plugin"
 import type { Caller } from "@vibest/core/plugin/domains"
 import { Runtimes, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
@@ -32,44 +32,44 @@ describe("where the entry session runs", () => {
   const hc = { id: "hc", terminal: { address: "t4", socket: "/run/hc/default.sock" } } satisfies CallerHit
   const herdr = { id: "herdr", terminal: { session: "vibest", pane: "p1" } } satisfies CallerHit
   it("no detected runtime is refused, and --runtime launches one", () => {
-    const refused = entryPlace({ runtime: undefined, hits: [] })
+    const refused = attachPlace({ runtime: undefined, hits: [] })
     assert.strictEqual(refused.in, "refused")
     assert.match(refused.in === "refused" ? refused.message : "", /pass --runtime/)
-    assert.deepStrictEqual(entryPlace({ runtime: "herdr", hits: [] }), {
+    assert.deepStrictEqual(attachPlace({ runtime: "herdr", hits: [] }), {
       in: "launch",
       runtime: "herdr",
     })
   })
   it("one detected runtime starts the entry session in that terminal", () => {
-    assert.deepStrictEqual(entryPlace({ runtime: undefined, hits: [hc] }), {
+    assert.deepStrictEqual(attachPlace({ runtime: undefined, hits: [hc] }), {
       in: "terminal",
       runtime: "hc",
       terminal: hc.terminal,
     })
-    assert.deepStrictEqual(entryPlace({ runtime: undefined, hits: [herdr] }), {
+    assert.deepStrictEqual(attachPlace({ runtime: undefined, hits: [herdr] }), {
       in: "terminal",
       runtime: "herdr",
       terminal: herdr.terminal,
     })
-    assert.strictEqual(entryPlace({ runtime: undefined, hits: [{ ...herdr, terminal: undefined }] }).in, "refused")
+    assert.strictEqual(attachPlace({ runtime: undefined, hits: [{ ...herdr, terminal: undefined }] }).in, "refused")
   })
   it("two detected runtimes follow load order, and --runtime overrides", () => {
-    assert.deepStrictEqual(entryPlace({ runtime: undefined, hits: [hc, herdr] }), {
+    assert.deepStrictEqual(attachPlace({ runtime: undefined, hits: [hc, herdr] }), {
       in: "terminal",
       runtime: "hc",
       terminal: hc.terminal,
     })
-    assert.deepStrictEqual(entryPlace({ runtime: undefined, hits: [herdr, hc] }), {
+    assert.deepStrictEqual(attachPlace({ runtime: undefined, hits: [herdr, hc] }), {
       in: "terminal",
       runtime: "herdr",
       terminal: herdr.terminal,
     })
-    assert.deepStrictEqual(entryPlace({ runtime: "herdr", hits: [herdr, hc] }), {
+    assert.deepStrictEqual(attachPlace({ runtime: "herdr", hits: [herdr, hc] }), {
       in: "terminal",
       runtime: "herdr",
       terminal: herdr.terminal,
     })
-    assert.deepStrictEqual(entryPlace({ runtime: "hc", hits: [herdr] }), {
+    assert.deepStrictEqual(attachPlace({ runtime: "hc", hits: [herdr] }), {
       in: "launch",
       runtime: "hc",
     })
@@ -110,7 +110,7 @@ describe("the runtime registry", () => {
 
         const env = { HC_ID: "t1", HERDR_ID: "p1" }
         assert.deepStrictEqual(
-          entryPlace({ runtime: undefined, hits: yield* specHits(yield* runtimes.callers, env) }),
+          attachPlace({ runtime: undefined, hits: yield* specHits(yield* runtimes.callers, env) }),
           {
             in: "terminal",
             runtime: "hc",
@@ -158,7 +158,7 @@ describe("caller runtimes", () => {
         HERDR_SOCKET_PATH: "/herdr.sock",
       })
 
-      assert.deepStrictEqual(entryPlace({ runtime: undefined, hits }), {
+      assert.deepStrictEqual(attachPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "herdr",
         terminal: { id: "p1//herdr.sock" },
@@ -196,7 +196,7 @@ describe("caller runtimes", () => {
       )
 
       assert.deepStrictEqual(calls, ["hc"])
-      assert.deepStrictEqual(entryPlace({ runtime: undefined, hits }), {
+      assert.deepStrictEqual(attachPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "hc",
         terminal: { id: "hc-term" },
@@ -213,7 +213,7 @@ describe("caller runtimes", () => {
       )
 
       assert.deepStrictEqual(calls, ["herdr"])
-      assert.deepStrictEqual(entryPlace({ runtime: "herdr", hits: named }), {
+      assert.deepStrictEqual(attachPlace({ runtime: "herdr", hits: named }), {
         in: "terminal",
         runtime: "herdr",
         terminal: { id: "herdr-term" },

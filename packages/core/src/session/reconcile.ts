@@ -73,7 +73,7 @@ export const make = Effect.gen(function* () {
 
     if (!session || archived(session) || (bound !== undefined && session.process?.id !== bound)) return
 
-    if (session.entry && (yield* db.session.entryMoving(session.projectId))) return
+    if (yield* db.session.sessionMoving(session.id)) return
     const open = executionStateOf(session) === "open"
 
     if (!open && exitedAt(session) !== null) return
@@ -162,7 +162,7 @@ export const make = Effect.gen(function* () {
     if (unstarted) yield* reactor.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
 
     if (s === "blocked") {
-      if (!(yield* Ref.getAndSet(r.blockedNotified, true)) && !session.entry) {
+      if (!(yield* Ref.getAndSet(r.blockedNotified, true)) && (yield* db.session.creatorOf(session.id)) !== undefined) {
         const since = new Date(yield* Clock.currentTimeMillis)
         const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
         yield* notice(

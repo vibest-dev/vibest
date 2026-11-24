@@ -30,7 +30,7 @@ const X = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 const setup = Effect.gen(function* () {
   const db = yield* Db.Service
   const project = yield* projectOf("r")
-  const entry = yield* db.session.startEntry(project, "pi", false, place, { agent: "coordinator" })
+  const entry = yield* db.session.startRoot(project, "pi", false, place, { agent: "coordinator" })
   yield* db.session.insertSession(session(A), project, { cwd: "/w", task: "a", parentSessionId: entry.sessionId })
 
   return { db, project, entryId: entry.sessionId }

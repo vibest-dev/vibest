@@ -36,7 +36,7 @@ const project = Effect.gen(function* () {
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
 
-  const entry = yield* db.session.startEntry(
+  const entry = yield* db.session.startRoot(
     key,
     "claude",
     false,
