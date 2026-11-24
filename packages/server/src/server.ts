@@ -47,7 +47,7 @@ import { WatchFeed } from "./watch-feed.ts"
 
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
-export const handlers = Layer.mergeAll(
+export const handlersCore = Layer.mergeAll(
   DaemonHandlers.layer,
   SessionHandlers.layer,
   InboxHandlers.layer,
@@ -56,22 +56,19 @@ export const handlers = Layer.mergeAll(
   ProjectHandlers.layer,
   RemoteHandlers.layer,
   WorktreeHandlers.layer,
-).pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer)),
-      RemoteHandlers.routingLayer.pipe(Layer.provideMerge(CallerChecks.layer)),
-    ),
-  ),
-)
+).pipe(Layer.provide(RemoteHandlers.routingLayer.pipe(Layer.provideMerge(CallerChecks.layer))))
 
-export const layer = RpcServer.layer(VibestRpcs).pipe(
-  Layer.provide(Layer.mergeAll(handlers, AdmissionLive)),
+export const handlers = handlersCore.pipe(Layer.provide(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer))))
+
+const serverLayer = RpcServer.layer(VibestRpcs).pipe(
+  Layer.provide(Layer.mergeAll(handlersCore, AdmissionLive)),
   Layer.provide(CallerGateLive),
   Layer.provide(ProtocolGateLive),
   Layer.provide(RpcServer.layerProtocolSocketServer),
   Layer.provide(RpcSerialization.layerNdJsonRpc()),
 )
+
+export const layer = serverLayer.pipe(Layer.provide(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer))))
 
 export class SocketServerLayer extends Context.Service<
   SocketServerLayer,
@@ -88,7 +85,7 @@ export const socketServer = LayerNode.make({
 
 export const node = LayerNode.make({
   name: "vibest/RpcServer",
-  layer,
+  layer: serverLayer,
   deps: [
     services,
     Agents.node,
@@ -104,6 +101,7 @@ export const node = LayerNode.make({
     Inbox.node,
     Integration.node,
     EntrySession.node,
+    Listing.node,
     Load.node,
     Machines.node,
     Peer.node,
@@ -117,6 +115,7 @@ export const node = LayerNode.make({
     RepositoryUrl.node,
     Subscriptions.node,
     UpdateCheck.node,
+    WatchFeed.node,
     App.node,
     Identity.node,
     socketServer,

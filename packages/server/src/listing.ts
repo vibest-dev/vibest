@@ -9,6 +9,7 @@ import {
   type SessionBrief,
   terminalOf,
 } from "@vibest/core/database/db-rows"
+import { LayerNode } from "@vibest/core/effect/layer-node"
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Session } from "@vibest/core/session"
@@ -228,3 +229,9 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Db.node, Session.node, Runtimes.node, Starts.node],
+})

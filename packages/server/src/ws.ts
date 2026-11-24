@@ -39,13 +39,15 @@ import * as Socket from "effect/socket/Socket"
 
 import { AdmissionLive, ProtocolGateLive } from "./gates.ts"
 import { DaemonHandlers } from "./handlers/daemon.ts"
+import * as Listing from "./listing.ts"
 import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
 import { Peer } from "./machine/peer.ts"
 import { Remote } from "./machine/remote.ts"
-import { handlers } from "./server.ts"
+import { handlersCore } from "./server.ts"
 import { services } from "./services.ts"
 import { UpdateCheck } from "./update-check.ts"
+import { WatchFeed } from "./watch-feed.ts"
 
 export const WsInfo = Schema.Struct({
   url: Schema.String,
@@ -96,12 +98,16 @@ export const readWsInfo = (file: string) =>
   )
 
 declare const crypto: { readonly getRandomValues: (bytes: Uint8Array) => Uint8Array }
+declare const TextDecoder: new () => { readonly decode: (input: Uint8Array) => string }
+
+const textEncoder = new TextEncoder()
+const textDecoder = new TextDecoder()
 
 const randomHex = (byteLength: number): string => Hex.encode(crypto.getRandomValues(new Uint8Array(byteLength)))
 
 const tokenMatches = (expected: Uint8Array, candidate: string | undefined): boolean => {
   if (candidate === undefined) return false
-  const actual = new TextEncoder().encode(candidate)
+  const actual = textEncoder.encode(candidate)
 
   if (actual.length !== expected.length) return false
   let diff = 0
@@ -192,7 +198,7 @@ const makeWsProtocol = Effect.gen(function* () {
     const writeEncoded = (encoded: string | Uint8Array | undefined) => {
       if (encoded === undefined) return Effect.void
 
-      const frame = Predicate.isString(encoded) ? encoded : Array.from(encoded, (b) => String.fromCharCode(b)).join("")
+      const frame = Predicate.isString(encoded) ? encoded : textDecoder.decode(encoded)
 
       return Effect.orDie(writer.write(frame))
     }
@@ -352,7 +358,7 @@ export class WsServerLayer extends Context.Service<WsServerLayer, Layer.Layer<Ht
 
 export const wsServerLayer = LayerNode.unbound(WsServerLayer)
 
-export const layer = Layer.unwrap(
+const wsLayer = Layer.unwrap(
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
@@ -368,7 +374,7 @@ export const layer = Layer.unwrap(
     const identity = yield* DaemonHandlers.Identity
     const pid = identity.pid ?? 0
     const token = randomHex(32)
-    const expectedToken = new TextEncoder().encode(token)
+    const expectedToken = textEncoder.encode(token)
 
     const protocolAndHandler = Effect.gen(function* () {
       const { protocol, onSocket, closeAll } = yield* makeWsProtocol
@@ -424,7 +430,7 @@ export const layer = Layer.unwrap(
         )
 
         const rpcLayer = RpcServer.layer(VibestRpcs).pipe(
-          Layer.provide(Layer.mergeAll(handlers, AdmissionLive)),
+          Layer.provide(Layer.mergeAll(handlersCore, AdmissionLive)),
           Layer.provide(WsCallerGateLive),
           Layer.provide(ProtocolGateLive),
           Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
@@ -438,9 +444,11 @@ export const layer = Layer.unwrap(
   }),
 )
 
+export const layer = wsLayer.pipe(Layer.provide(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer))))
+
 export const node = LayerNode.make({
   name: "vibest/WsServer",
-  layer,
+  layer: wsLayer,
   deps: [
     services,
     Agents.node,
@@ -456,6 +464,7 @@ export const node = LayerNode.make({
     Inbox.node,
     Integration.node,
     EntrySession.node,
+    Listing.node,
     Load.node,
     Machines.node,
     Peer.node,
@@ -470,6 +479,7 @@ export const node = LayerNode.make({
     RepositoryUrl.node,
     Subscriptions.node,
     UpdateCheck.node,
+    WatchFeed.node,
     App.node,
     Identity.node,
     wsServerLayer,

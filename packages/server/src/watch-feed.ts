@@ -1,4 +1,5 @@
 import { Bus, type BusEvent } from "@vibest/core/bus"
+import { LayerNode } from "@vibest/core/effect/layer-node"
 import { WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
 import { Cause, Context, Effect, Layer, PubSub, Queue, type Scope, Stream } from "effect"
 
@@ -86,3 +87,9 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Bus.node, Listing.node],
+})
