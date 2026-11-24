@@ -5,7 +5,7 @@ import { Context, Effect, FileSystem, Layer, Path } from "effect"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 import { Git } from "./git.ts"
-import { listProjectRepositoryDirs } from "./project/create.ts"
+import { listProjectRepositories } from "./project/create.ts"
 import { RepositoryUrl, repositoryIdentity } from "./repository-url.ts"
 
 export * as Project from "./project.ts"
@@ -66,7 +66,7 @@ export const layer = Layer.effect(
 
         if (root !== undefined) return [root]
 
-        const children = yield* listProjectRepositoryDirs(directory).pipe(
+        const children = yield* listProjectRepositories(directory).pipe(
           Effect.provideService(Git.Service, git),
           Effect.provideService(FileSystem.FileSystem, fs),
           Effect.provideService(Path.Path, path),
