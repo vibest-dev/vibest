@@ -307,6 +307,16 @@ const make = Effect.gen(function* () {
       ),
   )
 
+  const listedMachine = (
+    name: string,
+    entry: { readonly state: MachineState; readonly since: number; readonly reason?: string | undefined },
+  ): ListedMachine => ({
+    name,
+    state: entry.state,
+    since: entry.since,
+    ...(entry.reason !== undefined && entry.state !== "connected" && { reason: entry.reason }),
+  })
+
   const set = (name: string, entry: Omit<Entry, "since">) =>
     Effect.gen(function* () {
       const before = entries.get(name)
@@ -317,17 +327,10 @@ const make = Effect.gen(function* () {
       if (before?.state !== entry.state || before.reason !== entry.reason)
         yield* Effect.logInfo(`machine ${name}: ${entry.state}${entry.reason ? ` (${entry.reason})` : ""}`)
 
-      const listed: ListedMachine = {
-        name,
-        state: updated.state,
-        since: updated.since,
-        ...(updated.reason !== undefined && updated.state !== "connected" && { reason: updated.reason }),
-      }
-
       yield* PubSub.publish(
         changes,
         MachineChanges.Updated({
-          machine: listed,
+          machine: listedMachine(name, updated),
           link: updated.state === "connected" ? updated.link : undefined,
         }),
       )
@@ -569,12 +572,9 @@ const make = Effect.gen(function* () {
       const connected = entry.state === "connected"
 
       const info: MachineInfo = {
-        name: row.name,
+        ...listedMachine(row.name, entry),
         target: row.target,
         id: row.vibestdId,
-        state: entry.state,
-        since: entry.since,
-        ...(entry.reason !== undefined && !connected && { reason: entry.reason }),
         connectedAt: row.connectedAt,
         ...(connected && entry.vibestd !== undefined && { vibestd: entry.vibestd }),
         ...(connected && entry.version !== undefined && { version: entry.version }),
@@ -679,7 +679,16 @@ const make = Effect.gen(function* () {
 
     states,
 
-    subscribeChanges: PubSub.subscribe(changes),
+    watchStates: Effect.gen(function* () {
+      const subscription = yield* PubSub.subscribe(changes)
+
+      const initial = Array.from(entries.entries(), ([name, entry]) => ({
+        machine: listedMachine(name, entry),
+        link: entry.state === "connected" ? entry.link : undefined,
+      }))
+
+      return { initial, changes: Stream.fromSubscription(subscription) }
+    }),
 
     remove: Effect.fn("Machines.remove")(function* (name: string) {
       const row = yield* db.remote.machineNamed(name)
@@ -694,12 +703,12 @@ const make = Effect.gen(function* () {
           machine: name,
           machines: (yield* db.remote.machines).map((row) => row.name),
         })
+      yield* PubSub.publish(changes, MachineChanges.Removed({ name }))
       const notes = yield* lock.withLock(name)(fire(row, "remove"))
       there.delete(name)
       noted.delete(name)
 
       for (const key of repairs.keys()) if (key.startsWith(`${name}\0`)) repairs.delete(key)
-      yield* PubSub.publish(changes, MachineChanges.Removed({ name }))
 
       return { notes }
     }),

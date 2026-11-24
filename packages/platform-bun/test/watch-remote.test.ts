@@ -4,10 +4,11 @@ import { SocketConnector } from "@vibest/client/socket-connector"
 import { Db } from "@vibest/core/database/db"
 import { Identity } from "@vibest/core/identity"
 import { peerHeaders } from "@vibest/protocol/protocol"
-import { PingResult, type WatchEvent } from "@vibest/protocol/rpc"
+import { PingResult, WatchEvent, WatchLagged } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
+import * as Listing from "@vibest/server/listing"
 import { Effect, Layer, Predicate, Queue, Schema, Stream } from "effect"
 import { Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
 
@@ -62,7 +63,7 @@ const FakePeerRpcs = RpcGroup.make(
     }),
   }),
   Rpc.make("Peer.Outbox", { success: Schema.Unknown, stream: true }),
-  Rpc.make("Watch", { success: Schema.Unknown, stream: true }),
+  Rpc.make("Watch", { success: WatchEvent, error: WatchLagged, stream: true }),
 )
 
 const fakePeerSocket = (options: {
@@ -70,6 +71,7 @@ const fakePeerSocket = (options: {
   readonly version: string
   readonly peerWatch?: boolean
   readonly id?: string
+  readonly watch?: () => Stream.Stream<WatchEvent, WatchLagged>
 }) =>
   Effect.gen(function* () {
     const dir = yield* tempDirectory("vibest-fake-peer-")
@@ -85,7 +87,7 @@ const fakePeerSocket = (options: {
         }),
       "Peer.Hello": () => Effect.succeed({ id: peerId, name: "legacy-box", version: options.version, runtimes: [] }),
       "Peer.Outbox": () => Stream.never,
-      Watch: () => Stream.never,
+      Watch: () => (options.watch ? options.watch() : Stream.never),
     })
 
     const server = RpcServer.layer(FakePeerRpcs).pipe(
@@ -278,6 +280,94 @@ describe("Watch with remote machines", () => {
         )
 
         assert.include(mismatched.machine.reason ?? "", "vibest update")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "remote Watch stream failing with WatchLagged automatically reconnects and refreshes Snapshot while connection stays open",
+    () =>
+      Effect.gen(function* () {
+        const net = new Net()
+        const a = yield* makeStack(net)
+        const p1 = randomId()
+        const s1 = randomId()
+        const p2 = randomId()
+        const s2 = randomId()
+        let watchAttempts = 0
+
+        const makeSession = (id: string, projectId: string, name: string) => ({
+          id,
+          name,
+          agent: "general",
+          harness: "pi",
+          provider: null,
+          model: null,
+          status: "idle" as const,
+          startedAt: 1000,
+          exitedAt: null,
+          executionState: "completed" as const,
+          projectId,
+          runtime: "herdr",
+          address: { machine: "local", id: `r/${name}` },
+          worktree: `/remote/${name}`,
+          repositoryRoot: `/remote/${name}`,
+          git: null,
+          createdAt: 1000,
+          lastActive: 1000,
+          task: null,
+          latest: null,
+          parentId: null,
+          finished: null,
+        })
+
+        const peer = yield* fakePeerSocket({
+          protocol: PROTOCOL,
+          version: "0.0.2-dev",
+          peerWatch: true,
+          watch: () => {
+            watchAttempts++
+
+            if (watchAttempts === 1)
+              return Stream.concat(
+                Stream.make(
+                  Listing.WatchEvents.Snapshot({
+                    projects: [{ id: p1, directory: "/remote/p1", entrySessionId: s1, activity: "idle" }],
+                    sessions: [makeSession(s1, p1, "sess-1")],
+                    machines: [],
+                  }),
+                ),
+                Stream.fail(new WatchLagged({ message: "simulated lag on remote peer" })),
+              )
+
+            return Stream.concat(
+              Stream.make(
+                Listing.WatchEvents.Snapshot({
+                  projects: [{ id: p2, directory: "/remote/p2", entrySessionId: s2, activity: "idle" }],
+                  sessions: [makeSession(s2, p2, "sess-2")],
+                  machines: [],
+                }),
+              ),
+              Stream.never,
+            )
+          },
+        })
+
+        net.route("laggy-host", peer.socket)
+        yield* a.cli(a.raw["Machine.Add"]({ name: "laggy-box", target: "laggy-host" }))
+
+        yield* untilVirtual(a.cli(a.raw.Watch(undefined).pipe(Stream.take(1), Stream.runCollect)), (chunk) => {
+          const snap = chunk[0]
+
+          return (
+            snap !== undefined &&
+            isSnapshot(snap) &&
+            snap.sessions.some((s) => s.id === s2 && s.machine === "laggy-box") &&
+            !snap.sessions.some((s) => s.id === s1) &&
+            snap.projects.some((p) => p.id === p2 && p.machine === "laggy-box")
+          )
+        })
+
+        assert.isAtLeast(watchAttempts, 2)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

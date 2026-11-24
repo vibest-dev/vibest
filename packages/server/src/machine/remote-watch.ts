@@ -1,21 +1,24 @@
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
+import { Host } from "@vibest/plugin/host"
 import { peerHeaders } from "@vibest/protocol/protocol"
-import { WatchLagged, type ProjectRow, type WatchEvent, type WatchSession } from "@vibest/protocol/rpc"
+import { type ProjectRow, type WatchEvent, type WatchSession } from "@vibest/protocol/rpc"
 import type { ListedMachine } from "@vibest/schema/machine"
-import { Cause, Context, Effect, Fiber, Layer, Match, Queue, Stream } from "effect"
+import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, Stream } from "effect"
 
 import * as Listing from "../listing.ts"
-import { WATCH_BACKLOG } from "../watch-feed.ts"
+import { watchFanout } from "../watch-feed.ts"
 import { Machines } from "./machines.ts"
 
 export * as RemoteWatch from "./remote-watch.ts"
 
+const WATCH_RETRY = Host.reconnectSchedule({ first: Machines.RETRY_FIRST, max: Duration.seconds(30) })
+
 interface Mirror {
   machine: ListedMachine
-  readonly projects: Map<string, ProjectRow>
-  readonly sessions: Map<string, WatchSession>
-  fiber: Fiber.Fiber<void> | undefined
+  link: Machines.Link | undefined
+  projects: Map<string, ProjectRow>
+  sessions: Map<string, WatchSession>
 }
 
 const listedFor = (machine: ListedMachine, link: Machines.Link | undefined): ListedMachine =>
@@ -32,155 +35,149 @@ const make = Effect.gen(function* () {
   const machines = yield* Machines.Service
   const self = yield* Identity.Service
   const scope = yield* Effect.scope
-  const watchers = new Set<Queue.Queue<WatchEvent, WatchLagged>>()
+  const fanout = watchFanout()
+  const fibers = yield* FiberMap.make<string>()
   const mirrors = new Map<string, Mirror>()
 
-  const publish = (event: WatchEvent) =>
-    Effect.sync(() => {
-      for (const watcher of watchers) {
-        if (Queue.offerUnsafe(watcher, event)) continue
-        watchers.delete(watcher)
-        Queue.failCauseUnsafe(
-          watcher,
-          Cause.fail(
-            new WatchLagged({
-              message: `Watch fell ${WATCH_BACKLOG} events behind; reconnect for a new Snapshot`,
-            }),
-          ),
-        )
-      }
-    })
-
-  const stopMirrorFiber = (mirror: Mirror) =>
-    Effect.gen(function* () {
-      const current = mirror.fiber
-
-      if (current === undefined) return
-      mirror.fiber = undefined
-      yield* Fiber.interrupt(current)
-    })
-
   const clearCached = (name: string, mirror: Mirror) =>
-    Effect.gen(function* () {
-      const ended = Array.from(mirror.sessions.values())
-      mirror.sessions.clear()
-      mirror.projects.clear()
+    Effect.uninterruptible(
+      Effect.gen(function* () {
+        const ended = Array.from(mirror.sessions.values())
+        mirror.sessions = new Map()
+        mirror.projects = new Map()
 
-      for (const session of ended)
-        yield* publish(
-          Listing.WatchEvents.SessionEnded({ id: session.id, projectId: session.projectId, machine: name }),
-        )
-    })
+        for (const session of ended)
+          yield* fanout.publish(
+            Listing.WatchEvents.SessionEnded({ id: session.id, projectId: session.projectId, machine: name }),
+          )
+      }),
+    )
 
   const applyRemoteEvent = (name: string, mirror: Mirror, event: WatchEvent) =>
     Match.value(event).pipe(
       Match.tagsExhaustive({
         Snapshot: ({ projects, sessions }) =>
-          Effect.gen(function* () {
-            const nextProjects = new Map<string, ProjectRow>()
-            const nextSessions = new Map<string, WatchSession>()
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              const nextProjects = new Map<string, ProjectRow>()
+              const nextSessions = new Map<string, WatchSession>()
 
-            for (const project of projects) nextProjects.set(project.id, { ...project, machine: name })
+              for (const project of projects) nextProjects.set(project.id, { ...project, machine: name })
 
-            for (const session of sessions) nextSessions.set(session.id, { ...session, machine: name })
+              for (const session of sessions) nextSessions.set(session.id, { ...session, machine: name })
 
-            for (const [id, prev] of mirror.sessions)
-              if (!nextSessions.has(id))
-                yield* publish(Listing.WatchEvents.SessionEnded({ id, projectId: prev.projectId, machine: name }))
-            mirror.projects.clear()
-            mirror.sessions.clear()
+              const ended: Array<WatchSession> = []
 
-            for (const [id, project] of nextProjects) mirror.projects.set(id, project)
+              for (const [id, prev] of mirror.sessions) if (!nextSessions.has(id)) ended.push(prev)
+              mirror.projects = nextProjects
+              mirror.sessions = nextSessions
 
-            for (const [id, session] of nextSessions) mirror.sessions.set(id, session)
+              for (const prev of ended)
+                yield* fanout.publish(
+                  Listing.WatchEvents.SessionEnded({ id: prev.id, projectId: prev.projectId, machine: name }),
+                )
 
-            for (const project of nextProjects.values()) yield* publish(Listing.WatchEvents.Project({ project }))
+              for (const project of nextProjects.values())
+                yield* fanout.publish(Listing.WatchEvents.Project({ project }))
 
-            for (const session of nextSessions.values()) yield* publish(Listing.WatchEvents.Session({ session }))
-          }),
+              for (const session of nextSessions.values())
+                yield* fanout.publish(Listing.WatchEvents.Session({ session }))
+            }),
+          ),
         Project: ({ project }) => {
           const tagged: ProjectRow = { ...project, machine: name }
           mirror.projects.set(tagged.id, tagged)
 
-          return publish(Listing.WatchEvents.Project({ project: tagged }))
+          return fanout.publish(Listing.WatchEvents.Project({ project: tagged }))
         },
         Session: ({ session }) => {
           const tagged: WatchSession = { ...session, machine: name }
           mirror.sessions.set(tagged.id, tagged)
 
-          return publish(Listing.WatchEvents.Session({ session: tagged }))
+          return fanout.publish(Listing.WatchEvents.Session({ session: tagged }))
         },
         SessionEnded: ({ id, projectId }) => {
           mirror.sessions.delete(id)
 
-          return publish(Listing.WatchEvents.SessionEnded({ id, projectId, machine: name }))
+          return fanout.publish(Listing.WatchEvents.SessionEnded({ id, projectId, machine: name }))
         },
         Machine: () => Effect.void,
         MachineRemoved: () => Effect.void,
       }),
     )
 
+  const watchRemote = (name: string, mirror: Mirror, link: Machines.Link) =>
+    link.stream(link.client.Watch(undefined, { headers: peerHeaders(self.id) })).pipe(
+      Stream.runForEach((event) => applyRemoteEvent(name, mirror, event)),
+      Effect.tap(() => Effect.logWarning("remote watch stream ended; reconnecting", { machine: name })),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("remote watch stream failed; reconnecting", { machine: name, cause }),
+      ),
+      Effect.repeat({ schedule: WATCH_RETRY, while: () => mirror.link === link }),
+      Effect.asVoid,
+    )
+
   const syncMachine = (rawMachine: ListedMachine, link: Machines.Link | undefined) =>
     Effect.gen(function* () {
       const shown = listedFor(rawMachine, link)
+      const existing = mirrors.get(shown.name)
 
-      const mirror: Mirror = mirrors.get(shown.name) ?? {
+      if (existing !== undefined && shown.since < existing.machine.since) return
+
+      const mirror: Mirror = existing ?? {
         machine: shown,
+        link: undefined,
         projects: new Map(),
         sessions: new Map(),
-        fiber: undefined,
       }
+
+      const sameConnected =
+        shown.state === "connected" &&
+        link !== undefined &&
+        mirror.link === link &&
+        mirror.machine.state === "connected"
 
       mirror.machine = shown
       mirrors.set(shown.name, mirror)
-      yield* publish(Listing.WatchEvents.Machine({ machine: shown }))
 
       if (shown.state === "connected" && link !== undefined) {
-        yield* stopMirrorFiber(mirror)
+        if (!sameConnected) {
+          mirror.link = link
+          yield* FiberMap.run(fibers, shown.name, watchRemote(shown.name, mirror, link), { startImmediately: true })
+        }
 
-        mirror.fiber = yield* link.stream(link.client.Watch(undefined, { headers: peerHeaders(self.id) })).pipe(
-          Stream.runForEach((event) => applyRemoteEvent(shown.name, mirror, event)),
-          Effect.catchCause((cause) =>
-            Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning(`remote watch ${shown.name} ended`, cause),
-          ),
-          Effect.forkIn(scope, { startImmediately: true }),
-        )
+        yield* fanout.publish(Listing.WatchEvents.Machine({ machine: shown }))
 
         return
       }
 
-      yield* stopMirrorFiber(mirror)
+      mirror.link = undefined
+      yield* FiberMap.remove(fibers, shown.name)
+      yield* fanout.publish(Listing.WatchEvents.Machine({ machine: shown }))
 
       if (shown.state !== "connecting") yield* clearCached(shown.name, mirror)
     })
 
   const removeMachine = (name: string) =>
     Effect.gen(function* () {
+      yield* FiberMap.remove(fibers, name)
       const mirror = mirrors.get(name)
 
       if (mirror !== undefined) {
-        yield* stopMirrorFiber(mirror)
         yield* clearCached(name, mirror)
         mirrors.delete(name)
       }
 
-      yield* publish(Listing.WatchEvents.MachineRemoved({ name }))
+      yield* fanout.publish(Listing.WatchEvents.MachineRemoved({ name }))
     })
 
-  const changeSubscription = yield* machines.subscribeChanges
+  const watched = yield* machines.watchStates
 
-  for (const { info, link } of yield* machines.states)
-    yield* syncMachine(
-      {
-        name: info.name,
-        state: info.state,
-        since: info.since,
-        ...(info.reason !== undefined && info.state !== "connected" && { reason: info.reason }),
-      },
-      link,
-    )
+  for (const { machine, link } of watched.initial) yield* syncMachine(machine, link)
 
-  yield* Stream.fromSubscription(changeSubscription).pipe(
+  yield* watched.changes.pipe(
     Stream.runForEach((change) =>
       Match.value(change).pipe(
         Match.tagsExhaustive({
@@ -206,12 +203,7 @@ const make = Effect.gen(function* () {
 
       return { projects, sessions, machines: listedMachines }
     }),
-    subscribe: Effect.acquireRelease(
-      Queue.dropping<WatchEvent, WatchLagged>(WATCH_BACKLOG).pipe(
-        Effect.tap((queue) => Effect.sync(() => watchers.add(queue))),
-      ),
-      (queue) => Effect.sync(() => watchers.delete(queue)).pipe(Effect.andThen(Queue.shutdown(queue))),
-    ).pipe(Effect.map(Stream.fromQueue)),
+    subscribe: fanout.subscribe,
   }
 })
 

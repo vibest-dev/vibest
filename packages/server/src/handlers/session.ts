@@ -351,23 +351,21 @@ export const make = Effect.gen(function* () {
           if (!Predicate.isTagged(caller, "Cli") && !Predicate.isTagged(caller, "Peer"))
             return yield* new Forbidden({ method: "Watch", message: "only the user or a peer runs Watch" })
 
-          if (Predicate.isTagged(caller, "Peer")) {
-            const changes = yield* watchFeed.subscribe
-            const sessionRows = yield* watched(yield* listed(ListScope.All(), false))
+          const localChanges = yield* watchFeed.subscribe
+          const sessionRows = yield* watched(yield* listed(ListScope.All(), false))
+          const localProjects = yield* snapshotProjects(sessionRows)
 
+          if (Predicate.isTagged(caller, "Peer")) {
             const snapshot: WatchEvent = Listing.WatchEvents.Snapshot({
-              projects: yield* snapshotProjects(sessionRows),
+              projects: localProjects,
               sessions: sessionRows,
               machines: [],
             })
 
-            return Stream.concat(Stream.make(snapshot), changes)
+            return Stream.concat(Stream.make(snapshot), localChanges)
           }
 
-          const localChanges = yield* watchFeed.subscribe
           const remoteChanges = yield* remoteWatch.subscribe
-          const sessionRows = yield* watched(yield* listed(ListScope.All(), false))
-          const localProjects = yield* snapshotProjects(sessionRows)
           const remote = yield* remoteWatch.snapshot
 
           const snapshot: WatchEvent = Listing.WatchEvents.Snapshot({
