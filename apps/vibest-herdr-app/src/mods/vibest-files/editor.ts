@@ -1,7 +1,7 @@
 import { EditorState } from "gpui-base"
 import { settings, theme } from "herdr"
 
-import { TEXT } from "../../shared/metrics.ts"
+import { fontSize } from "../../shared/text-size.ts"
 
 export interface Loaded {
   state: EditorState | null
@@ -31,8 +31,8 @@ export const editorState = (path: string, text: string): EditorState => {
     language: LANG.get(ext) ?? ext,
     readonly: true,
     value: text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}\n… (file truncated)` : text,
-    font_family: String(settings().font_family ?? ""),
-    font_size: TEXT,
+    font_family: String(settings().font ?? ""),
+    font_size: fontSize(),
     syntax: {
       keyword: t.ansi5,
       string: t.ansi2,

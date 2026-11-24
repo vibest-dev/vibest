@@ -4,7 +4,7 @@ import { checking, readTextFile } from "herdr"
 
 import { iconButton } from "../../shared/icon-button.ts"
 import { liveMetrics } from "../../shared/live-metrics.ts"
-import { SMALL, TEXT } from "../../shared/metrics.ts"
+import { SMALL, TEXT } from "../../shared/text-size.ts"
 import { type Theme, themeColors } from "../../shared/theme-colors.ts"
 import { editorState, type Loaded } from "./editor.ts"
 import { Folder } from "./folder.ts"
@@ -75,7 +75,7 @@ export default class Files extends View {
       .flex_1()
       .min_w(0)
       .h_full()
-      .gap(2)
+      .gap(4)
       .items_center()
       .overflow_x_scroll()
       .when(tabs.files.length === 0, (el) => el.child(div().px(4).font_medium().child("Files")))
@@ -86,12 +86,12 @@ export default class Files extends View {
           return h_flex()
             .id(`ft-${i}`)
             .flex_none()
-            .h(24)
-            .pl(8)
+            .h(32)
+            .pl(4)
             .pr(4)
             .gap(4)
             .items_center()
-            .rounded(6)
+            .rounded(8)
             .cursor_pointer()
             .when(active, (el) => el.bg(t.hover))
             .text_color(active ? t.foreground : t.muted)
@@ -102,15 +102,15 @@ export default class Files extends View {
               div()
                 .id(`ft-x-${i}`)
                 .flex_none()
-                .p(2)
-                .rounded(4)
+                .p(4)
+                .rounded(8)
                 .text_color(t.dim)
                 .hover((s) => s.bg(t.border).text_color(t.foreground))
                 .on_click((_e, cx) => {
                   cx.stop_propagation()
                   this.setTabs(closeFile(this.tabs, f.path), cx)
                 })
-                .child(svg("mods/pane/close.svg").size(12)),
+                .child(svg("mods/pane/close.svg").size(16)),
             )
         }),
       )
@@ -118,7 +118,8 @@ export default class Files extends View {
     return h_flex()
       .h(liveMetrics().head)
       .flex_none()
-      .px(6)
+      .px(4)
+      .py(4)
       .gap(4)
       .items_center()
       .child(strip)
@@ -131,7 +132,6 @@ export default class Files extends View {
             this.treeOpen = !this.treeOpen
             cx.notify()
           },
-          { size: 22 },
         ),
       )
   }
@@ -143,7 +143,7 @@ export default class Files extends View {
       ? Editor.new(active.state).size_full()
       : div()
           .size_full()
-          .p(12)
+          .p(8)
           .text_color(t.dim)
           .child(active?.message ?? "Open a file from the tree")
   }
@@ -160,13 +160,13 @@ export default class Files extends View {
       out.push(
         h_flex()
           .id(`file-${path}`)
-          .h(28)
+          .h(32)
           .flex_none()
-          .pl(8 + depth * 18)
+          .pl(8 + depth * 16)
           .pr(8)
-          .gap(7)
+          .gap(4)
           .items_center()
-          .rounded(7)
+          .rounded(8)
           .cursor_pointer()
           .hover((s) => s.bg(t.hover))
           .on_click((_e, cx) =>
@@ -177,14 +177,14 @@ export default class Files extends View {
           .child(
             entry.dir
               ? svg(`mods/files/chevron-${open ? "down" : "right"}.svg`)
-                  .size(12)
+                  .size(16)
                   .flex_none()
                   .text_color(t.dim)
-              : div().w(12).flex_none(),
+              : div().w(16).flex_none(),
           )
           .child(
             svg(`mods/files/${entry.dir ? "folder" : "file"}.svg`)
-              .size(14)
+              .size(16)
               .flex_none()
               .text_color(t.muted),
           )
@@ -192,7 +192,7 @@ export default class Files extends View {
           .when(Boolean(mark), (el) =>
             el.child(
               div()
-                .text_size(SMALL)
+                .text_size(SMALL())
                 .text_color(mark === "A" ? t.ansi2 : mark === "D" || mark === "U" ? t.ansi1 : t.blocked)
                 .child(mark),
             ),
@@ -216,16 +216,15 @@ export default class Files extends View {
       .id("files-tree")
       .size_full()
       .overflow_y_scrollbar()
-      .p(6)
       .children(this.rows("", 0, [], t))
       .when(Boolean(folder.error) || !folder.entries.get("")?.length, (el) =>
-        el.child(div().p(8).text_size(TEXT).text_color(t.dim).child(empty)),
+        el.child(div().p(8).text_size(TEXT()).text_color(t.dim).child(empty)),
       )
       .when(folder.limited, (el) =>
         el.child(
           div()
             .p(8)
-            .text_size(TEXT)
+            .text_size(TEXT())
             .text_color(t.dim)
             .child(`File list limited to ${PER_FOLDER} entries per folder and ${TOTAL.toLocaleString("en-US")} total`),
         ),
@@ -235,13 +234,13 @@ export default class Files extends View {
       .id("files")
       .size_full()
       .min_h(0)
-      .rounded(10)
+      .rounded(8)
       .overflow_hidden()
       .bg(t.background)
       .border_1()
       .border_color(t.border)
       .text_color(t.foreground)
-      .text_size(TEXT)
+      .text_size(TEXT())
       .child(this.header(t))
       .child(
         h_resizable("vibest-files-body")

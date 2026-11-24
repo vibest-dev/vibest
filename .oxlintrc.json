@@ -178,6 +178,7 @@
   ],
   "ignorePatterns": [
     "apps/vibest-herdr-app/types",
+    "apps/vibest-herdr-app/src/mods/vibest-spaces/spaces.js",
     "dist",
     "node_modules",
     ".cache",

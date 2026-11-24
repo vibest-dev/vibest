@@ -3,7 +3,8 @@ import { div, type Element, svg } from "gpui-kit"
 import { run } from "herdr"
 
 import { icon, iconButton } from "../../shared/icon-button.ts"
-import { SMALL, TEXT } from "../../shared/metrics.ts"
+import { HEADER_X } from "../../shared/metrics.ts"
+import { SMALL, TEXT } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import { type Breadcrumb, RIGHT_PANEL, type TopbarState } from "./topbar-state.ts"
 
@@ -32,26 +33,26 @@ const panelButton = (t: Theme, shown: string | null, child: string, name: string
 const branchChip = (t: Theme, branch: string): Element =>
   h_flex()
     .flex_none()
-    .h(20)
-    .px(6)
+    .h(16)
+    .px(8)
     .gap(4)
     .items_center()
-    .rounded(6)
+    .rounded(8)
     .border(1)
     .border_color(t.border)
-    .text_size(SMALL)
+    .text_size(SMALL())
     .font_weight(400)
     .text_color(t.muted)
-    .child(svg(icon("git-branch")).size(12))
+    .child(svg(icon("git-branch")).size(16))
     .child(div().max_w(160).truncate().child(branch))
 
 const breadcrumbView = (t: Theme, crumb: Breadcrumb): Element =>
   h_flex()
     .flex_1()
     .min_w(0)
-    .gap(8)
+    .gap(4)
     .items_center()
-    .child(svg(icon("folder")).size(14).flex_none().text_color(t.muted))
+    .child(svg(icon("folder")).size(16).flex_none().text_color(t.muted))
     .child(div().flex_none().max_w(160).truncate().text_color(t.muted).child(crumb.project))
     .child(div().flex_none().text_color(t.dim).child("/"))
     .child(div().min_w(0).truncate().text_color(t.foreground).child(crumb.thread))
@@ -61,12 +62,13 @@ export const topbarView = (t: Theme, state: TopbarState, win: TopbarWindow): Ele
   h_flex()
     .size_full()
     .min_w(0)
-    .pl(win.inset)
+    .pl(win.inset || HEADER_X)
+    .pr(HEADER_X - 4)
     .pt(win.pad)
-    .gap(12)
+    .gap(4)
     .items_center()
     .bg(t.chrome)
-    .text_size(TEXT)
+    .text_size(TEXT())
     .font_medium()
     .when(state.sidebarHidden, (el) =>
       el.child(

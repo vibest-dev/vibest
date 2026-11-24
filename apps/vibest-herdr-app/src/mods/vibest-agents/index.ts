@@ -1,58 +1,35 @@
-import { type AsyncContext, type Context, type Element, View } from "gpui-kit"
-import { appHome, checking, exec } from "herdr"
+import { type AsyncContext, type Element, View } from "gpui-kit"
+import { checking } from "herdr"
 
+import { projectGroups } from "../../shared/project-groups.ts"
+import { selectedProject } from "../../shared/session-ui.ts"
 import { themeColors } from "../../shared/theme-colors.ts"
-import { LS_ARGV, type LsResult, lsFailure, readLsResult } from "./ls.ts"
-import { closePull, completePull, idlePull, type Pull, requestPull } from "./pull.ts"
-import { agentsView } from "./view.ts"
+import { VibestFeed } from "../../shared/vibest-source.ts"
+import { agentsView, shownGroup } from "./view.ts"
+
+const CLOCK_MS = 30_000
 
 export default class Agents extends View {
-  shown: LsResult
-  pull: Pull
+  now: number
+  feed: VibestFeed
 
   init(_props: Record<string, never>, cx: AsyncContext): void {
-    this.shown = { sessions: [], note: "Reading vibestd…", asOf: "" }
-    this.pull = idlePull()
+    this.now = Date.now()
+    this.feed = new VibestFeed()
 
     if (checking()) return
 
-    this.request(cx)
-  }
+    this.feed.start(cx)
 
-  close(): void {
-    this.pull = closePull(this.pull)
-  }
-
-  request(cx: Context): void {
-    const next = requestPull(this.pull)
-    const started = !this.pull.running && next.running
-
-    this.pull = next
-
-    if (started) this.spawnRead(cx, next.token)
-  }
-
-  spawnRead(cx: Context, token: number): void {
-    cx.spawn(async (spawned) => {
-      const result = await exec("env", [...LS_ARGV], { cwd: appHome() }).then(
-        (listed) => readLsResult(listed, new Date()),
-        (error) => lsFailure(error instanceof Error ? error : String(error)),
-      )
-
-      const done = completePull(this.pull, token)
-
-      this.pull = done.pull
-
-      if (done.apply) {
-        this.shown = result
-        spawned.notify()
-      }
-
-      if (this.pull.running) this.spawnRead(spawned, this.pull.token)
+    cx.timer.every(CLOCK_MS, (ticked) => {
+      this.now = Date.now()
+      ticked.notify()
     })
   }
 
   render(): Element {
-    return agentsView(themeColors(), this.shown, (cx) => this.request(cx))
+    const state = this.feed.state
+
+    return agentsView(themeColors(), shownGroup(projectGroups(state), selectedProject()), state, this.now)
   }
 }

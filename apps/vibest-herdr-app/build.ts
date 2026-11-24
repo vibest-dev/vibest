@@ -20,7 +20,7 @@ for await (const entry of new Bun.Glob("mods/*/index.ts").scan(src)) {
     naming: "main.js",
     format: "esm",
     target: "browser",
-    external: ["gpui-kit", "gpui-base", "herdr"],
+    external: ["gpui-kit", "gpui-base", "herdr", "websocket"],
   })
 
   if (!result.success) {

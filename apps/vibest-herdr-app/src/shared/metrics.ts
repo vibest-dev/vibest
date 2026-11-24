@@ -1,15 +1,20 @@
 import { findNode, type LayoutNode } from "./layout-tree.ts"
 
-export const TEXT = 14
-export const SMALL = 12
 export const CONTROL = 32
 export const INSET = 8
+export const EDGE = 4
+export const CONTENT = 4
+export const HEADER_X = 8
 export const LIGHTS_X = 13
-export const LIGHTS_INSET = 65
+export const LIGHTS_INSET = 74
 const LIGHTS_SIZE = 15
-const BAR_MIN = 30
-const HEAD_MIN = 36
+const BAR = 32
+const PANE_HEADER = 24
 const BARS = ["topbar", "sidebar-header"]
+export const LEFT_GUTTER = "left-gutter"
+const MAIN = "main"
+const CHAT = "chat"
+const TABS = "terminals"
 
 export interface Metrics {
   readonly bar: number
@@ -24,16 +29,12 @@ const vertical = (padding: LayoutNode["padding"]): number =>
 
 const center = (band: number, size: number): number => Math.floor((band - size) / 2)
 
-export const metrics = (layout: LayoutNode | null | undefined, viewportHeight: number, fontSize: number): Metrics => {
+export const metrics = (layout: LayoutNode | null | undefined): Metrics => {
   const root = layout ?? undefined
   const pad = vertical(findNode(root, "workspace-body")?.padding)
   const border = findNode(root, "terminals")?.content?.pane?.border?.width ?? 0
-  const row = Math.round(fontSize * 1.5)
-  const fixed = BAR_MIN + pad + border + HEAD_MIN + INSET + border + pad
-  const leftover = (((Math.floor(viewportHeight) - fixed) % row) + row) % row
-  const third = Math.floor(leftover / 3)
-  const bar = BAR_MIN + third
-  const head = HEAD_MIN + leftover - third
+  const bar = BAR
+  const head = PANE_HEADER + 2 * CONTENT
 
   return {
     bar,
@@ -56,7 +57,7 @@ interface MutableLayoutNode {
   children?: readonly LayoutNode[]
 }
 
-const resize = (node: LayoutNode, m: Metrics): LayoutNode => {
+const resize = (node: LayoutNode, m: Metrics, sidebarHidden: boolean, chat: string | null): LayoutNode => {
   const pane = node.content?.pane
   const next: MutableLayoutNode = { ...node }
 
@@ -65,23 +66,39 @@ const resize = (node: LayoutNode, m: Metrics): LayoutNode => {
   }
 
   if (pane?.header) {
-    next.content = { ...node.content, pane: { ...pane, header: { ...pane.header, height: m.head - INSET } } }
+    next.content = { ...node.content, pane: { ...pane, header: { ...pane.header, height: m.head - CONTENT } } }
+  }
+
+  if (node.id === LEFT_GUTTER) {
+    next.hidden = !sidebarHidden
+  }
+
+  if (node.id === MAIN) {
+    next.active = chat ? CHAT : TABS
+  }
+
+  if (node.id === CHAT && chat) {
+    next.content = { terminal: chat }
   }
 
   if (node.children) {
-    next.children = node.children.map((c) => resize(c, m))
+    next.children = node.children.map((c) => resize(c, m, sidebarHidden, chat))
   }
 
   return next
 }
 
-export const fitLayout = (layout: LayoutNode | null | undefined, m: Metrics): LayoutNode | null => {
+export const fitLayout = (
+  layout: LayoutNode | null | undefined,
+  m: Metrics,
+  chat: string | null = null,
+): LayoutNode | null => {
   if (!layout?.children) return null
 
   const next = {
-    ...resize(layout, m),
+    ...resize(layout, m, Boolean(findNode(layout, "sidebar")?.hidden), chat),
     traffic_lights: m.lights,
-    terminal_padding: [layout.terminal_padding?.[0] ?? 0, INSET],
+    terminal_padding: [CONTENT, CONTENT],
   }
 
   return JSON.stringify(next) === JSON.stringify(layout) ? null : next

@@ -44,13 +44,15 @@ fonts, sizes, theme, colors and appearance. The vibest themes are optional; pick
 root (row)
 ├─ sidebar (column, 256 px)
 │  ├─ sidebar-header   mod vibest-sidebar-header: the Vibest wordmark
-│  ├─ sidebar-threads  mod vibest-sidebar-threads: projects and their threads
+│  ├─ sidebar-lists (column)
+│  │  ├─ projects     mod vibest-projects: vibest projects merged by repository, then machines, then sessions
+│  │  └─ spaces       shipped spaces: herdr spaces, for quick terminals
 │  └─ sidebar-footer   shipped workspace-chrome (footer): settings, add machine
 └─ workspace (column)
    ├─ topbar           mod vibest-topbar: breadcrumb, branch, panel toggles, window buttons
    └─ workspace-body (row)
       ├─ terminals     the shown tab's terminals, each card headed by the shipped pane mod
-      └─ right-panel (stack, hidden, 540 px): changes | files | agents (mod vibest-agents)
+      └─ right-panel (stack, shown, 360 px): changes | files | agents (mod vibest-agents: working and blocked agents)
 ```
 
 The top bar's Files, Diff and Agents buttons select that child of `right-panel` and show it; pressing the shown one
@@ -71,13 +73,13 @@ Each of our layout blocks is its own mod, named after its block, in one folder:
 - In a mod, `index.ts` reads herdr or vibest and keeps the copy's state, the data modules turn what was read into
   plain values and import nothing from gpui (their tests sit beside them), and `view.ts` draws.
 
-| Folder                             | Files                                                                                                                                                                                    |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/mods/vibest-sidebar-header/`  | `index.ts`, the wordmark                                                                                                                                                                 |
-| `src/mods/vibest-sidebar-threads/` | `index.ts`, `projects.ts` (spaces and panes to projects and threads, status labels, times, the stored fold), `view.ts`                                                                   |
-| `src/mods/vibest-topbar/`          | `index.ts`, `topbar-state.ts` (breadcrumb, shown panel, sidebar shown), `view.ts`                                                                                                        |
-| `src/mods/vibest-agents/`          | `index.ts`, `ls.ts` (the `vibest ls` command line, parsing its JSON, the result a read shows), `sessions.ts` (grouping and row text), `pull.ts` (which read's result to keep), `view.ts` |
-| `src/shared/`                      | `theme-colors.ts`, `icon-button.ts`, `traffic-lights.ts`, `thread-title.ts`                                                                                                              |
+| Folder                            | Files                                                                                                    |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `src/mods/vibest-sidebar-header/` | `index.ts`, the wordmark                                                                                 |
+| `src/mods/vibest-projects/`       | `index.ts`, `view.ts`: groups from `src/shared/project-groups.ts`, rows per project, machine and session |
+| `src/mods/vibest-topbar/`         | `index.ts`, `topbar-state.ts` (breadcrumb, shown panel, sidebar shown), `view.ts`                        |
+| `src/mods/vibest-agents/`         | `index.ts`, `view.ts`: every working or blocked session, blocked first                                   |
+| `src/shared/`                     | `theme-colors.ts`, `icon-button.ts`, `traffic-lights.ts`, `thread-title.ts`                              |
 
 Types come from herdr-app 0.1.17's own `herdr.d.ts` and `gpui-kit.d.ts`, vendored unchanged in
 `types/herdr-app-0.1.17/`; `tsconfig.json` maps `herdr` to the first and uses the compiler options of the
@@ -115,3 +117,15 @@ herdr-app do layout.switch --name vibest
 ```
 
 `ctrl-shift-l` switches back to another layout; deleting the copied files removes it.
+
+## vibest data
+
+`src/shared/vibest-source.ts` gives both mods vibestd's `Watch` state (`src/shared/vibest-model.ts`). For now it
+returns made-up data (`vibest-mock.ts`, marked "Mock data"): a mod cannot open a Unix socket
+(herdrdev/herdr-app#928), so it will read `Watch` over a loopback WebSocket vibestd is to serve. The mods do not change
+when it does.
+
+Projects merge across machines as a view only (`project-groups.ts`, after t3code's `projectGrouping.ts`): the key is
+each repository's identity, origin first, so a fork stays apart from its upstream; a project with several repositories
+uses all of them; one without a remote stays on its own (`machine:directory`). This machine comes first and is where a
+click on the project goes. Machine rows show only when there is more than this machine to tell apart.

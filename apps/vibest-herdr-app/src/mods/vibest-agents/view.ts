@@ -1,42 +1,60 @@
 import { h_flex, v_flex } from "gpui-base"
-import { type Context, div, type Element } from "gpui-kit"
+import { div, type Element, svg } from "gpui-kit"
 
+import { icon } from "../../shared/icon-button.ts"
 import { liveMetrics } from "../../shared/live-metrics.ts"
-import { TEXT } from "../../shared/metrics.ts"
+import type { ProjectGroup } from "../../shared/project-groups.ts"
+import { showSession, statusMark } from "../../shared/session-ui.ts"
+import { SMALL, TEXT } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
-import type { LsResult, SessionRow } from "./ls.ts"
-import {
-  groupSessions,
-  projectHeading,
-  rowTitle,
-  rowTooltip,
-  sessionStatus,
-  shortId,
-  snapshotNote,
-} from "./sessions.ts"
+import { LOCAL, type VibestSession, type VibestState } from "../../shared/vibest-model.ts"
 
-const sessionRow = (t: Theme, session: SessionRow): Element =>
-  h_flex()
-    .id(`session-${session.id}`)
-    .gap(8)
-    .px(2)
-    .py(2)
-    .items_center()
-    .rounded(4)
-    .tooltip(rowTooltip(session))
-    .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(rowTitle(session)))
-    .child(div().flex_none().text_color(t.muted).child(sessionStatus(session)))
-    .child(div().flex_none().text_color(t.dim).child(shortId(session)))
+export const projectAgents = (group: ProjectGroup | undefined): VibestSession[] =>
+  (group?.members ?? []).flatMap((m) => m.sessions)
 
-export const agentsView = (t: Theme, shown: LsResult, refresh: (cx: Context) => void): Element => {
-  const rows = groupSessions(shown.sessions).flatMap((group) => [
-    div()
-      .id(`project-${group.projectId}`)
-      .truncate()
-      .text_color(t.dim)
-      .child(projectHeading(group.projectId, group.label)),
-    ...group.sessions.map((session) => sessionRow(t, session)),
-  ])
+export const shownGroup = (groups: readonly ProjectGroup[], selected: string | null): ProjectGroup | undefined =>
+  groups.find((g) => g.key === selected) ?? groups[0]
+
+const machineLabel = (machine: string): string => (machine === LOCAL ? "This machine" : machine)
+
+const agentRow = (t: Theme, s: VibestSession, now: number): Element =>
+  v_flex()
+    .id(`agent-${s.machine}-${s.id}`)
+    .px(8)
+    .py(8)
+    .gap(4)
+    .rounded(8)
+    .flex_none()
+    .hover((el) => el.bg(t.hover))
+    .cursor_pointer()
+    .on_click(() => showSession(s))
+    .child(
+      h_flex()
+        .gap(4)
+        .items_center()
+        .child(
+          div().flex_1().min_w(0).truncate().text_size(TEXT()).font_medium().text_color(t.foreground).child(s.name),
+        )
+        .child(statusMark(t, s.status, s.lastActive, now)),
+    )
+    .child(
+      h_flex()
+        .gap(4)
+        .items_center()
+        .text_size(SMALL())
+        .text_color(t.dim)
+        .child(
+          svg(icon(s.machine === LOCAL ? "monitor" : "server"))
+            .size(16)
+            .flex_none(),
+        )
+        .child(div().flex_none().child(machineLabel(s.machine)))
+        .child(div().flex_1().min_w(0).truncate().child(s.branch)),
+    )
+
+export const agentsView = (t: Theme, group: ProjectGroup | undefined, state: VibestState, now: number): Element => {
+  const rows = projectAgents(group)
+  const offline = state.machines.filter((m) => m.state !== "connected")
 
   return v_flex()
     .id("agents")
@@ -45,45 +63,58 @@ export const agentsView = (t: Theme, shown: LsResult, refresh: (cx: Context) => 
     .bg(t.background)
     .border(1)
     .border_color(t.border)
-    .rounded(10)
+    .rounded(8)
     .overflow_hidden()
-    .text_size(TEXT)
     .child(
       h_flex()
         .h(liveMetrics().head)
         .flex_none()
-        .px(14)
-        .gap(8)
+        .px(8)
+        .py(4)
+        .gap(4)
         .items_center()
         .border_b(1)
         .border_color(t.border)
+        .text_size(TEXT())
         .child(div().font_semibold().text_color(t.foreground).child("Agents"))
-        .child(div().flex_1())
-        .child(
-          div()
-            .id("agents-refresh")
-            .px(6)
-            .py(2)
-            .rounded(4)
-            .cursor_pointer()
-            .text_size(TEXT)
-            .text_color(t.foreground)
-            .hover((el) => el.bg(t.hover))
-            .on_click((_event, clicked) => refresh(clicked))
-            .child("Refresh"),
-        ),
+        .child(div().text_color(t.dim).child(String(rows.length)))
+        .when(group !== undefined, (el) =>
+          el.child(
+            div()
+              .flex_none()
+              .text_color(t.muted)
+              .child(group?.label ?? ""),
+          ),
+        )
+        .child(div().flex_1().min_w(0).truncate().text_right().text_size(SMALL()).text_color(t.dim).child(state.note)),
     )
     .child(
       v_flex()
         .id("agents-list")
         .flex_1()
         .min_h(0)
-        .p(10)
-        .gap(6)
-        .text_size(TEXT)
+        .gap(4)
         .overflow_y_scrollbar()
-        .when(shown.note !== "", (el) => el.child(div().text_color(t.muted).child(shown.note)))
-        .when(shown.asOf !== "", (el) => el.child(div().text_color(t.dim).child(snapshotNote(shown.asOf))))
-        .children(rows),
+        .when(rows.length === 0, (el) =>
+          el.child(
+            div()
+              .p(8)
+              .text_size(TEXT())
+              .text_color(t.muted)
+              .child(group ? "No agents in this project." : "No vibest projects yet."),
+          ),
+        )
+        .children(rows.map((s) => agentRow(t, s, now)))
+        .children(
+          offline.map((m) =>
+            div()
+              .id(`offline-${m.name}`)
+              .px(8)
+              .pt(8)
+              .text_size(SMALL())
+              .text_color(t.dim)
+              .child(`${m.name}: ${m.reason || m.state}`),
+          ),
+        ),
     )
 }

@@ -11,7 +11,7 @@ const header = (t: Theme): Element => {
   return h_flex()
     .size_full()
     .pl(lightsShown() ? LIGHTS_INSET : INSET)
-    .pr(12)
+    .pr(16)
     .pt(liveMetrics().pad)
     .items_center()
     .bg(t.chrome)

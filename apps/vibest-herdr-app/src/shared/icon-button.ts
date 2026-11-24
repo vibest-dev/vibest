@@ -2,6 +2,9 @@ import { type Context, div, type Element, svg } from "gpui-kit"
 
 import type { Theme } from "./theme-colors.ts"
 
+export const BUTTON = 24
+export const ICON = 16
+
 export const icon = (name: string): string => (name.endsWith(".svg") ? name : `mods/workspace-chrome/${name}.svg`)
 
 export const iconButton = (
@@ -9,7 +12,7 @@ export const iconButton = (
   id: string,
   name: string,
   action: (cx: Context) => void,
-  { size = 28, on = false }: { readonly size?: number; readonly on?: boolean } = {},
+  { size = BUTTON, on = false }: { readonly size?: number; readonly on?: boolean } = {},
 ): Element =>
   div()
     .id(id)
@@ -28,4 +31,4 @@ export const iconButton = (
       cx.stop_propagation()
       action(cx)
     })
-    .child(svg(icon(name)).size(16))
+    .child(svg(icon(name)).size(ICON))

@@ -2,7 +2,8 @@ import { h_flex } from "gpui-base"
 import { type Color, div, type Element, image, svg } from "gpui-kit"
 import { type PaneInfo, run } from "herdr"
 
-import { INSET, SMALL, TEXT } from "../../shared/metrics.ts"
+import { CONTENT, HEADER_X } from "../../shared/metrics.ts"
+import { SMALL, TEXT } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import { paneName, shortFolder } from "./header.ts"
 
@@ -10,22 +11,24 @@ const programIcon = (p: PaneInfo, color: Color): Element | null => {
   if (!p.program?.icon) return null
 
   return p.program.tint
-    ? svg(p.program.icon).size(14).flex_none().text_color(color)
-    : image(p.program.icon).w(14).h(14).flex_none()
+    ? svg(p.program.icon).size(16).flex_none().text_color(color)
+    : image(p.program.icon).w(16).h(16).flex_none()
 }
+
+const BUTTON_PAD = 4
 
 const button = (t: Theme, id: string, name: string, command: string, args: Record<string, string>): Element =>
   div()
     .id(id)
-    .p(3)
-    .rounded(4)
+    .p(BUTTON_PAD)
+    .rounded(8)
     .text_color(t.dim)
     .hover((s) => s.bg(t.hover).text_color(t.foreground))
     .on_click((_e, cx) => {
       cx.stop_propagation()
       run(command, args)
     })
-    .child(svg(`mods/pane/${name}.svg`).size(14))
+    .child(svg(`mods/pane/${name}.svg`).size(16))
 
 export const paneHeader = (t: Theme, p: PaneInfo, home: string): Element => {
   const pane = p.pane
@@ -34,37 +37,37 @@ export const paneHeader = (t: Theme, p: PaneInfo, home: string): Element => {
   return h_flex()
     .id(`pane-head-${pane}`)
     .size_full()
-    .pl(5)
-    .pr(8)
-    .pt(INSET)
-    .gap(8)
+    .pl(HEADER_X)
+    .pr(HEADER_X - BUTTON_PAD)
+    .pt(CONTENT)
+    .gap(4)
     .items_center()
     .bg(t.background)
-    .text_size(TEXT)
+    .text_size(TEXT())
     .on_click(() => run("pane.focus", { pane }))
     .when(pic !== null, (el) => el.child(pic))
     .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(paneName(p)))
     .child(div().flex_1().truncate().text_color(t.dim).child(shortFolder(p.cwd, home)))
     .when(p.status === "working", (el) =>
-      el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)),
+      el.child(svg("mods/workspace-chrome/spinner.svg").size(16).flex_none().text_color(t.working).spin(900)),
     )
     .when(p.status === "blocked", (el) =>
       el.child(
         div()
           .flex_none()
-          .px(6)
-          .h(18)
+          .px(8)
+          .h(16)
           .flex()
           .items_center()
-          .rounded(5)
+          .rounded(8)
           .bg(`${t.blocked}26`)
-          .text_size(SMALL)
+          .text_size(SMALL())
           .font_semibold()
           .text_color(t.blocked)
           .child("Needs you"),
       ),
     )
-    .when(p.status === "done", (el) => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
+    .when(p.status === "done", (el) => el.child(div().size(8).flex_none().rounded(4).bg(t.done)))
     .when(p.focused, (el) =>
       el
         .child(button(t, `ph-r-${pane}`, "split-right", "pane.split", { direction: "right", pane }))

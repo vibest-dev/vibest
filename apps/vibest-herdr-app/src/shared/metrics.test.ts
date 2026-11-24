@@ -5,7 +5,7 @@ import { fitLayout, metrics } from "./metrics.ts"
 const tree = (bar: number, lights: number[], header = 40) => ({
   id: "root",
   traffic_lights: lights,
-  terminal_padding: [8, 8],
+  terminal_padding: [4, 4],
   children: [
     { id: "sidebar", children: [{ id: "sidebar-header", size: { px: bar } }] },
     {
@@ -23,36 +23,62 @@ const tree = (bar: number, lights: number[], header = 40) => ({
 })
 
 describe("metrics", () => {
-  const fixed = 30 + 8 + 1 + 36 + 8 + 1 + 8
-
-  it("gives a third of what whole terminal rows leave over to the bars and the rest to the pane head", () => {
-    expect(metrics(tree(30, [13, 11]), fixed + 21 * 43, 14)).toEqual({
-      bar: 30,
-      pad: 8,
-      head: 36,
-      searchTop: 11,
-      lights: [13, 11],
-    })
-    expect(metrics(tree(30, [13, 11]), fixed + 21 * 43 + 6, 14)).toEqual({
-      bar: 32,
-      pad: 8,
-      head: 40,
-      searchTop: 13,
-      lights: [13, 12],
-    })
-    expect(metrics(tree(30, [13, 11]), fixed + 21 * 43 + 20.6, 14)).toMatchObject({ bar: 36, head: 50 })
+  it("keeps the bars at 32 and the pane head at 24 plus 4 above and below it, whatever the window height", () => {
+    expect(metrics(tree(30, [13, 11]))).toEqual({ bar: 32, pad: 8, head: 32, searchTop: 9, lights: [13, 12] })
   })
 })
 
 describe("fitLayout", () => {
-  const m = { bar: 32, pad: 8, head: 40, searchTop: 13, lights: [13, 12] as const }
+  const m = { bar: 32, pad: 8, head: 32, searchTop: 13, lights: [13, 12] as const }
 
   it("resizes the bars and the pane header, and moves the traffic lights", () => {
-    expect(fitLayout(tree(30, [13, 11]), m)).toEqual(tree(32, [13, 12], 32))
+    expect(fitLayout(tree(30, [13, 11]), m)).toEqual(tree(32, [13, 12], 28))
   })
 
   it("returns nothing when the layout already fits", () => {
-    expect(fitLayout(tree(32, [13, 12], 32), m)).toBeNull()
+    expect(fitLayout(tree(32, [13, 12], 28), m)).toBeNull()
     expect(fitLayout(null, m)).toBeNull()
+  })
+})
+
+describe("left gutter", () => {
+  const m = { bar: 32, pad: 8, head: 32, searchTop: 13, lights: [13, 12] as const }
+
+  const layout = (sidebarHidden: boolean, gutterHidden: boolean) => ({
+    ...tree(32, [13, 12], 28),
+    children: [
+      { id: "sidebar", hidden: sidebarHidden },
+      { id: "left-gutter", hidden: gutterHidden },
+    ],
+  })
+
+  it("shows only while the sidebar is hidden, so the panes never touch the window edge", () => {
+    expect(fitLayout(layout(true, true), m)?.children?.[1]).toEqual({ id: "left-gutter", hidden: false })
+    expect(fitLayout(layout(false, false), m)?.children?.[1]).toEqual({ id: "left-gutter", hidden: true })
+    expect(fitLayout(layout(false, true), m)).toBeNull()
+  })
+})
+
+describe("main chat", () => {
+  const m = { bar: 32, pad: 8, head: 32, searchTop: 13, lights: [13, 12] as const }
+
+  const layout = (active: string, terminal: string) => ({
+    ...tree(32, [13, 12], 28),
+    children: [
+      {
+        id: "main",
+        active,
+        children: [{ id: "terminals" }, { id: "chat", content: { terminal } }],
+      },
+    ],
+  })
+
+  it("shows the project's main conversation in the chat block", () => {
+    expect(fitLayout(layout("terminals", ""), m, "mac-mini/t1pk")).toEqual(layout("chat", "mac-mini/t1pk"))
+  })
+
+  it("falls back to the tabs when no main conversation is running", () => {
+    expect(fitLayout(layout("chat", "t7"), m, null)).toEqual(layout("terminals", "t7"))
+    expect(fitLayout(layout("chat", "t7"), m, "t7")).toBeNull()
   })
 })

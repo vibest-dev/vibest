@@ -2,17 +2,21 @@
   "id": "root",
   "type": "row",
   "titlebar": "none",
-  "theme": { "light": "vibest-light", "dark": "vibest-dark" },
+  "theme": {
+    "light": "vibest-light",
+    "dark": "vibest-dark"
+  },
   "traffic_lights": [13, 12],
   "preview": "layouts/vibest.svg",
-  "terminal_padding": [8, 8],
+  "terminal_padding": [4, 4],
   "background": "chrome",
-  "padding": [0, 8],
   "children": [
     {
       "id": "sidebar",
       "type": "column",
-      "size": { "px": 256 },
+      "size": {
+        "px": 256
+      },
       "min": 208,
       "max": 480,
       "background": "chrome",
@@ -21,18 +25,62 @@
         {
           "id": "sidebar-header",
           "type": "block",
-          "size": { "px": 32 },
+          "size": {
+            "px": 32
+          },
           "window_drag": true,
-          "content": { "mod": "vibest-sidebar-header" }
+          "content": {
+            "mod": "vibest-sidebar-header"
+          }
         },
-        { "id": "sidebar-threads", "type": "block", "content": { "mod": "vibest-sidebar-threads" } },
+        {
+          "id": "sidebar-lists",
+          "type": "column",
+          "children": [
+            {
+              "id": "projects",
+              "type": "block",
+              "size": {
+                "weight": 3
+              },
+              "content": {
+                "mod": "vibest-projects"
+              },
+              "min": 128
+            },
+            {
+              "id": "spaces",
+              "type": "block",
+              "size": {
+                "weight": 2
+              },
+              "min": 90,
+              "content": {
+                "mod": "vibest-spaces"
+              }
+            }
+          ]
+        },
         {
           "id": "sidebar-footer",
           "type": "block",
-          "size": { "px": 69 },
-          "content": { "mod": "workspace-chrome", "props": { "footer": true } }
+          "size": {
+            "px": 32
+          },
+          "content": {
+            "mod": "vibest-sidebar-footer"
+          }
         }
       ]
+    },
+    {
+      "id": "left-gutter",
+      "type": "column",
+      "size": {
+        "px": 4
+      },
+      "hidden": true,
+      "children": []
     },
     {
       "id": "workspace",
@@ -43,49 +91,115 @@
         {
           "id": "topbar",
           "type": "block",
-          "size": { "px": 32 },
+          "size": {
+            "px": 32
+          },
           "window_drag": true,
-          "content": { "mod": "vibest-topbar" }
+          "content": {
+            "mod": "vibest-topbar"
+          }
         },
         {
           "id": "workspace-body",
           "type": "row",
-          "padding": [8, 0],
-          "gap": 8,
+          "padding": [4, 0],
+          "gap": 4,
           "children": [
             {
-              "id": "terminals",
-              "type": "block",
-              "content": {
-                "tab": "active",
-                "pane": {
-                  "gap": 8,
-                  "radius": 10,
+              "id": "main",
+              "type": "stack",
+              "active": "terminals",
+              "children": [
+                {
+                  "id": "terminals",
+                  "type": "block",
+                  "content": {
+                    "tab": "active",
+                    "pane": {
+                      "gap": 4,
+                      "radius": 8,
+                      "background": "background",
+                      "border": {
+                        "width": 1,
+                        "color": "border"
+                      },
+                      "focus": {
+                        "width": 1,
+                        "color": "border"
+                      },
+                      "lone": true,
+                      "header": {
+                        "content": {
+                          "mod": "vibest-pane"
+                        },
+                        "height": 32,
+                        "position": "top",
+                        "reveal": "always"
+                      }
+                    }
+                  }
+                },
+                {
+                  "id": "chat",
+                  "type": "block",
+                  "radius": 8,
                   "background": "background",
-                  "border": { "width": 1, "color": "border" },
-                  "focus": { "width": 1, "color": "border" },
-                  "lone": true,
-                  "header": { "content": { "mod": "vibest-pane" }, "height": 40, "position": "top", "reveal": "always" }
+                  "border": {
+                    "width": 1,
+                    "color": "border"
+                  },
+                  "content": {
+                    "terminal": ""
+                  }
                 }
-              }
+              ]
             },
             {
               "id": "right-panel",
               "type": "stack",
-              "hidden": true,
-              "size": { "px": 540 },
+              "hidden": false,
+              "size": {
+                "px": 360
+              },
               "min": 360,
               "max": 900,
-              "active": "changes",
+              "active": "agents",
               "children": [
-                { "id": "changes", "type": "block", "content": { "mod": "changes" } },
-                { "id": "files", "type": "block", "content": { "mod": "vibest-files" } },
-                { "id": "agents", "type": "block", "content": { "mod": "vibest-agents" } }
+                {
+                  "id": "changes",
+                  "type": "block",
+                  "content": {
+                    "mod": "changes"
+                  }
+                },
+                {
+                  "id": "files",
+                  "type": "block",
+                  "content": {
+                    "mod": "vibest-files"
+                  }
+                },
+                {
+                  "id": "agents",
+                  "type": "block",
+                  "content": {
+                    "mod": "vibest-agents"
+                  }
+                }
               ]
             }
           ]
         }
       ]
+    },
+    {
+      "id": "right-gutter",
+      "type": "column",
+      "size": {
+        "px": 4
+      },
+      "children": []
     }
-  ]
+  ],
+  "gap": 0
 }
