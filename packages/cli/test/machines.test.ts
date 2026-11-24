@@ -528,7 +528,7 @@ describe("another machine's vibestd runs agents here", () => {
         b.raw.Send({ id: session, message: "x" }),
         b.raw.Peek({ id: session }),
         b.raw.Interrupt({ id: session }),
-        b.raw.Remove({ id: session }),
+        b.raw.Archive({ id: session }),
       ] as ReadonlyArray<Effect.Effect<unknown, unknown>>)
         assert.strictEqual(failureTag(yield* Effect.exit(a2(call))), "NoSuchSession")
       const sameProjectOtherPeer = yield* b.as(randomId(), "p1")
@@ -589,7 +589,7 @@ describe("another machine's vibestd runs agents here", () => {
           b.raw.Send({ id: session, message: "pretending" }),
           b.raw.Peek({ id: session }),
           b.raw.Interrupt({ id: session }),
-          b.raw.Remove({ id: session }),
+          b.raw.Archive({ id: session }),
         ] as ReadonlyArray<Effect.Effect<unknown, unknown>>)
           assert.strictEqual(failureTag(yield* Effect.exit(z(call))), "NoSuchSession")
         yield* b.db.remote.addMachine({ name: "my-workstation", target: "a-host", vibestdId: a })

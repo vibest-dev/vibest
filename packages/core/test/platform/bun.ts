@@ -50,7 +50,7 @@ export const memoryPluginHost = Layer.mergeAll(
   }),
   Layer.succeed(Archive.Service, {
     undoCutOffStart: () => noSessions,
-    remove: () => noSessions,
+    archive: () => noSessions,
     stop: () => noSessions,
     finishArchive: () => noSessions,
   }),

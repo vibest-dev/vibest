@@ -46,9 +46,9 @@ the ordinary RPC protocol (`packages/client/src/pipe.ts`: a socket over the chil
 Every request on the pipe carries `vibest-caller: peer`, `vibest-peer: <A's identity id>` and, when it acts for a
 project, `vibest-peer-project: <A's project id>`. B refuses every peer request except `Ping` and `Peer.Hello` until
 that id has a `peer` row, and refuses every method not in `PEER_CALLS` (`packages/protocol/src/rpc.ts`). A forwarded
-call (`FORWARDED_CALLS`: `Get`, `List`, `Send`, `Interrupt`, `Remove`, `Peek`) also carries `vibest-peer-by`, which is
+call (`FORWARDED_CALLS`: `Get`, `List`, `Send`, `Interrupt`, `Archive`, `Peek`) also carries `vibest-peer-by`, which is
 `user` or the id of the session on A that made the call, and B refuses it without that header. A session `X` reaches
-on B only the sessions whose `origin_session` is `X` (`List`, `Get`, `Send`, `Interrupt`, `Remove`, `Peek`), and what it
+on B only the sessions whose `origin_session` is `X` (`List`, `Get`, `Send`, `Interrupt`, `Archive`, `Peek`), and what it
 sends them is signed with `X`; `user` reaches every session A's project started there. This
 scopes by mistake, not by trust: whoever can run the ssh command already acts as that user on B.
 
@@ -125,7 +125,7 @@ the peer's rows in `seq` order, then each new one after its commit; an item over
 same request id finds it and queues nothing. Archiving a peer session (`session.ended`) deletes its unacknowledged
 rows.
 
-`List`, `Get`, `Send`, `Interrupt`, `Remove` and `Peek` from a peer resolve a session id only among sessions whose
+`List`, `Get`, `Send`, `Interrupt`, `Archive` and `Peek` from a peer resolve a session id only among sessions whose
 origin has that peer and that project; any other session is `NoSuchSession`.
 
 ## Cloning a project
@@ -194,7 +194,7 @@ in that runtime and fails with `NoRuntime` (`<B>: the runtime "x" is not
 loaded; loaded: …`) when it does not have it. With none of the three, B's own hooks choose, as for a local run.
 An address `<name>/<id>` is resolved once, at the entry of each method, into a local id or a machine and an id; a
 bare id is always local and nothing is searched across machines. `vibest result|send|interrupt|archive|peek
-<name>/<id>` forward `Get`, `Send`, `Interrupt`, `Remove` and `Peek` with `vibest-peer-project` set to the caller's
+<name>/<id>` forward `Get`, `Send`, `Interrupt`, `Archive` and `Peek` with `vibest-peer-project` set to the caller's
 project and `vibest-peer-by` set to the calling session, or `user`. `List` (and `vibest ls`) answers `{ sessions, machines }`, as `hc ls` does: `sessions` has the local rows and
 each connected machine's rows (ids `<name>/<id>`, `machine` set), asked of all machines at once; `machines` lists every
 added machine, connected or not, with `state`, `since` and, when it is not connected, `reason`; a connected

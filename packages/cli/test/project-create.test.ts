@@ -343,7 +343,7 @@ describe("multi-repository isolated workspace", () => {
 
       yield* fakeGit.checkout(sdkWt, { state: { branch: "feat/sdk", pushed: false, saved: true, why: "" } })
       yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: false, why: "uncommitted changes" } })
-      const kept = (yield* sessions.remove(id))!
+      const kept = (yield* sessions.archive(id))!
       assert.strictEqual(kept.worktree, "kept")
       assert.match(kept.reasons.join("\n"), /app: worktree kept: uncommitted changes/)
       assert.strictEqual(kept.branch, "sdk=feat/sdk")
@@ -351,7 +351,7 @@ describe("multi-repository isolated workspace", () => {
       assert.isFalse(yield* fs.exists(sdkWt))
 
       yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: true, why: "" } })
-      const removed = (yield* sessions.remove(id))!
+      const removed = (yield* sessions.archive(id))!
       assert.strictEqual(removed.worktree, "removed")
       assert.isFalse(yield* fs.exists(workspace))
     }),

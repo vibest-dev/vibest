@@ -202,7 +202,7 @@ describe("Watch with remote machines", () => {
 
         assert.strictEqual(added.session.projectId, bProject)
 
-        yield* b.cli(b.raw.Remove({ id: bSub }))
+        yield* b.cli(b.raw.Archive({ id: bSub }))
 
         const ended = yield* cliWatch.next(
           (e): e is Extract<WatchEvent, { _tag: "SessionEnded" }> =>

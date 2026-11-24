@@ -35,7 +35,7 @@ describe.concurrent("an exited session", () => {
         { agent: "general" },
       )
       const [other] = yield* w.db.session.processesAt(RUNTIME, address)
-      const out = (yield* w.sessions.remove(w.id))!
+      const out = (yield* w.sessions.archive(w.id))!
       assert.deepStrictEqual(yield* w.herdr.callsTo("close"), [])
       assert.include(out.reasons.join("\n"), `left open: session ${other!.sessionId} runs in it`)
     }),
@@ -73,10 +73,10 @@ describe.concurrent("vibest archive", () => {
       )
       const worktree = yield* sessionWorktree(owner.id)
       assert.include(
-        (yield* owner.sessions.remove(owner.id, { keepWorktree: true }))!.reasons.join("\n"),
+        (yield* owner.sessions.archive(owner.id, { keepWorktree: true }))!.reasons.join("\n"),
         "--keep-worktree",
       )
-      const out = (yield* owner.sessions.remove(id))!
+      const out = (yield* owner.sessions.archive(id))!
       assert.strictEqual(out.worktree, "removed")
       assert.isFalse(yield* fs.exists(worktree))
     }),
