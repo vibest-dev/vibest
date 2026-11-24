@@ -15,6 +15,7 @@ import { Effect, Predicate, Stream } from "effect"
 
 import { integrationOf, processOf, reader } from "../gates.ts"
 import * as Listing from "../listing.ts"
+import { RemoteWatch } from "../machine/remote-watch.ts"
 import { ListScope } from "../machine/remote.ts"
 import { WatchFeed } from "../watch-feed.ts"
 import * as CallerChecks from "./caller.ts"
@@ -30,6 +31,7 @@ export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const runtimes = yield* Runtimes.Service
   const watchFeed = yield* WatchFeed.Service
+  const remoteWatch = yield* RemoteWatch.Service
   const bus = yield* Bus.Service
   const integration = yield* Integration.Service
   const starts = yield* Starts.Service
@@ -344,16 +346,34 @@ export const make = Effect.gen(function* () {
     Watch: () =>
       Stream.unwrap(
         Effect.gen(function* () {
-          yield* userOnly("Watch")
-          const changes = yield* watchFeed.subscribe
+          const caller = yield* Caller
+
+          if (!Predicate.isTagged(caller, "Peer")) yield* userOnly("Watch")
+
+          const localChanges = yield* watchFeed.subscribe
           const sessionRows = yield* watched(yield* listed(ListScope.All(), false))
+          const localProjects = yield* snapshotProjects(sessionRows)
+
+          if (Predicate.isTagged(caller, "Peer")) {
+            const snapshot: WatchEvent = Listing.WatchEvents.Snapshot({
+              projects: localProjects,
+              sessions: sessionRows,
+              machines: [],
+            })
+
+            return Stream.concat(Stream.make(snapshot), localChanges)
+          }
+
+          const remoteChanges = yield* remoteWatch.subscribe
+          const remote = yield* remoteWatch.snapshot
 
           const snapshot: WatchEvent = Listing.WatchEvents.Snapshot({
-            projects: yield* snapshotProjects(sessionRows),
-            sessions: sessionRows,
+            projects: [...localProjects, ...remote.projects],
+            sessions: [...sessionRows, ...remote.sessions],
+            machines: remote.machines,
           })
 
-          return Stream.concat(Stream.make(snapshot), changes)
+          return Stream.concat(Stream.make(snapshot), Stream.merge(localChanges, remoteChanges))
         }),
       ),
 

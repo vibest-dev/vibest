@@ -40,6 +40,7 @@ import * as Listing from "./listing.ts"
 import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
 import { Peer } from "./machine/peer.ts"
+import { RemoteWatch } from "./machine/remote-watch.ts"
 import { Remote } from "./machine/remote.ts"
 import { services } from "./services.ts"
 import { UpdateCheck } from "./update-check.ts"
@@ -58,7 +59,9 @@ export const handlersCore = Layer.mergeAll(
   WorktreeHandlers.layer,
 ).pipe(Layer.provide(RemoteHandlers.routingLayer.pipe(Layer.provideMerge(CallerChecks.layer))))
 
-export const handlers = handlersCore.pipe(Layer.provide(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer))))
+export const handlers = handlersCore.pipe(
+  Layer.provide(Layer.merge(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer)), RemoteWatch.layer)),
+)
 
 const socketServerRpcLayer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(CallerGateLive),
@@ -102,6 +105,7 @@ export const handlersNode = LayerNode.make({
     Listing.node,
     Load.node,
     Machines.node,
+    RemoteWatch.node,
     Peer.node,
     Plugins.node,
     Processes.node,

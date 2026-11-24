@@ -18,6 +18,50 @@ const watched = [
   { type: "runtime.reset" },
 ] as const
 
+export const watchFanout = () => {
+  const watchers = new Set<Queue.Queue<WatchEvent, WatchLagged>>()
+
+  const failAll = (message: string) =>
+    Effect.sync(() => {
+      const failed = Array.from(watchers)
+      watchers.clear()
+
+      for (const watcher of failed) Queue.failCauseUnsafe(watcher, Cause.fail(new WatchLagged({ message })))
+    })
+
+  const publish = (event: WatchEvent) =>
+    Effect.sync(() => {
+      for (const watcher of watchers) {
+        if (Queue.offerUnsafe(watcher, event)) continue
+        watchers.delete(watcher)
+        Queue.failCauseUnsafe(
+          watcher,
+          Cause.fail(
+            new WatchLagged({
+              message: `Watch fell ${WATCH_BACKLOG} events behind; reconnect for a new Snapshot`,
+            }),
+          ),
+        )
+      }
+    })
+
+  const subscribe = Effect.acquireRelease(
+    Queue.dropping<WatchEvent, WatchLagged>(WATCH_BACKLOG).pipe(
+      Effect.tap((queue) => Effect.sync(() => watchers.add(queue))),
+    ),
+    (queue) => Effect.sync(() => watchers.delete(queue)).pipe(Effect.andThen(Queue.shutdown(queue))),
+  ).pipe(Effect.map(Stream.fromQueue))
+
+  return {
+    publish,
+    failAll,
+    subscribe,
+    get size() {
+      return watchers.size
+    },
+  }
+}
+
 export interface Interface {
   readonly subscribe: Effect.Effect<Stream.Stream<WatchEvent, WatchLagged>, never, Scope.Scope>
 }
@@ -29,43 +73,19 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const listing = yield* Listing.Service
-    const watchers = new Set<Queue.Queue<WatchEvent, WatchLagged>>()
-
-    const failWatchers = (message: string) =>
-      Effect.sync(() => {
-        const failed = Array.from(watchers)
-        watchers.clear()
-
-        for (const watcher of failed) Queue.failCauseUnsafe(watcher, Cause.fail(new WatchLagged({ message })))
-      })
-
-    const publish = (event: WatchEvent) =>
-      Effect.sync(() => {
-        for (const watcher of watchers) {
-          if (Queue.offerUnsafe(watcher, event)) continue
-          watchers.delete(watcher)
-          Queue.failCauseUnsafe(
-            watcher,
-            Cause.fail(
-              new WatchLagged({
-                message: `Watch fell ${WATCH_BACKLOG} events behind; reconnect for a new Snapshot`,
-              }),
-            ),
-          )
-        }
-      })
+    const fanout = watchFanout()
 
     const publishBatch = (batch: ReadonlyArray<BusEvent>) =>
       Effect.suspend(() =>
-        watchers.size === 0
+        fanout.size === 0
           ? Effect.void
           : listing.watchDeltas(batch).pipe(
-              Effect.flatMap(Effect.forEach(publish, { discard: true })),
+              Effect.flatMap(Effect.forEach(fanout.publish, { discard: true })),
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
                   ? Effect.failCause(cause)
                   : Effect.logError("Watch could not read a change", cause).pipe(
-                      Effect.andThen(failWatchers("Watch could not read a change; reconnect for a new Snapshot")),
+                      Effect.andThen(fanout.failAll("Watch could not read a change; reconnect for a new Snapshot")),
                     ),
               ),
             ),
@@ -77,14 +97,7 @@ export const layer = Layer.effect(
       Effect.forkScoped,
     )
 
-    return Service.of({
-      subscribe: Effect.acquireRelease(
-        Queue.dropping<WatchEvent, WatchLagged>(WATCH_BACKLOG).pipe(
-          Effect.tap((queue) => Effect.sync(() => watchers.add(queue))),
-        ),
-        (queue) => Effect.sync(() => watchers.delete(queue)).pipe(Effect.andThen(Queue.shutdown(queue))),
-      ).pipe(Effect.map(Stream.fromQueue)),
-    })
+    return Service.of({ subscribe: fanout.subscribe })
   }),
 )
 
