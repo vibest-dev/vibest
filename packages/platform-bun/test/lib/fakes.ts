@@ -62,10 +62,7 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
         const payload =
           input !== undefined &&
           !("runtime" in input) &&
-          (method === "Spawn" ||
-            method === "Launch" ||
-            method === "Project.EntrySession" ||
-            method === "Project.RunningEntry")
+          (method === "Spawn" || method === "Launch" || method === "Session.Claim")
             ? { ...input, runtime: TEST_HERDR }
             : input
 
@@ -80,12 +77,9 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
     const db = yield* Db.Service
-    const projectId = yield* db.session.projectOfSession(sessionId)
+    const row = yield* db.session.getSession(sessionId)
 
-    if (projectId === undefined) return null
-    const entry = yield* db.session.entryOf(projectId)
-
-    return entry?.id === sessionId ? (entry.process?.harnessSessionId ?? null) : null
+    return row?.process?.harnessSessionId ?? null
   })
 
 const STDIN_FROM_FILE = 'f=$1; shift; exec "$@" <"$f"'

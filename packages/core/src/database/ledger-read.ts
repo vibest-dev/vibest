@@ -42,7 +42,6 @@ export type SessionColumns = {
   readonly readyAt: number | null
   readonly pEnded: number | null
   readonly parent: string | null
-  readonly entry: number
   readonly pEndReason: string | null
   readonly oId: number | null
   readonly oProcess: number | null
@@ -122,7 +121,6 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => ({
   lastActive: row.activeAt ?? row.createdAt,
   endedAt: row.endedAt,
   parentId: row.parent,
-  entry: row.entry === 1,
   process: processOf(row, live.integration ?? integrationOf(row)),
   openExecution: openExecutionOf(row),
   lastExecution: lastExecutionOf(row),
@@ -137,7 +135,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
     sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.agent, s.name,
         s.created_at, s.ended_at, s.active_at, s.parent_session_id AS parent,
-        EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id) AS entry,
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.harness_session_id, p.placed_at, p.ready_at,
         p.ended_at AS p_ended, p.end_reason AS p_end_reason,

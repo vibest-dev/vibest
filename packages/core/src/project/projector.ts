@@ -1,10 +1,4 @@
-import {
-  type FactOf,
-  ProjectCreated,
-  ProjectEntryChanged,
-  ProjectMoved,
-  ProjectRepositoriesChanged,
-} from "@vibest/schema/event"
+import { type FactOf, ProjectCreated, ProjectMoved, ProjectRepositoriesChanged } from "@vibest/schema/event"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -44,10 +38,6 @@ export const layer = Layer.effectDiscard(
     )
     yield* bus.project(ProjectRepositoriesChanged, (fact) =>
       putRepositories(sql, fact.projectId!, fact.data.repositories),
-    )
-    yield* bus.project(
-      ProjectEntryChanged,
-      (fact) => sql`UPDATE project SET entry_session_id = ${fact.data.session ?? null} WHERE id = ${fact.projectId!}`,
     )
   }),
 )

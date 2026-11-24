@@ -16,6 +16,6 @@ export const tempDirectory = (prefix: string) =>
   }).pipe(Effect.orDie)
 
 export const entryPending = (db: Db.Interface, projectId: string) =>
-  Effect.flatMap(db.session.entryOf(projectId), (entry) =>
+  Effect.flatMap(db.session.latestRoot(projectId), (entry) =>
     entry === undefined ? Effect.succeed([]) : db.inbox.pendingInbox(entry.id),
   )

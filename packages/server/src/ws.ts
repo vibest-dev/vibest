@@ -24,8 +24,9 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as NetAddress from "effect/net/NetAddress"
 import { RpcMessage, RpcSerialization, RpcServer } from "effect/rpc"
 
+import { AdmissionLive } from "./gates.ts"
 import { group } from "./handlers/group.ts"
-import { handlers, handlersNode } from "./server.ts"
+import { admissionNode, handlers, handlersNode } from "./server.ts"
 
 export const WsEndpoint = Schema.Struct({
   url: Schema.String,
@@ -42,7 +43,24 @@ const WsConfigFile = Schema.Struct({
   websocket: Schema.optional(Schema.Boolean),
 })
 
-const WsRpcs = group(["Watch"])
+const WsRpcs = group([
+  "Watch",
+  "Launch",
+  "Project.Open",
+  "Project.Create",
+  "Send",
+  "Session.Link",
+  "Session.Unlink",
+  "Interrupt",
+  "Stop",
+  "Archive",
+  "Peek",
+  "Get",
+  "Session.Seen",
+  "Machine.List",
+  "Harnesses.List",
+  "Agents.List",
+])
 
 const MAX_FRAME_BYTES = 64 * 1024
 
@@ -158,7 +176,7 @@ const wsSerialization = RpcSerialization.RpcSerialization.of({
           : []
 
         const normalizedParams =
-          frame.value.method === "Watch" &&
+          (frame.value.method === "Watch" || frame.value.method === "Machine.List") &&
           Predicate.isObject(frame.value.params) &&
           !Array.isArray(frame.value.params) &&
           Object.keys(frame.value.params).length === 0
@@ -340,10 +358,18 @@ const wsLayer = Layer.unwrap(
   }),
 )
 
-export const layer = wsLayer.pipe(Layer.provide(handlers))
+export const layer = wsLayer.pipe(Layer.provide(Layer.mergeAll(handlers, AdmissionLive)))
 
 export const node = LayerNode.make({
   service: Service,
   layer: wsLayer,
-  deps: [handlersNode, pluginLoaderNode, App.node, wsServerLayer, PlatformNode.fileSystem, PlatformNode.layout],
+  deps: [
+    handlersNode,
+    admissionNode,
+    pluginLoaderNode,
+    App.node,
+    wsServerLayer,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+  ],
 })

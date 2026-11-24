@@ -288,7 +288,7 @@ describe("multi-repository isolated workspace", () => {
       const app = yield* repositoryWithOneCommitOnMain(root, "app")
       const sdk = yield* repositoryWithOneCommitOnMain(root, "sdk")
 
-      const entry = yield* db.session.startEntry(
+      const entry = yield* db.session.startRoot(
         yield* projectOf(root),
         "pi",
         false,
@@ -371,7 +371,7 @@ describe("multi-repository isolated workspace", () => {
       yield* repositoryWithOneCommitOnMain(root, "sdk")
       const raw = yield* connect(layout.socket)
 
-      const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["Project.EntrySession"]({
+      const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["Session.Claim"]({
         agent: "coordinator",
         harness: "pi",
         fresh: false,
@@ -413,7 +413,7 @@ describe("multi-repository isolated workspace", () => {
       const raw = yield* connect((yield* Layout).socket)
       const cli = authed(raw, cliHeaders(root))
 
-      const { sessionId, projectId } = yield* cli["Project.EntrySession"]({
+      const { sessionId, projectId } = yield* cli["Session.Claim"]({
         agent: "coordinator",
         harness: "pi",
         fresh: false,

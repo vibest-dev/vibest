@@ -60,7 +60,7 @@ describe("vibest run --file", () => {
         yield* fs.writeFileString(other, "second\n")
         yield* fs.writeFile(binary, new Uint8Array([0x68, 0x00, 0xff]))
 
-        const entry = yield* db.session.startEntry(
+        const entry = yield* db.session.startRoot(
           yield* projectOf(repo),
           "pi",
           false,

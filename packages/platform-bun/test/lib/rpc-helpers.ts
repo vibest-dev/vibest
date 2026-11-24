@@ -43,8 +43,8 @@ export const asEntry = (raw: Effect.Success<typeof client>, repositoryRoot: stri
     const projectId = yield* projectOf(repositoryRoot)
 
     const entry =
-      (yield* db.session.entryOf(projectId))?.id ??
-      (yield* db.session.startEntry(
+      (yield* db.session.latestRoot(projectId))?.id ??
+      (yield* db.session.startRoot(
         projectId,
         "pi",
         false,

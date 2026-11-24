@@ -57,7 +57,7 @@ const busyPiSubagent = Effect.gen(function* () {
   const sessions = yield* Session.Service
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
-  yield* db.session.startEntry(
+  yield* db.session.startRoot(
     key,
     "pi",
     false,
@@ -201,7 +201,7 @@ describe("restart in place", () => {
       const db = yield* Db.Service
       const herdr = yield* FakeRuntime
       const projectId = yield* projectOf(yield* makeRepository)
-      yield* db.session.startEntry(
+      yield* db.session.startRoot(
         projectId,
         harness,
         false,
@@ -213,7 +213,7 @@ describe("restart in place", () => {
       )
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
-      const entry = (yield* db.session.entryOf(projectId))!
+      const entry = (yield* db.session.latestRoot(projectId))!
       yield* db.session.noteConversation(entry.id, "conversation-1")
       yield* db.session.patchLive(entry.id, { pid: 100 })
 
@@ -242,7 +242,7 @@ describe("restart in place", () => {
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
       const projectId = (yield* db.session.getSession(sub))!.projectId
-      const entryId = (yield* db.session.entryOf(projectId))!.id
+      const entryId = (yield* db.session.latestRoot(projectId))!.id
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
       yield* db.session.noteConversation(entryId, "conversation-1")
@@ -317,7 +317,7 @@ describe("restart in place", () => {
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
       const projectId = yield* projectOf(yield* makeRepository)
-      yield* db.session.startEntry(
+      yield* db.session.startRoot(
         projectId,
         "pi",
         false,
@@ -328,7 +328,7 @@ describe("restart in place", () => {
         { agent: "coordinator" },
       )
       yield* herdr.seedAgent("test/coord")
-      const id = (yield* db.session.entryOf(projectId))!.id
+      const id = (yield* db.session.latestRoot(projectId))!.id
       yield* db.session.noteConversation(id, "conversation-1")
       yield* db.session.patchLive(id, { pid: 400 })
       yield* db.session.startObserved(id, "work in flight", 1)
@@ -351,7 +351,7 @@ describe("restart in place", () => {
     Effect.gen(function* () {
       const db = yield* Db.Service
       const projectId = yield* projectOf(yield* makeRepository)
-      yield* db.session.startEntry(
+      yield* db.session.startRoot(
         projectId,
         "pi",
         false,
@@ -361,7 +361,7 @@ describe("restart in place", () => {
         },
         { agent: "coordinator" },
       )
-      const id = (yield* db.session.entryOf(projectId))!.id
+      const id = (yield* db.session.latestRoot(projectId))!.id
       yield* db.session.noteConversation(id, "conversation-1")
       yield* db.session.noteIntegration(id, { version: "0.0.0-old", protocol: PROTOCOL })
       yield* db.session.patchLive(id, { ready: 1, pid: 500, integration: { version: VERSION, protocol: PROTOCOL } })

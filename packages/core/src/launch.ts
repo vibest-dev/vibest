@@ -37,10 +37,12 @@ export const withProcess = (launch: Launch, process: number | undefined): Launch
 export const withExecution = (launch: Launch, execution: number | undefined): Launch =>
   execution === undefined ? launch : { ...launch, env: { ...launch.env, VIBEST_EXECUTION: String(execution) } }
 
-export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
+export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input: {
   readonly harness: HarnessId
   readonly agent: string
   readonly root: string
+  readonly worktree?: string | undefined
+  readonly systemPrompt?: string | undefined
   readonly provider: string | null
   readonly model: string | null
   readonly session: Effect.Effect<
@@ -80,14 +82,16 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
 
   const saved = yield* input.session
 
-  const promptText = systemPrompt({
-    system: definition.system,
-    id: saved.sessionId,
-    checkout: true,
-    projectDir: layout.project(saved.projectId),
-    agents: (yield* Agents.Service).all,
-    ...(yield* projectText(layout.project(saved.projectId))),
-  })
+  const promptText =
+    input.systemPrompt ??
+    systemPrompt({
+      system: definition.system,
+      id: saved.sessionId,
+      checkout: true,
+      projectDir: layout.project(saved.projectId),
+      agents: (yield* Agents.Service).all,
+      ...(yield* projectText(layout.project(saved.projectId))),
+    })
 
   const promptPath = yield* unsafeOnly(writeSystemPrompt(saved.sessionId, promptText))
   yield* (yield* FileSystem.FileSystem)
@@ -111,7 +115,7 @@ export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
     argv: PluginHarness.harnessArgv(
       adapter,
       {
-        worktree: input.root,
+        worktree: input.worktree ?? input.root,
         projectDir: layout.project(saved.projectId),
         systemPromptFile: promptPath,
         provider: input.provider,
@@ -141,6 +145,7 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
   target: string | undefined,
   input: {
     readonly root: string
+    readonly cwd?: string | undefined
     readonly label: string
     readonly home: string
     readonly env?: Readonly<Record<string, string>> | undefined
@@ -151,7 +156,7 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
   const terminal = yield* h
     .open({
       project: input.root,
-      cwd: input.root,
+      cwd: input.cwd ?? input.root,
       launch: {
         argv: SHELL_HANDOFF,
         env: { ...input.env, VIBEST_HOME: input.home },

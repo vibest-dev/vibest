@@ -18,7 +18,7 @@ import { Project } from "@vibest/core/project"
 import { RepositoryUrl } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
-import { EntrySession } from "@vibest/core/session/entry"
+import { SessionLaunch } from "@vibest/core/session/entry"
 import { Starts } from "@vibest/core/session/starts"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { VibestRpcs } from "@vibest/protocol/rpc"
@@ -101,7 +101,7 @@ export const handlersNode = LayerNode.make({
     DaemonHandlers.identityNode,
     Inbox.node,
     Integration.node,
-    EntrySession.node,
+    SessionLaunch.node,
     Listing.node,
     Load.node,
     Machines.node,

@@ -25,7 +25,7 @@ export * as Inbox from "./inbox.ts"
 
 export type Presence = "idle" | "busy" | "gone" | "unknown"
 
-export const entryIdle = Effect.fn("Inbox.entryIdle")(function* (
+export const terminalPresence = Effect.fn("Inbox.terminalPresence")(function* (
   h: Runtime,
   terminal: RuntimeAddress,
 ): Effect.fn.Return<Presence, RuntimeError> {
