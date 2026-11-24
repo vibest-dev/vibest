@@ -60,7 +60,7 @@ describe("vibest.report-reminder", () => {
                 agent: "general",
                 title: "sub",
                 parentId: E,
-                to: [E],
+                to: [{ id: E }],
                 status: "idle",
                 lastActive: 0,
                 waiting: false,

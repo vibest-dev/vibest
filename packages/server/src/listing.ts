@@ -10,6 +10,7 @@ import {
   type SessionBrief,
   terminalOf,
 } from "@vibest/core/database/db-rows"
+import { resolveEdgeRefs } from "@vibest/core/database/session-edges"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Project } from "@vibest/core/project"
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
@@ -23,7 +24,7 @@ import {
   type WatchEvent,
   type WatchSession,
 } from "@vibest/protocol/rpc"
-import type { RuntimeAddress } from "@vibest/schema/session"
+import { canonicalTarget, type Terminal, type TerminalTarget } from "@vibest/schema/terminal"
 import { Context, Data, Effect, Layer, Predicate } from "effect"
 
 import { ListScope } from "./machine/remote.ts"
@@ -48,7 +49,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief, waiting?: Pro
   executionState: executionStateOf(session),
   projectId: session.projectId,
   runtime: session.process === null && waiting !== undefined ? waiting.runtime : runtimeOf(session),
-  address: exitedAt(session) !== null ? { machine: "local", id: "" } : terminalOf(session),
+  terminal: exitedAt(session) !== null ? null : terminalOf(session),
   worktree: session.worktree,
   repositoryRoot: session.repositoryRoot ?? null,
   git: session.git ?? null,
@@ -115,11 +116,11 @@ export const sessionListing = (deps: {
       )
     })
 
-  const seenAt = (runtime: string, address: RuntimeAddress) =>
-    address.id === ""
+  const seenAt = (terminal: Terminal | null) =>
+    terminal === null
       ? Effect.succeed(undefined)
-      : runtimes.route(runtime).pipe(
-          Effect.flatMap((rt) => (rt.seen === undefined ? Effect.succeed(undefined) : rt.seen(address))),
+      : runtimes.route(terminal.runtime).pipe(
+          Effect.flatMap((rt) => (rt.seen === undefined ? Effect.succeed(undefined) : rt.seen(terminal.target))),
           Effect.orElseSucceed(() => undefined),
         )
 
@@ -128,16 +129,17 @@ export const sessionListing = (deps: {
       const ids = infos.map((info) => info.id)
       const parents = yield* db.session.sessionParents(ids)
       const edges = yield* db.session.sessionEdges(ids)
+      const machineByRemote = new Map((yield* db.remote.machines).map((row) => [row.remoteId, row.name]))
 
       return yield* Effect.forEach(
         infos,
         (info) =>
-          Effect.map(seenAt(info.runtime, info.address), (seen): WatchSession => ({
+          Effect.map(seenAt(info.terminal), (seen): WatchSession => ({
             ...info,
             status: unseenDone(info.status, seen),
             parentId: parents.get(info.id) ?? null,
             finished: seen?.finished ?? null,
-            to: edges.get(info.id) ?? [],
+            to: resolveEdgeRefs(edges.get(info.id) ?? [], machineByRemote),
           })),
         { concurrency: "unbounded" },
       )
@@ -163,7 +165,7 @@ export const sessionListing = (deps: {
     Effect.gen(function* () {
       return yield* Effect.forEach(
         yield* db.session.listSessions({ projectId: id, stopped: false }),
-        (s) => Effect.map(seenAt(runtimeOf(s), terminalOf(s)), (seen) => unseenDone(s.status, seen)),
+        (s) => Effect.map(seenAt(terminalOf(s)), (seen) => unseenDone(s.status, seen)),
         { concurrency: "unbounded" },
       )
     })
@@ -205,17 +207,17 @@ export const sessionListing = (deps: {
       return [WatchEvents.Project({ project: { ...row, activity, repositories } })]
     })
 
-  const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
+  const sessionsAt = (runtime: string, target: TerminalTarget) =>
     Effect.gen(function* () {
       const rows = yield* db.session.listSessions()
+      const wanted = canonicalTarget(target)
 
       return rows
-        .filter(
-          (row) =>
-            runtimeOf(row) === runtime &&
-            terminalOf(row).machine === terminal.machine &&
-            terminalOf(row).id === terminal.id,
-        )
+        .filter((row) => {
+          const t = terminalOf(row)
+
+          return t !== null && t.runtime === runtime && canonicalTarget(t.target) === wanted
+        })
         .map((row) => row.id)
     })
 

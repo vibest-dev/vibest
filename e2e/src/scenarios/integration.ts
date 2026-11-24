@@ -659,11 +659,9 @@ const checks: ReadonlyArray<Check> = [
 
             const pane = (
               await w
-                .json<{ sessions: Array<{ id: string; address?: { id: string } }> }>(["ls"])
+                .json<{ sessions: Array<{ id: string; terminal?: { target: { pane?: string } } | null }> }>(["ls"])
                 .then((l) => l.sessions)
-            )
-              .find((e) => e.id === id)
-              ?.address?.id.split("/")[1]
+            ).find((e) => e.id === id)?.terminal?.target.pane
 
             const info = (await herdr(socket, "pane.process_info", { pane_id: pane ?? "" })).process_info as {
               foreground_processes?: Array<{ name: string; argv?: Array<string> | null }>

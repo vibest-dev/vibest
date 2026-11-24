@@ -302,7 +302,7 @@ describe("vibest.sock", () => {
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       }).pipe(Effect.forkChild)
 
       yield* held.reached
@@ -314,7 +314,7 @@ describe("vibest.sock", () => {
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       }).pipe(Effect.forkChild)
 
       yield* TestClock.adjust(PRESENT_TIMEOUT)
@@ -329,7 +329,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, yield* makeRepository)
 
       const enter = (harness: "pi" | "claude") =>
-        c["Session.Claim"]({ agent: "coordinator", harness, fresh: false, terminal: "test/p1" })
+        c["Session.Claim"]({ agent: "coordinator", harness, fresh: false, terminal: { id: "test/p1" } })
 
       const first = yield* enter("pi")
       assert.strictEqual(first.command.env.VIBEST_PROCESS, String(yield* db.session.currentProcessId(first.sessionId)))
@@ -359,7 +359,7 @@ describe("vibest.sock", () => {
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })
 
       yield* raw["Session.Ready"](
@@ -475,7 +475,7 @@ describe("vibest.sock", () => {
           agent: "coordinator",
           harness: "claude",
           fresh: false,
-          terminal: "test/p1",
+          terminal: { id: "test/p1" },
         })).harnessSessionId,
         "s2",
         "a conversation reported by another harness than the session's is ignored",
@@ -507,7 +507,7 @@ describe("vibest.sock", () => {
             agent: "coordinator",
             harness: "pi",
             fresh: false,
-            terminal: `test/${paneId}`,
+            terminal: { id: `test/${paneId}` },
           })
 
           return yield* asSession(raw, launched.sessionId, root)
@@ -582,7 +582,7 @@ describe("vibest.sock", () => {
             agent: "coordinator",
             harness: "pi",
             fresh: false,
-            terminal: `test/${paneId}`,
+            terminal: { id: `test/${paneId}` },
           })
 
           return yield* asSession(raw, launched.sessionId, root)
@@ -606,8 +606,8 @@ describe("vibest.sock", () => {
         ["Project.Move", c["Project.Move"]({ from: "x" })],
         ["Session.Attach", c["Session.Attach"]({ callerEnv: {} })],
         ["List", c.List({ stopped: true })],
-        ["Session.Link", c["Session.Link"]({ spec: EdgeMutual.make({ ids: [id, id] }) })],
-        ["Session.Unlink", c["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [id, id] }) })],
+        ["Session.Link", c["Session.Link"]({ spec: EdgeMutual.make({ ids: [{ id }, { id }] }) })],
+        ["Session.Unlink", c["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [{ id }, { id }] }) })],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         ["Inbox.Take", c["Inbox.Take"](undefined)],
@@ -616,7 +616,7 @@ describe("vibest.sock", () => {
         ["Session.Seen", c["Session.Seen"]({ id: "x", finished: 0 })],
         [
           "Session.Claim",
-          c["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: "test/p1" }),
+          c["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: { id: "test/p1" } }),
         ],
         ["Project.Create", c["Project.Create"]({ directory: "x", from: ["y"] })],
         ["Project.Info", c["Project.Info"]()],
@@ -664,7 +664,7 @@ describe("vibest.sock", () => {
       const entryBefore = yield* db.session.latestRoot((yield* db.session.getSession(id))!.projectId)
 
       const entryCalls: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
-        w["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: true, terminal: "test/p1" }),
+        w["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: true, terminal: { id: "test/p1" } }),
         w["Session.Attach"]({ callerEnv: {} }),
         w.Launch({ agent: "coordinator", callerEnv: {}, focus: false }),
       ]
@@ -736,7 +736,7 @@ describe("vibest.sock", () => {
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })).sessionId
 
       yield* session.Send({ id: entry, message: "first" })

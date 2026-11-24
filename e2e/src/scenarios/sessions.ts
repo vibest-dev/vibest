@@ -37,7 +37,7 @@ type Listed = {
   model: string | null
   status: string
   exitedAt: number | null
-  address: { id: string }
+  terminal: { runtime: string; target: { session?: string; pane?: string } } | null
   worktree: string
   git: ListedGit | null
   latest: { status: string; summary: string } | null
@@ -48,7 +48,7 @@ type Removed = {
   pane: string
   worktree: string
   path: string
-  branch: string | null
+  branches: Array<{ repository: string; branch: string }>
   reasons: Array<string>
 }
 
@@ -191,7 +191,7 @@ const checks: ReadonlyArray<Check> = [
             entry.harness === "pi" &&
             entry.provider === "second" &&
             entry.model === "m2" &&
-            entry.address.id.split("/")[0] === session,
+            entry.terminal?.target.session === session,
           `ls: ${JSON.stringify(entry)}`,
         )
         const worktree = await fs.realpath(entry!.worktree)
@@ -218,7 +218,7 @@ const checks: ReadonlyArray<Check> = [
         expect(
           sharer !== undefined &&
             (await fs.realpath(sharer.worktree)) === worktree &&
-            sharer.address.id !== entry!.address.id,
+            sharer.terminal?.target.pane !== entry!.terminal?.target.pane,
           `sharer: ${JSON.stringify(sharer)}, first: ${JSON.stringify(entry)}`,
         )
       } finally {
@@ -361,7 +361,7 @@ const checks: ReadonlyArray<Check> = [
         const commit = await git(w, branched.worktree, "rev-parse", "HEAD")
         const branchedOut = await archive(w, p, branched.id)
         expect(
-          branchedOut.worktree === "removed" && branchedOut.branch === "s6/branched",
+          branchedOut.worktree === "removed" && branchedOut.branches.some((b) => b.branch === "s6/branched"),
           `a branch: ${JSON.stringify(branchedOut)}`,
         )
         expect((await git(w, p.repo, "rev-parse", "s6/branched")) === commit, "the branch lost its commit")
@@ -467,7 +467,7 @@ const checks: ReadonlyArray<Check> = [
           30_000,
         )
         const waiting = (await rowOf(two!))!
-        expect(waiting.address.id === "", `the waiting subagent already has a terminal: ${JSON.stringify(waiting)}`)
+        expect(waiting.terminal === null, `the waiting subagent already has a terminal: ${JSON.stringify(waiting)}`)
         expect(
           waiting.harness === "pi" && waiting.runtime !== "",
           `the waiting subagent does not show its launch choice: ${JSON.stringify(waiting)}`,

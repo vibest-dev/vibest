@@ -1,5 +1,4 @@
 import { Db } from "@vibest/core/database/db"
-import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import { Identity } from "@vibest/core/identity"
 import { Project } from "@vibest/core/project"
 import { createProject } from "@vibest/core/project/create"
@@ -24,7 +23,7 @@ export const make = Effect.gen(function* () {
     "Project.Open": ({ directory, machine }) =>
       Effect.gen(function* () {
         const caller = yield* Caller
-        const away = machine !== undefined && machine !== LOCAL_MACHINE
+        const away = machine !== undefined
 
         if (away) {
           if (Predicate.isTagged(caller, "Remote"))

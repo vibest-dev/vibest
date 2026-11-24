@@ -22,12 +22,14 @@ export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered"
 
 export type InboxStatus = typeof InboxStatus.Type
 
-export const RuntimeAddress = Schema.Struct({
-  machine: Schema.String,
-  id: Schema.String,
-})
-
-export type RuntimeAddress = typeof RuntimeAddress.Type
+export {
+  canonicalTarget,
+  formatSessionRef,
+  formatTerminalTarget,
+  SessionRef,
+  Terminal,
+  TerminalTarget,
+} from "./terminal.ts"
 
 export const RuntimeLocation = Schema.Union([
   Schema.Struct({ socketPath: Schema.String }),

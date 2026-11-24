@@ -14,7 +14,15 @@ describe("Machine.Load", () => {
       const cli = <A, E, R>(effect: Effect.Effect<A, E, R>) => RpcClient.withHeaders(effect, cliHeaders(x.directory))
 
       const enter = (harness: string, fresh: boolean) =>
-        cli(x.raw["Session.Claim"]({ agent: "coordinator", harness, fresh, terminal: "t1", runtime: "herdr" }))
+        cli(
+          x.raw["Session.Claim"]({
+            agent: "coordinator",
+            harness,
+            fresh,
+            terminal: { id: "t1" },
+            runtime: "herdr",
+          }),
+        )
 
       const first = yield* enter("cursor", false)
       yield* cli(x.raw.Archive({ id: first.sessionId }))

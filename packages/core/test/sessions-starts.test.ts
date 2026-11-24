@@ -70,7 +70,7 @@ const claimEntry = (root: string, terminal: string, fresh = false) =>
       harness: "pulling-pi",
       fresh,
       move: false,
-      terminal,
+      terminal: { id: terminal },
       runtime: "herdr",
       provider: undefined,
       model: undefined,
@@ -260,7 +260,7 @@ describe("a cap on live harness processes", () => {
       const entry = (yield* claimEntry(repo, "pane:a")).sessionId
       yield* herdr.seedAgent("pane:a")
       yield* limitTo([{ max: 1 }])
-      assert.isNotNull(yield* entries.running(projectId, "pane:b"))
+      assert.isNotNull(yield* entries.running(projectId, { id: "pane:b" }))
       yield* sessions.stop(entry, { type: "user" })
       yield* herdr.updateAgent("pane:a", (agent) => ({ ...agent, alive: false }))
       yield* sessions.check(entry)

@@ -8,7 +8,8 @@ import {
   type Sender,
 } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
-import type { Taken, InboxRow, RuntimeAddress } from "@vibest/schema/session"
+import type { Taken, InboxRow } from "@vibest/schema/session"
+import type { TerminalTarget } from "@vibest/schema/terminal"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
 
 import { Bus } from "./bus.ts"
@@ -27,7 +28,7 @@ export type Presence = "idle" | "busy" | "gone" | "unknown"
 
 export const terminalPresence = Effect.fn("Inbox.terminalPresence")(function* (
   h: Runtime,
-  terminal: RuntimeAddress,
+  terminal: TerminalTarget,
 ): Effect.fn.Return<Presence, RuntimeError> {
   const seen = yield* agentState(h, terminal)
 

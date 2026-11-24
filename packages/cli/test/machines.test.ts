@@ -87,7 +87,7 @@ describe("the remote caller", () => {
 
       const refused: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
         client.Spawn({ agent: "general", prompt: "x", callerEnv: {} }),
-        client["Session.Claim"]({ agent: "coordinator", fresh: false, terminal: "t1" }),
+        client["Session.Claim"]({ agent: "coordinator", fresh: false, terminal: { id: "t1" } }),
         client["Daemon.Stop"]({ instance: "x" }),
       ]
 
@@ -794,20 +794,22 @@ describe("vibest run --machine and remote sessions", () => {
           a.raw.Spawn({ agent: "general", machine: "mb", prompt: "do it there", callerEnv: {} }),
         )
 
-        assert.match(spawned.id, /^mb\/[0-9a-f-]{36}$/, "the address, as every other method answers")
+        assert.match(spawned.id, /^[0-9a-f-]{36}$/, "bare UUID id")
+        assert.strictEqual(spawned.machine, "mb", "remote machine name")
         assert.isUndefined(yield* a.db.session.getSession(onB(spawned.id)), "A stores no session")
         assert.strictEqual(b.spawns[0]!.commit, COMMIT)
         yield* finish(b.db, onB(spawned.id), "General Agent completed")
         const [notice] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
         assert.strictEqual(notice!.senderType, "vibest")
-        assert.strictEqual(unwrapped(notice!.content), `${spawned.id.slice(0, 11)}: General Agent completed`)
+        assert.strictEqual(unwrapped(notice!.content), `mb/${spawned.id.slice(0, 8)}: General Agent completed`)
         yield* until(b.run(outboxRows), (rows) => rows.length === 0)
-        const address = spawned.id.slice(0, 11)
-        const got = yield* asEntry(a.raw.Get({ id: address }))
+        const shortId = spawned.id.slice(0, 8)
+        const got = yield* asEntry(a.raw.Get({ id: shortId, machine: "mb" }))
         assert.strictEqual(got.id, spawned.id)
         assert.strictEqual(got.machine, "mb")
-        assert.deepStrictEqual(yield* asEntry(a.raw.Send({ id: address, message: "more" })), {
+        assert.deepStrictEqual(yield* asEntry(a.raw.Send({ id: shortId, machine: "mb", message: "more" })), {
           id: spawned.id,
+          machine: "mb",
         })
         const entry = (yield* a.db.session.getSession(entryId))!
         assert.deepStrictEqual(yield* b.run(sendersTo(onB(spawned.id))), [
@@ -838,7 +840,7 @@ describe("vibest run --machine and remote sessions", () => {
       )
       const [sent] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
       assert.notStrictEqual(sent!.senderType, "vibest")
-      assert.include(sent!.content, `<session-id>${spawned.id.slice(0, 11)}</session-id>`)
+      assert.include(sent!.content, `<session-id>mb/${spawned.id.slice(0, 8)}</session-id>`)
       assert.include(sent!.content, "which branch?")
       const asker = (yield* b.db.session.getSession(onB(spawned.id)))!
       assert.deepStrictEqual(yield* a.run(sendersTo(entryId)), [
@@ -851,7 +853,7 @@ describe("vibest run --machine and remote sessions", () => {
     "without --runtime A sends the caller's terminal runtime, else none and B chooses; --runtime wins; B lacking it fails clearly",
     () =>
       Effect.gen(function* () {
-        const term = callerPlugin("term", { env: ["TERM_PANE"], terminal: () => Effect.succeed("p1") })
+        const term = callerPlugin("term", { env: ["TERM_PANE"], terminal: () => Effect.succeed({ id: "p1" }) })
         const { net, a, b, asEntry } = yield* twoMachines({ a: { plugins: [term] } })
         yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "x", callerEnv: {} }))
         yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "x", callerEnv: { TERM_PANE: "p1" } }))
@@ -904,7 +906,7 @@ describe("vibest run --machine and remote sessions", () => {
 
       assert.strictEqual(nosuch._tag, "UnknownMachine")
       assert.strictEqual(nosuch.message, 'unknown machine "nosuch"; machines: mb')
-      const missing = yield* Effect.flip(asEntry(a.raw.Get({ id: "mb/deadbeef" })))
+      const missing = yield* Effect.flip(asEntry(a.raw.Get({ id: "deadbeef", machine: "mb" })))
       assert.strictEqual(missing._tag, "NoSuchSession")
       assert.strictEqual(missing.message, "no session deadbeef", "B's error and message, no machine prefix")
       net.fail("b-host", 255, "ssh: connect to host b-host port 22: Connection refused")
@@ -914,7 +916,7 @@ describe("vibest run --machine and remote sessions", () => {
       assert.strictEqual(down._tag, "MachineUnavailable")
       assert.include(down.message, "mb is unreachable: ")
       assert.match(down.message, /closed|refused/)
-      const forwarded = yield* Effect.flip(asEntry(a.raw.Get({ id: "mb/12345678" })))
+      const forwarded = yield* Effect.flip(asEntry(a.raw.Get({ id: "12345678", machine: "mb" })))
       assert.strictEqual(forwarded._tag, "MachineUnavailable")
       assert.include(forwarded.message, "mb is unreachable")
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),

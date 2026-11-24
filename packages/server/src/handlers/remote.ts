@@ -1,6 +1,5 @@
 import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
-import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import type { RemoteScope } from "@vibest/core/database/remote"
 import { Identity } from "@vibest/core/identity"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
@@ -8,13 +7,14 @@ import { REMOTE_BY_USER, REMOTE_PROJECT_HEADER } from "@vibest/protocol/protocol
 import { Caller, type CallerIdentity, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
 import { MachineIncompatible } from "@vibest/schema/machine"
 import { AmbiguousSession, type NotInRepository } from "@vibest/schema/session"
+import { formatSessionRef, type SessionRef } from "@vibest/schema/terminal"
 import { Context, Effect, Layer, Predicate, Stream } from "effect"
 
 import * as Listing from "../listing.ts"
 import { Inbound } from "../machine/inbound.ts"
 import { Load } from "../machine/load.ts"
 import { Machines } from "../machine/machines.ts"
-import { address, type At, ListScope, Remote } from "../machine/remote.ts"
+import { type At, ListScope, Remote } from "../machine/remote.ts"
 import * as CallerChecks from "./caller.ts"
 import type { Handlers } from "./caller.ts"
 import { group } from "./group.ts"
@@ -70,29 +70,26 @@ const makeRouting = Effect.gen(function* () {
 
   const routed = <A, E, R2, B, F>(
     method: Routed,
-    input: string,
+    ref: SessionRef,
     local: Local<A, E, R2>,
     forwarded: (at: At, project: string, by: string) => Effect.Effect<B, F>,
-  ) => {
-    const at = address(input)
-
-    return Predicate.isTagged(at, "Local")
-      ? local(at.id)
+  ) =>
+    ref.machine === undefined
+      ? local(ref.id)
       : deps.agent(method).pipe(
           Effect.flatMap((c) =>
             deps.projectOf(c, method).pipe(
               Effect.catchTag("NotInRepository", refused(method)),
-              Effect.flatMap((project) => forwarded(at, project.id, byOf(c))),
+              Effect.flatMap((project) => forwarded({ machine: ref.machine!, id: ref.id }, project.id, byOf(c))),
             ),
           ),
         )
-  }
 
   return {
     reach,
     routed: {
       Send: <A, E, R2>(p: PayloadOf<"Send">, local: Local<A, E, R2>) =>
-        routed("Send", p.id, local, (at, project, by) =>
+        routed("Send", p, local, (at, project, by) =>
           Effect.gen(function* () {
             let targetAt = at
             let forwardBy = by
@@ -106,7 +103,7 @@ const makeRouting = Effect.gen(function* () {
                 if (matches.length === 0)
                   return yield* new Forbidden({
                     method: "Send",
-                    message: `${p.id} is not linked from this session; link them with vibest session link`,
+                    message: `${formatSessionRef(p)} is not linked from this session; link them with vibest session link`,
                   })
 
                 if (matches.length > 1)
@@ -136,15 +133,15 @@ const makeRouting = Effect.gen(function* () {
           }),
         ),
       Interrupt: <A, E, R2>(p: PayloadOf<"Interrupt">, local: Local<A, E, R2>) =>
-        routed("Interrupt", p.id, local, (at, project, by) =>
-          remote.forward(at, project, by, (c, { id }, o) => c.Interrupt({ ...p, id }, o)),
+        routed("Interrupt", p, local, (at, project, by) =>
+          remote.forward(at, project, by, (c, { id }, o) => c.Interrupt({ id }, o)),
         ),
       Stop: <A, E, R2>(p: PayloadOf<"Stop">, local: Local<A, E, R2>) =>
-        routed("Stop", p.id, local, (at, project, by) =>
+        routed("Stop", p, local, (at, project, by) =>
           machines.link(at.machine).pipe(
             Effect.flatMap((link) =>
               link.capabilities.stop === true
-                ? remote.forward(at, project, by, (c, { id }, o) => c.Stop({ ...p, id }, o))
+                ? remote.forward(at, project, by, (c, { id }, o) => c.Stop({ id }, o))
                 : Effect.fail(
                     new MachineIncompatible({
                       machine: at.machine,
@@ -155,13 +152,15 @@ const makeRouting = Effect.gen(function* () {
           ),
         ),
       Archive: <A, E, R2>(p: PayloadOf<"Archive">, local: Local<A, E, R2>) =>
-        routed("Archive", p.id, local, (at, project, by) =>
-          remote.forward(at, project, by, (c, { id }, o) => c.Archive({ ...p, id }, o)),
+        routed("Archive", p, local, (at, project, by) =>
+          remote.forward(at, project, by, (c, { id }, o) =>
+            c.Archive({ id, ...(p.keepWorktree !== undefined && { keepWorktree: p.keepWorktree }) }, o),
+          ),
         ),
       Get: <A, E, R2>(p: PayloadOf<"Get">, local: Local<A, E, R2>) =>
-        routed("Get", p.id, local, (at, project, by) => remote.get(at, project, by, p)),
+        routed("Get", p, local, (at, project, by) => remote.get(at, project, by)),
       Peek: <A, E, R2>(p: PayloadOf<"Peek">, local: Local<A, E, R2>) =>
-        routed("Peek", p.id, local, (at, project, by) => remote.peek(at, project, by, p)),
+        routed("Peek", p, local, (at, project, by) => remote.peek(at, project, by, p)),
     },
 
     spawnOn: (machine: string, input: PayloadOf<"Spawn">, session: string, project: string) =>
@@ -246,7 +245,7 @@ const make = Effect.gen(function* () {
     "Project.Clone": ({ url, directory, machine }: PayloadOf<"Project.Clone">) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const away = machine !== undefined && machine !== LOCAL_MACHINE
+          const away = machine !== undefined
 
           if (away && Predicate.isTagged(yield* Caller, "Remote"))
             return yield* new Forbidden({ method: "Project.Clone", message: "a remote clones only on this machine" })

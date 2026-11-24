@@ -232,7 +232,8 @@ layer(Platform.services)("claude integration stop", (it) => {
         const home = yield* tempDirectory("c-")
         const lines: Array<string> = []
         yield* listen(path.join(home, "vibest.sock"), lines)
-        const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1", VIBEST_PROCESS: "7" }
+        const sessionId = "11111111-1111-4111-8111-111111111111"
+        const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: sessionId, VIBEST_PROCESS: "7" }
 
         const invoke = (report: typeof integrationStop, event: Schema.Json, env: Record<string, string> = worker) =>
           report("cursor", JSON.stringify(event)).pipe(
@@ -249,12 +250,12 @@ layer(Platform.services)("claude integration stop", (it) => {
           rpc(lines).map((r) => r.method),
           ["Session.Ready", "Prompt", "ExecutionEnd"],
         )
-        assert.deepStrictEqual(rpc(lines)[0]?.params, { id: "w1" })
+        assert.deepStrictEqual(rpc(lines)[0]?.params, { id: sessionId })
 
         for (const request of rpc(lines))
           assert.deepInclude(Object.fromEntries(request.headers as Array<[string, string]>), { "vibest-process": "7" })
         assert.deepStrictEqual(rpc(lines)[1]?.params, {
-          sessionId: "w1",
+          sessionId,
           harness: "cursor",
           event: JSON.stringify(prompt),
         })

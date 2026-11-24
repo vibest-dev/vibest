@@ -510,15 +510,33 @@ describe("local UI WebSocket", () => {
 
         assert.notStrictEqual(second.sessionId, launched.sessionId)
 
-        const linked = (yield* rpc("9", "Session.Link", {
-          spec: EdgeMutual.make({ ids: [launched.sessionId, second.sessionId] }),
-        })) as { readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string }> }
+        const linked = (yield* rpc(
+          "9",
+          "Session.Link",
+          JSON.parse(
+            JSON.stringify({ spec: EdgeMutual.make({ ids: [{ id: launched.sessionId }, { id: second.sessionId }] }) }),
+          ),
+        )) as {
+          readonly edges: ReadonlyArray<{
+            readonly from: { readonly id: string }
+            readonly to: { readonly id: string }
+          }>
+        }
 
         assert.strictEqual(linked.edges.length, 2)
 
-        const unlinked = (yield* rpc("10", "Session.Unlink", {
-          spec: EdgeMutual.make({ ids: [launched.sessionId, second.sessionId] }),
-        })) as { readonly edges: ReadonlyArray<{ readonly from: string; readonly to: string }> }
+        const unlinked = (yield* rpc(
+          "10",
+          "Session.Unlink",
+          JSON.parse(
+            JSON.stringify({ spec: EdgeMutual.make({ ids: [{ id: launched.sessionId }, { id: second.sessionId }] }) }),
+          ),
+        )) as {
+          readonly edges: ReadonlyArray<{
+            readonly from: { readonly id: string }
+            readonly to: { readonly id: string }
+          }>
+        }
 
         assert.strictEqual(unlinked.edges.length, 2)
 

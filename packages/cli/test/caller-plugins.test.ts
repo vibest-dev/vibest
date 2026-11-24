@@ -19,7 +19,7 @@ import * as Platform from "#platform"
 const runtime = (id: string, env: ReadonlyArray<string>): Caller => ({
   id,
   env,
-  terminal: (values) => Effect.succeed(env.map((key) => values[key]).join("/")),
+  terminal: (values) => Effect.succeed({ id: env.map((key) => values[key]).join("/") }),
 })
 
 const plugins = [
@@ -29,8 +29,8 @@ const plugins = [
 ]
 
 describe("where the entry session runs", () => {
-  const hc = { id: "hc", terminal: "t4@/run/hc/default.sock" } satisfies CallerHit
-  const herdr = { id: "herdr", terminal: "vibest/p1" } satisfies CallerHit
+  const hc = { id: "hc", terminal: { address: "t4", socket: "/run/hc/default.sock" } } satisfies CallerHit
+  const herdr = { id: "herdr", terminal: { session: "vibest", pane: "p1" } } satisfies CallerHit
   it("no detected runtime is refused, and --runtime launches one", () => {
     const refused = attachPlace({ runtime: undefined, hits: [] })
     assert.strictEqual(refused.in, "refused")
@@ -80,7 +80,11 @@ describe("the runtime registry", () => {
   const definition = (id: string, env: ReadonlyArray<string>, events: Stream.Stream<RuntimeEvent> = Stream.never) =>
     unusedRuntime(
       id,
-      { env, terminal: (values: Readonly<Record<string, string | undefined>>) => Effect.succeed(values[env[0]!]) },
+      {
+        env,
+        terminal: (values: Readonly<Record<string, string | undefined>>) =>
+          Effect.succeed(values[env[0]!] === undefined ? undefined : { id: values[env[0]!]! }),
+      },
       { events },
     )
 
@@ -110,7 +114,7 @@ describe("the runtime registry", () => {
           {
             in: "terminal",
             runtime: "hc",
-            terminal: "t1",
+            terminal: { id: "t1" },
           },
         )
         assert.includeMembers(dropped, ["HC_ID", "HERDR_ID"])
@@ -123,7 +127,7 @@ describe("the runtime registry", () => {
             for (;;) {
               const event = yield* PubSub.take(seen)
 
-              if (event.type === "terminal.exited") passed.push(event.terminal.id)
+              if (event.type === "terminal.exited") passed.push(event.terminal["id"]!)
 
               if (event.type === type) return passed
             }
@@ -157,7 +161,7 @@ describe("caller runtimes", () => {
       assert.deepStrictEqual(attachPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "herdr",
-        terminal: "p1//herdr.sock",
+        terminal: { id: "p1//herdr.sock" },
       })
     }),
   )
@@ -172,7 +176,7 @@ describe("caller runtimes", () => {
         terminal: () => {
           calls.push(id)
 
-          return fail ? Effect.fail(`${id} down`) : Effect.succeed(terminal)
+          return fail ? Effect.fail(`${id} down`) : Effect.succeed({ id: terminal })
         },
       })
 
@@ -195,7 +199,7 @@ describe("caller runtimes", () => {
       assert.deepStrictEqual(attachPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "hc",
-        terminal: "hc-term",
+        terminal: { id: "hc-term" },
       })
       calls.length = 0
 
@@ -212,7 +216,7 @@ describe("caller runtimes", () => {
       assert.deepStrictEqual(attachPlace({ runtime: "herdr", hits: named }), {
         in: "terminal",
         runtime: "herdr",
-        terminal: "herdr-term",
+        terminal: { id: "herdr-term" },
       })
     }),
   )

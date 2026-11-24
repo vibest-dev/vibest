@@ -215,9 +215,9 @@ export const make = Effect.gen(function* () {
 
   const sessionRunning = (session: SessionRow) =>
     Effect.gen(function* () {
-      const terminal = terminalOf(session)
+      const terminal = terminalOf(session)?.target
 
-      if (terminal.id === "") return undefined
+      if (terminal === undefined) return undefined
       const h = yield* routed(runtimeOf(session))
 
       if (h === undefined) return undefined
@@ -232,9 +232,9 @@ export const make = Effect.gen(function* () {
 
       if (session === undefined)
         return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
-      const terminal = terminalOf(session)
+      const terminal = terminalOf(session)?.target
 
-      if (terminal.id === "")
+      if (terminal === undefined)
         return { id, projectId: session.projectId, ok: false, message: `${id} not restarted: it has no terminal` }
       const h = yield* routed(runtimeOf(session))
 
@@ -270,7 +270,7 @@ export const make = Effect.gen(function* () {
         !current(row.process?.integration ?? undefined) &&
         !archived(row) &&
         (row.process?.placedAt ?? null) !== null &&
-        terminalOf(row).id !== "",
+        terminalOf(row) !== null,
     )
 
     const listed: Array<Outdated> = []

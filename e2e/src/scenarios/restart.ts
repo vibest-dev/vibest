@@ -237,9 +237,9 @@ const checks: ReadonlyArray<Check> = [
         const address = async () =>
           (
             await w
-              .json<{ sessions: Array<{ id: string; address: unknown }> }>(["ls"], { cwd: repo, env })
+              .json<{ sessions: Array<{ id: string; terminal: unknown }> }>(["ls"], { cwd: repo, env })
               .then((l) => l.sessions)
-          ).find((e) => e.id === before.id)?.address
+          ).find((e) => e.id === before.id)?.terminal
 
         const addressBefore = await address()
         await viaEntry(["run", "pi", "--session", session, "--env", piEnv, ask("slow")])

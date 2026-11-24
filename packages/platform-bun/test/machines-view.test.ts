@@ -9,7 +9,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { FakeRuntime, PluginHost, until, untilVirtual, yieldToIo } from "./lib/fakes.ts"
-import { entryOn, fakeSpawns, Net, onB, repoStack } from "./lib/machines-fakes.ts"
+import { entryOn, fakeSpawns, Net, repoStack } from "./lib/machines-fakes.ts"
 
 type Side = {
   readonly id: string
@@ -60,9 +60,7 @@ const viewPlugin = (s: Side) =>
                   : {
                       missing: false,
                       as: name,
-                      terminals: new Map(
-                        [...sessions.keys()].map((id) => [id, { machine: "local", id: `${name}/${id}` }]),
-                      ),
+                      terminals: new Map([...sessions.keys()].map((id) => [id, { id: `${name}/${id}` }])),
                     }
               }),
           }),
@@ -182,10 +180,10 @@ describe("another machine's terminals here", () => {
         const { A, a, here, spawn, listed } = yield* pair()
         const spawned = yield* spawn()
         const row = yield* listed(spawned.id)
-        assert.deepStrictEqual(row.address, { machine: "local", id: `mb/${onB(spawned.id)}` })
+        assert.deepStrictEqual(row.terminal, { runtime: "view", target: { id: `mb/${spawned.id}` } })
         assert.lengthOf(A.connects, 1)
         const events = (yield* a.run(FakeRuntime)).events
-        const foreign = { machine: "local", id: `${row.address.id}@/a.sock` }
+        const foreign = { id: `${row.terminal!.target["id"]}@/a.sock` }
         yield* PubSub.publish(events, { type: "state", terminal: foreign, state: "working" })
         yield* PubSub.publish(events, { type: "exited", terminal: foreign })
         yield* yieldToIo
@@ -195,11 +193,11 @@ describe("another machine's terminals here", () => {
           "events for unknown terminals are ignored",
         )
         A.mirror.clear()
-        assert.deepStrictEqual((yield* listed(spawned.id)).address, row.address)
+        assert.deepStrictEqual((yield* listed(spawned.id)).terminal, row.terminal)
         assert.lengthOf(A.connects, 2)
         A.mirror.clear()
-        const got = yield* here(a.raw.Get({ id: spawned.id }))
-        assert.deepStrictEqual(got.address, row.address)
+        const got = yield* here(a.raw.Get({ id: spawned.id, machine: "mb" }))
+        assert.deepStrictEqual(got.terminal, row.terminal)
         assert.lengthOf(A.connects, 3)
         A.mirror.clear()
         const again = yield* spawn()
@@ -208,13 +206,17 @@ describe("another machine's terminals here", () => {
         assert.strictEqual(A.mirror.get("core-b"), "mb")
         const other = yield* spawn("herdr")
         const plain = yield* listed(other.id)
-        assert.deepStrictEqual(plain.address, { machine: "mb", id: "" })
+        assert.deepStrictEqual(plain.terminal, {
+          runtime: "herdr",
+          machine: "mb",
+          target: { id: `t-${other.id}` },
+        })
         assert.include(plain.view ?? "", "cannot be shown here")
-        const peeked = yield* here(a.raw.Peek({ id: spawned.id }))
-        assert.strictEqual(peeked.terminal, row.address.id)
+        const peeked = yield* here(a.raw.Peek({ id: spawned.id, machine: "mb" }))
+        assert.deepStrictEqual(peeked.terminal, row.terminal)
         A.refuse = true
         A.mirror.clear()
-        const unseen = yield* here(a.raw.Peek({ id: spawned.id }))
+        const unseen = yield* here(a.raw.Peek({ id: spawned.id, machine: "mb" }))
         assert.strictEqual(unseen.view, "cannot add; fix: add by hand")
       }),
     ),
@@ -265,9 +267,9 @@ describe("another machine's terminals here", () => {
           )
           assert.deepStrictEqual(seen, ["mb"], "a hook for another runtime is not called again")
           assert.strictEqual(net.argv.length, dials, "no reconnect")
-          assert.deepStrictEqual((yield* listed(spawned.id)).address, {
-            machine: "local",
-            id: `mb/${onB(spawned.id)}`,
+          assert.deepStrictEqual((yield* listed(spawned.id)).terminal, {
+            runtime: "view",
+            target: { id: `mb/${spawned.id}` },
           })
         }),
       ),
@@ -281,7 +283,11 @@ describe("another machine's terminals here", () => {
         A.refuse = true
         A.mirror.clear()
         const row = yield* listed(spawned.id)
-        assert.deepStrictEqual(row.address, { machine: "mb", id: "" })
+        assert.deepStrictEqual(row.terminal, {
+          runtime: "view",
+          machine: "mb",
+          target: { id: `t-${spawned.id}` },
+        })
         assert.strictEqual(row.view, "cannot add; fix: add by hand")
         assert.lengthOf(A.connects, 2)
         yield* listed(spawned.id)

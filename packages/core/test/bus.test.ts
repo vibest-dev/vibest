@@ -67,7 +67,7 @@ const story = Effect.gen(function* () {
       yield* emit(Catalog["process.placed"], {
         sessionId: MAIN,
         at: 225,
-        data: { process: mainProcess, terminal: "w1:p1", pid: 10 },
+        data: { process: mainProcess, terminal: { id: "w1:p1" }, pid: 10 },
       })
       yield* emit(Catalog["process.ready"], {
         sessionId: MAIN,
@@ -107,7 +107,7 @@ const story = Effect.gen(function* () {
           model: "grok",
           routing: { decidedBy: { harness: "choice" }, trace: [] },
           runtime: "herdr",
-          terminal: "w1:p2",
+          terminal: { id: "w1:p2" },
           pid: 20,
         },
       })
@@ -379,7 +379,7 @@ describe("projectors", () => {
         model: null,
         routing: null,
         runtime: "herdr",
-        terminal: "w1:p1",
+        terminal: JSON.stringify({ id: "w1:p1" }),
         pid: 12,
         integrationVersion: "0.0.1",
         integrationProtocol: 8,
@@ -397,7 +397,7 @@ describe("projectors", () => {
         model: "grok",
         routing: JSON.stringify({ decidedBy: { harness: "choice" }, trace: [] }),
         runtime: "herdr",
-        terminal: "w1:p2",
+        terminal: JSON.stringify({ id: "w1:p2" }),
         pid: 20,
         integrationVersion: null,
         integrationProtocol: null,
@@ -421,7 +421,7 @@ describe("projectors", () => {
         Effect.gen(function* () {
           const id = yield* bus.publish(Catalog["process.started"], {
             sessionId: SUB,
-            data: { harness: "pi", runtime: "herdr", terminal: "w1:p3" },
+            data: { harness: "pi", runtime: "herdr", terminal: { id: "w1:p3" } },
           })
 
           yield* bus.publish(Catalog["process.ended"], {

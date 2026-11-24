@@ -1,7 +1,8 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
 import { Host } from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
-import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
+import { NoRuntime } from "@vibest/schema/session"
+import { formatTerminalTarget, type TerminalTarget } from "@vibest/schema/terminal"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, PubSub, type Scope, Stream } from "effect"
 
 import { type BoundProcess, Bus, type Signal } from "./bus.ts"
@@ -16,7 +17,7 @@ export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 
 export type RuntimeStatus = VibestPlugin.Runtime.RuntimeStatus
 
-export type Terminal = RuntimeAddress
+export type Terminal = TerminalTarget
 
 export type AgentState = VibestPlugin.Runtime.AgentState
 
@@ -26,7 +27,8 @@ export const RuntimeError = VibestPlugin.Runtime.RuntimeError
 
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 
-export const addressOf = (terminal: VibestPlugin.Runtime.Terminal): Terminal => ({ machine: "local", id: terminal.id })
+export const formatTerminal = (runtime: Pick<Runtime, "format"> | undefined, terminal: Terminal): string =>
+  runtime?.format ? runtime.format(terminal) : formatTerminalTarget(terminal)
 
 const bound = (processesAt: ProcessesAt, runtime: string, terminal: Terminal, state?: AgentState) =>
   Effect.map(processesAt(runtime, terminal), (processes): Signal =>
@@ -38,13 +40,13 @@ const bound = (processesAt: ProcessesAt, runtime: string, terminal: Terminal, st
 const live = (processesAt: ProcessesAt, runtime: string, event: RuntimeEvent): Effect.Effect<Signal> => {
   switch (event.type) {
     case "state":
-      return bound(processesAt, runtime, addressOf(event.terminal), event.state)
+      return bound(processesAt, runtime, event.terminal, event.state)
     case "exited":
-      return bound(processesAt, runtime, addressOf(event.terminal))
+      return bound(processesAt, runtime, event.terminal)
     case "seen":
-      return Effect.succeed({ type: "terminal.seen", runtime, terminal: addressOf(event.terminal) })
+      return Effect.succeed({ type: "terminal.seen", runtime, terminal: event.terminal })
     case "reset":
-      return Effect.succeed({ type: "runtime.reset", runtime, machine: "local" })
+      return Effect.succeed({ type: "runtime.reset", runtime })
   }
 }
 

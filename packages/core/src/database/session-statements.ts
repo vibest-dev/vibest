@@ -3,6 +3,7 @@ import {
   ExecutionFailed,
   ExecutionInput,
   ExecutionInterrupted,
+  type ExecutionOutcome,
   ExecutionStarted,
   ExecutionSucceeded,
   ExecutionUnresolved,
@@ -19,7 +20,8 @@ import {
 } from "@vibest/schema/event"
 import { newId, sessionLabel } from "@vibest/schema/id"
 import { Routing } from "@vibest/schema/plugin"
-import { type AgentStatus, RuntimeAddress } from "@vibest/schema/session"
+import { type AgentStatus } from "@vibest/schema/session"
+import { canonicalTarget, TerminalTarget } from "@vibest/schema/terminal"
 import { Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
@@ -32,7 +34,7 @@ export type Current = {
   readonly id: number
   readonly start: ProcessStart
   readonly ended: number | null
-  readonly terminal: string | null
+  readonly terminal: TerminalTarget | null
   readonly harnessSessionId: string | null
   readonly integration: Integration | undefined
   readonly readyAt: number | null
@@ -60,29 +62,35 @@ const encodeRouting = Schema.encodeSync(Routing)
 
 const decodeRoutingJson = Schema.decodeSync(Schema.fromJsonString(Routing))
 
+const decodeTerminalJson = Schema.decodeSync(Schema.fromJsonString(TerminalTarget))
+
 const routingJson = (routing: Routing | undefined) =>
   routing === undefined ? null : JSON.stringify(encodeRouting(routing))
 
-const currentOf = (row: ProcessColumns): Current => ({
-  id: row.id,
-  start: {
-    harness: row.harness,
-    ...(row.provider !== null && { provider: row.provider }),
-    ...(row.model !== null && { model: row.model }),
-    ...(row.routing !== null && { routing: decodeRoutingJson(row.routing) }),
-    runtime: row.runtime,
-    terminal: row.terminal ?? "",
-    ...(row.pid !== null && { pid: row.pid }),
-  },
-  ended: row.endedAt,
-  terminal: row.terminal,
-  harnessSessionId: row.harnessSessionId,
-  integration:
-    row.integrationVersion === null || row.integrationProtocol === null
-      ? undefined
-      : { version: row.integrationVersion, protocol: row.integrationProtocol },
-  readyAt: row.readyAt,
-})
+const currentOf = (row: ProcessColumns): Current => {
+  const terminal = row.terminal === null ? null : decodeTerminalJson(row.terminal)
+
+  return {
+    id: row.id,
+    start: {
+      harness: row.harness,
+      ...(row.provider !== null && { provider: row.provider }),
+      ...(row.model !== null && { model: row.model }),
+      ...(row.routing !== null && { routing: decodeRoutingJson(row.routing) }),
+      runtime: row.runtime,
+      ...(terminal !== null && { terminal }),
+      ...(row.pid !== null && { pid: row.pid }),
+    },
+    ended: row.endedAt,
+    terminal,
+    harnessSessionId: row.harnessSessionId,
+    integration:
+      row.integrationVersion === null || row.integrationProtocol === null
+        ? undefined
+        : { version: row.integrationVersion, protocol: row.integrationProtocol },
+    readyAt: row.readyAt,
+  }
+}
 
 const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, terminal, pid, harness_session_id,
   integration_version, integration_protocol, ready_at, ended_at`
@@ -260,7 +268,7 @@ export const statements = Effect.gen(function* () {
     live.start.runtime === start.runtime &&
     routingJson(live.start.routing) === routingJson(start.routing)
 
-  const placeProcess = (id: string, terminal: string, pid?: number, at?: number) =>
+  const placeProcess = (id: string, terminal: TerminalTarget, pid?: number, at?: number) =>
     Effect.gen(function* () {
       const live = yield* liveProcess(id)
 
@@ -279,7 +287,7 @@ export const statements = Effect.gen(function* () {
       const live = yield* liveProcess(id)
       const stamp = at === undefined ? {} : { at }
 
-      if (live !== undefined && live.terminal === null && start.terminal !== "" && sameChoice(live, start)) {
+      if (live !== undefined && live.terminal === null && start.terminal !== undefined && sameChoice(live, start)) {
         yield* placeProcess(id, start.terminal, start.pid, at)
 
         if (start.resume && start.resume !== live.harnessSessionId)
@@ -305,7 +313,7 @@ export const statements = Effect.gen(function* () {
           ...(start.routing !== undefined && { routing: start.routing }),
           ...(start.resume && { resume: start.resume }),
           runtime: start.runtime,
-          ...(start.terminal !== "" && { terminal: start.terminal }),
+          ...(start.terminal !== undefined && { terminal: start.terminal }),
           ...(start.pid !== undefined && { pid: start.pid }),
         },
       })
@@ -516,13 +524,15 @@ export const statements = Effect.gen(function* () {
       yield* observe({ type: "session.changed", sessionId: id })
     })
 
-  const processesAt = (runtime: string, address: RuntimeAddress) =>
+  const processesAt = (runtime: string, target: TerminalTarget) =>
     sql<{ sessionId: string; process: number }>`SELECT s.id AS session_id, p.id AS process FROM session s
       JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-      WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL`
+      WHERE p.runtime = ${runtime} AND p.terminal = ${canonicalTarget(target)} AND p.ended_at IS NULL`
 
-  const lastSessionAt = (runtime: string, address: RuntimeAddress) =>
-    sql<{ sessionId: string }>`SELECT session_id FROM process WHERE runtime = ${runtime} AND terminal = ${address.id}
+  const lastSessionAt = (runtime: string, target: TerminalTarget) =>
+    sql<{
+      sessionId: string
+    }>`SELECT session_id FROM process WHERE runtime = ${runtime} AND terminal = ${canonicalTarget(target)}
       ORDER BY started_at DESC, rowid DESC LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.sessionId))
 
   const lastProjectTerminal = (projectId: string, runtime: string) =>
@@ -532,19 +542,18 @@ export const statements = Effect.gen(function* () {
         AND s.origin_remote IS NULL
         AND p.runtime = ${runtime}
         AND p.terminal IS NOT NULL
-        AND p.terminal != ''
       ORDER BY p.ended_at IS NOT NULL, p.started_at DESC, p.rowid DESC
       LIMIT 1`.pipe(
-      Effect.map((rows): RuntimeAddress | undefined =>
-        rows[0] === undefined ? undefined : { machine: "local", id: rows[0].terminal },
+      Effect.map((rows): TerminalTarget | undefined =>
+        rows[0] === undefined ? undefined : decodeTerminalJson(rows[0].terminal),
       ),
     )
 
-  const liveSessionsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
+  const liveSessionsAt = (runtime: string, target: TerminalTarget, except?: string) =>
     Effect.gen(function* () {
       const rows = yield* sql<{ id: string }>`SELECT s.id FROM session s
         JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-        WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL
+        WHERE p.runtime = ${runtime} AND p.terminal = ${canonicalTarget(target)} AND p.ended_at IS NULL
           ${except === undefined ? sql`` : sql`AND s.id != ${except}`}`
 
       return rows.filter((r) => !moving.has(r.id))
@@ -623,7 +632,7 @@ export const statements = Effect.gen(function* () {
   const latestReply = (sessionId: string) =>
     sql<{
       execution: number
-      status: string
+      status: typeof ExecutionOutcome.Type
       text: string | null
       failure: string | null
       endedAt: number

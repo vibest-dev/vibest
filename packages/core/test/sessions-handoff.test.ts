@@ -17,7 +17,7 @@ import { until } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { idleSession, spawnInput, test } from "./lib/sessions-helpers.ts"
 
-const here = { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } }
+const here = { runtime: RUNTIME, target: { id: "test/coord" } }
 
 const inboxStatus = (sessionId: string, content?: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>

@@ -31,7 +31,7 @@ const entriesAtOneTerminal = Effect.gen(function* () {
   const db = yield* Db.Service
   const repo = yield* makeRepository
   const project = yield* projectOf(repo)
-  const location = { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } }
+  const location = { runtime: RUNTIME, target: { id: "test/coord" } }
 
   const endEntry = (id: string) =>
     Effect.gen(function* () {
@@ -138,7 +138,7 @@ describe.concurrent("Session", () => {
       const db = yield* Db.Service
       const repo = yield* makeRepository
       const entryId = yield* entryOfProject(repo)
-      const address = { machine: "local", id: "test/coord" }
+      const address = { id: "test/coord" }
       const waiting = (yield* db.inbox.insertSend(entryId, "waiting"))!
       assert.isTrue(yield* db.session.detachSession(entryId, RUNTIME, address))
       const ended = () => Effect.map(db.session.getSession(entryId), (row) => row!.process!.endedAt)
@@ -161,7 +161,7 @@ describe.concurrent("Session", () => {
       const db = yield* Db.Service
       const entryId = yield* entryOfProject(yield* makeRepository)
       yield* (yield* FakeRuntime).seedAgent("test/coord")
-      const address = { machine: "local", id: "test/coord" }
+      const address = { id: "test/coord" }
       const next = yield* db.session.restartProcess(entryId)
       const processes = yield* db.session.processesAt(RUNTIME, address)
       assert.deepStrictEqual(processes, [{ sessionId: entryId, process: next! }])
@@ -237,7 +237,7 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const runtime = yield* FakeRuntime
       const { id, sessions, db, entryId, row } = yield* spawnWorking(yield* makeRepository)
-      const address = { machine: "local", id: "test/coord" }
+      const target = { id: "test/coord" }
       yield* runtime.updateAgent("test/coord", (agent) => ({ ...agent, alive: false }))
       const held = yield* runtime.hold("present", id)
       const checking = yield* Effect.forkChild(sessions.check(entryId))
@@ -248,7 +248,7 @@ describe.concurrent("Session", () => {
         row.projectId,
         "pi",
         false,
-        { runtime: RUNTIME, address },
+        { runtime: RUNTIME, target },
         {
           agent: "coordinator",
         },

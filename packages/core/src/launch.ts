@@ -8,7 +8,7 @@ import { Agents, unknownAgent } from "./agents.ts"
 import { cliEnv, Harness } from "./harness.ts"
 import { Harnesses } from "./harnesses.ts"
 import type { AgentsDomain } from "./plugin/domains.ts"
-import { addressOf, type Runtime, type Terminal } from "./runtimes.ts"
+import { type Runtime, type Terminal } from "./runtimes.ts"
 import {
   projectText,
   SystemPromptDirUnsafe,
@@ -153,7 +153,7 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
     readonly near?: Terminal | undefined
   },
 ) {
-  const terminal = yield* h
+  return yield* h
     .open({
       project: input.root,
       cwd: input.cwd ?? input.root,
@@ -167,6 +167,4 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
       ...(target !== undefined && { target }),
     })
     .pipe(Effect.mapError((e) => new LaunchFailed({ message: e.message })))
-
-  return addressOf(terminal)
 })

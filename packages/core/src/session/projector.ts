@@ -27,6 +27,7 @@ import {
   SessionRenamed,
   SessionUnlinked,
 } from "@vibest/schema/event"
+import { canonicalTarget } from "@vibest/schema/terminal"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -95,7 +96,7 @@ export const layer = Layer.effectDiscard(
               pid, started_at, placed_at)
             VALUES (${fact.seq}, ${sessionIdOf(fact)}, ${data.harness}, ${data.provider ?? null}, ${data.model ?? null},
               ${data.routing === undefined ? null : JSON.stringify(data.routing)}, ${data.resume ?? null}, ${data.runtime},
-              ${data.terminal ?? null}, ${data.pid ?? null}, ${fact.at}, ${data.terminal === undefined ? null : fact.at})`,
+              ${data.terminal === undefined ? null : canonicalTarget(data.terminal)}, ${data.pid ?? null}, ${fact.at}, ${data.terminal === undefined ? null : fact.at})`,
           sql`UPDATE session SET process_id = ${fact.seq} WHERE id = ${sessionIdOf(fact)}`,
         )
       }),
@@ -104,7 +105,7 @@ export const layer = Layer.effectDiscard(
       ProcessPlaced,
       active(
         (fact) =>
-          sql`UPDATE process SET terminal = ${fact.data.terminal}, placed_at = ${fact.at},
+          sql`UPDATE process SET terminal = ${canonicalTarget(fact.data.terminal)}, placed_at = ${fact.at},
               pid = coalesce(${fact.data.pid ?? null}, pid)
             WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
       ),

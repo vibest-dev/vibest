@@ -2,13 +2,13 @@ import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Duration, Effect, Predicate, type Scope, Stream } from "effect"
 import type { api, HcFailure, HcClient } from "effect-herdr-core-sdk"
 
-import { KIND, LABEL } from "./terminal-runtime.ts"
+import { type HcTerminal, KIND, LABEL } from "./terminal-runtime.ts"
 
 type Hc = Pick<HcClient, "call">
 
 type Event = VibestPlugin.MachineEvent
 
-type Terminal = VibestPlugin.Runtime.Terminal
+type Terminal = HcTerminal
 
 const offline = (e: HcFailure) =>
   Predicate.isTagged(e, "HcTransportError") ? `hc here is offline (${e.message})` : `hc here: ${e.message}`
@@ -175,8 +175,8 @@ const NONE: ReadonlyMap<string, Terminal> = new Map()
 export const locate = (
   hc: Hc,
   remote: VibestPlugin.Runtime.Remote,
-  sessions: ReadonlyMap<string, string>,
-): Effect.Effect<VibestPlugin.Runtime.Located> =>
+  sessions: ReadonlyMap<string, HcTerminal>,
+): Effect.Effect<VibestPlugin.Runtime.Located<HcTerminal>> =>
   Effect.gen(function* () {
     const core = remote.link.core
 
@@ -198,13 +198,13 @@ export const locate = (
 
     if (sessions.size === 0) return { missing: false, terminals: NONE, as: row.name }
     const wanted = new Set(sessions.keys())
-    const terminals = new Map<string, Terminal>()
+    const terminals = new Map<string, HcTerminal>()
 
     for (const t of (yield* hc.call("terminal.list", { labels: { [LABEL.runtime]: KIND } })).terminals) {
       const session = t.labels[LABEL.session]
 
       if (t.address.startsWith(`${row.name}/`) && session !== undefined && wanted.has(session))
-        terminals.set(session, { id: t.address })
+        terminals.set(session, { address: t.address })
     }
 
     return {

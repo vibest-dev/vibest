@@ -39,7 +39,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
           model: null,
           harnessSessionId: null,
           runtime: TEST_HERDR,
-          address: { machine: "local", id: "w8:pending" },
+          terminal: { id: "w8:pending" },
           status: "unknown",
           startedAt: 1,
           exitedAt: null,

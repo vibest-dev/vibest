@@ -183,7 +183,7 @@ describe("hc mirrors vibest's machines", () => {
     }),
   )
 
-  const asked = (ids: ReadonlyArray<string>) => new Map(ids.map((id) => [id, `b/${id}`]))
+  const asked = (ids: ReadonlyArray<string>) => new Map(ids.map((id) => [id, { address: `b/${id}` }]))
 
   it.effect("locate: missing, found by core id under a renamed name, and unreachable with its why", () =>
     Effect.gen(function* () {
@@ -197,8 +197,8 @@ describe("hc mirrors vibest's machines", () => {
       assert.deepStrictEqual(
         [...found.terminals.entries()],
         [
-          ["s1", { id: "mb/t7" }],
-          ["s2", { id: "mb/t8" }],
+          ["s1", { address: "mb/t7" }],
+          ["s2", { address: "mb/t8" }],
         ],
       )
 

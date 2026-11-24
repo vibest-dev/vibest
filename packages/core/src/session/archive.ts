@@ -12,7 +12,15 @@ import { Git } from "../git.ts"
 import { Inbox } from "../inbox.ts"
 import { Processes } from "../processes.ts"
 import * as Reactor from "../reactor.ts"
-import { agentState, Runtimes, sessionState, stateOf, type Runtime, type Terminal } from "../runtimes.ts"
+import {
+  agentState,
+  formatTerminal,
+  Runtimes,
+  sessionState,
+  stateOf,
+  type Runtime,
+  type Terminal,
+} from "../runtimes.ts"
 import { busy, busyOf, Executions, STOP_WAIT } from "./executions.ts"
 import { SessionLive } from "./live.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
@@ -129,15 +137,16 @@ export const make = Effect.gen(function* () {
         .pipe(Effect.ignore)
 
       const notOurs =
-        recorded.id === ""
+        recorded === null
           ? undefined
           : owned === undefined
-            ? ((yield* otherSessionAt(session, recorded)) ?? "a newer session was recorded at it")
+            ? ((yield* otherSessionAt(session, recorded.target)) ?? "a newer session was recorded at it")
             : exitedAt(session) !== null
-              ? yield* otherSessionAt(session, recorded)
+              ? yield* otherSessionAt(session, recorded.target)
               : undefined
 
-      if (notOurs !== undefined) reasons.push(`terminal ${recorded.id} left open: ${notOurs}`)
+      if (notOurs !== undefined && recorded !== null)
+        reasons.push(`terminal ${formatTerminal(h, recorded.target)} left open: ${notOurs}`)
 
       const out = yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(id)) ?? ""))(
         releaser.release({
@@ -190,7 +199,9 @@ export const make = Effect.gen(function* () {
 
         if (exitedAt(session) !== null) return { stopped: false, message: `${id} is not running; a message resumes it` }
         const h = yield* live(session)
-        const terminal = terminalOf(session)
+        const terminal = terminalOf(session)?.target
+
+        if (terminal === undefined) return { stopped: false, message: `${id} is not running; a message resumes it` }
         const execution = yield* db.session.openExecution(id)
         const state = stateOf(yield* sessionState(h, terminal, Effect.succeed(session.status))) ?? "unknown"
 
@@ -249,7 +260,7 @@ export const make = Effect.gen(function* () {
         const h = yield* live(session)
 
         const out = yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(id)) ?? ""))(
-          releaser.release({ h, session, terminal: terminalOf(session), keepWorktree: true, reasons: [] }),
+          releaser.release({ h, session, terminal: terminalOf(session)?.target, keepWorktree: true, reasons: [] }),
         )
 
         yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)

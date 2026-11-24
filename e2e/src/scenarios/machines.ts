@@ -9,7 +9,12 @@ import { configurePlugins } from "../world/plugins.ts"
 
 type Machine = { name: string; id: string; state: string; reason?: string }
 
-type Listed = { id: string; machine?: string; runtime?: string; address?: { machine: string; id: string } }
+type Listed = {
+  id: string
+  machine?: string
+  runtime?: string
+  terminal?: { runtime: string; machine?: string; target: { address?: string; socket?: string } } | null
+}
 
 type HcMachine = { id: string; name: string; session?: string | null }
 
@@ -271,19 +276,17 @@ export const setup = async (
     )?.n ?? 0
 
   const run = async (marker: string, machine = "mb") => {
-    const printed = (
-      JSON.parse(
-        await w.okViaEntry(["run", "--machine", machine, "pi", "--", ask(marker)], {
-          env: aEnv,
-          asIs: true,
-          ...(options.aProject !== undefined && { cwd: options.aProject }),
-        }),
-      ) as { id: string }
-    ).id
+    const printed = JSON.parse(
+      await w.okViaEntry(["run", "--machine", machine, "pi", "--", ask(marker)], {
+        env: aEnv,
+        asIs: true,
+        ...(options.aProject !== undefined && { cwd: options.aProject }),
+      }),
+    ) as { id: string; machine?: string }
 
-    expect(printed.startsWith(`${machine}/`) && /^[0-9a-f-]{36}$/.test(printed.slice(machine.length + 1)), printed)
+    expect(printed.machine === machine && /^[0-9a-f-]{36}$/.test(printed.id), JSON.stringify(printed))
 
-    return printed.slice(0, machine.length + 9)
+    return `${machine}/${printed.id.slice(0, 8)}`
   }
 
   const stop = async () => {
@@ -814,8 +817,8 @@ const checks: ReadonlyArray<Check> = [
         expect(bRow?.runtime === "hc", `B's row: ${JSON.stringify(bRow)}`)
 
         const shown = async () =>
-          (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
-            r.id?.startsWith(address),
+          (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find(
+            (r) => r.machine === "mb" && r.id?.startsWith(id8),
           )
 
         let first: Listed | undefined
@@ -824,15 +827,15 @@ const checks: ReadonlyArray<Check> = [
           async () => {
             first = await shown()
 
-            return (first?.address?.id ?? "") !== ""
+            return (first?.terminal?.target.address ?? "") !== ""
           },
           60_000,
         )
         expect(
-          /^mb\/t\d+@/.test(first?.address?.id ?? "") && (first?.address?.id.endsWith(`@${s.aSocket}`) ?? false),
+          /^mb\/t\d+$/.test(first?.terminal?.target.address ?? "") && first?.terminal?.target.socket === s.aSocket,
           `A's row: ${JSON.stringify(first)}`,
         )
-        const terminal = first!.address!.id.split("@")[0]!
+        const terminal = first!.terminal!.target.address!
         const byLabel = await s.hcA("ls", "--json", "--label", `vibest.session=${bRow!.id}`)
         expect(byLabel.stdout.includes(`"${terminal}"`), `hc ls on A: ${byLabel.stdout}${byLabel.stderr}`)
         await until("the first notice", () => s!.notices(address, "msix") === 1, 120_000)
@@ -854,20 +857,29 @@ const checks: ReadonlyArray<Check> = [
         const renamed = await s.hcA("machine", "rename", "mb", "mbx")
         expect(renamed.code === 0, `hc machine rename: ${renamed.stderr}`)
         const followed = await shown()
-        expect(followed?.address?.id.startsWith("mbx/t") === true, `after the rename: ${JSON.stringify(followed)}`)
+        expect(
+          followed?.terminal?.target.address?.startsWith("mbx/t") === true,
+          `after the rename: ${JSON.stringify(followed)}`,
+        )
         expect((await hcRows()).length === 1, `a second mirror after the rename: ${JSON.stringify(await hcRows())}`)
 
         const dials = (await fs.readFile(s.log, "utf8")).split("\n").filter((l) => l.includes("vibest connect")).length
         expect((await s.hcA("machine", "rm", "mbx")).code === 0, "hc machine rm mbx")
         const repaired = await shown()
-        expect(repaired?.address?.id.startsWith("mb/t") === true, `ls after hc machine rm: ${JSON.stringify(repaired)}`)
+        expect(
+          repaired?.terminal?.target.address?.startsWith("mb/t") === true,
+          `ls after hc machine rm: ${JSON.stringify(repaired)}`,
+        )
         expect(
           (await hcRows()).some((m) => m.id === core && m.name === "mb"),
           `A's hc after the repair: ${JSON.stringify(await hcRows())}`,
         )
         expect((await s.hcA("machine", "rm", "mb")).code === 0, "hc machine rm mb")
         const got = JSON.parse(await s.okA(["result", address])) as Listed
-        expect(got.address?.id.startsWith("mb/t") === true, `result after hc machine rm: ${JSON.stringify(got)}`)
+        expect(
+          got.terminal?.target.address?.startsWith("mb/t") === true,
+          `result after hc machine rm: ${JSON.stringify(got)}`,
+        )
         const dialsAfter = (await fs.readFile(s.log, "utf8")).split("\n").filter((l) => l.includes("vibest connect"))
         expect(dialsAfter.length === dials, "vibest reconnected to repair")
 

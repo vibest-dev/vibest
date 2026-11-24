@@ -65,7 +65,7 @@ export const make = Effect.gen(function* () {
   const deliverQueued = Effect.fn("Delivery.deliverQueued")(function* (
     h: Runtime,
     session: SessionRow,
-    terminal: Terminal,
+    terminal: Terminal | undefined,
     hand?: (
       text: string,
       onHandover: Effect.Effect<void>,
@@ -75,7 +75,11 @@ export const make = Effect.gen(function* () {
     >,
   ) {
     const into =
-      hand ?? ((text: string, onHandover: Effect.Effect<void>) => prompt(h, session, terminal, text, onHandover))
+      hand ??
+      ((text: string, onHandover: Effect.Effect<void>) =>
+        terminal === undefined
+          ? Effect.die("deliverQueued called without a terminal")
+          : prompt(h, session, terminal, text, onHandover))
 
     const task = yield* db.inbox.untakenTask(session.id)
 
@@ -189,7 +193,7 @@ export const make = Effect.gen(function* () {
         if (archived(session)) return
         const h = yield* runtimes.route(runtimeOf(session))
 
-        return yield* deliverQueued(h, session, terminalOf(session), (text, onHandover) =>
+        return yield* deliverQueued(h, session, terminalOf(session)?.target, (text, onHandover) =>
           resume(h, session, { text, onHandover }),
         )
       }).pipe(
@@ -225,13 +229,13 @@ export const make = Effect.gen(function* () {
     )
       return
     const h = yield* runtimes.route(runtimeOf(session))
-    const terminal = terminalOf(session)
-    const seen = yield* agentState(h, terminal)
+    const terminal = terminalOf(session)?.target
+    const seen = terminal === undefined ? ("absent" as const) : yield* agentState(h, terminal)
     const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
 
     if (state !== undefined && busy(state)) return
 
-    if (state === undefined && !(yield* alive(h, terminal))) {
+    if (state === undefined && (terminal === undefined || !(yield* alive(h, terminal)))) {
       if (exitedAt(session) === null) return yield* exits.settle(h, id, session.process?.id)
 
       if (localRoot) return
@@ -252,7 +256,9 @@ export const make = Effect.gen(function* () {
     }
 
     const fresh = (yield* db.session.getSession(id)) ?? session
-    yield* deliverQueued(h, fresh, terminalOf(fresh))
+    const freshTerminal = terminalOf(fresh)?.target
+
+    if (freshTerminal !== undefined) yield* deliverQueued(h, fresh, freshTerminal)
   })
 
   const undeliverable = (id: string, rows: ReadonlySet<number>) => (cause: Cause.Cause<unknown>) =>
@@ -315,13 +321,15 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const session = yield* getRow(id)
         const h = yield* runtimes.route(runtimeOf(session))
-        const terminal = terminalOf(session)
+        const terminal = terminalOf(session)?.target
         const execution = yield* db.session.openExecution(id)
 
         if (execution === undefined)
           return {
             message: `${id} is not working; its execution had already finished and its reply is recorded`,
           }
+
+        if (terminal === undefined) return { message: `${id} is not working; nothing to interrupt` }
         const state = stateOf(yield* sessionState(h, terminal, Effect.succeed(session.status))) ?? "unknown"
 
         if (!(yield* db.session.executionAccepted(id)) && !busy(state))
@@ -390,7 +398,9 @@ export const make = Effect.gen(function* () {
 
         if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
         const h = yield* runtimes.route(runtimeOf(session))
-        yield* h.send(terminalOf(session), { text: inboxContent(rows) }).pipe(Effect.ignore)
+        const terminal = terminalOf(session)?.target
+
+        if (terminal !== undefined) yield* h.send(terminal, { text: inboxContent(rows) }).pipe(Effect.ignore)
       }).pipe(Effect.catchTag("NoRuntime", () => Effect.void)),
     )
   })

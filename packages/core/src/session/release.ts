@@ -1,15 +1,16 @@
 import { ArchiveOutcome } from "@vibest/schema/archive"
 import { Layout } from "@vibest/schema/layout"
 import { RuntimeUnreachable } from "@vibest/schema/session"
+import { canonicalTarget } from "@vibest/schema/terminal"
 import { Clock, Duration, Effect, FileSystem, Option, Path } from "effect"
 
 import { awaitOn, Bus } from "../bus.ts"
-import { type SessionRow, runtimeOf, terminalOf, exitedAt } from "../database/db-rows.ts"
+import { type SessionRow, runtimeOf, exitedAt } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { Git } from "../git.ts"
 import { Processes, validPid } from "../processes.ts"
 import { listProjectRepositories, workspaceGit } from "../project/create.ts"
-import { agentState, type Runtime, type Terminal } from "../runtimes.ts"
+import { agentState, formatTerminal, type Runtime, type Terminal } from "../runtimes.ts"
 import { removeSystemPrompt } from "../system-prompt.ts"
 import { gitState, mainCheckout, removeWorktree } from "../worktree.ts"
 
@@ -66,9 +67,7 @@ export const stopAgent = (
               gone.pipe(Effect.map((yes) => (yes ? Option.some(true) : Option.none()))),
               (event) =>
                 Effect.succeed(
-                  event.type === "terminal.exited" &&
-                    event.terminal.machine === terminal.machine &&
-                    event.terminal.id === terminal.id
+                  event.type === "terminal.exited" && canonicalTarget(event.terminal) === canonicalTarget(terminal)
                     ? Option.some(true)
                     : Option.none(),
                 ),
@@ -118,7 +117,7 @@ export const make = Effect.gen(function* () {
           workspace: "none" as const,
           worktree: "kept" as const,
           path: "",
-          branch: null,
+          branches: [],
           reasons,
         }
       }
@@ -129,7 +128,8 @@ export const make = Effect.gen(function* () {
 
       const closeTerminal = () =>
         Effect.gen(function* () {
-          if (h === undefined || input.terminal === undefined || input.terminal.id === "") return "none" as const
+          if (h === undefined || input.terminal === undefined) return "none" as const
+          const label = formatTerminal(h, input.terminal)
 
           const outcome = yield* h.close(input.terminal).pipe(
             Effect.as("closed" as const),
@@ -138,7 +138,7 @@ export const make = Effect.gen(function* () {
                 ? Effect.fail(
                     new RuntimeUnreachable({
                       session: runtimeOf(session),
-                      message: `closing terminal ${input.terminal!.id}: ${error.message}`,
+                      message: `closing terminal ${label}: ${error.message}`,
                     }),
                   )
                 : Effect.succeed(error.code === "not_found" ? ("closed" as const) : ("kept" as const)),
@@ -146,7 +146,7 @@ export const make = Effect.gen(function* () {
           )
 
           if (outcome === "kept") {
-            reasons.push(`closing terminal ${input.terminal.id} failed; its processes are not confirmed gone`)
+            reasons.push(`closing terminal ${label} failed; its processes are not confirmed gone`)
 
             return "kept" as const
           }
@@ -174,8 +174,7 @@ export const make = Effect.gen(function* () {
 
       const harnessPid = session.process?.pid
 
-      const owned =
-        terminalOf(session).machine === "local" && validPid(harnessPid) ? yield* processes.tree(harnessPid) : undefined
+      const owned = validPid(harnessPid) ? yield* processes.tree(harnessPid) : undefined
 
       const pane = yield* closeTerminal()
       const survivors: Array<number> = []
@@ -326,12 +325,11 @@ export const make = Effect.gen(function* () {
         yield* removeSystemPrompt(id)
       }
 
-      const branch = multiGit
-        ? multiGit
-            .map((r) => (r.branch ? `${r.name}=${r.branch}` : ""))
-            .filter(Boolean)
-            .join("\n") || null
-        : g?.branch || null
+      const branches = multiGit
+        ? multiGit.flatMap((r) => (r.branch ? [{ repository: r.name, branch: r.branch }] : []))
+        : g?.branch
+          ? [{ repository: path.basename(root ?? worktree), branch: g.branch }]
+          : []
 
       return {
         id,
@@ -340,7 +338,7 @@ export const make = Effect.gen(function* () {
         workspace: "none" as const,
         worktree: tree,
         path: worktree,
-        branch,
+        branches,
         reasons,
       }
     }).pipe(

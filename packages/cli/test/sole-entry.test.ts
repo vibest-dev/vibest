@@ -19,7 +19,7 @@ const running = {
   harness: "claude",
   place: "herdr w1:p1",
   runtime: "herdr",
-  address: "{}",
+  target: { id: "w1:p1" },
 }
 
 describe("resolveRunning while the root session runs in another terminal", () => {

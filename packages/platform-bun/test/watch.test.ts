@@ -51,7 +51,7 @@ const withEntry = Effect.gen(function* () {
     project,
     "pi",
     false,
-    { runtime: "herdr", address: { machine: "local", id: "w1:p8" } },
+    { runtime: "herdr", target: { id: "w1:p8" } },
     { agent: "coordinator", projectDirectory: repo },
   )
 
@@ -233,7 +233,7 @@ describe("Watch", () => {
         Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === activity
 
       yield* next((e): e is WatchEvent => isSession("idle", 0)(e))
-      yield* herdr.countFinished(terminal.id)
+      yield* herdr.countFinished(terminal["id"]!)
       yield* next((e): e is WatchEvent => isSession("done", 1)(e))
       yield* next((e): e is WatchEvent => isProject("done")(e))
 
@@ -265,8 +265,8 @@ describe("Watch", () => {
           Predicate.isTagged(e, "Session") && e.session.id === id && e.session.status === "working",
       )
       const terminal = (yield* herdr.terminalOf(id))!
-      yield* Effect.repeat(herdr.countFinished(terminal.id), { times: 5 })
-      const held = yield* herdr.hold("see", terminal.id)
+      yield* Effect.repeat(herdr.countFinished(terminal["id"]!), { times: 5 })
+      const held = yield* herdr.hold("see", terminal["id"]!)
       const five = yield* c["Session.Seen"]({ id, finished: 5 }).pipe(Effect.forkScoped)
       yield* held.reached
       const six = yield* c["Session.Seen"]({ id, finished: 6 }).pipe(Effect.forkScoped)
@@ -357,10 +357,16 @@ describe("Watch", () => {
       assert.strictEqual((first["result"] as Array<WatchEvent>)[0]!._tag, "Snapshot")
 
       const read = db.session.sessionIdentity
-      const ids = Array.from({ length: WATCH_BACKLOG + 500 }, (_, i) => `ended-${i}`)
+
+      const ids = Array.from(
+        { length: WATCH_BACKLOG + 500 },
+        (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      )
+
+      const idSet = new Set(ids)
 
       Object.assign(db.session, {
-        sessionIdentity: (id: string) => (id.startsWith("ended-") ? Effect.succeed({ projectId: project }) : read(id)),
+        sessionIdentity: (id: string) => (idSet.has(id) ? Effect.succeed({ projectId: project }) : read(id)),
       })
 
       for (const id of ids) yield* bus.observe({ type: "session.changed", sessionId: id })
@@ -515,31 +521,31 @@ describe("Watch", () => {
       const snapA = snapshot.sessions.find((s) => s.id === a.id)
       const snapB = snapshot.sessions.find((s) => s.id === b.id)
 
-      assert.deepStrictEqual(snapA?.to, [entryId])
-      assert.deepStrictEqual(snapB?.to, [entryId])
+      assert.deepStrictEqual(snapA?.to, [{ id: entryId }])
+      assert.deepStrictEqual(snapB?.to, [{ id: entryId }])
 
-      yield* cli["Session.Link"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) })
+      yield* cli["Session.Link"]({ spec: EdgeDirected.make({ from: [{ id: a.id }], to: [{ id: b.id }] }) })
 
       const linked = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
-          Predicate.isTagged(e, "Session") && e.session.id === a.id && e.session.to.includes(b.id),
+          Predicate.isTagged(e, "Session") && e.session.id === a.id && e.session.to.some((t) => t.id === b.id),
       )
 
-      assert.deepStrictEqual([...linked.session.to].sort(), [b.id, entryId].sort())
+      assert.deepStrictEqual(linked.session.to.map((t) => t.id).sort(), [b.id, entryId].sort())
 
-      yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) })
+      yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [{ id: a.id }], to: [{ id: b.id }] }) })
 
       const unlinked = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
-          Predicate.isTagged(e, "Session") && e.session.id === a.id && !e.session.to.includes(b.id),
+          Predicate.isTagged(e, "Session") && e.session.id === a.id && !e.session.to.some((t) => t.id === b.id),
       )
 
-      assert.deepStrictEqual(unlinked.session.to, [entryId])
+      assert.deepStrictEqual(unlinked.session.to, [{ id: entryId }])
     }),
   )
 
   test(
-    "exited unarchived sessions report empty address.id and are excluded from Snapshot project.activity",
+    "exited unarchived sessions report null terminal and are excluded from Snapshot project.activity",
     Effect.gen(function* () {
       const db = yield* Db.Service
       const { repo, entryId, entryClient } = yield* withEntry
@@ -564,7 +570,7 @@ describe("Watch", () => {
       const exitedChild = snapshot.sessions.find((s) => s.id === childId)
       assert.isDefined(exitedChild)
       assert.isNotNull(exitedChild?.exitedAt)
-      assert.strictEqual(exitedChild?.address.id, "")
+      assert.isNull(exitedChild?.terminal)
 
       const project = snapshot.projects.find((p) => p.id === exitedChild?.projectId)
       assert.strictEqual(project?.activity, "idle")

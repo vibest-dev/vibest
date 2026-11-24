@@ -16,7 +16,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
 
       const first = yield* Effect.flip(
-        c["Session.Claim"]({ agent: "general", runtime: "herdr", fresh: false, terminal: "test/p1" }),
+        c["Session.Claim"]({ agent: "general", runtime: "herdr", fresh: false, terminal: { id: "test/p1" } }),
       )
 
       assert.strictEqual(first._tag, "LaunchFailed")
@@ -27,7 +27,7 @@ describe("vibest.sock", () => {
         runtime: "herdr",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })
 
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
@@ -37,7 +37,7 @@ describe("vibest.sock", () => {
         agent: "coordinator",
         runtime: "herdr",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })
 
       assert.strictEqual(resumed.sessionId, claimed.sessionId)
@@ -65,7 +65,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const pane = "w1:coord"
       yield* herdr.seedAgent(pane)
-      yield* c["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: pane })
+      yield* c["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: { id: pane } })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "working" }))
       yield* until(c.List({}), (list) => list.sessions[0]?.status === "working")
       assert.deepInclude((yield* c.List({})).sessions[0], { agent: "coordinator", status: "working" })
@@ -110,7 +110,7 @@ describe("vibest.sock", () => {
         false,
         {
           runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
+          target: { id: "test/main" },
         },
         { agent: "coordinator", projectDirectory: repo },
       )
@@ -135,7 +135,7 @@ describe("vibest.sock", () => {
         false,
         {
           runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
+          target: { id: "test/main" },
         },
         { agent: "coordinator" },
       )

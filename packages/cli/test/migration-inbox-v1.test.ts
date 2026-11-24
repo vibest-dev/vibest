@@ -93,7 +93,7 @@ const oldLedger = Effect.gen(function* () {
   yield* Effect.void.pipe(Effect.provide(database(file)))
   yield* Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* sql`DELETE FROM migration WHERE id IN (${MIGRATION}, '20261122000000_execution_lifecycle')`
+    yield* sql`DELETE FROM migration WHERE id IN (${MIGRATION}, '20261122000000_execution_lifecycle', '20261124030000_drop_project_entry', '20261124040000_structured_terminal_targets')`
     yield* sql`UPDATE meta SET value = '5' WHERE key = 'catalog'`
 
     for (const [aggregate, seq, type, data] of facts)

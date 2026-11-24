@@ -413,7 +413,7 @@ describe("herdr open-entry", () => {
           false,
           {
             runtime: "herdr",
-            address: { machine: "local", id: "test/main" },
+            target: { id: "test/main" },
           },
           { agent: "coordinator" },
         )
@@ -422,7 +422,7 @@ describe("herdr open-entry", () => {
         assert.match(stopped.stdout, /^opened /)
         const opensBefore = (yield* herdr.callsTo("open")).length
         assert.ok(opensBefore > 0)
-        const entryId = terminalOf((yield* db.session.latestRoot(projectId))!)!.id
+        const entryId = terminalOf((yield* db.session.latestRoot(projectId))!)!.target["id"]!
         yield* herdr.seedAgent(entryId)
         const again = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.strictEqual(again.code, 0, again.stderr)

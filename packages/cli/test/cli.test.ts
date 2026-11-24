@@ -163,12 +163,12 @@ describe("vibest run links and vibest session link/unlink", () => {
   type SpawnCall = {
     harness?: string | null
     prompt?: string
-    from?: ReadonlyArray<string>
-    to?: ReadonlyArray<string>
-    with?: ReadonlyArray<string>
+    from?: ReadonlyArray<{ id: string; machine?: string }>
+    to?: ReadonlyArray<{ id: string; machine?: string }>
+    with?: ReadonlyArray<{ id: string; machine?: string }>
   }
 
-  type LinkCall = { method: "Session.Link" | "Session.Unlink"; spec: Schema.Json }
+  type LinkCall = { method: "Session.Link" | "Session.Unlink"; spec: unknown }
 
   const agentEnv = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }
   const spawnedId = "11111111-1111-4111-8111-111111111111"
@@ -214,7 +214,7 @@ describe("vibest run links and vibest session link/unlink", () => {
               })
             } else if (req.method === "Session.Link" || req.method === "Session.Unlink") {
               links.push({ method: req.method, spec: req.params?.spec ?? null })
-              reply({ result: { edges: [{ from: "a", to: "b" }] } })
+              reply({ result: { edges: [{ from: { id: "a" }, to: { id: "b" } }] } })
             }
           }
         })
@@ -257,9 +257,9 @@ describe("vibest run links and vibest session link/unlink", () => {
         assert.deepInclude(d.spawns[0], {
           harness: "pi",
           prompt: "do work",
-          from: ["aaaa1111", "bbbb2222"],
-          to: ["cccc3333"],
-          with: ["dddd4444"],
+          from: [{ id: "aaaa1111" }, { id: "bbbb2222" }],
+          to: [{ id: "cccc3333" }],
+          with: [{ id: "dddd4444" }],
         })
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     TIMEOUT,
@@ -273,7 +273,7 @@ describe("vibest run links and vibest session link/unlink", () => {
 
         const mutual = yield* d.run(["session", "link", "a", "b", "c"])
         assert.strictEqual(mutual.code, 0, mutual.stderr)
-        assert.deepStrictEqual(JSON.parse(mutual.stdout), { edges: [{ from: "a", to: "b" }] })
+        assert.deepStrictEqual(JSON.parse(mutual.stdout), { edges: [{ from: { id: "a" }, to: { id: "b" } }] })
 
         const directed = yield* d.run(["session", "link", "a", "b", "--to", "c", "--to", "d"])
         assert.strictEqual(directed.code, 0, directed.stderr)
@@ -285,10 +285,13 @@ describe("vibest run links and vibest session link/unlink", () => {
         assert.strictEqual(unlinked.code, 0, unlinked.stderr)
 
         assert.deepStrictEqual(d.links, [
-          { method: "Session.Link", spec: EdgeMutual.make({ ids: ["a", "b", "c"] }) },
-          { method: "Session.Link", spec: EdgeDirected.make({ from: ["a", "b"], to: ["c", "d"] }) },
-          { method: "Session.Link", spec: EdgeChain.make({ ids: ["a", "b", "c"] }) },
-          { method: "Session.Unlink", spec: EdgeDirected.make({ from: ["a"], to: ["b"] }) },
+          { method: "Session.Link", spec: EdgeMutual.make({ ids: [{ id: "a" }, { id: "b" }, { id: "c" }] }) },
+          {
+            method: "Session.Link",
+            spec: EdgeDirected.make({ from: [{ id: "a" }, { id: "b" }], to: [{ id: "c" }, { id: "d" }] }),
+          },
+          { method: "Session.Link", spec: EdgeChain.make({ ids: [{ id: "a" }, { id: "b" }, { id: "c" }] }) },
+          { method: "Session.Unlink", spec: EdgeDirected.make({ from: [{ id: "a" }], to: [{ id: "b" }] }) },
         ])
 
         const bad = yield* d.run(["session", "link", "--chain", "a", "--to", "b"])

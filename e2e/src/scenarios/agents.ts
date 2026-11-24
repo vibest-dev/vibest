@@ -17,7 +17,7 @@ type Entry = {
   harness: string
   provider: string | null
   model: string | null
-  address: { id: string }
+  terminal: { runtime: string; target: { pane?: string } } | null
   routing?: { decidedBy: Record<string, string> }
 }
 
@@ -393,7 +393,7 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(processes().length === 1, "the refused start started a process")
         const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
-        await herdr(socket, "pane.close", { pane_id: lead!.address.id.split("/").pop()! })
+        await herdr(socket, "pane.close", { pane_id: lead!.terminal!.target.pane! })
         await until("the entry session's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
         const again = await w.vibest(["--headless"], { env, timeoutMs: 60_000 })
         expect(again.code === 0, `bare vibest: ${again.code} ${again.stderr}${again.stdout}`)

@@ -6,14 +6,14 @@ import { DEFAULT_SESSION, defaultSocketPath, Hc, SocketConnector } from "effect-
 
 import { CALLER_ENV, terminalFrom } from "./caller.ts"
 import * as Machines from "./machines.ts"
-import { KIND, make } from "./terminal-runtime.ts"
+import { type HcTerminal, make } from "./terminal-runtime.ts"
 
 const platform = Layer.mergeAll(
   Layer.succeed(SocketConnector, (endpoint: string) => NodeSocket.makeNet({ path: endpoint })),
   NodePath.layer,
 )
 
-const callerFor = (defaultSocket: string): VibestPlugin.Runtime.RuntimeCaller => ({
+const callerFor = (defaultSocket: string): VibestPlugin.Runtime.RuntimeCaller<HcTerminal> => ({
   env: CALLER_ENV,
   terminal: (env) => Effect.succeed(terminalFrom(env, defaultSocket)),
 })
@@ -34,11 +34,11 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
       const session = yield* hcSession.pipe(Effect.orDie)
       const connect = (socketPath: string) => Hc.make(socketPath).pipe(Effect.provide(platform))
       const home = yield* connect(socket)
-      const runtime = yield* make({ connect, socket, scope: yield* Effect.scope })
 
-      const definition: VibestPlugin.Runtime.RuntimeDefinition = {
-        ...runtime,
-        id: KIND,
+      const definition = yield* make({
+        connect,
+        socket,
+        scope: yield* Effect.scope,
         name: "herdr-core",
         caller: callerFor(socket),
         link: () =>
@@ -47,13 +47,13 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
             Effect.orElseSucceed(() => undefined),
           ),
         locate: (remote, sessions) => Machines.locate(home, remote, sessions),
-      }
+      })
 
       yield* context.runtime.transform((editor) => editor.add(definition))
       yield* Machines.mirror(
         context.machine,
         home,
-        runtime.events.pipe(Stream.filter((event) => event.type === "reset")),
+        definition.events.pipe(Stream.filter((event) => event.type === "reset")),
       )
     }),
 })

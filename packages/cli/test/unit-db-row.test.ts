@@ -11,10 +11,10 @@ it.effect("a session row's open execution is the newest one and its last executi
     const project = yield* projectOf("r")
     const child = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     const parent = (yield* db.session.startRoot(project, "pi", false, place, { agent: "coordinator" })).sessionId
-    yield* db.session.insertSession(session(child, { address: { machine: "local", id: "" } }), project, {
+    yield* db.session.insertSession(session(child, { terminal: null }), project, {
       parentSessionId: parent,
     })
-    yield* db.session.placeProcess(child, "t1", 42)
+    yield* db.session.placeProcess(child, { id: "t1" }, 42)
     const first = (yield* db.session.startExecution(child, 5)).execution
     yield* db.session.endExecution(
       child,
@@ -34,29 +34,29 @@ it.effect("processesAt binds the live processes at that runtime and terminal", (
     const db = yield* Db.Service
     const project = yield* projectOf("r")
     const here = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-    const terminal = { machine: "local", id: "pane-a" }
+    const terminal = { id: "pane-a" }
     yield* db.session.insertSession(
       session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", {
-        address: { machine: "local", id: "pane-b" },
+        terminal: { id: "pane-b" },
         createdAt: 0,
       }),
       project,
     )
     yield* db.session.insertSession(
-      session("cccccccc-cccc-4ccc-8ccc-cccccccccccc", { runtime: "other", address: terminal, createdAt: 0 }),
+      session("cccccccc-cccc-4ccc-8ccc-cccccccccccc", { runtime: "other", terminal, createdAt: 0 }),
       project,
     )
     yield* db.session.insertSession(
-      session("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", { address: terminal, exitedAt: 5, createdAt: 0 }),
+      session("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", { terminal, exitedAt: 5, createdAt: 0 }),
       project,
     )
-    yield* db.session.insertSession(session(here, { address: terminal, createdAt: 1 }), project)
+    yield* db.session.insertSession(session(here, { terminal, createdAt: 1 }), project)
     const bound = yield* db.session.processesAt(RUNTIME, terminal)
     assert.deepStrictEqual(
       bound.map((p) => p.sessionId),
       [here],
     )
     assert.strictEqual(bound[0]!.process, (yield* db.session.getSession(here))!.process!.id)
-    assert.deepStrictEqual(yield* db.session.processesAt(RUNTIME, { machine: "local", id: "missing" }), [])
+    assert.deepStrictEqual(yield* db.session.processesAt(RUNTIME, { id: "missing" }), [])
   }).pipe(Effect.provide(database(":memory:"))),
 )

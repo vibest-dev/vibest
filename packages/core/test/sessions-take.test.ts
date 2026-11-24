@@ -29,7 +29,7 @@ const entryAsked = Effect.gen(function* () {
     false,
     {
       runtime: RUNTIME,
-      address: { machine: "local", id: "test/coord" },
+      target: { id: "test/coord" },
     },
     { agent: "coordinator" },
   )
@@ -235,7 +235,7 @@ describe.concurrent("an idle session takes its next batch", () => {
         yield* projectOf(repo),
         "pulling-pi",
         false,
-        { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
+        { runtime: RUNTIME, target: { id: "test/coord" } },
         { agent: "coordinator" },
       )
 

@@ -50,7 +50,7 @@ export const asEntry = (raw: Effect.Success<typeof client>, repositoryRoot: stri
         false,
         {
           runtime: "herdr",
-          address: { machine: "local", id: "test/entry" },
+          target: { id: "test/entry" },
         },
         { agent: "coordinator" },
       )).sessionId

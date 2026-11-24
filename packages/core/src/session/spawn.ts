@@ -24,7 +24,6 @@ import {
   type SessionRow,
   harnessIdOf,
   runtimeOf,
-  terminalOf,
   archived,
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
@@ -179,7 +178,7 @@ export const make = Effect.gen(function* () {
       return rt
     })
 
-  const shareOf = (input: SpawnInput, id: string, runtime: string, machineId: string) =>
+  const shareOf = (input: SpawnInput, id: string, runtime: string) =>
     Effect.gen(function* () {
       const refuse = (why: string) => new NoSuchSession({ id, message: `--share ${id}: ${why}` })
       const p = yield* db.session.getSession(id)
@@ -190,10 +189,7 @@ export const make = Effect.gen(function* () {
 
       if (archived(p)) return yield* refuse("it was archived")
 
-      if (runtimeOf(p) !== runtime || terminalOf(p).machine !== machineId)
-        return yield* refuse(
-          `ineligible: it runs in ${runtimeOf(p)} on ${terminalOf(p).machine}, not ${runtime} on ${machineId}`,
-        )
+      if (runtimeOf(p) !== runtime) return yield* refuse(`ineligible: it runs in ${runtimeOf(p)}, not ${runtime}`)
       const worktree = yield* worktreeOf(p).pipe(Effect.mapError((e) => refuse(e.message)))
 
       if (!(yield* fs.exists(worktree).pipe(Effect.orDie)))
@@ -288,7 +284,7 @@ export const make = Effect.gen(function* () {
             Effect.provideService(Harness.Service, harness),
             Effect.provideService(Harnesses.Service, harnesses),
           ),
-          machine: { id: followedShare === undefined ? input.machine.id : terminalOf(followedShare).machine },
+          machine: { id: input.machine.id },
           runtime: followedShare === undefined ? input.runtime : runtimeOf(followedShare),
           parentRuntime,
           machines: yield* machinesListing,
@@ -421,7 +417,7 @@ export const make = Effect.gen(function* () {
               model: model ?? null,
               harnessSessionId: adapter.ownSessionId ? yield* newId() : null,
               runtime: runtimeKind,
-              address: { machine: decision.machine.id, id: "" },
+              terminal: null,
               status: "unknown",
               startedAt: null,
               exitedAt: null,
@@ -438,7 +434,6 @@ export const make = Effect.gen(function* () {
               ...(model !== undefined && { model }),
               routing,
               runtime: runtimeKind,
-              terminal: "",
               ...(draft.harnessSessionId !== null && { resume: draft.harnessSessionId }),
             }
 
@@ -506,7 +501,7 @@ export const make = Effect.gen(function* () {
           ? yield* admit(undefined)
           : yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(input.share)) ?? ""))(
               Effect.gen(function* () {
-                const shared = yield* shareOf(input, input.share!, runtimeKind, decision.machine.id)
+                const shared = yield* shareOf(input, input.share!, runtimeKind)
 
                 return yield* admit(shared)
               }),

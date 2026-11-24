@@ -15,9 +15,9 @@ import {
   AmbiguousSession,
   type ExecutionState,
   NoSuchSession,
-  RuntimeAddress,
   type HarnessId,
 } from "@vibest/schema/session"
+import type { TerminalTarget } from "@vibest/schema/terminal"
 import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -101,9 +101,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         ? Effect.succeed(true)
         : sql.unsafe<{ n: number }>(LIVE_PROCESS_COUNT).pipe(Effect.map((rows) => (rows[0]?.n ?? 0) < max))
 
-    const clearAt = (runtime: string, address: RuntimeAddress, except?: string) =>
+    const clearAt = (runtime: string, target: TerminalTarget, except?: string) =>
       Effect.gen(function* () {
-        for (const other of yield* liveSessionsAt(runtime, address, except)) {
+        for (const other of yield* liveSessionsAt(runtime, target, except)) {
           yield* endProcess(other.id, "exited")
         }
       })
@@ -262,7 +262,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       ...(row.model && { model: row.model }),
                       ...(row.routing !== undefined && { routing: row.routing }),
                       runtime: row.runtime,
-                      terminal: row.address.id,
+                      ...(row.terminal !== null && { terminal: row.terminal }),
                       ...(row.harnessSessionId && { resume: row.harnessSessionId }),
                     },
                     processAt,
@@ -358,7 +358,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           project: string,
           harness: HarnessId,
           fresh: boolean,
-          location: { readonly runtime: string; readonly address: RuntimeAddress },
+          location: { readonly runtime: string; readonly target: TerminalTarget },
           start: {
             readonly provider?: string | undefined
             readonly model?: string | undefined
@@ -385,7 +385,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 const creating = existing === undefined || existing.endedAt !== null
                 const targetId = creating ? allocated : existing.id
 
-                yield* clearAt(location.runtime, location.address, targetId)
+                yield* clearAt(location.runtime, location.target, targetId)
                 const movingHere = moving.has(targetId)
 
                 const at = yield* now
@@ -448,7 +448,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     ...(start.model && { model: start.model }),
                     ...(start.routing && { routing: start.routing }),
                     runtime: location.runtime,
-                    terminal: location.address.id,
+                    terminal: location.target,
                     ...(resume !== undefined && { resume }),
                     ...(start.pid !== undefined && { pid: start.pid }),
                   },
@@ -503,7 +503,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(setStatus(id, status)).pipe(Effect.orDie),
       ),
 
-      placeProcess: Effect.fn("Db.session.placeProcess")((id: string, terminal: string, pid?: number) =>
+      placeProcess: Effect.fn("Db.session.placeProcess")((id: string, terminal: TerminalTarget, pid?: number) =>
         tx(session.placeProcess(id, terminal, pid)).pipe(Effect.orDie),
       ),
 
@@ -612,9 +612,9 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       detachSession: Effect.fn("Db.session.detachSession")(
-        (sessionId: string, runtime: string, address: RuntimeAddress) =>
+        (sessionId: string, runtime: string, target: TerminalTarget) =>
           Effect.gen(function* () {
-            const here = (yield* liveSessionsAt(runtime, address)).some((m) => m.id === sessionId)
+            const here = (yield* liveSessionsAt(runtime, target)).some((m) => m.id === sessionId)
 
             if (here) moving.add(sessionId)
 
@@ -628,16 +628,16 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         }),
       ),
 
-      lastSessionAt: Effect.fn("Db.session.lastSessionAt")((runtime: string, address: RuntimeAddress) =>
-        session.lastSessionAt(runtime, address).pipe(Effect.orDie),
+      lastSessionAt: Effect.fn("Db.session.lastSessionAt")((runtime: string, target: TerminalTarget) =>
+        session.lastSessionAt(runtime, target).pipe(Effect.orDie),
       ),
 
       lastProjectTerminal: Effect.fn("Db.session.lastProjectTerminal")((projectId: string, runtime: string) =>
         session.lastProjectTerminal(projectId, runtime).pipe(Effect.orDie),
       ),
 
-      processesAt: Effect.fn("Db.session.processesAt")((runtime: string, address: RuntimeAddress) =>
-        session.processesAt(runtime, address).pipe(Effect.orDie),
+      processesAt: Effect.fn("Db.session.processesAt")((runtime: string, target: TerminalTarget) =>
+        session.processesAt(runtime, target).pipe(Effect.orDie),
       ),
 
       sessionMoving: Effect.fn("Db.session.sessionMoving")((sessionId: string) =>

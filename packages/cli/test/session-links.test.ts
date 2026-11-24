@@ -23,25 +23,29 @@ describe("Session graph links RPC", () => {
       const fromOtherEntry = yield* asEntry(base, otherRepo)
 
       const a = yield* fromEntry.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "a" })
+      const refA = { id: a.id }
 
       const b = yield* fromEntry.Spawn({
         agent: "general",
         callerEnv: {},
         harness: "pi",
         prompt: "b",
-        from: [a.id],
+        from: [refA],
       })
+
+      const refB = { id: b.id }
 
       const c = yield* fromEntry.Spawn({
         agent: "general",
         callerEnv: {},
         harness: "pi",
         prompt: "c",
-        to: [a.id],
-        with: [b.id],
+        to: [refA],
+        with: [refB],
       })
 
       const d = yield* fromEntry.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "d" })
+      const refD = { id: d.id }
 
       const otherChild = yield* fromOtherEntry.Spawn({
         agent: "general",
@@ -63,33 +67,33 @@ describe("Session graph links RPC", () => {
       yield* fromB.Send({ id: c.id, message: "b-to-c" })
       assert.strictEqual((yield* Effect.flip(fromD.Send({ id: a.id, message: "d-to-a" })))._tag, "Forbidden")
 
-      const mutual = yield* cli["Session.Link"]({ spec: EdgeMutual.make({ ids: [a.id, d.id] }) })
+      const mutual = yield* cli["Session.Link"]({ spec: EdgeMutual.make({ ids: [refA, refD] }) })
       assert.deepStrictEqual(mutual.edges, [
-        { from: a.id, to: d.id },
-        { from: d.id, to: a.id },
+        { from: refA, to: refD },
+        { from: refD, to: refA },
       ])
       yield* fromD.Send({ id: a.id, message: "d-to-a-now" })
       yield* fromA.Send({ id: d.id, message: "a-to-d-now" })
 
-      const idem = yield* cli["Session.Link"]({ spec: EdgeMutual.make({ ids: [a.id, d.id] }) })
+      const idem = yield* cli["Session.Link"]({ spec: EdgeMutual.make({ ids: [refA, refD] }) })
       assert.deepStrictEqual(idem.edges, [
-        { from: a.id, to: d.id },
-        { from: d.id, to: a.id },
+        { from: refA, to: refD },
+        { from: refD, to: refA },
       ])
 
-      const chain = yield* cli["Session.Link"]({ spec: EdgeChain.make({ ids: [d.id, b.id, a.id] }) })
+      const chain = yield* cli["Session.Link"]({ spec: EdgeChain.make({ ids: [refD, refB, refA] }) })
       assert.deepStrictEqual(chain.edges, [
-        { from: d.id, to: b.id },
-        { from: b.id, to: a.id },
+        { from: refD, to: refB },
+        { from: refB, to: refA },
       ])
       yield* fromB.Send({ id: a.id, message: "b-to-a-chained" })
 
-      yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [d.id], to: [a.id] }) })
+      yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [refD], to: [refA] }) })
       assert.strictEqual((yield* Effect.flip(fromD.Send({ id: a.id, message: "d-to-a-unlinked" })))._tag, "Forbidden")
       yield* fromA.Send({ id: d.id, message: "a-to-d-still-linked" })
 
       const selfLoop = yield* Effect.flip(
-        cli["Session.Link"]({ spec: EdgeDirected.make({ from: [a.id], to: [a.id] }) }),
+        cli["Session.Link"]({ spec: EdgeDirected.make({ from: [refA], to: [refA] }) }),
       )
 
       assert.strictEqual(selfLoop._tag, "Forbidden")
@@ -97,7 +101,7 @@ describe("Session graph links RPC", () => {
       assert.notStrictEqual(opened.projectId, otherOpened.projectId)
 
       const crossProject = yield* Effect.flip(
-        cli["Session.Link"]({ spec: EdgeDirected.make({ from: [a.id], to: [otherChild.id] }) }),
+        cli["Session.Link"]({ spec: EdgeDirected.make({ from: [refA], to: [{ id: otherChild.id }] }) }),
       )
 
       assert.strictEqual(crossProject._tag, "Forbidden")
@@ -109,7 +113,7 @@ describe("Session graph links RPC", () => {
           harness: "pi",
           prompt: "remote",
           machine: "box",
-          with: [a.id],
+          with: [refA],
         }),
       )
 
@@ -119,18 +123,18 @@ describe("Session graph links RPC", () => {
       const remote = authed(base, remoteHeaders("remote-1", opened.projectId))
 
       const remoteLink = yield* Effect.flip(
-        remote["Session.Link"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) }),
+        remote["Session.Link"]({ spec: EdgeDirected.make({ from: [refA], to: [refB] }) }),
       )
 
       assert.strictEqual(remoteLink._tag, "InvalidCaller")
 
       const remoteUnlink = yield* Effect.flip(
-        remote["Session.Unlink"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) }),
+        remote["Session.Unlink"]({ spec: EdgeDirected.make({ from: [refA], to: [refB] }) }),
       )
 
       assert.strictEqual(remoteUnlink._tag, "InvalidCaller")
 
-      const singleUnlink = yield* Effect.flip(cli["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [a.id] }) }))
+      const singleUnlink = yield* Effect.flip(cli["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [refA] }) }))
       assert.strictEqual(singleUnlink._tag, "Forbidden")
       assert.notInclude(singleUnlink.message, "to link")
 
@@ -142,7 +146,7 @@ describe("Session graph links RPC", () => {
       const promptBefore = yield* placement.systemPromptOf(rowA)
       assert.include(promptBefore, `vibest send ${entryId}`)
 
-      yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [a.id], to: [entryId] }) })
+      yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [refA], to: [{ id: entryId }] }) })
 
       const refusedParent = yield* Effect.flip(fromA.Send({ id: entryId, message: "to-unlinked-parent" }))
       assert.strictEqual(refusedParent._tag, "Forbidden")

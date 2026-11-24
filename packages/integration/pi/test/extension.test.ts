@@ -203,7 +203,7 @@ const idleRow = <H extends "pi" | "claude">(harnessId: H) => ({
   model: null,
   harnessSessionId: null,
   runtime: "herdr",
-  address: { machine: "local", id: "test/p0" },
+  terminal: { id: "test/p0" },
   status: "idle" as const,
   startedAt: 1,
   exitedAt: 1,
@@ -232,7 +232,7 @@ describe("pi-vibest", () => {
           false,
           {
             runtime: "herdr",
-            address: { machine: "local", id: "w1:p8" },
+            target: { id: "w1:p8" },
           },
           { agent: "coordinator" },
         )
@@ -324,7 +324,7 @@ describe("pi-vibest", () => {
           false,
           {
             runtime: "herdr",
-            address: { machine: "local", id: "w1:p8" },
+            target: { id: "w1:p8" },
           },
           { agent: "coordinator" },
         )
@@ -463,7 +463,7 @@ describe("pi-vibest", () => {
         true,
         {
           runtime: "herdr",
-          address: { machine: "local", id: "w1:p7" },
+          target: { id: "w1:p7" },
         },
         { agent: "coordinator" },
       )
@@ -546,7 +546,7 @@ describe("pi-vibest", () => {
         true,
         {
           runtime: "herdr",
-          address: { machine: "local", id: "w1:p7" },
+          target: { id: "w1:p7" },
         },
         { agent: "coordinator" },
       )
@@ -724,7 +724,7 @@ describe("pi-vibest", () => {
         agent: "coordinator",
         harness: "pi",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })
 
       assert.isNull(launched.harnessSessionId)
@@ -763,8 +763,12 @@ describe("pi-vibest", () => {
       yield* until(saved, (id) => id === "s-fork")
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(
-        (yield* c["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: "test/p1" }))
-          .harnessSessionId,
+        (yield* c["Session.Claim"]({
+          agent: "coordinator",
+          harness: "pi",
+          fresh: false,
+          terminal: { id: "test/p1" },
+        })).harnessSessionId,
         "s-fork",
       )
       yield* db.session.noteConversation(launched.sessionId, "kept")
@@ -775,7 +779,7 @@ describe("pi-vibest", () => {
         agent: "coordinator",
         harness: "pi",
         fresh: true,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })
 
       assert.notStrictEqual(renewed.sessionId, launched.sessionId)
@@ -796,7 +800,7 @@ describe("pi-vibest", () => {
         agent: "coordinator",
         harness: "pi",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })
 
       const saved = savedSession(launched.sessionId)

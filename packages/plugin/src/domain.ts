@@ -1,6 +1,7 @@
 import type { ExecutionOutcome } from "@vibest/schema/event"
 import type { AgentStatus } from "@vibest/schema/session"
 import type { Subscription, SubscriptionLimit } from "@vibest/schema/subscription"
+import type { SessionRef } from "@vibest/schema/terminal"
 import { Schema } from "effect"
 
 export class SessionRefused extends Schema.TaggedError<SessionRefused>()("SessionRefused", { reason: Schema.String }) {}
@@ -21,7 +22,7 @@ export interface PluginSession {
   readonly agent: string
   readonly title: string
   readonly parentId: string | null
-  readonly to: ReadonlyArray<string>
+  readonly to: ReadonlyArray<SessionRef>
   readonly status: AgentStatus
   readonly lastActive: number
   readonly waiting: boolean

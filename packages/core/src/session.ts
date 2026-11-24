@@ -17,7 +17,7 @@ import {
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import { type SessionRow, runtimeOf, terminalOf, exitedAt } from "./database/db-rows.ts"
+import { type SessionRow, terminalOf, exitedAt } from "./database/db-rows.ts"
 import { Db, type SessionFilter } from "./database/db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
@@ -181,16 +181,17 @@ export const make = Effect.gen(function* () {
 
   const peek = Effect.fn("Session.peek")(function* (id: string, lines: number) {
     const session = yield* getRow(id)
+    const terminal = terminalOf(session)
 
-    if (exitedAt(session) !== null || terminalOf(session).id === "")
+    if (exitedAt(session) !== null || terminal === null)
       return yield* new NoSuchSession({
         id,
         message: `${id} has no terminal to peek at (it exited or never started)`,
       })
-    const h = yield* runtimes.route(runtimeOf(session))
+    const h = yield* runtimes.route(terminal.runtime)
 
     const text = yield* h
-      .read(terminalOf(session), Math.max(1, Math.min(Math.floor(lines), 500)))
+      .read(terminal.target, Math.max(1, Math.min(Math.floor(lines), 500)))
       .pipe(Effect.catchTag("RuntimeError", unreachable(session)))
 
     return text.trimEnd()

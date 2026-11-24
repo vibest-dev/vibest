@@ -1,6 +1,5 @@
 import { attachPlace, filterCallerEnv, specHits } from "@vibest/core/caller"
 import { Db } from "@vibest/core/database/db"
-import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import { Identity } from "@vibest/core/identity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { SessionLaunch } from "@vibest/core/session/entry"
@@ -31,7 +30,7 @@ export const make = Effect.gen(function* () {
     Launch: (input) =>
       Effect.gen(function* () {
         const caller = yield* Caller
-        const away = input.machine !== undefined && input.machine !== LOCAL_MACHINE
+        const away = input.machine !== undefined
 
         if (away) {
           if (Predicate.isTagged(caller, "Remote"))
@@ -65,7 +64,7 @@ export const make = Effect.gen(function* () {
                 runtime: input.runtime,
                 runtimeSession: input.runtimeSession,
               })
-            : { id: LOCAL_MACHINE }
+            : { id: "local" }
 
         return yield* sessionLaunch.launch({
           projectId: project.id,
@@ -117,7 +116,7 @@ export const make = Effect.gen(function* () {
         const running =
           fresh === true
             ? null
-            : yield* sessionLaunch.running(project.id, place.in === "terminal" ? place.terminal : "", sessionId)
+            : yield* sessionLaunch.running(project.id, place.in === "terminal" ? place.terminal : undefined, sessionId)
 
         return { projectId: project.id, directory: project.directory, hasRoot, place, running }
       }),

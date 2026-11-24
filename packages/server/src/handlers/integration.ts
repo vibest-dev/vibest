@@ -1,6 +1,5 @@
 import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/database/db"
-import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import { harnessCatalog } from "@vibest/core/harness"
 import { Harnesses, unprovided } from "@vibest/core/harnesses"
 import { type HookCaller, Integration } from "@vibest/core/integration"
@@ -41,7 +40,7 @@ export const make = Effect.gen(function* () {
   return {
     "Harnesses.List": ({ provider, machine }, { headers }) =>
       Effect.gen(function* () {
-        if (machine !== undefined && machine !== LOCAL_MACHINE) {
+        if (machine !== undefined) {
           if (reader(headers)(CALLER_HEADER) === "remote")
             return yield* new Forbidden({
               method: "Harnesses.List",
@@ -58,7 +57,7 @@ export const make = Effect.gen(function* () {
 
     "Agents.List": ({ machine }, { headers }) =>
       Effect.gen(function* () {
-        if (machine !== undefined && machine !== LOCAL_MACHINE) {
+        if (machine !== undefined) {
           if (reader(headers)(CALLER_HEADER) === "remote")
             return yield* new Forbidden({
               method: "Agents.List",

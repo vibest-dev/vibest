@@ -1,3 +1,4 @@
+import { canonicalTarget } from "@vibest/schema/terminal"
 import {
   Cause,
   Duration,
@@ -76,14 +77,19 @@ export const runtimeContract = (
       Effect.catchCause(() => Effect.void),
     )
 
-    const exitedFor = (terminal: Runtime.Terminal, what: string) =>
-      until(
+    const format = (t: Runtime.Terminal) => runtime.format?.(t) ?? canonicalTarget(t)
+
+    const exitedFor = (terminal: Runtime.Terminal, what: string) => {
+      const targetKey = canonicalTarget(terminal)
+
+      return until(
         "events",
         Ref.get(seen),
-        (events) => events.some((event) => event.type === "exited" && event.terminal.id === terminal.id),
-        `emitted no exited event for ${what} ${terminal.id}`,
+        (events) => events.some((event) => event.type === "exited" && canonicalTarget(event.terminal) === targetKey),
+        `emitted no exited event for ${what} ${format(terminal)}`,
         timeout,
       )
+    }
 
     const [first] = yield* until("events", Ref.get(seen), (events) => events.length > 0, "emitted no event", timeout)
     yield* that("events", first?.type === "reset", `began with ${JSON.stringify(first)} instead of a reset event`)
@@ -95,7 +101,13 @@ export const runtimeContract = (
       label: `vibest contract ${marker}`,
     })
 
-    yield* that("open", Predicate.isString(terminal.id) && terminal.id !== "", "returned a terminal without an id")
+    yield* that(
+      "open",
+      Object.keys(terminal).length > 0 &&
+        Object.values(terminal).every((value) => Predicate.isString(value) && value !== "") &&
+        format(terminal) !== "",
+      `returned an invalid terminal target: ${JSON.stringify(terminal)}`,
+    )
 
     yield* runtime.send(terminal, { text: ran("sent") })
     yield* until(
@@ -224,7 +236,7 @@ export const runtimeContract = (
       "process",
       runtime.process(terminal).pipe(Effect.flip, Effect.option),
       (found) => Option.isSome(found) && found.value.code === "not_found",
-      `kept answering process for the closed terminal ${terminal.id} instead of not_found`,
+      `kept answering process for the closed terminal ${format(terminal)} instead of not_found`,
       Duration.fromInputUnsafe("5 seconds"),
     )
   }).pipe(Effect.asVoid)

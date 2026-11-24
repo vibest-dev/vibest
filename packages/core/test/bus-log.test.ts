@@ -137,11 +137,11 @@ describe("log", () => {
 const exited = {
   type: "terminal.exited",
   runtime: "r",
-  terminal: { machine: "local", id: "t" },
+  terminal: { id: "t" },
   processes: [],
 } as const
 
-const released = { type: "runtime.reset", runtime: "r", machine: "local" } as const
+const released = { type: "runtime.reset", runtime: "r" } as const
 
 describe("subscribe", () => {
   it.effect("a subscriber of one type retains no other type, and several types keep publish order", () =>

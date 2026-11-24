@@ -7,16 +7,16 @@ import {
   NoRuntime,
   NoSuchSession,
   type RuntimeMachine,
-  type RuntimeAddress,
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
+import { canonicalTarget, type TerminalTarget } from "@vibest/schema/terminal"
 import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 
 import { definitionLaunch } from "../agent-launch.ts"
 import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
-import { archived, encodeAddress, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
+import { archived, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { KeyedMutex } from "../effect/keyed-mutex.ts"
 import { LayerNode } from "../effect/layer-node.ts"
@@ -27,7 +27,7 @@ import { terminalPresence } from "../inbox.ts"
 import * as Launch from "../launch.ts"
 import { Plugins } from "../plugin.ts"
 import { Processes } from "../processes.ts"
-import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
+import { formatTerminal, machinesListing, type Runtime, Runtimes, type Terminal } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks, terminalLock } from "./locks.ts"
 import { Placement, runtimeEnv } from "./placement.ts"
@@ -43,16 +43,16 @@ export class SessionRunning extends Schema.TaggedError<SessionRunning>()("Sessio
   place: Schema.String,
 }) {}
 
-const placeOf = (runtime: { readonly id: string; readonly name?: string }, address: RuntimeAddress) => {
+const placeOf = (runtime: Pick<Runtime, "id" | "name" | "format">, target: TerminalTarget) => {
   const name = runtime.name ?? runtime.id
 
-  return address.id !== "" ? `${name} ${address.id}` : `${name} (not placed)`
+  return `${name} ${formatTerminal(runtime, target)}`
 }
 
-export const sameTerminal = (current: SessionRow | undefined, runtime: string, address: string) => {
+export const sameTerminal = (current: SessionRow | undefined, runtime: string, target: TerminalTarget) => {
   const place = current === undefined ? undefined : placedTerminal(current)
 
-  return place !== undefined && place.runtime === runtime && encodeAddress(place.address) === address
+  return place !== undefined && place.runtime === runtime && canonicalTarget(place.target) === canonicalTarget(target)
 }
 
 const ROOT_FIRST_INPUT =
@@ -172,16 +172,21 @@ const make = Effect.gen(function* () {
       )
     })
 
-  const runningOf = (session: SessionRow | undefined, terminal: string) =>
+  const runningOf = (session: SessionRow | undefined, terminal: TerminalTarget | undefined) =>
     Effect.gen(function* () {
       const place = session === undefined ? undefined : placedTerminal(session)
 
-      if (session === undefined || place === undefined || place.address.id === terminal) return null
+      if (
+        session === undefined ||
+        place === undefined ||
+        (terminal !== undefined && canonicalTarget(place.target) === canonicalTarget(terminal))
+      )
+        return null
       const found = runtimes.find(place.runtime)
 
       if (!(yield* restarting.has(session.id))) {
         if (found === undefined) return null
-        const presence = yield* terminalPresence(found, place.address).pipe(Effect.option)
+        const presence = yield* terminalPresence(found, place.target).pipe(Effect.option)
 
         if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
       }
@@ -189,15 +194,15 @@ const make = Effect.gen(function* () {
       return {
         sessionId: session.id,
         harness: harnessIdOf(session),
-        place: placeOf(found ?? { id: place.runtime }, place.address),
+        place: placeOf(found ?? { id: place.runtime }, place.target),
         runtime: place.runtime,
-        address: encodeAddress(place.address),
+        target: place.target,
       }
     })
 
   const running = Effect.fn("SessionLaunch.running")(function* (
     projectId: string,
-    terminal: string,
+    terminal: TerminalTarget | undefined,
     sessionId?: string,
   ) {
     const target = yield* targetSession(projectId, sessionId, false)
@@ -207,11 +212,11 @@ const make = Effect.gen(function* () {
 
   const onlyRuntime = Effect.map(runtimes.all, (all) => (all.length === 1 ? all[0]?.id : undefined))
 
-  const stopSession = (session: SessionRow, runtime: string, address: string) =>
+  const stopSession = (session: SessionRow, runtime: string, target: TerminalTarget) =>
     Effect.gen(function* () {
       const place = placedTerminal(session)
 
-      if (place === undefined || !sameTerminal(session, runtime, address)) return { result: "moved" as const }
+      if (place === undefined || !sameTerminal(session, runtime, target)) return { result: "moved" as const }
 
       if (yield* restarting.has(session.id))
         return {
@@ -220,15 +225,15 @@ const make = Effect.gen(function* () {
         }
       const h = yield* runtimes.route(runtime)
 
-      return yield* stopAgent(h, place.address, {
+      return yield* stopAgent(h, place.target, {
         pid: pidOf(session),
-        detach: db.session.detachSession(session.id, runtime, place.address),
+        detach: db.session.detachSession(session.id, runtime, place.target),
         reattach: db.session.reattachSession(session.id),
         wait: HARNESS_EXIT_WAIT,
       }).pipe(Effect.provideService(Bus.Service, bus), Effect.provideService(Processes.Service, processes))
     })
 
-  const ensureNotRunning = (existing: SessionRow | undefined, terminal: string, move: boolean) =>
+  const ensureNotRunning = (existing: SessionRow | undefined, terminal: TerminalTarget | undefined, move: boolean) =>
     Effect.gen(function* () {
       if (existing === undefined) return
       const live = yield* runningOf(existing, terminal)
@@ -241,7 +246,7 @@ const make = Effect.gen(function* () {
           harness: live.harness,
           place: live.place,
         })
-      const stopped = yield* stopSession(existing, live.runtime, live.address)
+      const stopped = yield* stopSession(existing, live.runtime, live.target)
 
       if (stopped.result === "moved")
         return yield* new LaunchFailed({ message: "not starting: the session moved meanwhile; run vibest again" })
@@ -338,7 +343,7 @@ const make = Effect.gen(function* () {
           session: projectLocked.withLock(id)(
             Effect.gen(function* () {
               const existing = yield* targetSession(id, input.sessionId, fresh)
-              yield* ensureNotRunning(existing, "", input.move === true)
+              yield* ensureNotRunning(existing, undefined, input.move === true)
 
               const sessionId =
                 existing === undefined ? yield* db.session.allocateSessionId().pipe(Effect.orDie) : existing.id
@@ -373,7 +378,7 @@ const make = Effect.gen(function* () {
                   id,
                   chosen,
                   fresh,
-                  { runtime: rt.id, address: pane },
+                  { runtime: rt.id, target: pane },
                   {
                     provider: decision.provider,
                     model: decision.model,
@@ -426,7 +431,7 @@ const make = Effect.gen(function* () {
         sessionId,
         projectId: id,
         runtime: rt.id,
-        terminal: pane.id,
+        terminal: pane,
         place: placeOf(rt, pane),
         attach: rt.attach?.(at.target, pane) ?? null,
         ...(routing !== undefined && { routing }),
@@ -441,7 +446,7 @@ const make = Effect.gen(function* () {
     readonly harness: string | undefined
     readonly fresh: boolean
     readonly move: boolean
-    readonly terminal: string
+    readonly terminal: TerminalTarget
     readonly runtime: string | undefined
     readonly provider: string | undefined
     readonly model: string | undefined
@@ -494,7 +499,6 @@ const make = Effect.gen(function* () {
         const existing = yield* targetSession(projectId, input.sessionId, fresh)
         yield* ensureNotRunning(existing, terminal, input.move)
 
-        const address = { machine: "local", id: terminal }
         const cwd = yield* sessionCwd(existing, directory)
         const existingPrompt = existing === undefined ? undefined : yield* placement.systemPromptOf(existing)
         const title = existing?.name || entryLabel(directory)
@@ -519,12 +523,12 @@ const make = Effect.gen(function* () {
             provider: decision.provider ?? null,
             model: decision.model ?? null,
             session: Effect.gen(function* () {
-              const saved = yield* locks.withLock(terminalLock(rt.id, address))(
+              const saved = yield* locks.withLock(terminalLock(rt.id, terminal))(
                 db.session.startRoot(
                   projectId,
                   chosenHarness,
                   fresh,
-                  { runtime: rt.id, address },
+                  { runtime: rt.id, target: terminal },
                   {
                     provider: decision.provider,
                     model: decision.model,
@@ -538,7 +542,7 @@ const make = Effect.gen(function* () {
                 ),
               )
 
-              claimed = { ...saved, runtime: runtimeEnv(rt.id, address) }
+              claimed = { ...saved, runtime: runtimeEnv(rt.id, terminal) }
 
               return claimed
             }),
@@ -553,7 +557,7 @@ const make = Effect.gen(function* () {
 
         if (rt.present !== undefined)
           yield* rt
-            .present(address, { session: claimed.sessionId, projectId, title })
+            .present(terminal, { session: claimed.sessionId, projectId, title })
             .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
 
         const [file, ...args] = yield* Launch.launchLine(command).pipe(

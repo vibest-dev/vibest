@@ -1,4 +1,5 @@
 import { SessionLinked, SessionUnlinked } from "@vibest/schema/event"
+import type { SessionRef } from "@vibest/schema/terminal"
 import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -18,32 +19,51 @@ export interface SpawnLinks {
   readonly with?: ReadonlyArray<string> | undefined
 }
 
-export type EdgeSpec =
-  | { readonly _tag: "Mutual"; readonly ids: ReadonlyArray<string> }
-  | { readonly _tag: "Directed"; readonly from: ReadonlyArray<string>; readonly to: ReadonlyArray<string> }
-  | { readonly _tag: "Chain"; readonly ids: ReadonlyArray<string> }
+export type EdgeSpec<R = SessionRef> =
+  | { readonly _tag: "Mutual"; readonly ids: ReadonlyArray<R> }
+  | { readonly _tag: "Directed"; readonly from: ReadonlyArray<R>; readonly to: ReadonlyArray<R> }
+  | { readonly _tag: "Chain"; readonly ids: ReadonlyArray<R> }
 
-export const expandEdgeSpec = <T, E1, E2, R>(
-  spec: EdgeSpec,
-  resolve: (ref: string) => Effect.Effect<T, E1, R>,
+export const resolveEdgeRefs = (
+  edges: ReadonlyArray<{ readonly id: string; readonly remote?: string }>,
+  machineByRemote: ReadonlyMap<string, string>,
+): ReadonlyArray<SessionRef> =>
+  edges.map((edge) =>
+    edge.remote === undefined
+      ? { id: edge.id }
+      : { id: edge.id, machine: machineByRemote.get(edge.remote) ?? edge.remote },
+  )
+
+export const dedupePairs = <T>(
+  items: ReadonlyArray<readonly [T, T]>,
+  keyOf: (item: T) => string,
+): ReadonlyArray<readonly [T, T]> => {
+  const pairs: Array<readonly [T, T]> = []
+  const seen = new Set<string>()
+
+  for (const [from, to] of items) {
+    const fk = keyOf(from)
+    const tk = keyOf(to)
+
+    if (fk === tk) continue
+    const key = `${fk}\0${tk}`
+
+    if (seen.has(key)) continue
+    seen.add(key)
+    pairs.push([from, to])
+  }
+
+  return pairs
+}
+
+export const expandEdgeSpec = <Ref, T, E1, E2, R>(
+  spec: EdgeSpec<Ref>,
+  resolve: (ref: Ref) => Effect.Effect<T, E1, R>,
   keyOf: (item: T) => string,
   fail: (message: string) => Effect.Effect<never, E2>,
 ): Effect.Effect<ReadonlyArray<readonly [T, T]>, E1 | E2, R> =>
   Effect.gen(function* () {
-    const pairs: Array<readonly [T, T]> = []
-    const seen = new Set<string>()
-
-    const push = (from: T, to: T) => {
-      const fk = keyOf(from)
-      const tk = keyOf(to)
-
-      if (fk === tk) return
-      const key = `${fk}\0${tk}`
-
-      if (seen.has(key)) return
-      seen.add(key)
-      pairs.push([from, to])
-    }
+    const raw: Array<readonly [T, T]> = []
 
     if (Predicate.isTagged(spec, "Mutual")) {
       const resolved = yield* Effect.forEach(spec.ids, resolve)
@@ -54,9 +74,9 @@ export const expandEdgeSpec = <T, E1, E2, R>(
 
       if (items.length < 2) return yield* fail("give at least two distinct sessions")
 
-      for (const a of items) for (const b of items) push(a, b)
+      for (const a of items) for (const b of items) raw.push([a, b])
 
-      return pairs
+      return dedupePairs(raw, keyOf)
     }
 
     if (Predicate.isTagged(spec, "Directed")) {
@@ -68,7 +88,9 @@ export const expandEdgeSpec = <T, E1, E2, R>(
       if (from.length === 1 && to.length === 1 && keyOf(from[0]!) === keyOf(to[0]!))
         return yield* fail("a session cannot target itself")
 
-      for (const a of from) for (const b of to) push(a, b)
+      for (const a of from) for (const b of to) raw.push([a, b])
+
+      const pairs = dedupePairs(raw, keyOf)
 
       if (pairs.length === 0) return yield* fail("a session cannot target itself")
 
@@ -84,10 +106,10 @@ export const expandEdgeSpec = <T, E1, E2, R>(
       const b = items[i + 1]!
 
       if (keyOf(a) === keyOf(b)) return yield* fail("a session cannot target itself")
-      push(a, b)
+      raw.push([a, b])
     }
 
-    return pairs
+    return dedupePairs(raw, keyOf)
   })
 
 export const queryRemoteEdges = (
@@ -156,18 +178,25 @@ export const make = Effect.gen(function* () {
 
     sessionEdges: Effect.fn("Db.session.sessionEdges")((ids: ReadonlyArray<string>) =>
       (ids.length === 0
-        ? Effect.succeed<ReadonlyArray<{ fromSessionId: string; toSessionId: string }>>([])
-        : sql<{ fromSessionId: string; toSessionId: string }>`SELECT from_session_id, to_session_id
-            FROM session_edge WHERE ${sql.in("from_session_id", ids)} ORDER BY to_session_id`
+        ? Effect.succeed<ReadonlyArray<{ fromSessionId: string; toRemoteId: string; toSessionId: string }>>([])
+        : sql<{
+            fromSessionId: string
+            toRemoteId: string
+            toSessionId: string
+          }>`SELECT from_session_id, to_remote_id, to_session_id
+            FROM session_edge WHERE ${sql.in("from_session_id", ids)} ORDER BY to_remote_id, to_session_id`
       ).pipe(
         Effect.map((rows) => {
-          const byFrom = new Map<string, Array<string>>()
+          const byFrom = new Map<string, Array<{ readonly id: string; readonly remote?: string }>>()
 
           for (const row of rows) {
+            const target =
+              row.toRemoteId === "" ? { id: row.toSessionId } : { id: row.toSessionId, remote: row.toRemoteId }
+
             const list = byFrom.get(row.fromSessionId)
 
-            if (list === undefined) byFrom.set(row.fromSessionId, [row.toSessionId])
-            else list.push(row.toSessionId)
+            if (list === undefined) byFrom.set(row.fromSessionId, [target])
+            else list.push(target)
           }
 
           return byFrom

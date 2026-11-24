@@ -134,7 +134,7 @@ describe("Watch with remote machines", () => {
               bProject,
               "pi",
               false,
-              { runtime: "herdr", address: { machine: "local", id: "b/p1" } },
+              { runtime: "herdr", target: { id: "b/p1" } },
               { agent: "coordinator", projectDirectory: bRepo },
             ),
           ),
@@ -180,7 +180,7 @@ describe("Watch with remote machines", () => {
                 harnessSessionId: null,
                 name: "remote-worker",
                 runtime: "herdr",
-                address: { machine: "local", id: "b/p2" },
+                terminal: { id: "b/p2" },
                 status: "working",
                 startedAt: 1000,
                 createdAt: 1000,
@@ -310,7 +310,7 @@ describe("Watch with remote machines", () => {
           executionState: "completed" as const,
           projectId,
           runtime: "herdr",
-          address: { machine: "local", id: `r/${name}` },
+          terminal: { runtime: "herdr", target: { id: `r/${name}` } },
           worktree: `/remote/${name}`,
           repositoryRoot: `/remote/${name}`,
           git: null,
@@ -404,9 +404,9 @@ describe("Watch with remote machines", () => {
                             missing: false,
                             as: mirrorName,
                             terminals: new Map(
-                              [...sessions.entries()].map(([sessionId, remoteAddr]) => [
+                              [...sessions.entries()].map(([sessionId, remoteTarget]) => [
                                 sessionId,
-                                { id: `${mirrorName}/${remoteAddr}` },
+                                { address: `${mirrorName}/${remoteTarget["address"]}` },
                               ]),
                             ),
                           },
@@ -428,7 +428,7 @@ describe("Watch with remote machines", () => {
               aProject,
               "pi",
               false,
-              { runtime: "hc", address: { machine: "local", id: "t1pk" } },
+              { runtime: "hc", target: { address: "t1pk" } },
               { agent: "coordinator", projectDirectory: aRepo },
             ),
           ),
@@ -445,7 +445,7 @@ describe("Watch with remote machines", () => {
                 harnessSessionId: null,
                 name: "secondary-socket",
                 runtime: "hc",
-                address: { machine: "local", id: "t2@/other.sock" },
+                terminal: { address: "t2", socket: "/other.sock" },
                 status: "idle",
                 startedAt: 1000,
                 createdAt: 1000,
@@ -476,7 +476,7 @@ describe("Watch with remote machines", () => {
                 harnessSessionId: null,
                 name: "remote-hc",
                 runtime: "hc",
-                address: { machine: "local", id: "t9pk" },
+                terminal: { address: "t9pk" },
                 status: "idle",
                 startedAt: 1000,
                 createdAt: 1000,
@@ -514,23 +514,29 @@ describe("Watch with remote machines", () => {
         const gotLocal = yield* a.cli(a.raw.Get({ id: aEntry.sessionId }))
         const gotSecondary = yield* a.cli(a.raw.Get({ id: aSecondaryId }))
 
-        const gotRemote = yield* RpcClient.withHeaders(a.raw.Get({ id: `mac-mini/${bRemoteId}` }), cliHeaders(aRepo))
+        const gotRemote = yield* RpcClient.withHeaders(
+          a.raw.Get({ id: bRemoteId, machine: "mac-mini" }),
+          cliHeaders(aRepo),
+        )
 
-        const expectedLocal = { machine: "local", id: "t1pk" }
-        const expectedSecondary = { machine: "local", id: "t2@/other.sock" }
-        const expectedRemote = { machine: "local", id: "mac-mini/t9pk" }
+        const expectedLocal = { runtime: "hc", target: { address: "t1pk" } }
+        const expectedSecondary = { runtime: "hc", target: { address: "t2", socket: "/other.sock" } }
+        const expectedRemote = { runtime: "hc", target: { address: "mac-mini/t9pk" } }
 
-        assert.deepStrictEqual(snapshot.sessions.find((s) => s.id === aEntry.sessionId)?.address, expectedLocal)
-        assert.deepStrictEqual(listed.sessions.find((s) => s.id === aEntry.sessionId)?.address, expectedLocal)
-        assert.deepStrictEqual(gotLocal?.address, expectedLocal)
+        assert.deepStrictEqual(snapshot.sessions.find((s) => s.id === aEntry.sessionId)?.terminal, expectedLocal)
+        assert.deepStrictEqual(listed.sessions.find((s) => s.id === aEntry.sessionId)?.terminal, expectedLocal)
+        assert.deepStrictEqual(gotLocal?.terminal, expectedLocal)
 
-        assert.deepStrictEqual(snapshot.sessions.find((s) => s.id === aSecondaryId)?.address, expectedSecondary)
-        assert.deepStrictEqual(listed.sessions.find((s) => s.id === aSecondaryId)?.address, expectedSecondary)
-        assert.deepStrictEqual(gotSecondary?.address, expectedSecondary)
+        assert.deepStrictEqual(snapshot.sessions.find((s) => s.id === aSecondaryId)?.terminal, expectedSecondary)
+        assert.deepStrictEqual(listed.sessions.find((s) => s.id === aSecondaryId)?.terminal, expectedSecondary)
+        assert.deepStrictEqual(gotSecondary?.terminal, expectedSecondary)
 
-        assert.deepStrictEqual(snapshot.sessions.find((s) => s.id === bRemoteId)?.address, expectedRemote)
-        assert.deepStrictEqual(listed.sessions.find((s) => s.id === `mac-mini/${bRemoteId}`)?.address, expectedRemote)
-        assert.deepStrictEqual(gotRemote?.address, expectedRemote)
+        assert.deepStrictEqual(snapshot.sessions.find((s) => s.id === bRemoteId)?.terminal, expectedRemote)
+        assert.deepStrictEqual(
+          listed.sessions.find((s) => s.id === bRemoteId && s.machine === "mac-mini")?.terminal,
+          expectedRemote,
+        )
+        assert.deepStrictEqual(gotRemote?.terminal, expectedRemote)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })
