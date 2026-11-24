@@ -634,4 +634,78 @@ describe("plugins: tool.before hook", () => {
       ],
     },
   )
+
+  const toolTimeoutEntered = { value: false }
+  const pastToolSleep = "1 minute"
+
+  test(
+    "a tool.before hook that times out is logged, counted, and skipped so later hooks still run",
+    Effect.gen(function* () {
+      const plugins = yield* Plugins.Service
+
+      const checking = yield* Effect.forkChild(
+        plugins.guard({ ...sampleEvent, tool: "Write", input: { file_path: "/after-timeout" } }),
+      )
+
+      yield* until(
+        Effect.sync(() => toolTimeoutEntered.value),
+        (x) => x,
+      )
+      yield* TestClock.adjust("5 seconds")
+      const refused = yield* Fiber.join(checking)
+      assert.strictEqual(refused, "after timeout refused")
+
+      const listed = yield* plugins.list
+      assert.deepInclude(
+        listed.find((p) => p.id === "slow-tool"),
+        { calls: 1, timedOut: 1, refused: 0 },
+      )
+      assert.deepInclude(
+        listed.find((p) => p.id === "after-slow"),
+        { calls: 1, timedOut: 0, refused: 1 },
+      )
+      yield* TestClock.adjust(pastToolSleep)
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "slow-tool",
+          effect: (ctx) =>
+            ctx.agent.hook("tool.before", () =>
+              Effect.sync(() => (toolTimeoutEntered.value = true)).pipe(
+                Effect.andThen(Effect.uninterruptible(Effect.sleep(pastToolSleep))),
+              ),
+            ),
+        }),
+        Plugin.define({
+          id: "after-slow",
+          effect: (ctx) =>
+            ctx.agent.hook("tool.before", () => Effect.fail(new ToolRefused({ reason: "after timeout refused" }))),
+        }),
+      ],
+    },
+  )
+
+  test(
+    "tool.before refuses fail-closed when plugin activation does not settle within the activation wait",
+    Effect.gen(function* () {
+      const plugins = yield* Plugins.Service
+      const checking = yield* Effect.forkChild(plugins.guard(sampleEvent))
+      yield* TestClock.adjust("10 seconds")
+      const refused = yield* Fiber.join(checking)
+      assert.include(refused ?? "", "plugins are still activating")
+      assert.include(refused ?? "", "hanging-setup")
+      yield* TestClock.adjust(pastToolSleep)
+    }),
+    {
+      activateLate: true,
+      pluginTimeout: "20 seconds",
+      plugins: [
+        Plugin.define({
+          id: "hanging-setup",
+          effect: () => Effect.uninterruptible(Effect.sleep(pastToolSleep)),
+        }),
+      ],
+    },
+  )
 })

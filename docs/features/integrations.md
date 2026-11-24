@@ -1,7 +1,8 @@
 # Integrations and the guard
 
 vibest's plugin for each harness ships with vibest and is loaded into every session vibest starts; nothing is
-installed into the harness's own configuration. Its pre-tool guard keeps an agent to its role. Each capability below
+installed into the harness's own configuration. Its pre-tool guard runs `agent.tool.before` plugin hooks, with
+`vibest.guard` enforcing minimal protocol invariants. Each capability below
 says what it is and when it counts as working.
 
 ## I1. The plugins ship with vibest
@@ -25,8 +26,8 @@ installed plugin's session-start hook runs too, and the reply is the execution's
 
 ## I5. Cursor runs vibest's plugin beside the project's hooks
 
-A real cursor-agent session on the user's own login runs vibest's plugin beside the project's own hooks. Asked to run a
-herdr command, herdr does not run (the model either tries and the guard refuses it, or keeps to its rules); the execution
+A real cursor-agent session on the user's own login runs vibest's plugin beside the project's own hooks. Asked to run
+`vibest integration stop`, it does not run (the model either tries and `vibest.guard` refuses it, or keeps to its rules); the execution
 completes with the reply, and the project's own hook ran.
 
 ## I6. The user's harness configuration is untouched
@@ -70,7 +71,7 @@ same vibest: every session starts with `VIBEST_CLI` set to it and its directory 
 
 A Cursor session vibest started runs shell commands without Cursor asking "Run this command?", even on Cursor's default
 `allowlist` approval mode with no allow rule: its `vibest send` to the session that started it arrives, and the session
-is never blocked. vibest's guard still refuses what vibest forbids: asked to run herdr, herdr does not run.
+is never blocked. vibest's guard still refuses what `vibest.guard` forbids: asked to run `vibest integration stop`, it does not run.
 
 ## I13. A Cursor session resumes from its start
 

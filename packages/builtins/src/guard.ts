@@ -160,7 +160,12 @@ const programs = (argv: ReadonlyArray<string>, identity = false): ReadonlyArray<
 
         if (WRAPPER_VALUE_OPTIONS.get(name)!.includes(o)) {
           if (name === "env" && (o === "-u" || o === "--unset")) identity ||= IDENTITY.test(argv[i + 1] ?? "")
+
+          if (name === "env" && (o === "-S" || o === "--split-string"))
+            return programs([...splitCommand(argv[i + 1] ?? "").flat(), ...argv.slice(i + 2)], identity)
           i++
+        } else if (name === "env" && o.startsWith("--split-string=")) {
+          return programs([...splitCommand(o.slice("--split-string=".length)).flat(), ...argv.slice(i + 1)], identity)
         }
       }
 
@@ -189,8 +194,12 @@ const programsOf = (command: string): ReadonlyArray<Program> => {
   return changed ? all.map((p) => ({ ...p, identity: true })) : all
 }
 
+const VIBEST_CLI_VAR = /^\$(?:VIBEST_CLI|\{VIBEST_CLI[^}]*\})$/
+
+const isVibestProgram = (word: string) => base(word) === "vibest" || VIBEST_CLI_VAR.test(word)
+
 const vibestArgs = (argv: ReadonlyArray<string>) =>
-  argv[0] !== undefined && base(argv[0]) === "vibest" ? argv.slice(1) : undefined
+  argv[0] !== undefined && isVibestProgram(argv[0]) ? argv.slice(1) : undefined
 
 export const shellRefusal = (command: string): string | undefined => {
   for (const p of programsOf(command)) {

@@ -19,7 +19,7 @@ import {
 import { paneOf, compiled, expect, harnesses, herdr, row, rows, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
-const HERDR_TASK =
+const GUARD_TASK =
   "Run this shell command exactly as written: vibest integration stop > guard-ran.txt. Then reply with: pong"
 
 export const listed = async (w: World, id: string, cwd = w.repository) =>
@@ -336,7 +336,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I5",
     tier: "agent",
     title:
-      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks, which run with the session's process id; asked to run herdr, herdr does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the execution's reply",
+      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks, which run with the session's process id; asked to run vibest integration stop, it does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the execution's reply",
     run: async (w, evidence) => {
       for (const bin of ["cursor-agent", "herdr"])
         if (!Bun.which(bin, { PATH: w.env().PATH! })) throw new Skip(`${bin} not on PATH`)
@@ -367,7 +367,7 @@ const checks: ReadonlyArray<Check> = [
         w,
         "cursor",
         [],
-        HERDR_TASK,
+        GUARD_TASK,
         async ({ id }) => {
           await until(
             "the session's result",
@@ -387,11 +387,11 @@ const checks: ReadonlyArray<Check> = [
           expect(files.length > 0, `no Cursor transcript in ${transcripts}`)
 
           const tried = (await Promise.all(files.map((f) => fs.readFile(path.join(transcripts, f), "utf8")))).some(
-            (t) => /"tool_use".*herdr pane list/.test(t),
+            (t) => /"tool_use".*vibest integration stop/.test(t),
           )
 
           await w.writeEvidence(
-            path.join(evidence, "I5-herdr-call.json"),
+            path.join(evidence, "I5-guard-call.json"),
             `${JSON.stringify({ tried, transcripts })}\n`,
           )
           expect(/\bpong\b/.test(message), message)

@@ -24,7 +24,7 @@ or when the old directory still exists. An agent may not run it.
 
 A Pi entry session, a Pi subagent and a Claude subagent each write and read the Project's artifacts with their own file
 tools, without a permission prompt. Every Claude session also has all of Bash pre-approved (a rule the user sets to ask
-for Bash still asks). Writing into another Project's folder is refused. Every session's system prompt carries
+for Bash still asks). Custom path boundaries (such as refusing writes outside `VIBEST_PROJECT_DIR`) can be enforced by a user `agent.tool.before` plugin (G21). Every session's system prompt carries
 `preferences.md` and the curated memory index `memories/MEMORY.md` (capped at 100 lines and 8,000 bytes on a line
 boundary, with a warning when truncated to compact under 70 lines; bootstrapped once newest-first up to 70 lines and
 5,600 bytes when `MEMORY.md` is missing and `memories/` holds `.md` files), while topic file bodies in

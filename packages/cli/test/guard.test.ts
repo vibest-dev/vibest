@@ -87,6 +87,12 @@ describe("vibest.guard shell rules", () => {
       "env - vibest ls",
       "VIBEST_SESSION_ID= vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "VIBEST_SESSION_ID=other vibest ls",
+      'VIBEST_SESSION_ID=other "$VIBEST_CLI" ls',
+      "VIBEST_SESSION_ID=other $VIBEST_CLI ls",
+      'VIBEST_SESSION_ID=other "${VIBEST_CLI}" ls',
+      'VIBEST_SESSION_ID=other "${VIBEST_CLI:-vibest}" ls',
+      'env -u VIBEST_SESSION_ID "$VIBEST_CLI" archive abcd',
+      'env -S "VIBEST_SESSION_ID=other vibest ls"',
       "env VIBEST_SESSION_ID= /usr/local/bin/vibest ls",
       "unset VIBEST_SESSION_ID; vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "export VIBEST_SESSION_ID=other && vibest ls",
@@ -106,6 +112,7 @@ describe("vibest.guard shell rules", () => {
   it("refuses vibest integration stop, prompt and ready, however they are wrapped", () => {
     for (const command of [
       "vibest integration stop",
+      '"$VIBEST_CLI" integration stop',
       "vibest --log-level debug integration stop < x.json",
       "echo '{}' | vibest integration stop",
       "x=`vibest integration stop`",
@@ -122,7 +129,15 @@ describe("vibest.guard shell rules", () => {
       "vibest integration prompt is the harness's hook, not an agent command.",
     )
     assert.strictEqual(
+      shellRefusal("$VIBEST_CLI integration prompt"),
+      "vibest integration prompt is the harness's hook, not an agent command.",
+    )
+    assert.strictEqual(
       shellRefusal("vibest integration ready --harness cursor"),
+      "vibest integration ready is the harness's hook, not an agent command.",
+    )
+    assert.strictEqual(
+      shellRefusal('"${VIBEST_CLI}" integration ready'),
       "vibest integration ready is the harness's hook, not an agent command.",
     )
   })

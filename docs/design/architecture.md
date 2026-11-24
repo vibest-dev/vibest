@@ -819,9 +819,9 @@ running one as it is (not torn down or set up again, and neither are the plugins
 both revisions, while with changed options it is failed and the old one is not restored; one whose setup fails falls
 back to the previous one; neither is retried until it changes; a plugin file found in the plugins
 directory and named in `vibest.json`, or named there twice, is one plugin, at its first place with the options of its
-last mention; an activation latch gates `agent.start.before`. It waits up to 10 s
-for the pending generation; if it is still not active the operation fails with `PluginsNotActive`, naming the
-plugins still loading, and does not run on the plugins already active. The hooks for that call are the ones
+last mention; an activation latch gates `agent.start.before` and `agent.tool.before`. It waits up to 10 s
+for the pending generation; if it is still not active `agent.start.before` fails with `PluginsNotActive`, naming the
+plugins still loading, and `agent.tool.before` refuses the tool call, naming the plugins still loading, rather than running on the plugins already active. The hooks for that call are the ones
 active at the gate, so a reload during the reads that follow does not change them. `vibest plugins` reads the plugins
 already active and does not wait. Machine hooks keep their current reads. Builtin plugins activate while vibestd's layers are built, before it listens, so a request
 that routes to a builtin runtime never finds it unregistered. User plugins activate afterwards, in the background,
