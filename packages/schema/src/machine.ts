@@ -35,7 +35,7 @@ export class AlreadyAdded extends Schema.TaggedError<AlreadyAdded>()("AlreadyAdd
   }
 }
 
-export const MachineState = Schema.Literals(["connecting", "connected", "unreachable", "different"])
+export const MachineState = Schema.Literals(["connecting", "connected", "unreachable", "incompatible", "different"])
 
 export type MachineState = typeof MachineState.Type
 

@@ -7,6 +7,7 @@ import { awaitEvent, Bus } from "../bus.ts"
 import {
   type SessionRow,
   harnessIdOf,
+  isRoot,
   runtimeOf,
   terminalOf,
   exitedAt,
@@ -55,7 +56,7 @@ export const make = Effect.gen(function* () {
   const { prompt, interruptAgent } = yield* Executions.Service
   const exits = yield* Exits.Service
   const { notice, resume, taskInput } = yield* Placement.Service
-  const { send, deliverTo, admit } = yield* Sends.Service
+  const { send, admit } = yield* Sends.Service
   const reactor = yield* Reactor.make
   const starts = yield* Starts.Service
   const { locked } = locks
@@ -64,7 +65,7 @@ export const make = Effect.gen(function* () {
   const deliverQueued = Effect.fn("Delivery.deliverQueued")(function* (
     h: Runtime,
     session: SessionRow,
-    terminal: Terminal,
+    terminal: Terminal | undefined,
     hand?: (
       text: string,
       onHandover: Effect.Effect<void>,
@@ -74,7 +75,11 @@ export const make = Effect.gen(function* () {
     >,
   ) {
     const into =
-      hand ?? ((text: string, onHandover: Effect.Effect<void>) => prompt(h, session, terminal, text, onHandover))
+      hand ??
+      ((text: string, onHandover: Effect.Effect<void>) =>
+        terminal === undefined
+          ? Effect.die("deliverQueued called without a terminal")
+          : prompt(h, session, terminal, text, onHandover))
 
     const task = yield* db.inbox.untakenTask(session.id)
 
@@ -188,7 +193,7 @@ export const make = Effect.gen(function* () {
         if (archived(session)) return
         const h = yield* runtimes.route(runtimeOf(session))
 
-        return yield* deliverQueued(h, session, terminalOf(session), (text, onHandover) =>
+        return yield* deliverQueued(h, session, terminalOf(session)?.target, (text, onHandover) =>
           resume(h, session, { text, onHandover }),
         )
       }).pipe(
@@ -213,8 +218,10 @@ export const make = Effect.gen(function* () {
 
     if (archived(session)) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
 
+    const localRoot = isRoot(session) && !(yield* db.session.startedByRemote(id))
+
     if (
-      (session.entry && inbox.pulls(harnessIdOf(session))) ||
+      (localRoot && exitedAt(session) === null && inbox.pulls(harnessIdOf(session))) ||
       executionStateOf(session) === "open" ||
       session.status === "blocked" ||
       ((session.process?.placedAt ?? null) === null && exitedAt(session) === null) ||
@@ -222,14 +229,16 @@ export const make = Effect.gen(function* () {
     )
       return
     const h = yield* runtimes.route(runtimeOf(session))
-    const terminal = terminalOf(session)
-    const seen = yield* agentState(h, terminal)
+    const terminal = terminalOf(session)?.target
+    const seen = terminal === undefined ? ("absent" as const) : yield* agentState(h, terminal)
     const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
 
     if (state !== undefined && busy(state)) return
 
-    if (state === undefined && !(yield* alive(h, terminal))) {
+    if (state === undefined && (terminal === undefined || !(yield* alive(h, terminal)))) {
       if (exitedAt(session) === null) return yield* exits.settle(h, id, session.process?.id)
+
+      if (localRoot) return
 
       if ((yield* db.inbox.pendingInbox(id)).length === 0) return
 
@@ -247,7 +256,9 @@ export const make = Effect.gen(function* () {
     }
 
     const fresh = (yield* db.session.getSession(id)) ?? session
-    yield* deliverQueued(h, fresh, terminalOf(fresh))
+    const freshTerminal = terminalOf(fresh)?.target
+
+    if (freshTerminal !== undefined) yield* deliverQueued(h, fresh, freshTerminal)
   })
 
   const undeliverable = (id: string, rows: ReadonlySet<number>) => (cause: Cause.Cause<unknown>) =>
@@ -310,13 +321,15 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const session = yield* getRow(id)
         const h = yield* runtimes.route(runtimeOf(session))
-        const terminal = terminalOf(session)
+        const terminal = terminalOf(session)?.target
         const execution = yield* db.session.openExecution(id)
 
         if (execution === undefined)
           return {
             message: `${id} is not working; its execution had already finished and its reply is recorded`,
           }
+
+        if (terminal === undefined) return { message: `${id} is not working; nothing to interrupt` }
         const state = stateOf(yield* sessionState(h, terminal, Effect.succeed(session.status))) ?? "unknown"
 
         if (!(yield* db.session.executionAccepted(id)) && !busy(state))
@@ -385,7 +398,9 @@ export const make = Effect.gen(function* () {
 
         if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
         const h = yield* runtimes.route(runtimeOf(session))
-        yield* h.send(terminalOf(session), { text: inboxContent(rows) }).pipe(Effect.ignore)
+        const terminal = terminalOf(session)?.target
+
+        if (terminal !== undefined) yield* h.send(terminal, { text: inboxContent(rows) }).pipe(Effect.ignore)
       }).pipe(Effect.catchTag("NoRuntime", () => Effect.void)),
     )
   })
@@ -411,11 +426,16 @@ export const make = Effect.gen(function* () {
   for (const id of yield* db.inbox.pendingRecipients()) {
     const session = yield* db.session.getSession(id)
 
-    if (session !== undefined && !archived(session) && exitedAt(session) !== null)
+    if (
+      session !== undefined &&
+      !archived(session) &&
+      exitedAt(session) !== null &&
+      !(isRoot(session) && !(yield* db.session.startedByRemote(id)))
+    )
       yield* wakes.wake(id, { rows: new Set(), ended: true })
   }
 
-  return { deliverQueued, send, deliverTo, admit, interrupt, userPrompt, typeTaken }
+  return { deliverQueued, send, admit, interrupt, userPrompt, typeTaken }
 })
 
 export type Interface = Effect.Success<typeof make>

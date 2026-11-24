@@ -26,16 +26,16 @@ describe.concurrent("an exited session", () => {
     "archive leaves its pane open, and says so, when another live session now runs at that terminal",
     Effect.gen(function* () {
       const w = yield* exitedSession
-      const address = { machine: "local", id: w.row.process!.terminal! }
-      yield* w.db.session.startEntry(
+      const target = w.row.process!.terminal!
+      yield* w.db.session.startRoot(
         w.row.projectId,
         "claude",
         false,
-        { runtime: RUNTIME, address },
+        { runtime: RUNTIME, target },
         { agent: "general" },
       )
-      const [other] = yield* w.db.session.processesAt(RUNTIME, address)
-      const out = (yield* w.sessions.remove(w.id))!
+      const [other] = yield* w.db.session.processesAt(RUNTIME, target)
+      const out = (yield* w.sessions.archive(w.id))!
       assert.deepStrictEqual(yield* w.herdr.callsTo("close"), [])
       assert.include(out.reasons.join("\n"), `left open: session ${other!.sessionId} runs in it`)
     }),
@@ -73,10 +73,10 @@ describe.concurrent("vibest archive", () => {
       )
       const worktree = yield* sessionWorktree(owner.id)
       assert.include(
-        (yield* owner.sessions.remove(owner.id, { keepWorktree: true }))!.reasons.join("\n"),
+        (yield* owner.sessions.archive(owner.id, { keepWorktree: true }))!.reasons.join("\n"),
         "--keep-worktree",
       )
-      const out = (yield* owner.sessions.remove(id))!
+      const out = (yield* owner.sessions.archive(id))!
       assert.strictEqual(out.worktree, "removed")
       assert.isFalse(yield* fs.exists(worktree))
     }),

@@ -38,13 +38,13 @@ describe.concurrent("after a vibestd stop", () => {
     Effect.gen(function* () {
       const db = yield* Db.Service
       const repo = yield* makeRepository
-      yield* db.session.startEntry(
+      yield* db.session.startRoot(
         yield* projectOf(repo),
         "pi",
         false,
         {
           runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
+          target: { id: "test/coord" },
         },
         { agent: "coordinator" },
       )

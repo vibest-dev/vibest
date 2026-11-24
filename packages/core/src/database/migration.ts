@@ -18,13 +18,26 @@ import { migration as oneSender } from "./migration/20261119000000_one_sender.ts
 import { migration as limitedEndIsExited } from "./migration/20261120000000_limited_end_is_exited.ts"
 import { migration as inboxV1 } from "./migration/20261121000000_inbox_v1.ts"
 import { migration as executionLifecycle } from "./migration/20261122000000_execution_lifecycle.ts"
+import { migration as sessionEdges } from "./migration/20261124000000_session_edges.ts"
+import { migration as remoteAndCrossMachineEdges } from "./migration/20261124020000_remote_and_cross_machine_edges.ts"
+import { migration as dropProjectEntry } from "./migration/20261124030000_drop_project_entry.ts"
+import { migration as structuredTerminalTargets } from "./migration/20261124040000_structured_terminal_targets.ts"
 
 export type Migration = {
   readonly id: string
   readonly up: (tx: SqlClient.SqlClient) => Effect.Effect<void, SqlError.SqlError>
 }
 
-export const migrations: ReadonlyArray<Migration> = [oneSender, limitedEndIsExited, inboxV1, executionLifecycle]
+export const migrations: ReadonlyArray<Migration> = [
+  oneSender,
+  limitedEndIsExited,
+  inboxV1,
+  executionLifecycle,
+  sessionEdges,
+  remoteAndCrossMachineEdges,
+  dropProjectEntry,
+  structuredTerminalTargets,
+]
 
 const createTable = (sql: SqlClient.SqlClient) =>
   sql.unsafe(`CREATE TABLE IF NOT EXISTS ${MIGRATION_TABLE} (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL)

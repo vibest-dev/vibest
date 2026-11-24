@@ -3,10 +3,9 @@ import {
   type ProcessEndReason,
   ProcessPid,
   ProcessReady,
-  ProjectEntryChanged,
   SessionCreated,
   SessionDirectoryChanged,
-  SessionEnded,
+  SessionLinked,
   type Sender,
 } from "@vibest/schema/event"
 import { entryLabel } from "@vibest/schema/id"
@@ -16,9 +15,9 @@ import {
   AmbiguousSession,
   type ExecutionState,
   NoSuchSession,
-  RuntimeAddress,
   type HarnessId,
 } from "@vibest/schema/session"
+import type { TerminalTarget } from "@vibest/schema/terminal"
 import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -38,21 +37,20 @@ import {
 } from "./db-rows.ts"
 import type * as Inbox from "./inbox.ts"
 import type * as Remote from "./remote.ts"
+import * as SessionEdges from "./session-edges.ts"
+import type { SpawnLinks } from "./session-edges.ts"
+import * as SessionReads from "./session-reads.ts"
 import type * as Session from "./session-statements.ts"
 
-export type TeamStart = "new" | { readonly join: string }
-
-export type TeamRefusal =
-  | { readonly team: string; readonly teamOwner: string }
-  | { readonly teamUnknown: string }
-  | { readonly teamEnded: string }
+export type { SessionEdge, SpawnLinks } from "./session-edges.ts"
 
 export const LIVE_PROCESS_COUNT = "SELECT count(*) AS n FROM process WHERE ended_at IS NULL"
 
 export type SessionFilter = {
   readonly projectId?: string
   readonly stopped?: boolean
-  readonly peer?: Remote.PeerScope | undefined
+  readonly unarchived?: boolean
+  readonly remote?: Remote.RemoteScope | undefined
   readonly waiting?: ReadonlyArray<string>
 }
 
@@ -72,7 +70,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       findSession,
       currentProcess,
       currentProcessId,
-      findEntrySessions,
+      latestRoot,
       openExecution,
       workingExecutions,
       allocateExecution,
@@ -80,7 +78,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       startedAt,
       accept,
       observable,
-      isEntry,
+      isRoot,
       fromOldProcess,
       endProcess,
       startProcess,
@@ -89,88 +87,35 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       finishExecution,
       recordObservedEnd,
       setStatus,
-      entrySessionsAt,
+      liveSessionsAt,
       unusedId,
       creatorOf,
       fromCurrentHarness,
       canResumeConversation,
     } = session
 
-    const { queueInbox, insertInboxRow, dropWaiting } = inbox
+    const { queueInbox, insertInboxRow } = inbox
 
     const roomFor = (max: number | undefined) =>
       max === undefined
         ? Effect.succeed(true)
         : sql.unsafe<{ n: number }>(LIVE_PROCESS_COUNT).pipe(Effect.map((rows) => (rows[0]?.n ?? 0) < max))
 
-    const clearEntryAt = (runtime: string, address: RuntimeAddress, except?: string) =>
+    const clearAt = (runtime: string, target: TerminalTarget, except?: string) =>
       Effect.gen(function* () {
-        for (const entry of yield* entrySessionsAt(runtime, address, except)) {
-          yield* endProcess(entry.id, "exited")
-          yield* dropWaiting(entry.id)
+        for (const other of yield* liveSessionsAt(runtime, target, except)) {
+          yield* endProcess(other.id, "exited")
         }
       })
 
+    const edges = yield* SessionEdges.make
+    const queries = yield* SessionReads.make
+
     return {
-      mayListTeam: Effect.fn("Db.session.mayListTeam")(session.mayListTeam),
-
-      teamMembers: Effect.fn("Db.session.teamMembers")(session.teamMembers),
-
-      sessionParents: Effect.fn("Db.session.sessionParents")((ids: ReadonlyArray<string>) =>
-        (ids.length === 0
-          ? Effect.succeed<ReadonlyArray<{ id: string; parentSessionId: string | null }>>([])
-          : sql<{ id: string; parentSessionId: string | null }>`SELECT id, parent_session_id FROM session
-              WHERE ${sql.in("id", ids)}`
-        ).pipe(
-          Effect.map((rows) => new Map(rows.map((row) => [row.id, row.parentSessionId]))),
-          Effect.orDie,
-        ),
-      ),
-
-      sessionDirectory: Effect.fn("Db.session.sessionDirectory")((id: string) =>
-        sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${id}`.pipe(
-          Effect.map((rows) => rows[0]?.directory),
-          Effect.orDie,
-        ),
-      ),
-
-      worktreeSessions: Effect.fn("Db.session.worktreeSessions")(() =>
-        sql<{
-          id: string
-          projectId: string
-          name: string
-          directory: string
-          endedAt: number | null
-        }>`SELECT id, project_id, name, directory, ended_at FROM session WHERE directory != ''`.pipe(Effect.orDie),
-      ),
-
-      startedByPeer: Effect.fn("Db.session.startedByPeer")((id: string) =>
-        sql`SELECT 1 FROM session WHERE id = ${id} AND origin_peer IS NOT NULL`.pipe(
-          Effect.map((rows) => rows.length > 0),
-          Effect.orDie,
-        ),
-      ),
+      ...edges,
+      ...queries,
 
       hadTerminal: Effect.fn("Db.session.hadTerminal")((id: string) => reads.hadTerminal(id).pipe(Effect.orDie)),
-
-      liveSharers: Effect.fn("Db.session.liveSharers")((id: string) =>
-        sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
-          WHERE o.id != s.id AND o.directory = s.directory AND s.directory != '' AND o.ended_at IS NULL
-          ORDER BY o.id`.pipe(
-          Effect.map((rows) => rows.map((r) => r.id)),
-          Effect.orDie,
-        ),
-      ),
-
-      earlierSharer: Effect.fn("Db.session.earlierSharer")((id: string) =>
-        sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
-          WHERE o.id != s.id AND o.directory = s.directory AND s.directory != ''
-            AND (o.created_at, o.rowid) < (s.created_at, s.rowid)
-          ORDER BY o.created_at, o.rowid LIMIT 1`.pipe(
-          Effect.map((rows) => rows[0]?.id),
-          Effect.orDie,
-        ),
-      ),
 
       creatorOf,
 
@@ -182,21 +127,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
           if (creator === undefined) return undefined
 
-          if ("peer" in creator) return { id: creator.session, label: "the agent that started you" }
+          if ("remote" in creator)
+            return { id: creator.session, label: "the agent that started you", remote: creator.remote }
 
-          const [row] = yield* sql<{ entry: string | null; name: string | null }>`SELECT
-              p.entry_session_id AS entry, c.name AS name
-            FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = ${creator.local}
-            WHERE s.id = ${id}`
+          const [row] = yield* sql<{ name: string | null }>`SELECT name FROM session WHERE id = ${creator.local}`
 
-          const label =
-            creator.local === row?.entry
-              ? "the entry session"
-              : row?.name
-                ? `agent ${row.name}`
-                : "the agent that started you"
+          const label = row?.name ? `agent ${row.name}` : "the agent that started you"
 
-          return { id: creator.local, label }
+          return { id: creator.local, label, remote: undefined }
         }).pipe(Effect.orDie),
       ),
 
@@ -211,17 +149,17 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             request,
             origin,
             max,
-            team,
+            links,
           }: {
             readonly cwd?: string
             readonly task?: string
             readonly parentSessionId?: string | undefined
             readonly request?: string | undefined
-            readonly origin?: Remote.PeerStart | undefined
+            readonly origin?: Remote.RemoteStart | undefined
             readonly max?: number | undefined
-            readonly team?: TeamStart | undefined
+            readonly links?: SpawnLinks | undefined
           } = {},
-        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended" | TeamRefusal> =>
+        ): Effect.Effect<true | "waiting" | SpawnedBefore | "parent-ended"> =>
           tx(
             Effect.gen(function* () {
               if (request !== undefined) {
@@ -235,19 +173,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 (yield* sql`SELECT 1 FROM session WHERE id = ${parentSessionId} AND ended_at IS NOT NULL`).length > 0
               )
                 return "parent-ended" as const
-
-              const teamId =
-                team === undefined ? undefined : team === "new" ? yield* session.unusedTeamId(project) : team.join
-
-              if (team !== undefined && team !== "new") {
-                const owner = yield* session.teamOwner(project, team.join)
-
-                if (owner === undefined) return { teamUnknown: team.join }
-
-                if (!(yield* session.teamLive(project, team.join))) return { teamEnded: team.join }
-
-                if (owner !== parentSessionId) return { team: team.join, teamOwner: owner }
-              }
 
               const message =
                 task === undefined
@@ -264,7 +189,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                             ? {
                                 type: "agent",
                                 session: origin.reportTo,
-                                machine: (yield* remote.peerName(origin.peer)) ?? origin.peer,
+                                machine: (yield* remote.remoteName(origin.remote)) ?? origin.remote,
                               }
                             : { type: "user" },
                       content: task,
@@ -283,15 +208,46 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   ...(parentSessionId !== undefined && { parent: parentSessionId }),
                   ...(origin !== undefined && {
                     origin: {
-                      peer: origin.peer,
+                      remote: origin.remote,
                       project: origin.project,
                       ...(origin.reportTo !== undefined && { session: origin.reportTo }),
                     },
                   }),
                   ...(message !== undefined && { message }),
-                  ...(teamId !== undefined && { team: teamId }),
                 },
               })
+
+              const seen = new Set<string>()
+
+              const link = (from: string, to: string, remoteId?: string) => {
+                if (remoteId === undefined && from === to) return Effect.void
+                const key = `${from}\0${remoteId ?? ""}\0${to}`
+
+                if (seen.has(key)) return Effect.void
+                seen.add(key)
+
+                return publish(SessionLinked, {
+                  sessionId: from,
+                  at: row.createdAt,
+                  data: { to, ...(remoteId !== undefined && { remote: remoteId }) },
+                }).pipe(Effect.asVoid)
+              }
+
+              if (parentSessionId !== undefined) {
+                yield* link(parentSessionId, row.id)
+                yield* link(row.id, parentSessionId)
+              }
+
+              if (origin?.reportTo !== undefined) yield* link(row.id, origin.reportTo, origin.remote)
+
+              for (const fromId of links?.from ?? []) yield* link(fromId, row.id)
+
+              for (const toId of links?.to ?? []) yield* link(row.id, toId)
+
+              for (const targetId of links?.with ?? []) {
+                yield* link(targetId, row.id)
+                yield* link(row.id, targetId)
+              }
 
               const processAt = row.startedAt ?? row.createdAt
               const admitted = yield* roomFor(max)
@@ -306,7 +262,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       ...(row.model && { model: row.model }),
                       ...(row.routing !== undefined && { routing: row.routing }),
                       runtime: row.runtime,
-                      terminal: row.address.id,
+                      ...(row.terminal !== null && { terminal: row.terminal }),
                       ...(row.harnessSessionId && { resume: row.harnessSessionId }),
                     },
                     processAt,
@@ -334,7 +290,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           ).pipe(Effect.orDie),
       ),
 
-      resolveSession: Effect.fn("Db.session.resolveSession")((input: string, scope?: Remote.PeerScope) =>
+      resolveSession: Effect.fn("Db.session.resolveSession")((input: string, scope?: Remote.RemoteScope) =>
         Effect.gen(function* () {
           if (!/^[0-9a-f-]{8,36}$/.test(input))
             return yield* new NoSuchSession({
@@ -347,7 +303,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
           const rows = yield* sql<{
             id: string
           }>`SELECT s.id FROM session s WHERE s.id >= ${input} AND s.id < ${`${input}~`}
-            ${scope === undefined ? sql`` : sql`AND ${remote.ofPeer(sql`s.id`, scope)}`} ORDER BY s.id LIMIT 11`.pipe(
+            ${scope === undefined ? sql`` : sql`AND ${remote.ofRemote(sql`s.id`, scope)}`} ORDER BY s.id LIMIT 11`.pipe(
             Effect.orDie,
           )
 
@@ -361,34 +317,16 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
       newSessionId: unusedId.pipe(Effect.orDie),
 
-      sessionIdentity: Effect.fn("Db.session.sessionIdentity")((id: string) =>
-        sql<{
-          id: string
-          projectId: string
-          agent: string
-          harness: string
-          team: string | null
-          entry: number
-        }>`SELECT a.id, a.project_id, a.agent, a.team,
-            coalesce(p.harness, '') AS harness,
-            q.entry_session_id = a.id AS entry
-          FROM session a JOIN project q ON q.id = a.project_id
-          LEFT JOIN process p ON p.session_id = a.id AND p.id = a.process_id
-          WHERE a.id = ${id}`.pipe(
-          Effect.map((rows) => (rows[0] === undefined ? undefined : { ...rows[0], entry: rows[0].entry === 1 })),
-          Effect.orDie,
-        ),
-      ),
-
       getSession: Effect.fn("Db.session.getSession")((id: string) => findSession(id).pipe(Effect.orDie)),
 
       listSessions: Effect.fn("Db.session.listSessions")((filter: SessionFilter = {}) =>
         selectSessions(
           [
             ...(filter.projectId === undefined ? [] : [sql`s.project_id = ${filter.projectId}`]),
-            ...(filter.peer === undefined ? [] : [remote.ofPeer(sql`s.id`, filter.peer)]),
+            ...(filter.unarchived === true ? [sql`s.ended_at IS NULL`] : []),
+            ...(filter.remote === undefined ? [] : [remote.ofRemote(sql`s.id`, filter.remote)]),
           ],
-          filter.stopped
+          filter.stopped || filter.unarchived
             ? undefined
             : sql`((${running} AND (p_id IS NOT NULL OR ended_at IS NULL)) OR ${
                 (filter.waiting ?? []).length === 0 ? sql`0` : sql.in("id", filter.waiting!)
@@ -400,30 +338,27 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         reads.briefs(ids).pipe(Effect.orDie),
       ),
 
-      entrySessions: findEntrySessions().pipe(Effect.orDie),
-
       allocateSessionId: Effect.fn("Db.session.allocateSessionId")(() => unusedId),
 
-      entryOf: Effect.fn("Db.session.entryOf")((projectIdValue: string) =>
-        findEntrySessions(projectIdValue).pipe(
-          Effect.map((rows) => rows[0]),
+      isRoot: Effect.fn("Db.session.isRoot")((id: string) => isRoot(id).pipe(Effect.orDie)),
+
+      latestRoot: Effect.fn("Db.session.latestRoot")((projectIdValue: string) =>
+        latestRoot(projectIdValue).pipe(
+          Effect.map((row) =>
+            row !== undefined && moving.has(row.id) && row.process !== null
+              ? { ...row, process: { ...row.process, terminal: null } }
+              : row,
+          ),
           Effect.orDie,
         ),
       ),
 
-      entryAt: Effect.fn("Db.session.entryAt")((runtime: string, address: RuntimeAddress) =>
-        entrySessionsAt(runtime, address).pipe(
-          Effect.map((rows) => rows[0]?.project),
-          Effect.orDie,
-        ),
-      ),
-
-      startEntry: Effect.fn("Db.session.startEntry")(
+      startRoot: Effect.fn("Db.session.startRoot")(
         (
           project: string,
           harness: HarnessId,
           fresh: boolean,
-          location: { readonly runtime: string; readonly address: RuntimeAddress },
+          location: { readonly runtime: string; readonly target: TerminalTarget },
           start: {
             readonly provider?: string | undefined
             readonly model?: string | undefined
@@ -431,30 +366,34 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             readonly projectDirectory?: string | undefined
             readonly pid?: number | undefined
             readonly sessionId?: string | undefined
+            readonly targetSessionId?: string | undefined
             readonly agent: string
             readonly firstInput?: string | undefined
           },
         ) =>
           Effect.gen(function* () {
-            const id = start.sessionId ?? (yield* unusedId)
+            const allocated = start.sessionId ?? (yield* unusedId)
 
             return yield* tx(
               Effect.gen(function* () {
-                yield* clearEntryAt(location.runtime, location.address, project)
-                const movingHere = moving.has(project)
+                const existing = fresh
+                  ? undefined
+                  : start.targetSessionId !== undefined
+                    ? yield* findSession(start.targetSessionId)
+                    : yield* latestRoot(project)
 
-                const [existing] = yield* sql<{
-                  entry: string | null
-                }>`SELECT entry_session_id AS entry FROM project WHERE id = ${project}`
+                const creating = existing === undefined || existing.endedAt !== null
+                const targetId = creating ? allocated : existing.id
+
+                yield* clearAt(location.runtime, location.target, targetId)
+                const movingHere = moving.has(targetId)
 
                 const at = yield* now
-
-                const creating = !existing?.entry || fresh
 
                 const message =
                   creating && start.firstInput !== undefined
                     ? yield* queueInbox({
-                        recipient: id,
+                        recipient: targetId,
                         sender: { type: "user" },
                         content: start.firstInput,
                         at,
@@ -462,13 +401,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     : undefined
 
                 if (creating) {
-                  if (existing?.entry) {
-                    yield* endProcess(existing.entry, "archived", at)
-                    yield* publish(SessionEnded, { sessionId: existing.entry, at, data: { reason: "replaced" } })
-                  }
-
                   yield* publish(SessionCreated, {
-                    sessionId: id,
+                    sessionId: targetId,
                     at,
                     data: {
                       project,
@@ -478,46 +412,43 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       ...(message !== undefined && { message }),
                     },
                   })
-                  yield* publish(ProjectEntryChanged, { projectId: project, at, data: { session: id } })
                 }
 
-                const entryId = !existing?.entry || fresh ? id : existing.entry
-
                 if (start.projectDirectory) {
-                  const [own] = yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${entryId}`
+                  const [own] = yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${targetId}`
 
                   if (own?.directory === "")
                     yield* publish(SessionDirectoryChanged, {
-                      sessionId: entryId,
+                      sessionId: targetId,
                       at,
                       data: { directory: start.projectDirectory },
                     })
                 }
 
-                const current = yield* currentProcess(entryId)
+                const current = yield* currentProcess(targetId)
 
                 if (current !== undefined && current.ended === null)
-                  yield* endProcess(entryId, movingHere ? "move" : "exited", at)
+                  yield* endProcess(targetId, movingHere ? "move" : "exited", at)
 
                 const harnessSessionId = current?.harnessSessionId ?? null
 
                 const resume =
-                  !fresh &&
+                  !creating &&
                   current?.start.harness === harness &&
                   harnessSessionId !== null &&
-                  (yield* canResumeConversation(entryId, harnessSessionId))
+                  (yield* canResumeConversation(targetId, harnessSessionId))
                     ? harnessSessionId
                     : undefined
 
                 const process = yield* startProcess(
-                  entryId,
+                  targetId,
                   {
                     harness,
                     ...(start.provider && { provider: start.provider }),
                     ...(start.model && { model: start.model }),
                     ...(start.routing && { routing: start.routing }),
                     runtime: location.runtime,
-                    terminal: location.address.id,
+                    terminal: location.target,
                     ...(resume !== undefined && { resume }),
                     ...(start.pid !== undefined && { pid: start.pid }),
                   },
@@ -527,30 +458,28 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 let execution: number | undefined
 
                 if (start.firstInput !== undefined && resume === undefined) {
-                  execution = yield* allocateExecution(entryId, at)
+                  execution = yield* allocateExecution(targetId, at)
 
                   if (message === undefined) {
                     const queued = yield* queueInbox({
-                      recipient: entryId,
+                      recipient: targetId,
                       sender: { type: "user" },
                       content: start.firstInput,
                       at,
                     })
 
-                    yield* inbox.moveInbox(sql`recipient_session_id = ${entryId} AND id = ${queued}`, "delivering", {
+                    yield* inbox.moveInbox(sql`recipient_session_id = ${targetId} AND id = ${queued}`, "delivering", {
                       execution,
                     })
                   }
 
-                  yield* inbox.linkTask(entryId, execution, at)
+                  yield* inbox.linkTask(targetId, execution, at)
                 }
 
-                yield* afterCommit(() => void moving.delete(project))
-
-                if (!movingHere || fresh) yield* dropWaiting(entryId)
+                yield* afterCommit(() => void moving.delete(targetId))
 
                 return {
-                  sessionId: entryId,
+                  sessionId: targetId,
                   harnessSessionId: resume ?? null,
                   projectId: project,
                   process,
@@ -574,7 +503,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(setStatus(id, status)).pipe(Effect.orDie),
       ),
 
-      placeProcess: Effect.fn("Db.session.placeProcess")((id: string, terminal: string, pid?: number) =>
+      placeProcess: Effect.fn("Db.session.placeProcess")((id: string, terminal: TerminalTarget, pid?: number) =>
         tx(session.placeProcess(id, terminal, pid)).pipe(Effect.orDie),
       ),
 
@@ -682,51 +611,37 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(endProcess(id, "stopped", undefined, undefined, by)).pipe(Effect.orDie),
       ),
 
-      endExited: Effect.fn("Db.session.endExited")(
-        (id: string, reason: "exited" | "launch_failed", process: number | undefined) =>
-          tx(
-            Effect.gen(function* () {
-              if (!(yield* endProcess(id, reason, undefined, process))) return false
-
-              if (yield* isEntry(id)) yield* dropWaiting(id)
-
-              return true
-            }),
-          ).pipe(Effect.orDie),
-      ),
-
-      detachEntry: Effect.fn("Db.session.detachEntry")(
-        (projectIdValue: string, runtime: string, address: RuntimeAddress) =>
+      detachSession: Effect.fn("Db.session.detachSession")(
+        (sessionId: string, runtime: string, target: TerminalTarget) =>
           Effect.gen(function* () {
-            const here = (yield* entrySessionsAt(runtime, address)).some((m) => m.project === projectIdValue)
+            const here = (yield* liveSessionsAt(runtime, target)).some((m) => m.id === sessionId)
 
-            if (here) moving.add(projectIdValue)
+            if (here) moving.add(sessionId)
 
             return here
           }).pipe(Effect.orDie),
       ),
 
-      reattachEntry: Effect.fn("Db.session.reattachEntry")(
-        (projectIdValue: string, _runtime: string, _address: RuntimeAddress) =>
-          Effect.sync(() => {
-            moving.delete(projectIdValue)
-          }),
+      reattachSession: Effect.fn("Db.session.reattachSession")((sessionId: string) =>
+        Effect.sync(() => {
+          moving.delete(sessionId)
+        }),
       ),
 
-      lastSessionAt: Effect.fn("Db.session.lastSessionAt")((runtime: string, address: RuntimeAddress) =>
-        session.lastSessionAt(runtime, address).pipe(Effect.orDie),
+      lastSessionAt: Effect.fn("Db.session.lastSessionAt")((runtime: string, target: TerminalTarget) =>
+        session.lastSessionAt(runtime, target).pipe(Effect.orDie),
       ),
 
       lastProjectTerminal: Effect.fn("Db.session.lastProjectTerminal")((projectId: string, runtime: string) =>
         session.lastProjectTerminal(projectId, runtime).pipe(Effect.orDie),
       ),
 
-      processesAt: Effect.fn("Db.session.processesAt")((runtime: string, address: RuntimeAddress) =>
-        session.processesAt(runtime, address).pipe(Effect.orDie),
+      processesAt: Effect.fn("Db.session.processesAt")((runtime: string, target: TerminalTarget) =>
+        session.processesAt(runtime, target).pipe(Effect.orDie),
       ),
 
-      entryMoving: Effect.fn("Db.session.entryMoving")((projectIdValue: string) =>
-        Effect.sync(() => moving.has(projectIdValue)),
+      sessionMoving: Effect.fn("Db.session.sessionMoving")((sessionId: string) =>
+        Effect.sync(() => moving.has(sessionId)),
       ),
 
       canResumeConversation,
@@ -805,7 +720,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         sql<{ id: string }>`SELECT s.id FROM session s
           WHERE s.ended_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM process p WHERE p.session_id = s.id)
-            AND NOT EXISTS (SELECT 1 FROM project j WHERE j.entry_session_id = s.id)`.pipe(
+            AND (s.parent_session_id IS NOT NULL OR s.origin_remote IS NOT NULL)`.pipe(
           Effect.map((rows) => rows.map((row) => row.id)),
           Effect.orDie,
         ),
@@ -849,7 +764,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               if (status === "completed") yield* inbox.confirm(id, execution)
 
-              if (options.notice !== undefined && !(yield* isEntry(id)))
+              if (options.notice !== undefined && !(yield* isRoot(id)))
                 yield* insertInboxRow({ sessionId: id, message: options.notice })
 
               return true
@@ -949,7 +864,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
             yield* setStatus(id, "idle")
 
-            if (end.status === "failed" && !(yield* isEntry(id)))
+            if (end.status === "failed" && !(yield* isRoot(id)))
               yield* insertInboxRow(
                 {
                   sessionId: id,

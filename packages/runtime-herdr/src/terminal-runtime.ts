@@ -22,13 +22,22 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import type { HerdrPool } from "./pool.ts"
 
+export const HerdrTerminal = Schema.Struct({
+  session: Schema.NonEmptyString,
+  pane: Schema.NonEmptyString,
+  name: Schema.optionalKey(Schema.NonEmptyString),
+  machine: Schema.optionalKey(Schema.NonEmptyString),
+})
+
+export type HerdrTerminal = typeof HerdrTerminal.Type
+
 export type AgentState = VibestPlugin.Runtime.AgentState
 
-export type Terminal = VibestPlugin.Runtime.Terminal
+export type Terminal = HerdrTerminal
 
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 
-export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
+export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent<HerdrTerminal>
 
 export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 
@@ -36,27 +45,14 @@ export const KIND = "herdr"
 
 export const REMOTE_SESSION = "default"
 
-export const terminalOf = (session: string, paneId: string, name?: string): Terminal => ({
-  id: name === undefined ? `${session}/${paneId}` : `${session}/${paneId}/${name}`,
+export const terminalOf = (session: string, pane: string, name?: string): HerdrTerminal => ({
+  session,
+  pane,
+  ...(name !== undefined && { name }),
 })
 
-const onAnotherMachine = (terminal: Terminal) => terminal.id.includes("@")
-
-export const parseTerminal = (
-  terminal: Terminal,
-): { readonly session: string; readonly paneId: string; readonly name: string | undefined } | undefined => {
-  if (onAnotherMachine(terminal)) return undefined
-  const at = terminal.id.indexOf("/")
-
-  if (at <= 0 || at === terminal.id.length - 1) return undefined
-  const rest = terminal.id.slice(at + 1)
-  const named = rest.indexOf("/")
-  const paneId = named === -1 ? rest : rest.slice(0, named)
-
-  if (paneId === "" || (named !== -1 && named === rest.length - 1)) return undefined
-
-  return { session: terminal.id.slice(0, at), paneId, name: named === -1 ? undefined : rest.slice(named + 1) }
-}
+export const formatHerdrTerminal = (terminal: HerdrTerminal): string =>
+  `${terminal.session}/${terminal.pane}${terminal.name === undefined ? "" : `/${terminal.name}`}${terminal.machine === undefined ? "" : `@${terminal.machine}`}`
 
 export const encodeTarget = (location: RuntimeLocation) => JSON.stringify(location)
 
@@ -160,6 +156,9 @@ export interface PoolDeps {
   readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]
   readonly fs: FileSystem.FileSystem | undefined
   readonly scope: Scope.Scope
+  readonly caller?: VibestPlugin.Runtime.RuntimeCaller<HerdrTerminal>
+  readonly link?: VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["link"]
+  readonly locate?: VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["locate"]
 }
 
 export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
@@ -363,9 +362,10 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         Effect.provide(NodePath.layer),
       )
 
-    const open: Runtime["open"] = (input) =>
+    const open: VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["open"] = (input) =>
       Effect.gen(function* () {
-        const near = input.near !== undefined && input.remote !== true ? parseTerminal(input.near) : undefined
+        const near =
+          input.near !== undefined && input.remote !== true && input.near.machine === undefined ? input.near : undefined
 
         const ambient = Option.getOrUndefined(
           yield* Config.option(Config.String("HERDR_SOCKET_PATH")).pipe(Effect.orDie),
@@ -397,7 +397,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             : yield* connectLocation(fallbackLocation).pipe(Effect.map((c) => ({ ...c, useNear: false })))
 
         const { session, h, useNear } = connected
-        const nearPane = near !== undefined && useNear ? yield* paneOf(h, near.paneId) : undefined
+        const nearPane = near !== undefined && useNear ? yield* paneOf(h, near.pane) : undefined
 
         const workspaceId =
           nearPane !== undefined
@@ -461,22 +461,17 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         return terminalOf(session, paneId)
       })
 
-    const at = (terminal: Terminal, method: string) => {
-      const parsed = parseTerminal(terminal)
-
-      return parsed !== undefined
-        ? Effect.succeed(parsed)
+    const at = (terminal: HerdrTerminal, method: string) =>
+      terminal.machine === undefined
+        ? Effect.succeed({ session: terminal.session, paneId: terminal.pane, name: terminal.name })
         : Effect.fail(
             new RuntimeApi.RuntimeError({
               code: "not_found",
-              message: onAnotherMachine(terminal)
-                ? `terminal ${terminal.id} (${method}) is a pane on ${terminal.id.slice(terminal.id.indexOf("@") + 1)}; vibest peek and send reach it through vibest`
-                : `terminal ${terminal.id} (${method}) names no herdr session`,
+              message: `terminal ${formatHerdrTerminal(terminal)} (${method}) is a pane on ${terminal.machine}; vibest peek and send reach it through vibest`,
             }),
           )
-    }
 
-    const send: Runtime["send"] = (terminal, { text, keys }) =>
+    const send: VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["send"] = (terminal, { text, keys }) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "send")
         const h = yield* client(place.session)
@@ -511,7 +506,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         }
       })
 
-    const run: NonNullable<Runtime["run"]> = (terminal, launch) =>
+    const run: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["run"]> = (terminal, launch) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "run")
         const h = yield* client(place.session)
@@ -543,7 +538,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         yield* typeLine(h, place.paneId, yield* typed(launch))
       })
 
-    const read: Runtime["read"] = (terminal, lines) =>
+    const read: VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["read"] = (terminal, lines) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "read")
         const h = yield* client(place.session)
@@ -552,7 +547,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
           .text
       })
 
-    const process: Runtime["process"] = (terminal) =>
+    const process: VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["process"] = (terminal) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "process")
         const h = yield* client(place.session)
@@ -593,14 +588,14 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         }
       })
 
-    const focus: Runtime["focus"] = (terminal) =>
+    const focus: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["focus"]> = (terminal) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "focus")
         const h = yield* client(place.session)
         yield* failWith(h.call("pane.focus", { pane_id: place.paneId })).pipe(Effect.asVoid)
       })
 
-    const close: Runtime["close"] = (terminal) =>
+    const close: VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["close"] = (terminal) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "close")
         const h = yield* client(place.session)
@@ -646,7 +641,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         yield* failWith(h.call("pane.close", { pane_id: paneId })).pipe(Effect.asVoid)
       })
 
-    const state: Runtime["state"] = (terminal) =>
+    const state: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["state"]> = (terminal) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "state")
         const h = yield* client(place.session)
@@ -667,7 +662,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         return found.detected || found.agent.interactive_ready ? stateOf(found.agent.agent_status) : "unknown"
       })
 
-    const session: Runtime["session"] = (terminal) =>
+    const session: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["session"]> = (terminal) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "session")
         const h = yield* client(place.session)
@@ -676,11 +671,11 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         return found !== undefined ? (found.agent.agent_session?.value ?? null) : null
       })
 
-    const present: Runtime["present"] = (terminal, info) =>
+    const present: NonNullable<VibestPlugin.Runtime.RuntimeDefinition<HerdrTerminal>["present"]> = (terminal, info) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "present")
 
-        if (cut(info.entrySession) !== undefined) yield* watch(place.session, place.paneId)
+        if (cut(info.session) !== undefined) yield* watch(place.session, place.paneId)
 
         if (["agent", "harness", "project", "live"].every((key) => cut(info[key]) === undefined)) return
         const h = yield* client(place.session)
@@ -727,8 +722,13 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         }
       })
 
-    return {
+    return RuntimeApi.define({
       id: KIND,
+      ...(deps.caller !== undefined && { caller: deps.caller }),
+      ...(deps.link !== undefined && { link: deps.link }),
+      ...(deps.locate !== undefined && { locate: deps.locate }),
+      terminal: HerdrTerminal,
+      format: formatHerdrTerminal,
       status,
       open,
       send,
@@ -748,11 +748,11 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const session =
           location !== undefined && "session" in location
             ? location.session
-            : terminal === undefined
+            : terminal === undefined || terminal.machine !== undefined
               ? undefined
-              : parseTerminal(terminal)?.session
+              : terminal.session
 
         return session === undefined ? ["herdr"] : ["herdr", "session", "attach", session]
       },
-    } satisfies Runtime
+    })
   })

@@ -85,7 +85,7 @@ describe("observed execution end", () => {
       yield* sessions.send(id, "queued")
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* (yield* Integration.Service).executionEnd(
-        { id, entry: false, harness: "claude" },
+        { id, harness: "claude" },
         JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "aborted", last_assistant_message: "" }),
       )
       const row = (yield* db.session.getSession(id))!
@@ -106,7 +106,7 @@ describe("observed execution end", () => {
       const inbox = yield* Inbox.Service
       const integration = yield* Integration.Service
       const { id, db, row } = yield* spawnWorking(yield* makeRepository, "pulling-claude")
-      const who = { id, entry: false, harness: "pulling-claude" as const, process: row.process?.id }
+      const who = { id, harness: "pulling-claude" as const, process: row.process?.id }
       const first = (yield* db.session.openExecution(id))!
       yield* integration.executionEnd(
         who,
@@ -163,7 +163,7 @@ describe("observed execution end", () => {
       const inbox = yield* Inbox.Service
       const integration = yield* Integration.Service
       const { id, db, row } = yield* spawnWorking(yield* makeRepository, "pulling-claude")
-      const who = { id, entry: false, harness: "pulling-claude" as const, process: row.process?.id }
+      const who = { id, harness: "pulling-claude" as const, process: row.process?.id }
       const first = (yield* db.session.openExecution(id))!
       yield* integration.executionEnd(
         who,
@@ -207,7 +207,7 @@ describe("observed execution end", () => {
       const { id, db, row } = yield* spawnWorking(yield* makeRepository, "claude")
       const integration = yield* Integration.Service
       const a = (yield* db.session.openExecution(id))!
-      const who = { id, entry: false, harness: "claude" as const, process: row.process?.id }
+      const who = { id, harness: "claude" as const, process: row.process?.id }
 
       const report = (execution: number, reply: string) =>
         JSON.stringify({
@@ -257,7 +257,7 @@ describe("observed execution end", () => {
       yield* held.reached
       const execution = (yield* db.session.openExecution(id))!
       yield* (yield* Integration.Service).executionEnd(
-        { id, entry: false, harness: "pi" },
+        { id, harness: "pi" },
         JSON.stringify({ type: "agent_settled", text: "done while locked", execution }),
       )
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
@@ -301,7 +301,7 @@ describe("observed execution end", () => {
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* herdr.updateAgent(id, (agent) => ({ ...agent, status: "working" }))
       const held = yield* herdr.hold("send", id)
-      const removing = yield* Effect.forkChild(sessions.remove(id))
+      const removing = yield* Effect.forkChild(sessions.archive(id))
       yield* held.reached
       yield* writeEnd(id, "pi", { type: "agent_settled", text: "", error: "aborted", aborted: true })
       yield* sessions.userPrompt(id, "typed during the archive")
@@ -344,7 +344,7 @@ describe("observed execution end", () => {
       yield* yieldToIo
       assert.isUndefined(interrupting.pollUnsafe())
       yield* (yield* Integration.Service).executionEnd(
-        { id, entry: false, harness: "pi" },
+        { id, harness: "pi" },
         JSON.stringify({ type: "agent_settled", text: "", error: "aborted", aborted: true, execution }),
       )
       const result = yield* Fiber.join(interrupting)

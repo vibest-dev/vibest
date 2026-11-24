@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { rankedRemotes, RepositoryUrl, repositoryIdentity } from "@vibest/core/repository-url"
+import { projectRemotes, rankedRemotes, RepositoryUrl, repositoryIdentity } from "@vibest/core/repository-url"
 import { Effect } from "effect"
 
 const config = (lines: ReadonlyArray<string>) => lines.join("\n")
@@ -23,6 +23,57 @@ describe("the remote a repository is known by", () => {
     assert.deepStrictEqual(rankedRemotes(config(remotes)), ["fork", "upstream", "origin", "alpha", "my.fork", "zeta"])
     assert.deepStrictEqual(rankedRemotes(config(["remote.fork.gh-resolved base"])), [])
     assert.deepStrictEqual(rankedRemotes(""), [])
+  })
+
+  it("projectRemotes picks origin first, then gh-resolved, then remaining remotes in config appearance order", () => {
+    const fork = config([
+      "remote.upstream.url https://github.com/org/repo.git",
+      "remote.upstream.gh-resolved base",
+      "remote.origin.url git@github.com:forker/repo.git",
+    ])
+
+    assert.deepStrictEqual(projectRemotes(fork), ["origin", "upstream"])
+    assert.deepStrictEqual(rankedRemotes(fork), ["upstream", "origin"])
+
+    const noOriginResolved = config([
+      "remote.firstremote.url https://github.com/first/repo.git",
+      "remote.upstream.url https://github.com/org/repo.git",
+      "remote.upstream.gh-resolved base",
+      "remote.alpha.url https://github.com/alpha/repo.git",
+    ])
+
+    assert.deepStrictEqual(projectRemotes(noOriginResolved), ["upstream", "firstremote", "alpha"])
+
+    const appearanceOrder = config([
+      "remote.firstremote.url https://github.com/first/repo.git",
+      "remote.alpha.url https://github.com/alpha/repo.git",
+    ])
+
+    assert.deepStrictEqual(projectRemotes(appearanceOrder), ["firstremote", "alpha"])
+    assert.deepStrictEqual(projectRemotes(config(["remote.fork.gh-resolved base"])), [])
+    assert.deepStrictEqual(projectRemotes(""), [])
+  })
+
+  it("handles URLs containing .url or .gh-resolved and ignores gh-resolved set to false or empty", () => {
+    const dotUrl = config([
+      "remote.origin.url https://github.com/org/my.url",
+      "remote.backup.url https://github.com/org/repo.gh-resolved.git",
+      "remote.my.fork.url https://github.com/fork/my.url.git",
+    ])
+
+    assert.deepStrictEqual(projectRemotes(dotUrl), ["origin", "backup", "my.fork"])
+    assert.deepStrictEqual(rankedRemotes(dotUrl), ["origin", "backup", "my.fork"])
+
+    const declined = config([
+      "remote.firstremote.url https://github.com/first/repo.git",
+      "remote.upstream.url https://github.com/org/repo.git",
+      "remote.upstream.gh-resolved false",
+      "remote.empty.url https://github.com/empty/repo.git",
+      "remote.empty.gh-resolved ",
+    ])
+
+    assert.deepStrictEqual(projectRemotes(declined), ["firstremote", "upstream", "empty"])
+    assert.deepStrictEqual(rankedRemotes(declined), ["upstream", "empty", "firstremote"])
   })
 
   it.effect("the identity is the host in lower case and the whole path, for any host", () =>

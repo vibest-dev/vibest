@@ -1,11 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
+import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Effect, Queue, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { type Connection, type Pushed, RexError } from "../src/client.ts"
-import { make, type RuntimeEvent } from "../src/terminal-runtime.ts"
+import { make } from "../src/terminal-runtime.ts"
 
-const terminal = { id: "session:s/block:b" }
+const terminal = { session: "session:s", block: "block:b" }
 
 const processChanged = (name: string | null): Pushed => ({
   type: "event",
@@ -118,7 +119,7 @@ describe("runtime-rex against a fake Rex connection", () => {
           shell: "/bin/sh",
         })
 
-        const seen = yield* Ref.make<ReadonlyArray<RuntimeEvent>>([])
+        const seen = yield* Ref.make<ReadonlyArray<VibestPlugin.Runtime.RuntimeEvent>>([])
         yield* runtime.events.pipe(
           Stream.runForEach((event) => Ref.update(seen, (events) => [...events, event])),
           Effect.forkScoped,

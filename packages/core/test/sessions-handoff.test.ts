@@ -17,7 +17,7 @@ import { until } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { idleSession, spawnInput, test } from "./lib/sessions-helpers.ts"
 
-const here = { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } }
+const here = { runtime: RUNTIME, target: { id: "test/coord" } }
 
 const inboxStatus = (sessionId: string, content?: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
@@ -125,7 +125,7 @@ test(
     const second = yield* sessions.spawn(input)
     yield* until((yield* Starts.Service).waiting, (keys) => keys.length === 2)
     yield* sessions.interrupt(first.id)
-    yield* sessions.remove(second.id)
+    yield* sessions.archive(second.id)
 
     assert.deepStrictEqual(
       yield* sql<{ status: string; processes: number }>`SELECT i.status AS status,
@@ -157,7 +157,7 @@ test(
     const taken = yield* inbox.take(entryId, undefined)
     assert.deepStrictEqual(yield* inboxStatus(entryId, "hello"), [{ status: "delivering" }])
     yield* integration.prompt(
-      { id: entryId, entry: true, harness: "pulling-pi" },
+      { id: entryId, harness: "pulling-pi" },
       JSON.stringify({ type: "accepted", execution: taken!.execution, ids: taken!.ids }),
     )
     assert.deepStrictEqual(yield* inboxStatus(entryId, "hello"), [{ status: "delivered" }])
@@ -180,7 +180,7 @@ test(
     assert.deepStrictEqual(yield* inboxStatus(entryId, "one"), [{ status: "delivering" }])
     assert.deepStrictEqual(yield* inboxStatus(entryId, "two"), [{ status: "delivering" }])
     yield* integration.prompt(
-      { id: entryId, entry: true, harness: "pulling-pi" },
+      { id: entryId, harness: "pulling-pi" },
       JSON.stringify({ type: "accepted", execution: taken!.execution, ids: taken!.ids }),
     )
     assert.deepStrictEqual(yield* inboxStatus(entryId, "one"), [{ status: "delivered" }])
@@ -199,7 +199,7 @@ test(
     yield* runtime.seedAgent("test/coord")
     yield* runtime.updateAgent("test/coord", (agent) => ({ ...agent, status: "working" }))
 
-    const started = yield* db.session.startEntry(yield* projectOf(repo), "pi", false, here, {
+    const started = yield* db.session.startRoot(yield* projectOf(repo), "pi", false, here, {
       agent: "general",
       firstInput: "bootstrap",
     })
@@ -273,7 +273,7 @@ test(
     const sql = yield* SqlClient.SqlClient
     const { id, entryId, sessions } = yield* idleSession(yield* makeRepository)
     assert.deepStrictEqual(yield* inboxStatus(id), [{ status: "delivered" }])
-    yield* sessions.remove(id)
+    yield* sessions.archive(id)
 
     const dropped = yield* sql<{ type: string }>`SELECT type FROM event
       WHERE aggregate = ${id} AND type = 'inbox.dropped'`

@@ -2,7 +2,7 @@ import path from "node:path"
 
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
-import { EntrySession } from "@vibest/core/session/entry"
+import { SessionLaunch } from "@vibest/core/session/entry"
 import { Placement } from "@vibest/core/session/placement"
 import { Effect } from "effect"
 
@@ -23,7 +23,7 @@ const insertTopLevel = (projectId: string, name: string, cwd: string) =>
         harnessId: "pi",
         harnessSessionId: null,
         runtime: "herdr",
-        address: { machine: "local", id: "" },
+        terminal: null,
         name,
         provider: null,
         model: null,
@@ -75,6 +75,7 @@ describe.concurrent("Placement project near-terminal", () => {
 
       const opensAfter2 = yield* fake.callsTo("open")
       assert.strictEqual(opensAfter2.at(-1)?.near, t1.id)
+      assert.isUndefined(opensAfter2.at(-1)?.parent)
 
       yield* db.session.endProcess(s1.id, "exited")
       yield* db.session.endProcess(s2.id, "exited")
@@ -146,7 +147,7 @@ describe.concurrent("Placement project near-terminal", () => {
           harnessId: "pi",
           harnessSessionId: null,
           runtime: "rex",
-          address: { machine: "local", id: "session:live/block:1" },
+          terminal: { session: "session:live", block: "block:1" },
           name: "live",
           provider: null,
           model: null,
@@ -170,7 +171,7 @@ describe.concurrent("Placement project near-terminal", () => {
           harnessId: "pi",
           harnessSessionId: null,
           runtime: "rex",
-          address: { machine: "local", id: "session:ended/block:2" },
+          terminal: { session: "session:ended", block: "block:2" },
           name: "ended",
           provider: null,
           model: null,
@@ -194,7 +195,7 @@ describe.concurrent("Placement project near-terminal", () => {
           harnessId: "pi",
           harnessSessionId: null,
           runtime: "rex",
-          address: { machine: "local", id: "session:remote/block:3" },
+          terminal: { session: "session:remote", block: "block:3" },
           name: "remote",
           provider: null,
           model: null,
@@ -207,28 +208,28 @@ describe.concurrent("Placement project near-terminal", () => {
           lastActive: 300,
         },
         projectId,
-        { cwd: repo, origin: { peer: "peer-1", project: "remote-proj" } },
+        { cwd: repo, origin: { remote: "remote-1", project: "remote-proj" } },
       )
 
       assert.deepStrictEqual(yield* db.session.lastProjectTerminal(projectId, "rex"), {
-        machine: "local",
-        id: "session:live/block:1",
+        session: "session:live",
+        block: "block:1",
       })
 
       yield* db.session.endProcess(liveId, "exited")
 
       assert.deepStrictEqual(yield* db.session.lastProjectTerminal(projectId, "rex"), {
-        machine: "local",
-        id: "session:ended/block:2",
+        session: "session:ended",
+        block: "block:2",
       })
     }),
   )
 
   test(
-    "EntrySession.launch reuses lastProjectTerminal when target is omitted and respects explicit target",
+    "SessionLaunch.launch reuses lastProjectTerminal when target is omitted and respects explicit target",
     Effect.gen(function* () {
       const db = yield* Db.Service
-      const entry = yield* EntrySession.Service
+      const entry = yield* SessionLaunch.Service
       const fake = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
@@ -237,13 +238,17 @@ describe.concurrent("Placement project near-terminal", () => {
         projectId,
         root: repo,
         at: { id: "local" },
-        argv: ["--harness", "pi"],
+        sessionId: undefined,
+        fresh: false,
+        harness: "pi",
+        provider: undefined,
+        model: undefined,
         focus: false,
         runtime: "herdr",
         agent: { id: "coordinator", named: false },
       })
 
-      const entryRow = (yield* db.session.entryOf(projectId))!
+      const entryRow = (yield* db.session.latestRoot(projectId))!
       assert.strictEqual(entryRow.name, `Vibest/${path.basename(repo)}`)
       assert.strictEqual((yield* fake.callsTo("open")).at(-1)?.label, entryRow.name)
       yield* db.session.endProcess(entryRow.id, "exited")
@@ -252,23 +257,32 @@ describe.concurrent("Placement project near-terminal", () => {
         projectId,
         root: repo,
         at: { id: "local" },
-        argv: ["--harness", "pi"],
+        sessionId: undefined,
+        fresh: false,
+        harness: "pi",
+        provider: undefined,
+        model: undefined,
         focus: false,
         runtime: "herdr",
         agent: { id: "coordinator", named: false },
       })
 
       const secondOpen = (yield* fake.callsTo("open")).at(-1)
-      assert.strictEqual(secondOpen?.near, first.terminal)
+      assert.strictEqual(secondOpen?.near, first.terminal["id"])
+      assert.isUndefined(secondOpen?.parent)
 
-      const secondEntryRow = (yield* db.session.entryOf(projectId))!
+      const secondEntryRow = (yield* db.session.latestRoot(projectId))!
       yield* db.session.endProcess(secondEntryRow.id, "exited")
 
       yield* entry.launch({
         projectId,
         root: repo,
         at: { id: "local", target: "explicit-session" },
-        argv: ["--harness", "pi"],
+        sessionId: undefined,
+        fresh: false,
+        harness: "pi",
+        provider: undefined,
+        model: undefined,
         focus: false,
         runtime: "herdr",
         agent: { id: "coordinator", named: false },
@@ -276,7 +290,62 @@ describe.concurrent("Placement project near-terminal", () => {
 
       const thirdOpen = (yield* fake.callsTo("open")).at(-1)
       assert.isUndefined(thirdOpen?.near)
+      assert.isUndefined(thirdOpen?.parent)
       assert.strictEqual(thirdOpen?.target, "explicit-session")
+    }),
+  )
+
+  test(
+    "child session passes creator terminal as parent and near, while top-level sessions pass no parent",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const placement = yield* Placement.Service
+      const fake = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+
+      const creator = yield* insertTopLevel(projectId, "creator", repo)
+
+      const creatorTerminal = yield* placement.openTerminal(fake.runtime, undefined, creator, {
+        project: repo,
+        cwd: repo,
+        launch: () => ({ argv: [], env: {} }),
+      })
+
+      const childId = yield* db.session.newSessionId
+      yield* db.session.insertSession(
+        {
+          id: childId,
+          agent: "general",
+          harnessId: "pi",
+          harnessSessionId: null,
+          runtime: "herdr",
+          terminal: null,
+          name: "child",
+          provider: null,
+          model: null,
+          status: "unknown",
+          startedAt: null,
+          exitedAt: null,
+          executionState: "none",
+          executionPromptedAt: 0,
+          createdAt: Date.now(),
+          lastActive: Date.now(),
+        },
+        projectId,
+        { cwd: repo, parentSessionId: creator.id },
+      )
+      const child = (yield* db.session.getSession(childId))!
+
+      yield* placement.openTerminal(fake.runtime, undefined, child, {
+        project: repo,
+        cwd: repo,
+        launch: () => ({ argv: [], env: {} }),
+      })
+
+      const childOpen = (yield* fake.callsTo("open")).at(-1)
+      assert.strictEqual(childOpen?.parent, creatorTerminal.id)
+      assert.strictEqual(childOpen?.near, creatorTerminal.id)
     }),
   )
 })

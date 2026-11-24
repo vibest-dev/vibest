@@ -10,14 +10,7 @@ import { Hc, SocketConnector } from "effect-herdr-core-sdk"
 import * as HcBun from "effect-herdr-core-sdk/bun"
 
 import { commandOf, note } from "../../../tools/reap.ts"
-import {
-  KIND,
-  LABEL,
-  make,
-  parseTerminalId,
-  PRESENT_ENTRY_SESSION,
-  PRESENT_PROJECT_ID,
-} from "../src/terminal-runtime.ts"
+import { KIND, LABEL, make, PRESENT_SESSION, PRESENT_PROJECT_ID } from "../src/terminal-runtime.ts"
 
 const hcOnPath = childProcess.spawnSync("hc", ["--version"], { stdio: "ignore" }).status === 0
 
@@ -132,8 +125,8 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           const records = JSON.parse(listed.stdout).terminals as Array<{ address: string; name: string }>
 
           for (const [i, terminal] of opened.entries()) {
-            const { address, socket } = parseTerminalId(terminal.id, socketPath)
-            assert.strictEqual(socket, socketPath)
+            const address = terminal["address"]!
+            assert.isUndefined(terminal["socket"])
             assert.strictEqual(records.find((t) => t.address === address)?.name, names[i])
             const got = hcCli("get", address, "--json")
             assert.strictEqual(got.status, 0, got.stderr)
@@ -158,6 +151,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             cwd,
             launch: { argv: ["cat"], env: {} },
             label: "child",
+            parent: main,
             near: main,
           })
 
@@ -172,7 +166,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           )
 
           assert.notInclude(screen, "<hc")
-          const record = yield* hc.call("terminal.get", { terminal: parseTerminalId(child.id, socketPath).address })
+          const record = yield* hc.call("terminal.get", { terminal: child["address"]! })
           assert.isNotNull(record.parent ?? null)
           assert.isFalse(record.notify ?? false)
           assert.isFalse(record.die_with_parent ?? false)
@@ -198,12 +192,11 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             label: "keep",
           })
 
-          const pid = (yield* hc.call("terminal.get", { terminal: parseTerminalId(terminal.id, socketPath).address }))
-            .pid
+          const pid = (yield* hc.call("terminal.get", { terminal: terminal["address"]! })).pid
 
           yield* runtime.send(terminal, { text: "kill -9 $$" })
           yield* until(
-            hc.call("terminal.get", { terminal: parseTerminalId(terminal.id, socketPath).address }),
+            hc.call("terminal.get", { terminal: terminal["address"]! }),
             (t) => t.state === "live" && Predicate.isNumber(t.pid) && t.pid !== pid,
             "the core did not replace the killed shell",
           )
@@ -228,7 +221,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           const seen = yield* Ref.make<ReadonlyArray<string>>([])
           yield* runtime.events.pipe(
             Stream.runForEach((e) =>
-              Ref.update(seen, (all) => [...all, e.type === "reset" ? "reset" : `${e.type}:${e.terminal.id}`]),
+              Ref.update(seen, (all) => [...all, e.type === "reset" ? "reset" : `${e.type}:${e.terminal["address"]}`]),
             ),
             Effect.forkScoped,
           )
@@ -241,9 +234,9 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             label: "argv",
           })
 
-          const address = parseTerminalId(terminal.id, socketPath).address
+          const address = terminal["address"]!
           yield* until(runtime.process(terminal), (p) => p.running, "the program never ran")
-          yield* until(Ref.get(seen), (all) => all.includes(`exited:${terminal.id}`), "no exited event after it ended")
+          yield* until(Ref.get(seen), (all) => all.includes(`exited:${address}`), "no exited event after it ended")
           assert.isFalse((yield* runtime.process(terminal)).running)
           const record = yield* hc.call("terminal.get", { terminal: address })
           assert.strictEqual(record.state, "live")
@@ -263,27 +256,35 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           const seen = yield* Ref.make<ReadonlyArray<string>>([])
           yield* runtime.events.pipe(
             Stream.runForEach((e) =>
-              Ref.update(seen, (all) => [...all, e.type === "reset" ? "reset" : `${e.type}:${e.terminal.id}`]),
+              Ref.update(seen, (all) => [...all, e.type === "reset" ? "reset" : `${e.type}:${e.terminal["address"]}`]),
             ),
             Effect.forkScoped,
           )
           yield* Effect.sleep("300 millis")
           const main = yield* runtime.open({ project: cwd, cwd, launch: { argv: [], env: {} }, label: "main" })
-          yield* runtime.present!(main, { [PRESENT_ENTRY_SESSION]: "session-1", [PRESENT_PROJECT_ID]: "project-1" })
+          const mainAddress = main["address"]!
+          yield* hc.call("terminal.label", {
+            terminal: mainAddress,
+            labels: { "herdr.space": "stale-space", "herdr.tab": "stale-tab" },
+          })
+          yield* runtime.present!(main, { [PRESENT_SESSION]: "session-1", [PRESENT_PROJECT_ID]: "project-1" })
 
-          const labels = (yield* hc.call("terminal.get", { terminal: parseTerminalId(main.id, socketPath).address }))
-            .labels
+          const labels = (yield* hc.call("terminal.get", { terminal: mainAddress })).labels
 
           assert.deepInclude(labels, {
             [LABEL.runtime]: KIND,
             [LABEL.project]: "project-1",
             [LABEL.session]: "session-1",
-            [LABEL.space]: "project-1",
-            [LABEL.tab]: "session-1",
           })
+          assert.isUndefined(labels["herdr.space"])
+          assert.isUndefined(labels["herdr.tab"])
           assert.isTrue((yield* runtime.process(main)).running)
           yield* runtime.run!(main, { argv: ["sleep", "1"], env: {} })
-          yield* until(Ref.get(seen), (all) => all.includes(`exited:${main.id}`), "no exited event after sleep ended")
+          yield* until(
+            Ref.get(seen),
+            (all) => all.includes(`exited:${mainAddress}`),
+            "no exited event after sleep ended",
+          )
           assert.isFalse((yield* runtime.process(main)).running)
           yield* runtime.close(main)
         }),
@@ -292,12 +293,26 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
   )
 
   it.live(
-    "open with near pointing to a closed terminal falls back cleanly without parent",
+    "open with parent pointing to a closed terminal falls back cleanly without parent, and near alone sets no parent",
     () =>
-      withRuntime((runtime) =>
+      withRuntime((runtime, hc) =>
         Effect.gen(function* () {
           const cwd = fs.realpathSync(root)
           const first = yield* runtime.open({ project: cwd, cwd, launch: { argv: [], env: {} }, label: "first" })
+
+          const sibling = yield* runtime.open({
+            project: cwd,
+            cwd,
+            launch: { argv: [], env: {} },
+            label: "sibling",
+            near: first,
+          })
+
+          const siblingRecord = yield* hc.call("terminal.get", {
+            terminal: sibling["address"]!,
+          })
+
+          assert.isNull(siblingRecord.parent ?? null)
           yield* runtime.close(first)
 
           const second = yield* runtime.open({
@@ -305,10 +320,12 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             cwd,
             launch: { argv: [], env: {} },
             label: "second",
+            parent: first,
             near: first,
           })
 
-          assert.notStrictEqual(second.id, first.id)
+          assert.notStrictEqual(second["address"], first["address"])
+          yield* runtime.close(sibling)
           yield* runtime.close(second)
         }),
       ),

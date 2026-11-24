@@ -28,7 +28,7 @@ describe.concurrent("Session", () => {
       const { id, sessions } = yield* idleSession(yield* makeRepository)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
-      const left = terminalOf((yield* (yield* Db.Service).session.getSession(id))!).id
+      const left = terminalOf((yield* (yield* Db.Service).session.getSession(id))!)!.target["id"]!
       const placed = (yield* herdr.callsTo("open")).length
       const held = yield* herdr.hold("open", id)
       yield* sessions.send(id, "again")
@@ -49,7 +49,7 @@ describe.concurrent("Session", () => {
       assert.strictEqual(yield* db.session.currentProcessId(id), reporter)
       yield* until(
         db.session.getSession(id),
-        (row) => row !== undefined && exitedAt(row) === null && terminalOf(row).id !== "",
+        (row) => row !== undefined && exitedAt(row) === null && terminalOf(row) !== null,
       )
       assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
     }),
@@ -67,7 +67,7 @@ describe.concurrent("Session", () => {
       const left = (yield* db.session.getSession(id))!
       const placed = (yield* herdr.callsTo("open")).length
       const notices = (yield* sqlNotices(id)).length
-      const refused = yield* herdr.hold("close", terminalOf(left).id)
+      const refused = yield* herdr.hold("close", terminalOf(left)!.target["id"]!)
       yield* sessions.send(id, "again")
       yield* refused.reached
       yield* refused.release("failed")
@@ -75,7 +75,7 @@ describe.concurrent("Session", () => {
       assert.strictEqual((yield* herdr.callsTo("open")).length, placed)
       assert.strictEqual(yield* db.session.currentProcessId(id), left.process!.id)
 
-      const gone = yield* herdr.hold("close", terminalOf(left).id)
+      const gone = yield* herdr.hold("close", terminalOf(left)!.target["id"]!)
       yield* sessions.send(id, "once more")
       yield* gone.reached
       yield* gone.release("not_found")
@@ -130,7 +130,7 @@ describe.concurrent("Session", () => {
 
       const before = yield* counts
       const held = yield* herdr.hold("state", id)
-      const removing = yield* Effect.forkChild(sessions.remove(id, { keepWorktree: true }))
+      const removing = yield* Effect.forkChild(sessions.archive(id, { keepWorktree: true }))
       yield* held.reached
       yield* sessions.send(id, "late")
       yield* held.release()
@@ -142,7 +142,7 @@ describe.concurrent("Session", () => {
       const late = notices.filter((m) => m.endsWith("\n\nlate"))
       assert.strictEqual(late.length, 1)
       assert.include(late[0], "was not delivered: it was archived")
-      assert.deepInclude(yield* sessions.remove(id), { worktree: "removed" })
+      assert.deepInclude(yield* sessions.archive(id), { worktree: "removed" })
     }),
   )
 
@@ -153,7 +153,7 @@ describe.concurrent("Session", () => {
       const repo = yield* makeRepository
       const a = yield* idleSession(repo)
       yield* fs.remove(yield* sessionWorktree(a.id), { recursive: true })
-      assert.deepInclude((yield* a.sessions.remove(a.id))!, { pane: "closed", workspace: "none", worktree: "gone" })
+      assert.deepInclude((yield* a.sessions.archive(a.id))!, { pane: "closed", workspace: "none", worktree: "gone" })
       assert.isNotNull(exitedAt((yield* a.db.session.getSession(a.id))!))
 
       const b = yield* idleSession(repo)
@@ -163,7 +163,7 @@ describe.concurrent("Session", () => {
       yield* fs.makeDirectory(wb)
       yield* fakeGit.repository(wb)
       yield* fs.writeFileString(`${wb}/mine.txt`, "the user's")
-      const out = (yield* b.sessions.remove(b.id))!
+      const out = (yield* b.sessions.archive(b.id))!
       assert.deepInclude(out, { worktree: "kept" })
       assert.match(out.reasons.join("\n"), /not a worktree of its repository/)
       assert.isTrue(yield* fs.exists(`${wb}/mine.txt`))
@@ -179,13 +179,13 @@ describe.concurrent("Session", () => {
         const aborted = harness === "claude" ? claudeEnd("aborted") : { text: "", error: "aborted", aborted: true }
         const during = yield* spawnWorking(repo, harness)
         const held = yield* herdr.hold("send", during.id)
-        const removing = yield* Effect.forkChild(during.sessions.remove(during.id))
+        const removing = yield* Effect.forkChild(during.sessions.archive(during.id))
         yield* held.reached
         yield* writeEnd(during.id, harness, aborted, 60_000)
         yield* held.release()
         yield* Fiber.join(removing)
         const after = yield* spawnWorking(repo, harness)
-        yield* after.sessions.remove(after.id)
+        yield* after.sessions.archive(after.id)
         yield* writeEnd(after.id, harness, aborted, 60_000)
         yield* TestClock.adjust("2 minutes")
 

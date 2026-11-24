@@ -31,7 +31,7 @@ const entriesAtOneTerminal = Effect.gen(function* () {
   const db = yield* Db.Service
   const repo = yield* makeRepository
   const project = yield* projectOf(repo)
-  const location = { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } }
+  const location = { runtime: RUNTIME, target: { id: "test/coord" } }
 
   const endEntry = (id: string) =>
     Effect.gen(function* () {
@@ -42,7 +42,7 @@ const entriesAtOneTerminal = Effect.gen(function* () {
 
   const exitedEntry = (fresh: boolean) =>
     Effect.gen(function* () {
-      const { sessionId } = yield* db.session.startEntry(project, "pi", fresh, location, {
+      const { sessionId } = yield* db.session.startRoot(project, "pi", fresh, location, {
         agent: "coordinator",
         projectDirectory: repo,
       })
@@ -87,7 +87,7 @@ describe.concurrent("Session", () => {
       yield* TestClock.adjust("10 seconds")
       assert.strictEqual((yield* sessions.inMemory).tracked, 2)
       assert.deepInclude(yield* db.session.getSession(id), { status: "idle" })
-      yield* sessions.remove(id)
+      yield* sessions.archive(id)
       assert.strictEqual((yield* (yield* SessionLive.Service).size).statuses, entryStatuses)
       yield* untilVirtual(sessions.inMemory, atMostEntryTracked)
     }),
@@ -138,18 +138,17 @@ describe.concurrent("Session", () => {
       const db = yield* Db.Service
       const repo = yield* makeRepository
       const entryId = yield* entryOfProject(repo)
-      const project = yield* projectOf(repo)
-      const address = { machine: "local", id: "test/coord" }
+      const address = { id: "test/coord" }
       const waiting = (yield* db.inbox.insertSend(entryId, "waiting"))!
-      assert.isTrue(yield* db.session.detachEntry(project, RUNTIME, address))
+      assert.isTrue(yield* db.session.detachSession(entryId, RUNTIME, address))
       const ended = () => Effect.map(db.session.getSession(entryId), (row) => row!.process!.endedAt)
       yield* sessions.check(entryId)
       assert.isNull(yield* ended())
-      yield* db.session.reattachEntry(project, RUNTIME, address)
+      yield* db.session.reattachSession(entryId)
       yield* sessions.check(entryId)
       assert.isNotNull(yield* ended())
       assert.deepStrictEqual(
-        (yield* db.inbox.inboxWithStatus(entryId, "dropped")).map((row) => row.id),
+        (yield* db.inbox.inboxWithStatus(entryId, "pending")).map((row) => row.id),
         [waiting.id],
       )
     }),
@@ -162,7 +161,7 @@ describe.concurrent("Session", () => {
       const db = yield* Db.Service
       const entryId = yield* entryOfProject(yield* makeRepository)
       yield* (yield* FakeRuntime).seedAgent("test/coord")
-      const address = { machine: "local", id: "test/coord" }
+      const address = { id: "test/coord" }
       const next = yield* db.session.restartProcess(entryId)
       const processes = yield* db.session.processesAt(RUNTIME, address)
       assert.deepStrictEqual(processes, [{ sessionId: entryId, process: next! }])
@@ -202,7 +201,7 @@ describe.concurrent("Session", () => {
       const { exitedEntry, endEntry } = yield* entriesAtOneTerminal
       const old = yield* exitedEntry(false)
       yield* endEntry(yield* exitedEntry(true))
-      assert.include(yield* sessions.remove(old, { keepWorktree: true }), { pane: "none" })
+      assert.include(yield* sessions.archive(old, { keepWorktree: true }), { pane: "none" })
       assert.notDeepInclude(yield* herdr.callsTo("close"), { terminal: "test/coord" })
     }),
   )
@@ -216,7 +215,7 @@ describe.concurrent("Session", () => {
       const { exitedEntry } = yield* entriesAtOneTerminal
       const old = yield* exitedEntry(false)
       const looking = yield* herdr.hold("state", "test/coord")
-      const archiving = yield* Effect.forkChild(sessions.remove(old, { keepWorktree: true }))
+      const archiving = yield* Effect.forkChild(sessions.archive(old, { keepWorktree: true }))
       yield* looking.reached
       const taken = yield* Ref.make(false)
 
@@ -238,18 +237,18 @@ describe.concurrent("Session", () => {
     Effect.gen(function* () {
       const runtime = yield* FakeRuntime
       const { id, sessions, db, entryId, row } = yield* spawnWorking(yield* makeRepository)
-      const address = { machine: "local", id: "test/coord" }
+      const target = { id: "test/coord" }
       yield* runtime.updateAgent("test/coord", (agent) => ({ ...agent, alive: false }))
       const held = yield* runtime.hold("present", id)
       const checking = yield* Effect.forkChild(sessions.check(entryId))
       yield* held.reached
       assert.isNotNull((yield* db.session.getSession(entryId))!.process!.endedAt)
 
-      const next = yield* db.session.startEntry(
+      const next = yield* db.session.startRoot(
         row.projectId,
         "pi",
         false,
-        { runtime: RUNTIME, address },
+        { runtime: RUNTIME, target },
         {
           agent: "coordinator",
         },
@@ -314,7 +313,7 @@ describe.concurrent("Session", () => {
         (yield* Session.Service).spawn({
           ...input,
           harness: undefined,
-          origin: { peer: "a".repeat(32), project: "p", reportTo: "origin-session" },
+          origin: { remote: "a".repeat(32), project: "p", reportTo: "origin-session" },
         }),
       )
 

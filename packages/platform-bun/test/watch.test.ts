@@ -6,7 +6,7 @@ import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { Project } from "@vibest/core/project"
 import { sessionHeaders } from "@vibest/protocol/protocol"
-import type { WatchEvent } from "@vibest/protocol/rpc"
+import { EdgeDirected, type WatchEvent } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import * as Listing from "@vibest/server/listing"
 import * as Server from "@vibest/server/server"
@@ -17,11 +17,13 @@ import * as Platform from "#platform"
 
 import {
   authed,
+  FakeGit,
   FakeRuntime,
   makeRepository,
   projectOf,
   tempDirectory,
   testLayer,
+  until,
   type TestServices,
   wire,
 } from "./lib/fakes.ts"
@@ -29,7 +31,7 @@ import {
 const served = Server.layer.pipe(
   Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
-  Layer.provideMerge(testLayer()),
+  Layer.provideMerge(testLayer({ sshHosts: { work: "Git.Internal.Example" } })),
 )
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>) =>
@@ -45,11 +47,11 @@ const withEntry = Effect.gen(function* () {
   yield* herdr.addPane("w1:p8", "ws", repo)
   yield* herdr.seedAgent("w1:p8")
 
-  const started = yield* db.session.startEntry(
+  const started = yield* db.session.startRoot(
     project,
     "pi",
     false,
-    { runtime: "herdr", address: { machine: "local", id: "w1:p8" } },
+    { runtime: "herdr", target: { id: "w1:p8" } },
     { agent: "coordinator", projectDirectory: repo },
   )
 
@@ -89,7 +91,12 @@ describe("Watch", () => {
       const { next, c } = yield* watching(repo)
       const snapshot = yield* next(isSnapshot)
       assert.deepStrictEqual(snapshot.projects, [
-        { id: project, directory: repo, entrySessionId: entryId, activity: "idle" },
+        {
+          id: project,
+          directory: repo,
+          activity: "idle",
+          repositories: [{ path: repo, identity: null }],
+        },
       ])
       assert.deepStrictEqual(
         snapshot.sessions.map((s) => [s.id, s.agent, s.parentId]),
@@ -118,11 +125,45 @@ describe("Watch", () => {
       assert.deepStrictEqual(seen.project, {
         id: opened.projectId,
         directory: other,
-        entrySessionId: null,
         activity: "idle",
+        repositories: [{ path: other, identity: null }],
       })
 
-      yield* c.Remove({ id })
+      yield* c.Archive({ id })
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "SessionEnded" }> =>
+          Predicate.isTagged(e, "SessionEnded") && e.id === id && e.projectId === project,
+      )
+    }),
+  )
+
+  test(
+    "an exited-but-unarchived session stays in Watch with exitedAt set until it is archived",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const { repo, project, entryClient } = yield* withEntry
+      const { next, c } = yield* watching(repo)
+      yield* next(isSnapshot)
+
+      const { id } = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
+          Predicate.isTagged(e, "Session") && e.session.id === id && e.session.startedAt !== null,
+      )
+
+      yield* db.session.endProcess(id, "exited")
+
+      const exited = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
+          Predicate.isTagged(e, "Session") && e.session.id === id && e.session.exitedAt !== null,
+      )
+
+      assert.isNotNull(exited.session.exitedAt)
+
+      const snapshotAfterExit = yield* (yield* watching(repo)).next(isSnapshot)
+      assert.isTrue(snapshotAfterExit.sessions.some((s) => s.id === id && s.exitedAt !== null))
+
+      yield* c.Archive({ id })
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "SessionEnded" }> =>
           Predicate.isTagged(e, "SessionEnded") && e.id === id && e.projectId === project,
@@ -192,7 +233,7 @@ describe("Watch", () => {
         Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === activity
 
       yield* next((e): e is WatchEvent => isSession("idle", 0)(e))
-      yield* herdr.countFinished(terminal.id)
+      yield* herdr.countFinished(terminal["id"]!)
       yield* next((e): e is WatchEvent => isSession("done", 1)(e))
       yield* next((e): e is WatchEvent => isProject("done")(e))
 
@@ -224,8 +265,8 @@ describe("Watch", () => {
           Predicate.isTagged(e, "Session") && e.session.id === id && e.session.status === "working",
       )
       const terminal = (yield* herdr.terminalOf(id))!
-      yield* Effect.repeat(herdr.countFinished(terminal.id), { times: 5 })
-      const held = yield* herdr.hold("see", terminal.id)
+      yield* Effect.repeat(herdr.countFinished(terminal["id"]!), { times: 5 })
+      const held = yield* herdr.hold("see", terminal["id"]!)
       const five = yield* c["Session.Seen"]({ id, finished: 5 }).pipe(Effect.forkScoped)
       yield* held.reached
       const six = yield* c["Session.Seen"]({ id, finished: 6 }).pipe(Effect.forkScoped)
@@ -307,14 +348,29 @@ describe("Watch", () => {
   test(
     "a client that stops acknowledging falls behind, and the stream fails with WatchLagged instead of growing",
     Effect.gen(function* () {
-      const { repo, project } = yield* withEntry
+      const { repo, project, entryId } = yield* withEntry
+      const db = yield* Db.Service
       const bus = yield* Bus.Service
       const w = yield* wire
       yield* w.send({ jsonrpc: "2.0", id: 1, method: "Watch", params: null, headers: Object.entries(cliHeaders(repo)) })
       const first = yield* w.recv
       assert.strictEqual((first["result"] as Array<WatchEvent>)[0]!._tag, "Snapshot")
 
-      for (let i = 0; i < WATCH_BACKLOG + 500; i++) yield* bus.observe({ type: "project.changed", projectId: project })
+      const read = db.session.sessionIdentity
+
+      const ids = Array.from(
+        { length: WATCH_BACKLOG + 500 },
+        (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+      )
+
+      const idSet = new Set(ids)
+
+      Object.assign(db.session, {
+        sessionIdentity: (id: string) => (idSet.has(id) ? Effect.succeed({ projectId: project }) : read(id)),
+      })
+
+      for (const id of ids) yield* bus.observe({ type: "session.changed", sessionId: id })
+      yield* bus.observe({ type: "session.changed", sessionId: entryId })
       const ack = { jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: 1 } }
 
       for (;;) {
@@ -325,6 +381,199 @@ describe("Watch", () => {
         assert.include(JSON.stringify(line["error"]), "WatchLagged")
         break
       }
+    }),
+  )
+
+  test(
+    "session.changed ticks reuse cached project repositories without re-probing git, while project.changed invalidates the cache",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const bus = yield* Bus.Service
+      const fakeGit = yield* FakeGit
+      const { repo, project, entryId } = yield* withEntry
+      yield* fakeGit.update(repo, { origin: "git@github.com:Org/Cached.git" })
+
+      const { next } = yield* watching(repo)
+      const snapshot = yield* next(isSnapshot)
+
+      assert.deepStrictEqual(snapshot.projects, [
+        {
+          id: project,
+          directory: repo,
+          activity: "idle",
+          repositories: [{ path: repo, identity: "github.com/Org/Cached" }],
+        },
+      ])
+
+      const readRemote = fakeGit.git.remoteUrl
+      let remoteReads = 0
+
+      Object.assign(fakeGit.git, {
+        remoteUrl: (dir: string, order?: "ranked" | "project") => {
+          remoteReads++
+
+          return readRemote(dir, order)
+        },
+      })
+
+      yield* db.session.setStatus(entryId, "working")
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === "working",
+      )
+      yield* db.session.setStatus(entryId, "idle")
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === "idle",
+      )
+      assert.strictEqual(remoteReads, 0)
+
+      yield* fakeGit.update(repo, { origin: "git@github.com:Org/Updated.git" })
+      yield* bus.observe({ type: "project.changed", projectId: project })
+
+      const refreshed = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") &&
+          e.project.id === project &&
+          e.project.repositories[0]?.identity === "github.com/Org/Updated",
+      )
+
+      assert.strictEqual(remoteReads, 1)
+      assert.deepStrictEqual(refreshed.project.repositories, [{ path: repo, identity: "github.com/Org/Updated" }])
+    }),
+  )
+
+  test(
+    "Snapshot and Project events include normalized repository identities for single-repo, multi-repo and updated projects",
+    Effect.gen(function* () {
+      const bus = yield* Bus.Service
+      const fakeGit = yield* FakeGit
+      const single = yield* makeRepository
+      yield* fakeGit.update(single, { origin: "git@github.com:Org/App.git" })
+      const openedSingle = yield* authed(yield* client, cliHeaders(single))["Project.Open"]({})
+
+      const parent = yield* tempDirectory("vibest-multi-")
+      const repoA = `${parent}/a-origin`
+      const repoB = `${parent}/b-alias`
+      const repoC = `${parent}/c-local`
+      yield* Effect.promise(() => fs.mkdir(repoA))
+      yield* Effect.promise(() => fs.mkdir(repoB))
+      yield* Effect.promise(() => fs.mkdir(repoC))
+      yield* fakeGit.repository(repoA, { origin: "https://GitHub.com/Org/Web.git" })
+      yield* fakeGit.repository(repoB, { origin: "work:team/service.git" })
+      yield* fakeGit.repository(repoC)
+
+      const { next } = yield* watching(single)
+      const snapshot = yield* next(isSnapshot)
+      const singleRow = snapshot.projects.find((p) => p.id === openedSingle.projectId)
+
+      assert.deepStrictEqual(singleRow?.repositories, [{ path: single, identity: "github.com/Org/App" }])
+
+      const openedMulti = yield* authed(yield* client, cliHeaders(parent))["Project.Open"]({})
+
+      const multiEvent = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") && e.project.id === openedMulti.projectId,
+      )
+
+      const expectedMulti = [
+        { path: repoA, identity: "github.com/Org/Web" },
+        { path: repoB, identity: "git.internal.example/team/service" },
+        { path: repoC, identity: null },
+      ]
+
+      assert.deepStrictEqual(multiEvent.project.repositories, expectedMulti)
+
+      const snapshotAfter = yield* (yield* watching(parent)).next(isSnapshot)
+      const multiRow = snapshotAfter.projects.find((p) => p.id === openedMulti.projectId)
+
+      assert.deepStrictEqual(multiRow?.repositories, expectedMulti)
+
+      yield* fakeGit.update(repoC, { origin: "git@gitlab.com:team/newly-added.git" })
+      yield* bus.observe({ type: "project.changed", projectId: openedMulti.projectId })
+
+      const updated = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
+          Predicate.isTagged(e, "Project") &&
+          e.project.id === openedMulti.projectId &&
+          e.project.repositories.some((r) => r.path === repoC && r.identity === "gitlab.com/team/newly-added"),
+      )
+
+      assert.deepStrictEqual(updated.project.repositories, [
+        { path: repoA, identity: "github.com/Org/Web" },
+        { path: repoB, identity: "git.internal.example/team/service" },
+        { path: repoC, identity: "gitlab.com/team/newly-added" },
+      ])
+    }),
+  )
+
+  test(
+    "WatchSession.to reflects spawn edges in Snapshot and live Session deltas on Session.Link and Session.Unlink",
+    Effect.gen(function* () {
+      const { repo, entryId, entryClient } = yield* withEntry
+      const cli = authed(yield* client, cliHeaders(repo))
+
+      const a = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "a" })
+      const b = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "b" })
+
+      const { next } = yield* watching(repo)
+      const snapshot = yield* next(isSnapshot)
+      const snapA = snapshot.sessions.find((s) => s.id === a.id)
+      const snapB = snapshot.sessions.find((s) => s.id === b.id)
+
+      assert.deepStrictEqual(snapA?.to, [{ id: entryId }])
+      assert.deepStrictEqual(snapB?.to, [{ id: entryId }])
+
+      yield* cli["Session.Link"]({ spec: EdgeDirected.make({ from: [{ id: a.id }], to: [{ id: b.id }] }) })
+
+      const linked = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
+          Predicate.isTagged(e, "Session") && e.session.id === a.id && e.session.to.some((t) => t.id === b.id),
+      )
+
+      assert.deepStrictEqual(linked.session.to.map((t) => t.id).sort(), [b.id, entryId].sort())
+
+      yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [{ id: a.id }], to: [{ id: b.id }] }) })
+
+      const unlinked = yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
+          Predicate.isTagged(e, "Session") && e.session.id === a.id && !e.session.to.some((t) => t.id === b.id),
+      )
+
+      assert.deepStrictEqual(unlinked.session.to, [{ id: entryId }])
+    }),
+  )
+
+  test(
+    "exited unarchived sessions report null terminal and are excluded from Snapshot project.activity",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const { repo, entryId, entryClient } = yield* withEntry
+
+      const { id: childId } = yield* entryClient.Spawn({
+        agent: "general",
+        callerEnv: {},
+        harness: "pi",
+        prompt: "work",
+      })
+
+      yield* until(
+        db.session.getSession(childId),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+
+      yield* db.session.endProcess(entryId, "exited")
+      yield* db.session.endProcess(childId, "exited")
+
+      const { next } = yield* watching(repo)
+      const snapshot = yield* next(isSnapshot)
+      const exitedChild = snapshot.sessions.find((s) => s.id === childId)
+      assert.isDefined(exitedChild)
+      assert.isNotNull(exitedChild?.exitedAt)
+      assert.isNull(exitedChild?.terminal)
+
+      const project = snapshot.projects.find((p) => p.id === exitedChild?.projectId)
+      assert.strictEqual(project?.activity, "idle")
     }),
   )
 })

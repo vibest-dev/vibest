@@ -36,13 +36,13 @@ const project = Effect.gen(function* () {
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
 
-  const entry = yield* db.session.startEntry(
+  const entry = yield* db.session.startRoot(
     key,
     "claude",
     false,
     {
       runtime: RUNTIME,
-      address: { machine: "local", id: "test/coord" },
+      target: { id: "test/coord" },
     },
     { agent: "coordinator" },
   )

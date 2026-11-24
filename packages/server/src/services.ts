@@ -15,7 +15,7 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
 import { Archive } from "@vibest/core/session/archive"
 import { Delivery } from "@vibest/core/session/delivery"
-import { EntrySession } from "@vibest/core/session/entry"
+import { SessionLaunch } from "@vibest/core/session/entry"
 import { Executions } from "@vibest/core/session/executions"
 import { Exits } from "@vibest/core/session/exits"
 import { SessionLive } from "@vibest/core/session/live"
@@ -27,10 +27,13 @@ import { Spawn } from "@vibest/core/session/spawn"
 import { Starts } from "@vibest/core/session/starts"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 
+import * as Listing from "./listing.ts"
+import { Inbound } from "./machine/inbound.ts"
 import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
-import { Peer } from "./machine/peer.ts"
+import { RemoteWatch } from "./machine/remote-watch.ts"
 import { Remote } from "./machine/remote.ts"
+import { WatchFeed } from "./watch-feed.ts"
 
 export const services = LayerNode.group([
   Bus.node,
@@ -59,9 +62,12 @@ export const services = LayerNode.group([
   Restart.node,
   Session.node,
   Integration.node,
-  Peer.node,
-  EntrySession.node,
+  Inbound.node,
+  SessionLaunch.node,
   Load.node,
   Machines.node,
+  RemoteWatch.node,
   Remote.node,
+  Listing.node,
+  WatchFeed.node,
 ])

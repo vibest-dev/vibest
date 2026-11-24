@@ -3,7 +3,7 @@ import { Effect, Ref, Stream } from "effect"
 import { type HcClient, HcCoreTooOld, HcError, HcTransportError, type api } from "effect-herdr-core-sdk"
 import { TestClock } from "effect/testing"
 
-import { FOLLOW_ATTEMPTS, failure, make } from "../src/terminal-runtime.ts"
+import { FOLLOW_ATTEMPTS, failure, hcTerminal, make } from "../src/terminal-runtime.ts"
 
 const HOME = "/run/home.sock"
 
@@ -63,8 +63,8 @@ describe("runtime-herdr-core errors, reconnects and doctor", () => {
   it.effect("vibestd's own core is followed past FOLLOW_ATTEMPTS failures; another core stops at FOLLOW_ATTEMPTS", () =>
     Effect.gen(function* () {
       const { runtime, counts } = yield* runtimeWith(Effect.succeed(hello))
-      yield* runtime.process({ id: `t1@${HOME}` }).pipe(Effect.ignore)
-      yield* runtime.process({ id: "t1@/run/other.sock" }).pipe(Effect.ignore)
+      yield* runtime.process({ address: "t1", socket: HOME }).pipe(Effect.ignore)
+      yield* runtime.process({ address: "t1", socket: "/run/other.sock" }).pipe(Effect.ignore)
 
       for (let i = 0; i < 3 * FOLLOW_ATTEMPTS; i++) yield* TestClock.adjust("30 seconds")
 
@@ -121,10 +121,10 @@ describe("runtime-herdr-core errors, reconnects and doctor", () => {
         cwd: "/work/demo",
         launch: { argv: [], env: {} },
         label: "main",
-        near: { id: "t1@/run/dead.sock" },
+        near: { address: "t1", socket: "/run/dead.sock" },
       })
 
-      assert.strictEqual(opened.id, `t2@${HOME}`)
+      assert.deepStrictEqual(opened, { address: "t2" })
       assert.strictEqual(seen.length, 2)
       assert.strictEqual(seen[0]?.socket, "/run/dead.sock")
       assert.strictEqual(seen[1]?.socket, HOME)
@@ -135,14 +135,14 @@ describe("runtime-herdr-core errors, reconnects and doctor", () => {
   it.effect("attach names the terminal's address and pins the core it is on with HC_SOCKET", () =>
     Effect.gen(function* () {
       const { runtime } = yield* runtimeWith(Effect.succeed(hello))
-      assert.deepStrictEqual(runtime.attach?.(undefined, { id: `t3@${HOME}` }), [
+      assert.deepStrictEqual(runtime.attach?.(undefined, { address: "t3", socket: HOME }), [
         "env",
         `HC_SOCKET=${HOME}`,
         "hc",
         "attach",
         "t3",
       ])
-      assert.deepStrictEqual(runtime.attach?.(undefined, { id: "t3@/other.sock" }), [
+      assert.deepStrictEqual(runtime.attach?.(undefined, { address: "t3", socket: "/other.sock" }), [
         "env",
         "HC_SOCKET=/other.sock",
         "hc",
@@ -152,4 +152,83 @@ describe("runtime-herdr-core errors, reconnects and doctor", () => {
       assert.deepStrictEqual(runtime.attach?.(undefined), [])
     }).pipe(Effect.scoped),
   )
+
+  it.effect(
+    "open sends no_parent when only near is passed, and parent + outlive_parent only when parent is passed",
+    () =>
+      Effect.gen(function* () {
+        const seen: Array<{
+          readonly socket: string
+          readonly params: { readonly parent?: string; readonly outlive_parent?: boolean; readonly no_parent?: boolean }
+        }> = []
+
+        const clientFor = (socketPath: string): HcClient => ({
+          socketPath,
+          hello: Effect.succeed(hello),
+          subscribe: () => Stream.fail(down("events.subscribe")),
+          call: ((
+            method: string,
+            params: { readonly parent?: string; readonly outlive_parent?: boolean; readonly no_parent?: boolean },
+          ) => {
+            seen.push({ socket: socketPath, params })
+
+            if (params.parent === "gone")
+              return Effect.fail(new HcError({ method, kind: "not_found", message: "gone" }))
+
+            return Effect.succeed({ address: `t${seen.length}` })
+          }) as HcClient["call"],
+        })
+
+        const runtime = yield* make({
+          connect: (socket) => Effect.succeed(clientFor(socket)),
+          socket: HOME,
+          scope: yield* Effect.scope,
+        })
+
+        yield* runtime.open({
+          project: "/work/demo",
+          cwd: "/work/demo",
+          launch: { argv: [], env: {} },
+          label: "entry",
+          near: { address: "t9", socket: HOME },
+        })
+
+        assert.strictEqual(seen[0]?.socket, HOME)
+        assert.strictEqual(seen[0]?.params.no_parent, true)
+        assert.isUndefined(seen[0]?.params.parent)
+
+        yield* runtime.open({
+          project: "/work/demo",
+          cwd: "/work/demo",
+          launch: { argv: [], env: {} },
+          label: "subagent",
+          parent: { address: "t1", socket: HOME },
+          near: { address: "t9", socket: HOME },
+        })
+
+        assert.strictEqual(seen[1]?.socket, HOME)
+        assert.strictEqual(seen[1]?.params.parent, "t1")
+        assert.strictEqual(seen[1]?.params.outlive_parent, true)
+        assert.isUndefined(seen[1]?.params.no_parent)
+
+        yield* runtime.open({
+          project: "/work/demo",
+          cwd: "/work/demo",
+          launch: { argv: [], env: {} },
+          label: "orphan",
+          parent: { address: "gone", socket: HOME },
+        })
+
+        assert.strictEqual(seen[2]?.params.parent, "gone")
+        assert.strictEqual(seen[3]?.params.no_parent, true)
+        assert.isUndefined(seen[3]?.params.parent)
+      }).pipe(Effect.scoped),
+  )
+
+  it("hcTerminal omits the default socket and keeps secondary sockets", () => {
+    assert.deepStrictEqual(hcTerminal(HOME, "t1pk", HOME), { address: "t1pk" })
+    assert.deepStrictEqual(hcTerminal(HOME, "mac-mini/t1pk", HOME), { address: "mac-mini/t1pk" })
+    assert.deepStrictEqual(hcTerminal("/other.sock", "t2", HOME), { address: "t2", socket: "/other.sock" })
+    assert.deepStrictEqual(hcTerminal(HOME, "t1pk"), { address: "t1pk", socket: HOME })
+  })
 })

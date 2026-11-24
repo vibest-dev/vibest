@@ -2,21 +2,21 @@ import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { NoSuchSession } from "@vibest/core/session"
-import { FORWARDED_CALLS, PEER_CALLS } from "@vibest/protocol/access"
+import { FORWARDED_CALLS, REMOTE_CALLS } from "@vibest/protocol/access"
 import {
   CALLER_HEADER,
   CWD_HEADER,
   HARNESS_HEADER,
   HARNESS_SESSION_HEADER,
-  PEER_BY_HEADER,
-  PEER_BY_USER,
-  PEER_HEADER,
-  PEER_PROJECT_HEADER,
   PLUGIN_VERSION_HEADER,
   PROCESS_HEADER,
   PROJECT_HEADER,
   PROTOCOL_HEADER,
   protocolMismatch,
+  REMOTE_BY_HEADER,
+  REMOTE_BY_USER,
+  REMOTE_HEADER,
+  REMOTE_PROJECT_HEADER,
   REPOSITORY_HEADER,
   RUNTIME_HEADER,
   SESSION_HEADER,
@@ -146,31 +146,31 @@ export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method
     if (Option.isNone(kind))
       return yield* bad(`${method} needs an ${CALLER_HEADER} header (cli or session); it does not default to cli`)
 
-    if (kind.value === "peer") {
-      const peer = read(PEER_HEADER)
+    if (kind.value === "remote") {
+      const remote = read(REMOTE_HEADER)
 
-      if (peer === undefined || !ID.test(peer))
-        return yield* bad(`${method} claims peer without a valid ${PEER_HEADER}`)
+      if (remote === undefined || !ID.test(remote))
+        return yield* bad(`${method} claims remote without a valid ${REMOTE_HEADER}`)
 
-      if (Option.isSome(sessionId)) return yield* bad(`${method} claims peer and a session id`)
+      if (Option.isSome(sessionId)) return yield* bad(`${method} claims remote and a session id`)
 
-      if (!PEER_CALLS.has(method)) return yield* bad(`a peer vibestd may not call ${method}`)
+      if (!REMOTE_CALLS.has(method)) return yield* bad(`a remote vibestd may not call ${method}`)
 
-      if (method !== "Peer.Hello" && !(yield* db.remote.peerKnown(peer)))
-        return yield* bad(`peer ${peer} has not said Peer.Hello; call it first`)
-      const by = read(PEER_BY_HEADER)
+      if (method !== "Remote.Hello" && !(yield* db.remote.remoteKnown(remote)))
+        return yield* bad(`remote ${remote} has not said Remote.Hello; call it first`)
+      const by = read(REMOTE_BY_HEADER)
 
       if (
         (by === undefined && FORWARDED_CALLS.has(method)) ||
-        (by !== undefined && by !== PEER_BY_USER && !ID.test(by))
+        (by !== undefined && by !== REMOTE_BY_USER && !ID.test(by))
       )
-        return yield* bad(`${method} is forwarded for the user or for a session; ${PEER_BY_HEADER} says neither`)
-      const project = read(PEER_PROJECT_HEADER)
+        return yield* bad(`${method} is forwarded for the user or for a session; ${REMOTE_BY_HEADER} says neither`)
+      const project = read(REMOTE_PROJECT_HEADER)
 
-      return Callers.Peer({
-        peerId: peer,
+      return Callers.Remote({
+        remoteId: remote,
         ...(project !== undefined && { projectId: project }),
-        ...(by !== undefined && by !== PEER_BY_USER && { session: by }),
+        ...(by !== undefined && by !== REMOTE_BY_USER && { session: by }),
       })
     }
 

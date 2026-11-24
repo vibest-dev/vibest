@@ -4,7 +4,7 @@ import { Duration, Effect, Option, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import type { HerdrPool } from "./pool.ts"
-import { parseTerminal, REMOTE_SESSION } from "./terminal-runtime.ts"
+import { type HerdrTerminal, REMOTE_SESSION } from "./terminal-runtime.ts"
 
 export interface Ran {
   readonly code: number
@@ -14,7 +14,7 @@ export interface Ran {
 
 export type Cli = (args: ReadonlyArray<string>) => Effect.Effect<Ran>
 
-type Terminal = VibestPlugin.Runtime.Terminal
+type Terminal = HerdrTerminal
 
 const CLI_TIMEOUT = Duration.seconds(25)
 
@@ -76,14 +76,14 @@ const NONE: ReadonlyMap<string, Terminal> = new Map()
 
 export const locate = (
   cli: Cli,
-  peer: VibestPlugin.Runtime.Peer,
-  sessions: ReadonlyMap<string, string>,
-): Effect.Effect<VibestPlugin.Runtime.Located> =>
+  remote: VibestPlugin.Runtime.Remote,
+  sessions: ReadonlyMap<string, HerdrTerminal>,
+): Effect.Effect<VibestPlugin.Runtime.Located<HerdrTerminal>> =>
   Effect.gen(function* () {
-    const session = peer.link.session
-    const target = peer.target
+    const session = remote.link.session
+    const target = remote.target
 
-    if (session === undefined) return { missing: false, terminals: NONE, note: `${peer.id} gave no herdr link` }
+    if (session === undefined) return { missing: false, terminals: NONE, note: `${remote.id} gave no herdr link` }
     const rows = yield* profiles(cli)
     const profile = mirrorOf(rows, target, session)
 
@@ -96,13 +96,12 @@ export const locate = (
         as: profile.label,
         note: `herdr here has ${profile.label} disabled; fix: herdr machine enable ${profile.id}`,
       }
-    const terminals = new Map<string, Terminal>()
+    const terminals = new Map<string, HerdrTerminal>()
 
     for (const [id, there] of sessions) {
-      const parsed = parseTerminal({ id: there })
-      const shown = parsed === undefined ? undefined : mirrorOf(rows, target, parsed.session)
+      const shown = there.machine === undefined ? mirrorOf(rows, target, there.session) : undefined
 
-      if (shown?.enabled === true) terminals.set(id, { id: `${there}@${shown.label}` })
+      if (shown?.enabled === true) terminals.set(id, { ...there, machine: shown.label })
     }
 
     return {
@@ -110,7 +109,7 @@ export const locate = (
       terminals,
       as: profile.label,
       ...(terminals.size < sessions.size && {
-        note: `herdr here has no enabled saved machine for that agent's herdr session on ${peer.id}`,
+        note: `herdr here has no enabled saved machine for that agent's herdr session on ${remote.id}`,
       }),
     }
   }).pipe(Effect.catch((note) => Effect.succeed({ missing: false, terminals: NONE, note })))

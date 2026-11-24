@@ -3,7 +3,7 @@ import type { MachineEvent, MachineNote } from "@vibest/plugin/effect"
 import { type Cli, link, locate, type Profile } from "@vibest/runtime-herdr/machines"
 import * as Mirror from "@vibest/runtime-herdr/mirror"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
-import { agentName, fromPool, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
+import { agentName, fromPool, type HerdrTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Fiber, Stream } from "effect"
 import type { HerdrClient } from "effect-herdr-sdk"
@@ -271,10 +271,10 @@ describe("runtime-herdr machines: remove", () => {
 
 describe("runtime-herdr machines: locate", () => {
   const peer = { id: "racknerd", target: "b-host", link: { session: "vibest" } }
-  const there = `vibest/w1:p3/${agentName(SESSION)}`
+  const there: HerdrTerminal = { session: "vibest", pane: "w1:p3", name: agentName(SESSION) }
 
   it.effect(
-    "each B terminal becomes <B terminal>@<label of its herdr session>; one in an unsaved session gets a note",
+    "each B terminal gets machine set to the label of its herdr session; one in an unsaved session gets a note",
     () =>
       Effect.gen(function* () {
         const herdr = fake({}, [profile({ id: "p7", label: "racknerd/vibest" })])
@@ -283,13 +283,13 @@ describe("runtime-herdr machines: locate", () => {
         const found = yield* locate(
           herdr.cli,
           peer,
-          new Map([
+          new Map<string, HerdrTerminal>([
             [SESSION, there],
-            [other, `work/w2:p1/${agentName(other)}`],
+            [other, { session: "work", pane: "w2:p1", name: agentName(other) }],
           ]),
         )
 
-        assert.deepStrictEqual(found.terminals.get(SESSION), { id: `${there}@racknerd/vibest` })
+        assert.deepStrictEqual(found.terminals.get(SESSION), { ...there, machine: "racknerd/vibest" })
         assert.isFalse(found.terminals.has(other))
         assert.include(found.note!, "no enabled saved machine for that agent's herdr session on racknerd")
         assert.deepStrictEqual(herdr.calls, [["machine", "list", "--json"]])
@@ -298,7 +298,7 @@ describe("runtime-herdr machines: locate", () => {
 
   it.effect("a disabled profile and a failing herdr give a note, not missing", () =>
     Effect.gen(function* () {
-      const asked = new Map([[SESSION, there]])
+      const asked = new Map<string, HerdrTerminal>([[SESSION, there]])
       const disabled = yield* locate(fake({}, [profile({ enabled: false })]).cli, peer, asked)
       assert.isFalse(disabled.missing)
       assert.include(disabled.note!, "herdr machine enable p0")
@@ -309,17 +309,8 @@ describe("runtime-herdr machines: locate", () => {
   )
 })
 
-describe("runtime-herdr machines: remote terminal ids", () => {
-  it("an id with @ names a pane on another machine and never parses as a local one", () => {
-    assert.isUndefined(parseTerminal({ id: `vibest/w1:p3/${agentName(SESSION)}@racknerd/vibest` }))
-    assert.deepStrictEqual(parseTerminal({ id: "vibest/w1:p3" }), {
-      session: "vibest",
-      paneId: "w1:p3",
-      name: undefined,
-    })
-  })
-
-  it.effect("every runtime member called with such an id fails not_found and never reaches herdr", () =>
+describe("runtime-herdr machines: remote terminal targets", () => {
+  it.effect("every runtime member called with a remote machine target fails not_found and never reaches herdr", () =>
     Effect.gen(function* () {
       const pool = HerdrPool.of({
         resolve: () => Effect.die("resolve reached"),
@@ -336,7 +327,12 @@ describe("runtime-herdr machines: remote terminal ids", () => {
         scope: yield* Effect.scope,
       })
 
-      const terminal = { machine: "local", id: `vibest/w1:p3/${agentName(SESSION)}@racknerd/vibest` }
+      const terminal: HerdrTerminal = {
+        session: "vibest",
+        pane: "w1:p3",
+        name: agentName(SESSION),
+        machine: "racknerd/vibest",
+      }
 
       const members = [
         runtime.send(terminal, { text: "x" }),

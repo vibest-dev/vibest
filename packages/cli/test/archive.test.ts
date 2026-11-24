@@ -74,7 +74,7 @@ const idleSession = Effect.gen(function* () {
 
 const removeAdvancingClock = (sessions: Session.Interface, id: string) =>
   Effect.gen(function* () {
-    const fiber = yield* Effect.forkChild(sessions.remove(id))
+    const fiber = yield* Effect.forkChild(sessions.archive(id))
     yield* untilVirtual(
       Effect.sync(() => fiber.pollUnsafe()),
       (exit) => exit !== undefined,
@@ -86,7 +86,7 @@ const removeAdvancingClock = (sessions: Session.Interface, id: string) =>
 const removeTimingCwd = (sessions: Session.Interface, id: string) =>
   Effect.gen(function* () {
     const held = yield* (yield* FakeProcesses).holdCwd()
-    const fiber = yield* Effect.forkChild(sessions.remove(id))
+    const fiber = yield* Effect.forkChild(sessions.archive(id))
     yield* held.reached
     const started = yield* Clock.currentTimeMillis
     yield* held.release()
@@ -105,7 +105,7 @@ describe.concurrent("vibest archive: process proof", () => {
       const fs = yield* FileSystem.FileSystem
       const { id, pane, sessions, db, herdr, worktree } = yield* idleSession
       const held = yield* herdr.hold("close")
-      const removing = yield* Effect.forkChild(Effect.flip(sessions.remove(id)))
+      const removing = yield* Effect.forkChild(Effect.flip(sessions.archive(id)))
       yield* held.reached
       const closedButReplyLost = herdr.runtime.close({ id: pane })
       yield* closedButReplyLost
@@ -117,7 +117,7 @@ describe.concurrent("vibest archive: process proof", () => {
       assert.isTrue(archived(row))
       assert.isTrue(yield* fs.exists(worktree))
       const freshSessions = yield* restartSessions
-      assert.deepInclude(yield* freshSessions.remove(id), {
+      assert.deepInclude(yield* freshSessions.archive(id), {
         processes: "exited",
         pane: "closed",
         worktree: "removed",
@@ -132,19 +132,19 @@ describe.concurrent("vibest archive: process proof", () => {
       const fs = yield* FileSystem.FileSystem
       const a = yield* idleSession
       const held = yield* a.herdr.hold("close")
-      const removing = yield* Effect.forkChild(a.sessions.remove(a.id))
+      const removing = yield* Effect.forkChild(a.sessions.archive(a.id))
       yield* held.reached
       yield* held.release("failed")
       assert.deepInclude(yield* Fiber.join(removing), { processes: "unknown", pane: "kept", worktree: "kept" })
       assert.isTrue(HashMap.has(yield* a.herdr.panes, a.pane))
       assert.deepStrictEqual(yield* processEnds(a.id), [])
       assert.isNull(exitedAt((yield* a.db.session.getSession(a.id))!))
-      assert.deepInclude(yield* a.sessions.remove(a.id), { pane: "closed", worktree: "removed" })
+      assert.deepInclude(yield* a.sessions.archive(a.id), { pane: "closed", worktree: "removed" })
 
       const b = yield* idleSession
       const closeByHand = b.herdr.runtime.close({ id: b.pane })
       yield* closeByHand
-      const gone = yield* b.sessions.remove(b.id)
+      const gone = yield* b.sessions.archive(b.id)
       assert.deepInclude(gone, { processes: "exited", pane: "closed", worktree: "removed" })
       assert.isNotNull(exitedAt((yield* b.db.session.getSession(b.id))!))
       assert.isFalse(yield* fs.exists(b.worktree))
@@ -176,7 +176,7 @@ describe.concurrent("vibest archive: process proof", () => {
       yield* until(a.db.session.getSession(a.id), (row) => (row ? exitedAt(row) : undefined) !== null)
       yield* settled
       assert.deepInclude(
-        yield* a.sessions.remove(a.id),
+        yield* a.sessions.archive(a.id),
         { processes: "exited", pane: "closed", worktree: "gone" },
         "closed by hand: the pane is already gone, so archive finds it closed",
       )
@@ -186,7 +186,7 @@ describe.concurrent("vibest archive: process proof", () => {
       const b = yield* workingSession
       yield* worktreeDeletedOutsideVibest(b)
       yield* settled
-      assert.deepInclude(yield* b.sessions.remove(b.id), { processes: "exited", pane: "closed", worktree: "gone" })
+      assert.deepInclude(yield* b.sessions.archive(b.id), { processes: "exited", pane: "closed", worktree: "gone" })
       assert.strictEqual(yield* reportedExecutionEndEvent(b.id), `result of ${b.id}`)
       assert.isFalse(yield* fs.exists(b.rules))
     }),
@@ -213,7 +213,7 @@ describe.concurrent("vibest archive: process proof", () => {
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
 
       yield* fake.setCwdUsers([])
-      assert.deepInclude(yield* sessions.remove(id), { processes: "exited", worktree: "removed", reasons: [] })
+      assert.deepInclude(yield* sessions.archive(id), { processes: "exited", worktree: "removed", reasons: [] })
       assert.isFalse(yield* fs.exists(rules))
     }),
   )
@@ -238,14 +238,14 @@ describe.concurrent("vibest archive: process proof", () => {
       )
       const unclearListing = undefined
       yield* fake.setCwdUsers(unclearListing)
-      assert.deepInclude(yield* b.sessions.remove(b.id), {
+      assert.deepInclude(yield* b.sessions.archive(b.id), {
         worktree: "kept",
         reasons: [
           "worktree kept: vibest could not get a complete list of this user's processes working in it (lsof missing, failed, warned or timed out)",
         ],
       })
       yield* fake.setCwdUsers([])
-      assert.deepInclude(yield* b.sessions.remove(b.id), { processes: "exited", worktree: "removed" })
+      assert.deepInclude(yield* b.sessions.archive(b.id), { processes: "exited", worktree: "removed" })
     }),
   )
 
@@ -260,7 +260,7 @@ describe.concurrent("vibest archive: process proof", () => {
       yield* fake.set(root, "alive")
       yield* fake.set(child, "alive")
       yield* fake.setCwdUsers([child])
-      const fiber = yield* Effect.forkChild(leaving.sessions.remove(leaving.id))
+      const fiber = yield* Effect.forkChild(leaving.sessions.archive(leaving.id))
       yield* untilVirtual(fake.probed, (probed) => probed.includes(root) && probed.includes(child))
       yield* fake.set(root, "exited")
       yield* fake.set(child, "exited")
@@ -307,7 +307,7 @@ describe.concurrent("vibest archive: process proof", () => {
       const { id, pane, sessions, herdr } = yield* idleSession
       const workspace = pane.split(":")[0]!
       const held = yield* herdr.hold("close")
-      const removing = yield* Effect.forkChild(sessions.remove(id))
+      const removing = yield* Effect.forkChild(sessions.archive(id))
       yield* held.reached
       yield* herdr.addPane(`${workspace}:user`, workspace, "/elsewhere")
       yield* held.release()

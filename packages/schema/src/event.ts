@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 
 import { factOf } from "./event-fact.ts"
 import { Routing } from "./plugin.ts"
+import { TerminalTarget } from "./terminal.ts"
 
 export type Aggregate = "project" | "session" | "ledger"
 
@@ -36,22 +37,21 @@ export const ProjectRepositoriesChanged = fact("project.repositories_changed", "
   repositories: Repositories,
 })
 
-export const ProjectEntryChanged = fact("project.entry_changed", "project", { session: optional(Text) })
-
 export const SessionCreated = fact("session.created", "session", {
   project: Text,
   agent: Text,
   name: Text,
   directory: Schema.String,
   parent: optional(Text),
-  origin: optional(Schema.Struct({ peer: Text, project: Text, session: optional(Text) })),
+  origin: optional(Schema.Struct({ remote: Text, project: Text, session: optional(Text) })),
   message: optional(Seq),
-  team: optional(Text),
 })
 
 export const SessionRenamed = fact("session.renamed", "session", { name: Text })
 export const SessionDirectoryChanged = fact("session.directory_changed", "session", { directory: Text })
-export const SessionEnded = fact("session.ended", "session", { reason: Schema.Literals(["archived", "replaced"]) })
+export const SessionEnded = fact("session.ended", "session", { reason: Schema.Literal("archived") })
+export const SessionLinked = fact("session.linked", "session", { to: Text, remote: optional(Text) })
+export const SessionUnlinked = fact("session.unlinked", "session", { to: Text, remote: optional(Text) })
 
 export const ProcessStarted = fact("process.started", "session", {
   harness: Text,
@@ -60,11 +60,15 @@ export const ProcessStarted = fact("process.started", "session", {
   routing: optional(Routing),
   resume: optional(Text),
   runtime: Text,
-  terminal: optional(Text),
+  terminal: optional(TerminalTarget),
   pid: optional(Pid),
 })
 
-export const ProcessPlaced = fact("process.placed", "session", { process: Seq, terminal: Text, pid: optional(Pid) })
+export const ProcessPlaced = fact("process.placed", "session", {
+  process: Seq,
+  terminal: TerminalTarget,
+  pid: optional(Pid),
+})
 
 export const ProcessReady = fact("process.ready", "session", {
   process: Seq,
@@ -228,15 +232,15 @@ export const InboxUnresolved = fact("inbox.unresolved", "session", {
   aboutSessionId: optional(Text),
 })
 
-export const MachineAdded = fact("machine.added", "ledger", { name: Text, target: Text, vibestd: Text })
+export const MachineAdded = fact("machine.added", "ledger", { name: Text, target: Text, remote: Text })
 export const MachineConnected = fact("machine.connected", "ledger", { name: Text })
 export const MachineRemoved = fact("machine.removed", "ledger", { name: Text })
 
-export const PeerSeen = fact("peer.seen", "ledger", { id: Text, name: Text })
+export const RemoteSeen = fact("remote.seen", "ledger", { id: Text, name: Text })
 
 export const OutboxQueued = fact("outbox.queued", "ledger", {
   id: Text,
-  peer: Text,
+  remote: Text,
   session: Text,
   recipient: optional(Text),
   kind: optional(Schema.Literals(["send", "notice"])),
@@ -245,17 +249,18 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   execution: optional(Seq),
 })
 
-export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })
+export const OutboxAcked = fact("outbox.acked", "ledger", { remote: Text, ids: Schema.NonEmptyArray(Text) })
 
 export const Catalog = {
   [ProjectCreated.type]: ProjectCreated,
   [ProjectMoved.type]: ProjectMoved,
   [ProjectRepositoriesChanged.type]: ProjectRepositoriesChanged,
-  [ProjectEntryChanged.type]: ProjectEntryChanged,
   [SessionCreated.type]: SessionCreated,
   [SessionRenamed.type]: SessionRenamed,
   [SessionDirectoryChanged.type]: SessionDirectoryChanged,
   [SessionEnded.type]: SessionEnded,
+  [SessionLinked.type]: SessionLinked,
+  [SessionUnlinked.type]: SessionUnlinked,
   [ProcessStarted.type]: ProcessStarted,
   [ProcessPlaced.type]: ProcessPlaced,
   [ProcessReady.type]: ProcessReady,
@@ -279,7 +284,7 @@ export const Catalog = {
   [MachineAdded.type]: MachineAdded,
   [MachineConnected.type]: MachineConnected,
   [MachineRemoved.type]: MachineRemoved,
-  [PeerSeen.type]: PeerSeen,
+  [RemoteSeen.type]: RemoteSeen,
   [OutboxQueued.type]: OutboxQueued,
   [OutboxAcked.type]: OutboxAcked,
 } as const
@@ -290,7 +295,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 11
+export const CATALOG_VERSION = 15
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {

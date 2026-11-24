@@ -5,13 +5,13 @@ import { senderOfRow, type SenderSql } from "@vibest/core/database/db-rows"
 import { Identity } from "@vibest/core/identity"
 import { Project } from "@vibest/core/project"
 import type { SpawnInput, Session } from "@vibest/core/session"
-import { peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
+import { remoteHeaders, sessionHeaders } from "@vibest/protocol/protocol"
 import { Sender } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import type { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
-import { Clock, Deferred, Effect, Layer, Predicate, Schema } from "effect"
+import { Cause, Clock, Deferred, Effect, Exit, Layer, Option, Predicate, Schema } from "effect"
 import { RpcClient } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
 import { SqlClient } from "effect/sql"
@@ -95,7 +95,11 @@ export class Net {
 
         const socket = Socket.make({
           reader: Effect.map(inner.reader, (r) => ({
-            pull: Effect.suspend(() => (held.on ? Effect.never : r.pull)).pipe(Effect.raceFirst(failOnCut)),
+            pull: Effect.suspend(() =>
+              held.on
+                ? Effect.never
+                : r.pull.pipe(Effect.flatMap((chunk) => (held.on ? Effect.never : Effect.succeed(chunk)))),
+            ).pipe(Effect.raceFirst(failOnCut)),
             upgrade: r.upgrade,
           })),
           writer: Effect.map(inner.writer, (w) => ({
@@ -120,7 +124,7 @@ export const peerSession = {
   model: null,
   harnessSessionId: null,
   runtime: "fake",
-  address: { machine: "local", id: "" },
+  terminal: null,
   status: "unknown" as const,
   startedAt: null,
   exitedAt: null,
@@ -137,6 +141,7 @@ export const fakeSpawns =
         spawns.push(input)
         const id = randomId()
         const at = yield* Clock.currentTimeMillis
+        const t = terminal(input, id)
 
         const inserted = yield* db.session.insertSession(
           {
@@ -146,7 +151,7 @@ export const fakeSpawns =
             createdAt: at,
             lastActive: at,
             runtime: input.runtime ?? peerSession.runtime,
-            address: { machine: "local", id: terminal(input, id) },
+            terminal: t === "" ? null : { id: t },
           },
           input.projectId,
           {
@@ -195,36 +200,36 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
     const raw = yield* connect(layout.socket)
     const cli = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(layout.home))
 
-    const as = (peer: string, aProject: string, by = A_ENTRY) =>
+    const as = (remote: string, aProject: string, by = A_ENTRY) =>
       Effect.gen(function* () {
         yield* RpcClient.withHeaders(
-          raw["Peer.Hello"]({ id: peer, name: `a-${peer.slice(0, 4)}`, callsMe: "mb" }),
-          peerHeaders(peer),
+          raw["Remote.Hello"]({ id: remote, name: `a-${remote.slice(0, 4)}`, callsMe: "mb" }),
+          remoteHeaders(remote),
         )
 
         const call = <A, E>(effect: Effect.Effect<A, E>) =>
-          RpcClient.withHeaders(effect, peerHeaders(peer, aProject, by))
+          RpcClient.withHeaders(effect, remoteHeaders(remote, aProject, by))
 
         return Object.assign(call, {
-          outbox: raw["Peer.Outbox"](undefined, { headers: peerHeaders(peer, aProject, by) }),
+          outbox: raw["Remote.Outbox"](undefined, { headers: remoteHeaders(remote, aProject, by) }),
         })
       })
 
     const spawn = (call: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>, request = randomId()) =>
-      call(raw["Peer.Spawn"]({ agent: "general", repository: REMOTE, commit: COMMIT, prompt: "do it", request }))
+      call(raw["Remote.Spawn"]({ agent: "general", repository: REMOTE, commit: COMMIT, prompt: "do it", request }))
 
     return { run, db, raw, cli, as, spawn, spawns, directory, project, layout, id: (yield* run(Identity.Service)).id }
   })
 
 export const entryOn = (stack: Effect.Success<ReturnType<typeof repoStack>>) =>
   Effect.gen(function* () {
-    const started = yield* stack.db.session.startEntry(
+    const started = yield* stack.db.session.startRoot(
       stack.project,
       "pi",
       false,
       {
         runtime: "fake",
-        address: { machine: "local", id: "main-pane" },
+        target: { id: "main-pane" },
       },
       { agent: "coordinator" },
     )
@@ -284,8 +289,21 @@ export const outboxRows = Effect.flatMap(
   SqlClient.SqlClient,
   (sql) =>
     sql<{
-      peerId: string
+      remoteId: string
       sessionId: string
-    }>`SELECT o.peer_id, o.session_id FROM outbox o LEFT JOIN session s ON s.id = o.session_id
+    }>`SELECT o.remote_id, o.session_id FROM outbox o LEFT JOIN session s ON s.id = o.session_id
         WHERE o.acked_at IS NULL AND s.ended_at IS NULL ORDER BY o.created_at`,
 )
+
+export const remotes = Effect.flatMap(
+  SqlClient.SqlClient,
+  (sql) => sql<{ id: string; name: string }>`SELECT id, name FROM remote ORDER BY id`,
+)
+
+export const failureTag = <A, E>(exit: Exit.Exit<A, E>) =>
+  Exit.isFailure(exit)
+    ? Option.match(Cause.findErrorOption(exit.cause), {
+        onNone: () => "defect",
+        onSome: (e) => (e as { readonly _tag: string })._tag,
+      })
+    : "success"

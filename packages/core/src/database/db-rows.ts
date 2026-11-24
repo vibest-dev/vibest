@@ -1,11 +1,9 @@
 import { ExecutionOutcome, ProcessEndReason, type AgentFrom, type Sender } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
 import { Routing } from "@vibest/schema/plugin"
-import { AgentStatus, RuntimeAddress, ExecutionState } from "@vibest/schema/session"
+import { AgentStatus, ExecutionState } from "@vibest/schema/session"
+import { type Terminal, TerminalTarget } from "@vibest/schema/terminal"
 import { Schema } from "effect"
-
-export const AddressJson = Schema.fromJsonString(RuntimeAddress)
-export const encodeAddress = Schema.encodeSync(AddressJson)
 
 const NewSessionFields = {
   id: Schema.String,
@@ -14,7 +12,7 @@ const NewSessionFields = {
   harnessId: Schema.String,
   harnessSessionId: Schema.NullOr(Schema.String),
   runtime: Schema.String,
-  address: AddressJson,
+  terminal: Schema.NullOr(TerminalTarget),
   name: Schema.String,
   provider: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
@@ -41,8 +39,7 @@ export const SessionProcess = Schema.Struct({
   model: Schema.NullOr(Schema.String),
   routing: Schema.NullOr(Routing),
   runtime: Schema.String,
-  machine: Schema.String,
-  terminal: Schema.NullOr(Schema.String),
+  terminal: Schema.NullOr(TerminalTarget),
   pid: Schema.NullOr(Schema.Number),
   harnessSessionId: Schema.NullOr(Schema.String),
   placedAt: Schema.NullOr(Schema.Number),
@@ -79,7 +76,6 @@ export const SessionRow = Schema.Struct({
   lastActive: Schema.Number,
   endedAt: Schema.NullOr(Schema.Number),
   parentId: Schema.NullOr(Schema.String),
-  entry: Schema.Boolean,
   process: Schema.NullOr(SessionProcess),
   openExecution: Schema.NullOr(OpenExecution),
   lastExecution: Schema.NullOr(LastExecution),
@@ -87,29 +83,33 @@ export const SessionRow = Schema.Struct({
 
 export type SessionRow = typeof SessionRow.Type
 
-export const archived = (row: Pick<SessionRow, "entry" | "endedAt">) => !row.entry && row.endedAt !== null
+export const archived = (row: Pick<SessionRow, "endedAt">) => row.endedAt !== null
 
-export const exitedAt = (row: Pick<SessionRow, "entry" | "endedAt" | "process">) =>
-  row.entry ? row.endedAt : (row.process?.endedAt ?? null)
+export const exitedAt = (row: Pick<SessionRow, "process">) => row.process?.endedAt ?? null
+
+export const isRoot = (row: Pick<SessionRow, "parentId">) => row.parentId === null
 
 export const sessionEnded = (row: SessionRow | undefined) =>
   row === undefined || exitedAt(row) !== null || archived(row)
 
-export const terminalOf = (row: Pick<SessionRow, "process">): RuntimeAddress => ({
-  machine: "local",
-  id: row.process?.terminal ?? "",
-})
+export const terminalOf = (row: Pick<SessionRow, "process">): Terminal | null => {
+  const process = row.process
+
+  return process === null || process.terminal === null || process.runtime === ""
+    ? null
+    : { runtime: process.runtime, target: process.terminal }
+}
 
 export const runtimeOf = (row: Pick<SessionRow, "process">) => row.process?.runtime ?? ""
 
 export const harnessIdOf = (row: Pick<SessionRow, "process">) => row.process?.harness ?? ""
 
-export const placedTerminal = (row: Pick<SessionRow, "process">) => {
+export const placedTerminal = (row: Pick<SessionRow, "process">): Terminal | undefined => {
   const process = row.process
 
   return process === null || process.endedAt !== null || process.terminal === null || process.runtime === ""
     ? undefined
-    : { runtime: process.runtime, address: { machine: "local", id: process.terminal } }
+    : { runtime: process.runtime, target: process.terminal }
 }
 
 export const startOf = (row: Pick<SessionRow, "process">): ProcessStart => {
@@ -121,7 +121,6 @@ export const startOf = (row: Pick<SessionRow, "process">): ProcessStart => {
     ...(process?.model && { model: process.model }),
     ...(process?.routing && { routing: process.routing }),
     runtime: process?.runtime ?? "",
-    terminal: "",
     ...(process?.harnessSessionId && { resume: process.harnessSessionId }),
   }
 }
@@ -165,7 +164,7 @@ export type ProcessStart = {
   readonly model?: string
   readonly routing?: Routing
   readonly runtime: string
-  readonly terminal: string
+  readonly terminal?: TerminalTarget | undefined
   readonly resume?: string
   readonly pid?: number
 }

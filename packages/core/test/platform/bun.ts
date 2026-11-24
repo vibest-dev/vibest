@@ -11,6 +11,7 @@ import { Sends } from "@vibest/core/session/sends"
 import { Summaries } from "@vibest/core/session/summaries"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import { Effect, Layer } from "effect"
+import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient } from "effect/http"
 
 const user = Layer.succeed(UserPlatform, {
@@ -24,6 +25,8 @@ const user = Layer.succeed(UserPlatform, {
 
 export const services = Layer.mergeAll(
   BunServices.layer,
+  Digest.layerWebCrypto,
+  SecureRandom.layerWebCrypto,
   FetchHttpClient.layer,
   user,
   Layer.succeed(SocketConnector.Service, (endpoint: string) => BunSocket.makeNet({ path: endpoint })),
@@ -44,13 +47,12 @@ export const memoryPluginHost = Layer.mergeAll(
   }),
   Layer.succeed(Sends.Service, {
     send: () => noSessions,
-    deliverTo: () => noSessions,
     admit: () => noSessions,
     relay: () => noSessions,
   }),
   Layer.succeed(Archive.Service, {
     undoCutOffStart: () => noSessions,
-    remove: () => noSessions,
+    archive: () => noSessions,
     stop: () => noSessions,
     finishArchive: () => noSessions,
   }),

@@ -73,7 +73,7 @@ export const make = Effect.gen(function* () {
 
     if (!session || archived(session) || (bound !== undefined && session.process?.id !== bound)) return
 
-    if (session.entry && (yield* db.session.entryMoving(session.projectId))) return
+    if (yield* db.session.sessionMoving(session.id)) return
     const open = executionStateOf(session) === "open"
 
     if (!open && exitedAt(session) !== null) return
@@ -83,10 +83,12 @@ export const make = Effect.gen(function* () {
 
     if (Option.isNone(routed)) return yield* live(session)
     const h = routed.value
-    const terminal = terminalOf(session)
+    const terminal = terminalOf(session)?.target
     const execution = open ? yield* db.session.openExecution(id) : undefined
     const r = yield* track(id)
-    const maybe = yield* agentState(h, terminal).pipe(Effect.option)
+
+    const maybe =
+      terminal === undefined ? Option.some("absent" as const) : yield* agentState(h, terminal).pipe(Effect.option)
 
     if (Option.isNone(maybe)) return
     const seen = maybe.value
@@ -97,7 +99,7 @@ export const make = Effect.gen(function* () {
     const exited =
       state === undefined &&
       (yield* Effect.gen(function* () {
-        const terminalRunning = yield* alive(h, terminal)
+        const terminalRunning = terminal !== undefined && (yield* alive(h, terminal))
         const reportedPid = session.process?.pid
 
         return (
@@ -114,7 +116,7 @@ export const make = Effect.gen(function* () {
 
     const adapter = yield* harnesses.get(harnessIdOf(session))
 
-    if (!adapter.ownSessionId && h.session !== undefined) {
+    if (!adapter.ownSessionId && h.session !== undefined && terminal !== undefined) {
       const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
 
       if (sessionId !== null && sessionId !== (session.process?.harnessSessionId ?? null))
@@ -160,7 +162,7 @@ export const make = Effect.gen(function* () {
     if (unstarted) yield* reactor.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
 
     if (s === "blocked") {
-      if (!(yield* Ref.getAndSet(r.blockedNotified, true)) && !session.entry) {
+      if (!(yield* Ref.getAndSet(r.blockedNotified, true)) && (yield* db.session.creatorOf(session.id)) !== undefined) {
         const since = new Date(yield* Clock.currentTimeMillis)
         const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
         yield* notice(
@@ -214,22 +216,17 @@ export const make = Effect.gen(function* () {
 
   let reconciles = 0
 
-  const reconcile = (where: "all" | { readonly runtime: string; readonly machine?: string }) =>
+  const reconcile = (where: "all" | { readonly runtime: string }) =>
     Effect.gen(function* () {
       const here = (yield* db.session.listSessions()).filter(
-        (row) =>
-          where === "all" ||
-          (runtimeOf(row) === where.runtime &&
-            (where.machine === undefined || terminalOf(row).machine === where.machine)),
+        (row) => where === "all" || runtimeOf(row) === where.runtime,
       )
 
       const rows = here.filter((row) => !archived(row) && (exitedAt(row) === null || executionStateOf(row) === "open"))
 
-      const archiving = here.filter((row) => archived(row) && exitedAt(row) === null && terminalOf(row).id !== "")
+      const archiving = here.filter((row) => archived(row) && exitedAt(row) === null && terminalOf(row) !== null)
       yield* Effect.forEach(archiving, (row) => finishArchive(row.id), { concurrency: 8, discard: true })
-      yield* Effect.log(
-        `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,
-      )
+      yield* Effect.log(`reconcile ${where === "all" ? "all" : where.runtime}: ${rows.length} live sessions`)
       yield* Effect.forEach(
         rows.map((row) => row.id),
         (id) => checkLocked(id),
@@ -267,9 +264,7 @@ export const make = Effect.gen(function* () {
   yield* reactor.on([TerminalState], (event) => onTerminal(event.processes, event.state === "working"))
   yield* reactor.on([TerminalExited], (event) => onTerminal(event.processes, false))
   yield* reactor.on([ProcessEnded], (event) => forgetIfDone(event.sessionId!))
-  yield* reactor.on([RuntimeReset], (event) =>
-    republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine }))),
-  )
+  yield* reactor.on([RuntimeReset], (event) => republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime }))))
 
   yield* Effect.forkIn(republish().pipe(Effect.andThen(reconcile("all")), logged("reconcile")), scope)
 

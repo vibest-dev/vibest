@@ -1,5 +1,4 @@
 import { Db } from "@vibest/core/database/db"
-import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import { Git } from "@vibest/core/git"
 import { list } from "@vibest/core/worktree-list"
 import { CALLER_HEADER } from "@vibest/protocol/protocol"
@@ -32,11 +31,11 @@ export const make = Effect.gen(function* () {
   return {
     "Worktree.List": ({ project, machine }, { headers }) =>
       Effect.gen(function* () {
-        if (machine !== undefined && machine !== LOCAL_MACHINE) {
-          if (reader(headers)(CALLER_HEADER) === "peer")
+        if (machine !== undefined) {
+          if (reader(headers)(CALLER_HEADER) === "remote")
             return yield* new Forbidden({
               method: "Worktree.List",
-              message: "a peer asks for this machine's worktrees only",
+              message: "a remote asks for this machine's worktrees only",
             })
 
           return yield* remote.worktrees(machine, project)

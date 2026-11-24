@@ -12,7 +12,11 @@ type Listed = {
   agent?: string
   machine?: string
   runtime?: string
-  address?: { machine: string; id: string }
+  terminal?: {
+    runtime: string
+    machine?: string
+    target: { session?: string; pane?: string; name?: string; machine?: string }
+  } | null
 }
 
 type Profile = { id: string; label: string; target: string; session: string; enabled?: boolean }
@@ -297,8 +301,8 @@ const checks: ReadonlyArray<Check> = [
         )!
 
         const shown = async () =>
-          (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
-            r.id.startsWith(printed.slice(0, 11)),
+          (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find(
+            (r) => r.machine === "mb" && r.id.startsWith(bRow!.id.slice(0, 8)),
           )
 
         let first: Listed | undefined
@@ -307,12 +311,17 @@ const checks: ReadonlyArray<Check> = [
           async () => {
             first = await shown()
 
-            return (first?.address?.id ?? "") !== ""
+            return (first?.terminal?.target.pane ?? "") !== ""
           },
           60_000,
         )
-        const pattern = new RegExp(`^${s.sessions.b}/${name}@${label}$`)
-        expect(pattern.test(first?.address?.id ?? ""), `A's row: ${JSON.stringify(first)}`)
+
+        const matches = (row: Listed | undefined) =>
+          row?.terminal?.target.session === s!.sessions.b &&
+          row?.terminal?.target.pane === name &&
+          row?.terminal?.target.machine === label
+
+        expect(matches(first), `A's row: ${JSON.stringify(first)}`)
         await until("the first notice", () => s!.notices(printed.slice(0, 11), "hseven") === 1, 120_000)
 
         const typed = await s.herdrA("--machine", label, "pane", "run", name, ask("hstep"))
@@ -332,7 +341,7 @@ const checks: ReadonlyArray<Check> = [
         const removedInHerdr = await s.herdrA("machine", "remove", saved[0]!.id)
         expect(removedInHerdr.code === 0, `herdr machine remove: ${removedInHerdr.stderr}`)
         const repaired = await shown()
-        expect(pattern.test(repaired?.address?.id ?? ""), `ls after herdr machine remove: ${JSON.stringify(repaired)}`)
+        expect(matches(repaired), `ls after herdr machine remove: ${JSON.stringify(repaired)}`)
         expect(
           (await s.profiles()).some((p) => p.label === label && p.session === s!.sessions.b),
           "the profile was not added back",
@@ -350,11 +359,15 @@ const checks: ReadonlyArray<Check> = [
         await until(
           "A's row of the agent after B's herdr session restarted has its terminal",
           async () => {
-            const row = (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
-              r.id.startsWith(again.slice(0, 11)),
+            const row = (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find(
+              (r) => r.machine === "mb" && r.id.startsWith(again.slice(0, 8)),
             )
 
-            return new RegExp(`^${s!.sessions.b}/w\\d+:p\\d+@${label}$`).test(row?.address?.id ?? "")
+            return (
+              row?.terminal?.target.session === s!.sessions.b &&
+              /^w\d+:p\d+$/.test(row?.terminal?.target.pane ?? "") &&
+              row?.terminal?.target.machine === label
+            )
           },
           60_000,
         )

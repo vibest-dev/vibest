@@ -1,6 +1,7 @@
 import { type BusEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import {
+  archived,
   executionStateOf,
   exitedAt,
   harnessIdOf,
@@ -9,12 +10,21 @@ import {
   type SessionBrief,
   terminalOf,
 } from "@vibest/core/database/db-rows"
+import { resolveEdgeRefs } from "@vibest/core/database/session-edges"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import { Project } from "@vibest/core/project"
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
 import { type SessionView, Session } from "@vibest/core/session"
 import { Starts } from "@vibest/core/session/starts"
-import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
-import type { RuntimeAddress } from "@vibest/schema/session"
+import {
+  type ProjectRepository,
+  type ProjectRow,
+  type SessionInfo,
+  type WatchEvent,
+  type WatchSession,
+} from "@vibest/protocol/rpc"
+import { canonicalTarget, type Terminal, type TerminalTarget } from "@vibest/schema/terminal"
 import { Context, Data, Effect, Layer, Predicate } from "effect"
 
 import { ListScope } from "./machine/remote.ts"
@@ -39,7 +49,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief, waiting?: Pro
   executionState: executionStateOf(session),
   projectId: session.projectId,
   runtime: session.process === null && waiting !== undefined ? waiting.runtime : runtimeOf(session),
-  address: terminalOf(session),
+  terminal: exitedAt(session) !== null ? null : terminalOf(session),
   worktree: session.worktree,
   repositoryRoot: session.repositoryRoot ?? null,
   git: session.git ?? null,
@@ -51,13 +61,33 @@ export const toInfo = (session: SessionView, brief?: SessionBrief, waiting?: Pro
   ...(waiting !== undefined && { waitingToStart: true as const }),
 })
 
+interface CachedRepositories {
+  readonly directory: string | null
+  readonly repositories: ReadonlyArray<ProjectRepository>
+}
+
 export const sessionListing = (deps: {
   readonly db: Db.Interface
+  readonly projects: Project.Interface
   readonly sessions: Session.Interface
   readonly runtimes: Runtimes.Interface
   readonly starts: Starts.Interface
 }) => {
-  const { db, sessions, runtimes, starts } = deps
+  const { db, projects, sessions, runtimes, starts } = deps
+  const repositoryCache = new Map<string, CachedRepositories>()
+
+  const resolveRepositories = (id: string, directory: string | null, refresh: boolean) =>
+    Effect.gen(function* () {
+      const hit = repositoryCache.get(id)
+
+      if (!refresh && hit !== undefined && hit.directory === directory) return hit.repositories
+
+      const recorded = yield* db.project.projectRemote(id)
+      const repositories = yield* projects.repositories(directory, recorded)
+      repositoryCache.set(id, { directory, repositories })
+
+      return repositories
+    })
 
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
     Effect.gen(function* () {
@@ -71,59 +101,71 @@ export const sessionListing = (deps: {
       })
     })
 
-  const listed = (scope: ListScope, stopped: boolean) =>
+  const listed = (scope: ListScope, stopped: boolean, unarchived = false) =>
     Effect.gen(function* () {
       if (Predicate.isTagged(scope, "Nothing")) return []
 
       const waiting = yield* starts.waiting
 
-      if (Predicate.isTagged(scope, "Peer"))
-        return yield* listedRows(yield* sessions.list({ peer: scope, stopped, waiting }))
+      if (Predicate.isTagged(scope, "Remote"))
+        return yield* listedRows(yield* sessions.list({ remote: scope, stopped, unarchived, waiting }))
       const projectId = Predicate.isTagged(scope, "Project") ? scope.id : undefined
 
       return yield* listedRows(
-        yield* sessions.list({ ...(projectId !== undefined && { projectId }), stopped, waiting }),
+        yield* sessions.list({ ...(projectId !== undefined && { projectId }), stopped, unarchived, waiting }),
       )
     })
 
-  const seenAt = (runtime: string, address: RuntimeAddress) =>
-    address.id === ""
+  const seenAt = (terminal: Terminal | null) =>
+    terminal === null
       ? Effect.succeed(undefined)
-      : runtimes.route(runtime).pipe(
-          Effect.flatMap((rt) => (rt.seen === undefined ? Effect.succeed(undefined) : rt.seen(address))),
+      : runtimes.route(terminal.runtime).pipe(
+          Effect.flatMap((rt) => (rt.seen === undefined ? Effect.succeed(undefined) : rt.seen(terminal.target))),
           Effect.orElseSucceed(() => undefined),
         )
 
   const watched = (infos: ReadonlyArray<SessionInfo>) =>
     Effect.gen(function* () {
-      const parents = yield* db.session.sessionParents(infos.map((info) => info.id))
+      const ids = infos.map((info) => info.id)
+      const parents = yield* db.session.sessionParents(ids)
+      const edges = yield* db.session.sessionEdges(ids)
+      const machineByRemote = new Map((yield* db.remote.machines).map((row) => [row.remoteId, row.name]))
 
       return yield* Effect.forEach(
         infos,
         (info) =>
-          Effect.map(seenAt(info.runtime, info.address), (seen): WatchSession => ({
+          Effect.map(seenAt(info.terminal), (seen): WatchSession => ({
             ...info,
             status: unseenDone(info.status, seen),
             parentId: parents.get(info.id) ?? null,
             finished: seen?.finished ?? null,
+            to: resolveEdgeRefs(edges.get(info.id) ?? [], machineByRemote),
           })),
         { concurrency: "unbounded" },
       )
     })
 
   const snapshotProjects = (sessions: ReadonlyArray<WatchSession>) =>
-    Effect.map(db.project.watchProjects(), (rows) =>
-      rows.map((row): ProjectRow => ({
-        ...row,
-        activity: projectActivity(sessions.flatMap((s) => (s.projectId === row.id ? [s.status] : []))),
-      })),
+    Effect.flatMap(db.project.watchProjects(), (rows) =>
+      Effect.forEach(
+        rows,
+        (row) =>
+          Effect.map(resolveRepositories(row.id, row.directory, true), (repositories): ProjectRow => ({
+            ...row,
+            activity: projectActivity(
+              sessions.flatMap((s) => (s.projectId === row.id && s.exitedAt === null ? [s.status] : [])),
+            ),
+            repositories,
+          })),
+        { concurrency: 8 },
+      ),
     )
 
   const projectStatuses = (id: string) =>
     Effect.gen(function* () {
       return yield* Effect.forEach(
         yield* db.session.listSessions({ projectId: id, stopped: false }),
-        (s) => Effect.map(seenAt(runtimeOf(s), terminalOf(s)), (seen) => unseenDone(s.status, seen)),
+        (s) => Effect.map(seenAt(terminalOf(s)), (seen) => unseenDone(s.status, seen)),
         { concurrency: "unbounded" },
       )
     })
@@ -136,7 +178,7 @@ export const sessionListing = (deps: {
       const ended = WatchEvents.SessionEnded({ id, projectId: identity.projectId })
       const row = yield* db.session.getSession(id)
 
-      if (row === undefined || exitedAt(row) !== null) return [ended]
+      if (row === undefined || archived(row)) return [ended]
 
       const view = yield* sessions
         .get(id)
@@ -156,25 +198,26 @@ export const sessionListing = (deps: {
 
   const watchProject = (id: string) =>
     Effect.gen(function* () {
-      const rows = yield* db.project.watchProjects(id)
+      const [row] = yield* db.project.watchProjects(id)
 
-      if (rows.length === 0) return []
+      if (row === undefined) return []
       const activity = projectActivity(yield* projectStatuses(id))
+      const repositories = yield* resolveRepositories(row.id, row.directory, false)
 
-      return rows.map((row) => WatchEvents.Project({ project: { ...row, activity } }))
+      return [WatchEvents.Project({ project: { ...row, activity, repositories } })]
     })
 
-  const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
+  const sessionsAt = (runtime: string, target: TerminalTarget) =>
     Effect.gen(function* () {
       const rows = yield* db.session.listSessions()
+      const wanted = canonicalTarget(target)
 
       return rows
-        .filter(
-          (row) =>
-            runtimeOf(row) === runtime &&
-            terminalOf(row).machine === terminal.machine &&
-            terminalOf(row).id === terminal.id,
-        )
+        .filter((row) => {
+          const t = terminalOf(row)
+
+          return t !== null && t.runtime === runtime && canonicalTarget(t.target) === wanted
+        })
         .map((row) => row.id)
     })
 
@@ -185,13 +228,14 @@ export const sessionListing = (deps: {
 
       for (const event of events) {
         if (event.type === "session.changed") sessionIds.add(event.sessionId)
-        else if (event.type === "project.changed") projectIds.add(event.projectId)
-        else if (event.type === "terminal.state" || event.type === "terminal.exited") {
-          const project = yield* db.session.entryAt(event.runtime, event.terminal)
-          const entry = project === undefined ? undefined : yield* db.session.entryOf(project)
-
-          if (entry !== undefined) sessionIds.add(entry.id)
-        } else if (event.type === "terminal.seen")
+        else if (event.type === "project.changed") {
+          repositoryCache.delete(event.projectId)
+          projectIds.add(event.projectId)
+        } else if (
+          event.type === "terminal.state" ||
+          event.type === "terminal.exited" ||
+          event.type === "terminal.seen"
+        )
           for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
         else if (event.type === "runtime.reset")
           for (const info of yield* listed(ListScope.All(), false))
@@ -222,9 +266,16 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     return sessionListing({
       db: yield* Db.Service,
+      projects: yield* Project.Service,
       sessions: yield* Session.Service,
       runtimes: yield* Runtimes.Service,
       starts: yield* Starts.Service,
     })
   }),
 )
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Db.node, Project.node, Session.node, Runtimes.node, Starts.node],
+})

@@ -30,7 +30,7 @@ const X = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 const setup = Effect.gen(function* () {
   const db = yield* Db.Service
   const project = yield* projectOf("r")
-  const entry = yield* db.session.startEntry(project, "pi", false, place, { agent: "coordinator" })
+  const entry = yield* db.session.startRoot(project, "pi", false, place, { agent: "coordinator" })
   yield* db.session.insertSession(session(A), project, { cwd: "/w", task: "a", parentSessionId: entry.sessionId })
 
   return { db, project, entryId: entry.sessionId }
@@ -41,16 +41,18 @@ describe("sends from sessions", () => {
     memory(
       Effect.gen(function* () {
         const { db, project, entryId } = yield* setup
-        const peer = "11111111-1111-4111-8111-111111111111"
+        const remoteId = "11111111-1111-4111-8111-111111111111"
         const remote = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         const middle = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
         const ended = "ffffffff-ffff-4fff-8fff-ffffffffffff"
         const id = "22222222-2222-4222-8222-222222222222"
-        yield* db.remote.notePeer({ id: peer, name: "peer-b" })
+        yield* db.remote.noteRemote({ id: remoteId, name: "remote-b" })
         yield* db.session.insertSession(session(B), project, { cwd: "/w", task: "child", parentSessionId: entryId })
-        yield* db.remote.sendToPeer(B, peer, remote, "orig", id)
-        yield* db.remote.ackOutbox(peer, [id])
-        yield* db.session.insertSession(session(middle), project, { origin: { peer, project: "p", reportTo: remote } })
+        yield* db.remote.sendToRemote(B, remoteId, remote, "orig", id)
+        yield* db.remote.ackOutbox(remoteId, [id])
+        yield* db.session.insertSession(session(middle), project, {
+          origin: { remote: remoteId, project: "p", reportTo: remote },
+        })
         yield* db.session.insertSession(session(ended), project, { parentSessionId: middle })
         yield* db.session.archive(middle)
         yield* db.session.archive(ended)
@@ -59,15 +61,15 @@ describe("sends from sessions", () => {
           id,
           recipient: ended,
           kind: "send" as const,
-          sender: "peer-b/dddddddd",
-          from: { session: remote, machine: "peer-b" },
+          sender: "remote-b/dddddddd",
+          from: { session: remote, machine: "remote-b" },
           content: "came back",
         }
 
-        assert.strictEqual(yield* db.remote.receivePeerItem(back), "queued")
-        assert.lengthOf(yield* db.remote.outboxOf(peer), 1)
-        assert.strictEqual(yield* db.remote.receivePeerItem(back), "duplicate")
-        assert.lengthOf(yield* db.remote.outboxOf(peer), 1)
+        assert.strictEqual(yield* db.remote.receiveRemoteItem(back), "queued")
+        assert.lengthOf(yield* db.remote.outboxOf(remoteId), 1)
+        assert.strictEqual(yield* db.remote.receiveRemoteItem(back), "duplicate")
+        assert.lengthOf(yield* db.remote.outboxOf(remoteId), 1)
       }),
     ),
   )
@@ -77,29 +79,29 @@ describe("sends from sessions", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const { db, project, entryId } = yield* setup
-        const peer = "11111111-1111-4111-8111-111111111111"
+        const remoteId = "11111111-1111-4111-8111-111111111111"
         const remote = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         const id = "11111111-1111-4111-8111-111111111112"
 
-        yield* db.remote.notePeer({ id: peer, name: "peer-b" })
+        yield* db.remote.noteRemote({ id: remoteId, name: "remote-b" })
         yield* db.session.insertSession(session(B), project, { cwd: "/w", task: "child" })
-        yield* db.remote.sendToPeer(B, peer, remote, "orig", id)
-        yield* db.remote.ackOutbox(peer, [id])
+        yield* db.remote.sendToRemote(B, remoteId, remote, "orig", id)
+        yield* db.remote.ackOutbox(remoteId, [id])
 
         const back = {
           id,
           recipient: entryId,
           kind: "send" as const,
-          sender: "peer-b/dddddddd",
-          from: { session: remote, machine: "peer-b" },
+          sender: "remote-b/dddddddd",
+          from: { session: remote, machine: "remote-b" },
           content: "orig",
         }
 
-        assert.strictEqual(yield* db.remote.receivePeerItem(back), "queued")
+        assert.strictEqual(yield* db.remote.receiveRemoteItem(back), "queued")
         assert.deepStrictEqual(yield* sql<{ n: number }>`SELECT count(*) AS n FROM inbox WHERE transfer_id = ${id}`, [
           { n: 1 },
         ])
-        assert.strictEqual(yield* db.remote.receivePeerItem(back), "duplicate")
+        assert.strictEqual(yield* db.remote.receiveRemoteItem(back), "duplicate")
       }),
     ),
   )
@@ -137,75 +139,49 @@ describe("sends from sessions", () => {
   )
 
   it.effect(
-    "a new team gets a fresh team id; only its creator adds members, an unknown id is refused, and only members of one team may send to each other",
+    "insertSession links from/to/with edges and linkSessions/unlinkSessions update directed messaging permissions",
     () =>
       memory(
         Effect.gen(function* () {
           const { db, project, entryId } = yield* setup
           const start = { cwd: "/w", task: "t", parentSessionId: entryId }
-          const teamOf = (id: string) => Effect.map(db.session.sessionIdentity(id), (row) => row?.team)
-          assert.isTrue(yield* db.session.insertSession(session(B), project, { ...start, team: "new" }))
-          const team = (yield* teamOf(B))!
-          assert.match(team, /^t-[0-9a-f]{4}$/)
-          const unknown = team === "t-0000" ? "t-0001" : "t-0000"
-          assert.isTrue(yield* db.session.insertSession(session(X), project, { ...start, team: { join: team } }))
-          assert.deepStrictEqual(
-            yield* db.session.insertSession(session("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), project, {
-              ...start,
-              parentSessionId: A,
-              team: { join: team },
-            }),
-            { team, teamOwner: entryId },
-          )
-          assert.deepStrictEqual(
-            yield* db.session.insertSession(session("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), project, {
-              ...start,
-              team: { join: unknown },
-            }),
-            { teamUnknown: unknown },
-          )
           assert.isTrue(
-            yield* db.session.insertSession(session("ffffffff-ffff-4fff-8fff-ffffffffffff"), project, {
+            yield* db.session.insertSession(session(B), project, {
               ...start,
-              parentSessionId: A,
-              team: "new",
+              links: { from: [A] },
             }),
           )
-          assert.notStrictEqual(yield* teamOf("ffffffff-ffff-4fff-8fff-ffffffffffff"), team)
-          assert.isTrue(yield* db.inbox.maySend(B, X))
-          assert.isTrue(yield* db.inbox.maySend(X, B))
-          assert.isFalse(yield* db.inbox.maySend(A, B))
-          assert.isFalse(yield* db.inbox.maySend("ffffffff-ffff-4fff-8fff-ffffffffffff", B))
-          assert.deepStrictEqual(
-            (yield* db.session.teamMembers(project, team)).map((m) => [m.id, m.parent]),
-            [
-              [B, entryId],
-              [X, entryId],
-            ],
+          assert.isTrue(yield* db.inbox.maySend(A, B))
+          assert.isFalse(yield* db.inbox.maySend(B, A))
+
+          assert.isTrue(
+            yield* db.session.insertSession(session(X), project, {
+              ...start,
+              links: { to: [B], with: [A] },
+            }),
           )
+          assert.isTrue(yield* db.inbox.maySend(X, B))
+          assert.isFalse(yield* db.inbox.maySend(B, X))
+          assert.isTrue(yield* db.inbox.maySend(A, X))
+          assert.isTrue(yield* db.inbox.maySend(X, A))
+
+          const targets = yield* db.session.linkedTargets(X, entryId)
+          assert.deepStrictEqual(targets.map((t) => t.id).sort(), [A, B].sort())
+
+          const edges = yield* db.session.sessionEdges([A, B, X])
+          assert.deepStrictEqual([...(edges.get(X) ?? [])].map((e) => e.id).sort(), [A, B, entryId].sort())
+
+          yield* db.session.linkSessions([{ from: B, to: X }])
+          assert.isTrue(yield* db.inbox.maySend(B, X))
+
+          yield* db.session.unlinkSessions([{ from: A, to: X }])
+          assert.isFalse(yield* db.inbox.maySend(A, X))
+          assert.isTrue(yield* db.inbox.maySend(X, A))
         }),
       ),
   )
 
-  it.effect("a team whose members have all ended is over: adding to its id is refused", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, project, entryId } = yield* setup
-        const start = { cwd: "/w", task: "t", parentSessionId: entryId }
-        assert.isTrue(yield* db.session.insertSession(session(B), project, { ...start, team: "new" }))
-        const team = (yield* db.session.sessionIdentity(B))!.team!
-        yield* db.session.archive(B)
-        assert.deepStrictEqual(
-          yield* db.session.insertSession(session(X), project, { ...start, team: { join: team } }),
-          {
-            teamEnded: team,
-          },
-        )
-      }),
-    ),
-  )
-
-  it.effect("a team is listed only for its creator and its members", () =>
+  it.effect("Db.inbox.maySend refuses a session sending to itself", () =>
     memory(
       Effect.gen(function* () {
         const { db, project, entryId } = yield* setup
@@ -214,27 +190,6 @@ describe("sends from sessions", () => {
             cwd: "/w",
             task: "t",
             parentSessionId: entryId,
-            team: "new",
-          }),
-        )
-        const team = (yield* db.session.sessionIdentity(B))!.team!
-        assert.isTrue(yield* db.session.mayListTeam(project, team, entryId))
-        assert.isTrue(yield* db.session.mayListTeam(project, team, B))
-        assert.isFalse(yield* db.session.mayListTeam(project, team, A))
-      }),
-    ),
-  )
-
-  it.effect("Db.inbox.maySend refuses a session sending to itself, including a team member", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, project, entryId } = yield* setup
-        assert.isTrue(
-          yield* db.session.insertSession(session(B), project, {
-            cwd: "/w",
-            task: "t",
-            parentSessionId: entryId,
-            team: "new",
           }),
         )
         assert.isFalse(yield* db.inbox.maySend(B, B))
@@ -255,7 +210,7 @@ describe("sends from sessions", () => {
           assert.deepStrictEqual(yield* db.session.nearestAlive(B), { local: entryId })
           assert.isTrue(yield* db.inbox.maySend(B, A))
           const creator = yield* db.session.creatorLabel(B)
-          assert.deepStrictEqual(creator, { id: A, label: `agent ${session(A).name}` })
+          assert.deepStrictEqual(creator, { id: A, label: `agent ${session(A).name}`, remote: undefined })
 
           const prompt = systemPrompt({
             system: "",
@@ -279,33 +234,39 @@ describe("sends from sessions", () => {
       memory(
         Effect.gen(function* () {
           const { db, project } = yield* setup
-          const peer = "11111111-1111-4111-8111-111111111111"
+          const remote = "11111111-1111-4111-8111-111111111111"
           const reportTo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
-          yield* db.remote.notePeer({ id: peer, name: "other" })
+          yield* db.remote.noteRemote({ id: remote, name: "other" })
           yield* db.session.insertSession(session(B), project, {
             cwd: "/w",
             task: "b",
-            origin: { peer, project: "p", reportTo },
+            origin: { remote, project: "p", reportTo },
           })
           yield* db.session.insertSession(session(X), project, { cwd: "/w", task: "x", parentSessionId: B })
           yield* db.session.archive(B)
           const { execution } = yield* db.session.startExecution(X, 1)
           const heir = yield* db.session.nearestAlive(X)
-          assert.deepStrictEqual(heir, { peer, session: reportTo })
-          assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "report"))
-          const out = yield* db.remote.outboxOf(peer)
+          assert.deepStrictEqual(heir, { remote, session: reportTo })
+          assert.isTrue(yield* db.remote.sendToRemote(X, remote, reportTo, "report"))
+          const out = yield* db.remote.outboxOf(remote)
           assert.deepInclude(out[0]!, { kind: "send", content: "report", reportTo })
           assert.deepStrictEqual(out[0]!.from, { session: X, agent: session(X).agent, title: session(X).name })
-          assert.isFalse(yield* db.remote.sendToPeer(X, "22222222-2222-4222-8222-222222222222", reportTo, "report"))
-          assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
-          assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
-          assert.lengthOf(yield* db.remote.outboxOf(peer), 2)
-          yield* db.remote.ackOutbox(
-            peer,
-            (yield* db.remote.outboxOf(peer)).map((row) => row.id),
+          assert.isFalse(yield* db.remote.sendToRemote(X, "22222222-2222-4222-8222-222222222222", reportTo, "report"))
+          assert.isTrue(
+            yield* db.remote.sendToRemote(X, remote, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"),
           )
-          assert.isTrue(yield* db.remote.sendToPeer(X, peer, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"))
-          assert.lengthOf(yield* db.remote.outboxOf(peer), 0, "a retry of an acknowledged request is not sent again")
+          assert.isTrue(
+            yield* db.remote.sendToRemote(X, remote, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"),
+          )
+          assert.lengthOf(yield* db.remote.outboxOf(remote), 2)
+          yield* db.remote.ackOutbox(
+            remote,
+            (yield* db.remote.outboxOf(remote)).map((row) => row.id),
+          )
+          assert.isTrue(
+            yield* db.remote.sendToRemote(X, remote, reportTo, "again", "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d"),
+          )
+          assert.lengthOf(yield* db.remote.outboxOf(remote), 0, "a retry of an acknowledged request is not sent again")
           assert.strictEqual(
             yield* db.inbox.sentIn(X, execution),
             2,
@@ -321,12 +282,12 @@ describe("sends from sessions", () => {
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const { db, project } = yield* setup
-        const peer = "11111111-1111-4111-8111-111111111111"
+        const remote = "11111111-1111-4111-8111-111111111111"
         const reportTo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         const middle = B
         const ended = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
-        yield* db.remote.notePeer({ id: peer, name: "other" })
-        yield* db.session.insertSession(session(middle), project, { origin: { peer, project: "p", reportTo } })
+        yield* db.remote.noteRemote({ id: remote, name: "other" })
+        yield* db.session.insertSession(session(middle), project, { origin: { remote, project: "p", reportTo } })
         yield* db.session.insertSession(session(ended), project, { parentSessionId: middle })
         yield* db.session.archive(middle)
         yield* db.session.archive(ended)
@@ -340,10 +301,10 @@ describe("sends from sessions", () => {
           content: "report",
         }
 
-        assert.strictEqual(yield* db.remote.receivePeerItem(item), "queued")
-        assert.strictEqual(yield* db.remote.receivePeerItem(item), "duplicate")
+        assert.strictEqual(yield* db.remote.receiveRemoteItem(item), "queued")
+        assert.strictEqual(yield* db.remote.receiveRemoteItem(item), "duplicate")
         assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE recipient_session_id = ${ended}`, [])
-        const out = yield* db.remote.outboxOf(peer)
+        const out = yield* db.remote.outboxOf(remote)
         assert.lengthOf(out, 1)
         assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })
         assert.strictEqual(out[0]!.id, item.id, "the forward reuses the incoming transfer id")

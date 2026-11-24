@@ -19,7 +19,7 @@ import { served, test, client, asCli, asEntry, asSession, failureTag } from "@vi
 import { session as draftSession } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { ACCESS } from "@vibest/protocol/access"
 import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
-import { VibestRpcs } from "@vibest/protocol/rpc"
+import { EdgeMutual, VibestRpcs } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Cause, Effect, Exit, Fiber, FileSystem, Path, type Schema, Stream } from "effect"
@@ -143,7 +143,7 @@ describe("vibest.sock", () => {
         first,
       )
       assert.deepStrictEqual(
-        (yield* db.session.listSessions()).filter((w) => !w.entry).map((w) => w.id),
+        (yield* db.session.listSessions()).filter((w) => w.parentId !== null).map((w) => w.id),
         [first.id],
       )
       const worktree = (yield* db.session.sessionDirectory(first.id))!
@@ -168,7 +168,7 @@ describe("vibest.sock", () => {
 
       assert.strictEqual(yield* queued("spawn-1"), 1)
       const sent = yield* c.Send({ id: first.id, message: "more", request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" })
-      yield* c.Remove({ id: first.id })
+      yield* c.Archive({ id: first.id })
       assert.deepStrictEqual(
         yield* c.Send({ id: first.id, message: "more", request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" }),
         sent,
@@ -298,11 +298,11 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const held = yield* runtime.hold("present")
 
-      const launch = yield* c["Project.EntrySession"]({
+      const launch = yield* c["Session.Claim"]({
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       }).pipe(Effect.forkChild)
 
       yield* held.reached
@@ -310,11 +310,11 @@ describe("vibest.sock", () => {
       const saved = yield* Fiber.join(launch)
       assert.isString(saved.sessionId)
 
-      const again = yield* c["Project.EntrySession"]({
+      const again = yield* c["Session.Claim"]({
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       }).pipe(Effect.forkChild)
 
       yield* TestClock.adjust(PRESENT_TIMEOUT)
@@ -329,7 +329,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, yield* makeRepository)
 
       const enter = (harness: "pi" | "claude") =>
-        c["Project.EntrySession"]({ agent: "coordinator", harness, fresh: false, terminal: "test/p1" })
+        c["Session.Claim"]({ agent: "coordinator", harness, fresh: false, terminal: { id: "test/p1" } })
 
       const first = yield* enter("pi")
       assert.strictEqual(first.command.env.VIBEST_PROCESS, String(yield* db.session.currentProcessId(first.sessionId)))
@@ -355,11 +355,11 @@ describe("vibest.sock", () => {
       )
       yield* (yield* FakeRuntime).seedAgent("test/p1")
 
-      const launch = yield* c["Project.EntrySession"]({
+      const launch = yield* c["Session.Claim"]({
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })
 
       yield* raw["Session.Ready"](
@@ -471,11 +471,11 @@ describe("vibest.sock", () => {
         },
       )
       assert.strictEqual(
-        (yield* c["Project.EntrySession"]({
+        (yield* c["Session.Claim"]({
           agent: "coordinator",
           harness: "claude",
           fresh: false,
-          terminal: "test/p1",
+          terminal: { id: "test/p1" },
         })).harnessSessionId,
         "s2",
         "a conversation reported by another harness than the session's is ignored",
@@ -503,11 +503,11 @@ describe("vibest.sock", () => {
         Effect.gen(function* () {
           const raw = yield* client
 
-          const launched = yield* asCli(raw, root)["Project.EntrySession"]({
+          const launched = yield* asCli(raw, root)["Session.Claim"]({
             agent: "coordinator",
             harness: "pi",
             fresh: false,
-            terminal: `test/${paneId}`,
+            terminal: { id: `test/${paneId}` },
           })
 
           return yield* asSession(raw, launched.sessionId, root)
@@ -525,7 +525,7 @@ describe("vibest.sock", () => {
         b.Send({ id, message: "x" }),
         b.Interrupt({ id }),
         b.Peek({ id }),
-        b.Remove({ id }),
+        b.Archive({ id }),
       ]
 
       for (const call of others) {
@@ -533,7 +533,7 @@ describe("vibest.sock", () => {
         assert.strictEqual(failureTag(exit), "Forbidden")
         assert.match(
           String(Exit.isFailure(exit) && Cause.pretty(exit.cause)),
-          /belongs to another entry session's project|was not started by this session/,
+          /belongs to another project|was not started by this session/,
         )
       }
 
@@ -561,7 +561,7 @@ describe("vibest.sock", () => {
         ["from its own entry session", "from the user"],
       )
       assert.strictEqual(
-        failureTag(yield* Effect.exit(user.Remove({ id }))),
+        failureTag(yield* Effect.exit(user.Archive({ id }))),
         "success",
         "the user's command line archives it even while it works",
       )
@@ -578,11 +578,11 @@ describe("vibest.sock", () => {
         Effect.gen(function* () {
           const raw = yield* client
 
-          const launched = yield* asCli(raw, root)["Project.EntrySession"]({
+          const launched = yield* asCli(raw, root)["Session.Claim"]({
             agent: "coordinator",
             harness: "pi",
             fresh: false,
-            terminal: `test/${paneId}`,
+            terminal: { id: `test/${paneId}` },
           })
 
           return yield* asSession(raw, launched.sessionId, root)
@@ -601,13 +601,13 @@ describe("vibest.sock", () => {
         c: Client,
       ): ReadonlyArray<readonly [string, Effect.Effect<unknown, { readonly _tag: string }>]> => [
         ["Spawn", c.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "more" })],
-        ["Launch", c.Launch({ agent: "coordinator", callerEnv: {}, argv: [], focus: false })],
-        ["Project.StartEntry", c["Project.StartEntry"]({ agent: "general", runtime: "herdr" })],
+        ["Launch", c.Launch({ agent: "coordinator", callerEnv: {}, focus: false })],
         ["Project.Open", c["Project.Open"]({})],
         ["Project.Move", c["Project.Move"]({ from: "x" })],
-        ["Project.EntryPlace", c["Project.EntryPlace"]({ callerEnv: {} })],
+        ["Session.Attach", c["Session.Attach"]({ callerEnv: {} })],
         ["List", c.List({ stopped: true })],
-        ["Team.List", c["Team.List"]({})],
+        ["Session.Link", c["Session.Link"]({ spec: EdgeMutual.make({ ids: [{ id }, { id }] }) })],
+        ["Session.Unlink", c["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [{ id }, { id }] }) })],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         ["Inbox.Take", c["Inbox.Take"](undefined)],
@@ -615,37 +615,36 @@ describe("vibest.sock", () => {
         ["Events", Stream.runDrain(c.Events({}))],
         ["Session.Seen", c["Session.Seen"]({ id: "x", finished: 0 })],
         [
-          "Project.EntrySession",
-          c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: "test/p1" }),
+          "Session.Claim",
+          c["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: { id: "test/p1" } }),
         ],
         ["Project.Create", c["Project.Create"]({ directory: "x", from: ["y"] })],
-        ["Project.FocusEntry", c["Project.FocusEntry"]({})],
-        ["Project.RunningEntry", c["Project.RunningEntry"]({ terminal: "test/p1" })],
-        ["Project.StopEntry", c["Project.StopEntry"]({ runtime: "herdr", address: "{}" })],
         ["Project.Info", c["Project.Info"]()],
         ["Project.Search", c["Project.Search"]({ query: "x" })],
         ["Send", c.Send({ id, message: "x" })],
         ["Interrupt", c.Interrupt({ id })],
         ["Stop", c.Stop({ id })],
         ["Peek", c.Peek({ id })],
-        ["Remove", c.Remove({ id })],
+        ["Archive", c.Archive({ id })],
         ["Daemon.Stop", c["Daemon.Stop"]({ instance: "x" })],
         ["Daemon.Handoff", c["Daemon.Handoff"]({ instance: "x", command: ["vibest"] })],
         ["Session.Ready", c["Session.Ready"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
         ["Agents.Outdated", c["Agents.Outdated"]()],
         ["Agents.Restart", c["Agents.Restart"]({ ids: [id] })],
         ["Integration.Guard", c["Integration.Guard"]({ harness: "pi", input: "{}" })],
-        ["Peer.Hello", c["Peer.Hello"]({ id, name: "x", callsMe: "y" })],
+        ["Remote.Hello", c["Remote.Hello"]({ id, name: "x", callsMe: "y" })],
         ["Machine.Add", c["Machine.Add"]({ name: "m", target: "h" })],
         ["Machine.Load", c["Machine.Load"]({})],
         ["Machine.List", c["Machine.List"]()],
         ["Machine.Remove", c["Machine.Remove"]({ name: "m" })],
         [
-          "Peer.Spawn",
-          c["Peer.Spawn"]({ agent: "general", repository: "r", commit: "abc1234", prompt: "x", request: "q" }),
+          "Remote.Spawn",
+          c["Remote.Spawn"]({ agent: "general", repository: "r", commit: "abc1234", prompt: "x", request: "q" }),
         ],
-        ["Peer.Outbox", Stream.runDrain(c["Peer.Outbox"](undefined))],
-        ["Peer.Ack", c["Peer.Ack"]({ ids: [] })],
+        ["Remote.Outbox", Stream.runDrain(c["Remote.Outbox"](undefined))],
+        ["Remote.Ack", c["Remote.Ack"]({ ids: [] })],
+        ["Remote.Link", c["Remote.Link"]({ edges: [] })],
+        ["Remote.Unlink", c["Remote.Unlink"]({ edges: [] })],
         ["Project.Clone", Stream.runDrain(c["Project.Clone"]({ url: "git://x/y.git" }))],
       ]
 
@@ -662,21 +661,22 @@ describe("vibest.sock", () => {
             .some((access) => access === "agent" || access === "session" || access === "open"),
       ))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
-      const entryBefore = yield* db.session.entryOf((yield* db.session.getSession(id))!.projectId)
+      const entryBefore = yield* db.session.latestRoot((yield* db.session.getSession(id))!.projectId)
 
       const entryCalls: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
-        w["Project.StopEntry"]({ runtime: "herdr", address: "{}" }),
-        w["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: true, terminal: "test/p1" }),
-        w["Project.StartEntry"]({ agent: "coordinator", runtime: "herdr" }),
-        w.Launch({ agent: "coordinator", callerEnv: {}, argv: [], focus: false }),
+        w["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: true, terminal: { id: "test/p1" } }),
+        w["Session.Attach"]({ callerEnv: {} }),
+        w.Launch({ agent: "coordinator", callerEnv: {}, focus: false }),
       ]
 
       for (const call of entryCalls) assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden")
-      assert.deepStrictEqual(yield* db.session.entryOf((yield* db.session.getSession(id))!.projectId), entryBefore)
+      assert.deepStrictEqual(yield* db.session.latestRoot((yield* db.session.getSession(id))!.projectId), entryBefore)
       const child = yield* w.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "from a session" })
       assert.deepStrictEqual(yield* db.session.creatorOf(child.id), { local: id })
 
-      yield* a["Session.Ready"]({ id: (yield* db.session.entryOf((yield* db.session.getSession(id))!.projectId))!.id })
+      yield* a["Session.Ready"]({
+        id: (yield* db.session.latestRoot((yield* db.session.getSession(id))!.projectId))!.id,
+      })
       yield* w["Session.Ready"]({ id, pid: 4242 })
       assert.isDefined(yield* db.session.readyAt(id))
       assert.strictEqual((yield* db.session.getSession(id))!.process?.pid, 4242)
@@ -732,11 +732,11 @@ describe("vibest.sock", () => {
       const session = yield* asSession(raw, id)
       yield* (yield* FakeRuntime).seedAgent("test/p1")
 
-      const entry = (yield* cli["Project.EntrySession"]({
+      const entry = (yield* cli["Session.Claim"]({
         agent: "coordinator",
         harness: "claude",
         fresh: false,
-        terminal: "test/p1",
+        terminal: { id: "test/p1" },
       })).sessionId
 
       yield* session.Send({ id: entry, message: "first" })
@@ -893,19 +893,6 @@ describe("vibest.sock", () => {
         }).pipe(Effect.provideService(Layout, having.layout)),
         "ok",
       )
-    }),
-  )
-
-  test(
-    "Team.List from a CLI caller without a session fails Forbidden naming vibest ls --team, not vibest run",
-    Effect.gen(function* () {
-      const cli = asCli(yield* client, yield* makeRepository)
-
-      for (const payload of [{}, { team: "t-1234" }]) {
-        const refused = yield* Effect.flip(cli["Team.List"](payload))
-        assert.strictEqual(refused._tag, "Forbidden")
-        assert.strictEqual(refused.message, "vibest ls --team is run by an agent in a session")
-      }
     }),
   )
 })

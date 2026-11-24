@@ -17,8 +17,6 @@ import {
 } from "./db-rows.ts"
 import type { MachineRow, OutboxRow } from "./remote.ts"
 
-export const LOCAL_MACHINE = "local"
-
 export type SessionColumns = {
   readonly id: string
   readonly project: string
@@ -42,7 +40,6 @@ export type SessionColumns = {
   readonly readyAt: number | null
   readonly pEnded: number | null
   readonly parent: string | null
-  readonly entry: number
   readonly pEndReason: string | null
   readonly oId: number | null
   readonly oProcess: number | null
@@ -82,8 +79,7 @@ const processOf = (row: SessionColumns, integration: Integration | undefined) =>
         model: row.model,
         routing: row.routing === null ? null : decodeUnknownJson(row.routing),
         runtime: row.runtime ?? "",
-        machine: LOCAL_MACHINE,
-        terminal: row.terminal,
+        terminal: row.terminal === null ? null : decodeUnknownJson(row.terminal),
         pid: row.pid,
         harnessSessionId: row.harnessSessionId,
         placedAt: row.placedAt,
@@ -122,7 +118,6 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => ({
   lastActive: row.activeAt ?? row.createdAt,
   endedAt: row.endedAt,
   parentId: row.parent,
-  entry: row.entry === 1,
   process: processOf(row, live.integration ?? integrationOf(row)),
   openExecution: openExecutionOf(row),
   lastExecution: lastExecutionOf(row),
@@ -137,7 +132,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
     sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.agent, s.name,
         s.created_at, s.ended_at, s.active_at, s.parent_session_id AS parent,
-        EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id) AS entry,
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.harness_session_id, p.placed_at, p.ready_at,
         p.ended_at AS p_ended, p.end_reason AS p_end_reason,
@@ -237,12 +231,12 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       }),
     )
 
-  const outboxOf = (peer: string, after: number, limit: number) =>
+  const outboxOf = (remote: string, after: number, limit: number) =>
     sql<Omit<OutboxRow, "from"> & FromSql>`SELECT o.id, o.seq, o.session_id, o.kind, o.content,
         o.from_session, o.from_agent, o.from_title, o.from_machine, o.created_at,
         coalesce(o.recipient, s.origin_session) AS report_to
       FROM outbox o LEFT JOIN session s ON s.id = o.session_id
-      WHERE o.peer_id = ${peer} AND o.acked_at IS NULL AND o.seq > ${after}
+      WHERE o.remote_id = ${remote} AND o.acked_at IS NULL AND o.seq > ${after}
         AND coalesce(o.recipient, s.origin_session) IS NOT NULL
       ORDER BY o.seq LIMIT ${limit}`.pipe(
       Effect.map((rows) =>
@@ -261,8 +255,8 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     outboxOf,
     sessionRows,
     inboxWhere,
-    hasPeerItem: (item: string) =>
+    hasRemoteItem: (item: string) =>
       sql`SELECT 1 FROM inbox WHERE transfer_id = ${item}`.pipe(Effect.map((rows) => rows.length > 0)),
-    machines: sql<MachineRow>`SELECT name, target, vibestd_id, connected_at, created_at FROM machine ORDER BY name`,
+    machines: sql<MachineRow>`SELECT name, target, remote_id, connected_at, created_at FROM machine ORDER BY name`,
   }
 }

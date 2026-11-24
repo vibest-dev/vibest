@@ -23,13 +23,13 @@ const entryAsked = Effect.gen(function* () {
   const db = yield* Db.Service
   const repo = yield* makeRepository
 
-  const entry = yield* db.session.startEntry(
+  const entry = yield* db.session.startRoot(
     yield* projectOf(repo),
     "pulling-pi",
     false,
     {
       runtime: RUNTIME,
-      address: { machine: "local", id: "test/coord" },
+      target: { id: "test/coord" },
     },
     { agent: "coordinator" },
   )
@@ -224,25 +224,25 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
-    "a peer send taken by the entry names the remote address, not the user",
+    "a remote send taken by the entry names the remote address, not the user",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db.Service
       const inbox = yield* Inbox.Service
       const repo = yield* makeRepository
 
-      const entry = yield* db.session.startEntry(
+      const entry = yield* db.session.startRoot(
         yield* projectOf(repo),
         "pulling-pi",
         false,
-        { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
+        { runtime: RUNTIME, target: { id: "test/coord" } },
         { agent: "coordinator" },
       )
 
       yield* herdr.seedAgent("test/coord")
 
       assert.strictEqual(
-        yield* db.remote.receivePeerItem({
+        yield* db.remote.receiveRemoteItem({
           id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
           recipient: entry.sessionId,
           kind: "send",

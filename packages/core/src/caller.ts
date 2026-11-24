@@ -1,4 +1,5 @@
 import { NO_RUNTIME_DETECTED } from "@vibest/schema/session"
+import type { TerminalTarget } from "@vibest/schema/terminal"
 import { Effect, Predicate } from "effect"
 
 import type { Caller } from "./plugin/domains.ts"
@@ -6,21 +7,21 @@ import type { Caller } from "./plugin/domains.ts"
 export interface CallerHit {
   readonly id: string
   readonly name?: string
-  readonly terminal: string | undefined
+  readonly terminal: TerminalTarget | undefined
 }
 
 const shown = (id: string, name: string | undefined) => name ?? id
 
-export type EntryPlace =
-  | { readonly in: "terminal"; readonly runtime: string; readonly terminal: string }
+export type AttachPlace =
+  | { readonly in: "terminal"; readonly runtime: string; readonly terminal: TerminalTarget }
   | { readonly in: "launch"; readonly runtime: string }
   | { readonly in: "refused"; readonly message: string }
 
-export const entryPlace = (o: {
+export const attachPlace = (o: {
   readonly runtime: string | undefined
   readonly hits: ReadonlyArray<CallerHit>
   readonly loaded?: ReadonlyArray<string>
-}): EntryPlace => {
+}): AttachPlace => {
   const named = (id: string) => o.hits.find((hit) => hit.id === id)
 
   if (o.runtime !== undefined) {

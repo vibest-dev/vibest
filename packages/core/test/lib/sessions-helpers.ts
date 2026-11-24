@@ -27,17 +27,17 @@ export const entryOfProject = (repo: string) =>
   Effect.gen(function* () {
     const db = yield* Db.Service
     const projectId = yield* projectOf(repo)
-    const found = yield* db.session.entryOf(projectId)
+    const found = yield* db.session.latestRoot(projectId)
 
     if (found !== undefined) return found.id
 
-    return (yield* db.session.startEntry(
+    return (yield* db.session.startRoot(
       projectId,
       PULLING_PI.id,
       false,
       {
         runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
+        target: { id: "test/coord" },
       },
       { agent: "coordinator" },
     )).sessionId

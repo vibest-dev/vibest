@@ -120,13 +120,12 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 23
+export const PROJECTION_VERSION = 27
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
-    id               TEXT PRIMARY KEY CHECK (length(id) = 36),
-    directory        TEXT UNIQUE,
-    entry_session_id TEXT
+    id        TEXT PRIMARY KEY CHECK (length(id) = 36),
+    directory TEXT UNIQUE
   ) STRICT`,
   `CREATE TABLE project_repository (
     project_id TEXT NOT NULL,
@@ -141,10 +140,9 @@ export const PROJECTION_SCHEMA = [
     agent                 TEXT NOT NULL,
     name                  TEXT NOT NULL,
     directory             TEXT NOT NULL,
-    origin_peer           TEXT,
+    origin_remote         TEXT,
     origin_project        TEXT,
     origin_session        TEXT,
-    team                  TEXT,
     created_at            INTEGER NOT NULL,
     ended_at              INTEGER,
     process_id            INTEGER,
@@ -154,7 +152,14 @@ export const PROJECTION_SCHEMA = [
   `CREATE INDEX session_project ON session (project_id)`,
   `CREATE INDEX session_parent ON session (parent_session_id)`,
   `CREATE INDEX session_live ON session (directory) WHERE ended_at IS NULL`,
-  `CREATE INDEX session_origin ON session (origin_peer, origin_project) WHERE origin_peer IS NOT NULL`,
+  `CREATE INDEX session_origin ON session (origin_remote, origin_project) WHERE origin_remote IS NOT NULL`,
+  `CREATE TABLE session_edge (
+    from_session_id TEXT NOT NULL,
+    to_remote_id    TEXT NOT NULL DEFAULT '',
+    to_session_id   TEXT NOT NULL,
+    PRIMARY KEY (from_session_id, to_remote_id, to_session_id)
+  ) STRICT`,
+  `CREATE INDEX session_edge_to ON session_edge (to_remote_id, to_session_id)`,
   `CREATE TABLE process (
     session_id           TEXT NOT NULL,
     id                   INTEGER NOT NULL,
@@ -221,11 +226,11 @@ export const PROJECTION_SCHEMA = [
   `CREATE TABLE machine (
     name         TEXT PRIMARY KEY,
     target       TEXT NOT NULL,
-    vibestd_id   TEXT NOT NULL UNIQUE CHECK (length(vibestd_id) = 36),
+    remote_id    TEXT NOT NULL UNIQUE CHECK (length(remote_id) = 36),
     connected_at INTEGER NOT NULL,
     created_at   INTEGER NOT NULL
   ) STRICT`,
-  `CREATE TABLE peer (
+  `CREATE TABLE remote (
     id           TEXT PRIMARY KEY CHECK (length(id) = 36),
     name         TEXT NOT NULL,
     connected_at INTEGER NOT NULL
@@ -233,7 +238,7 @@ export const PROJECTION_SCHEMA = [
   `CREATE TABLE outbox (
     id         TEXT PRIMARY KEY CHECK (length(id) = 36),
     seq        INTEGER NOT NULL,
-    peer_id    TEXT NOT NULL,
+    remote_id  TEXT NOT NULL,
     session_id TEXT NOT NULL,
     recipient  TEXT,
     kind       TEXT NOT NULL CHECK (kind IN ('send', 'notice')),
@@ -246,7 +251,7 @@ export const PROJECTION_SCHEMA = [
     created_at INTEGER NOT NULL,
     acked_at   INTEGER
   ) STRICT`,
-  `CREATE INDEX outbox_peer ON outbox (peer_id, seq) WHERE acked_at IS NULL`,
+  `CREATE INDEX outbox_remote ON outbox (remote_id, seq) WHERE acked_at IS NULL`,
   `CREATE INDEX outbox_session ON outbox (session_id)`,
 ]
 
@@ -254,10 +259,11 @@ export const PROJECTION_TABLES = {
   project: "id",
   project_repository: "path",
   session: "id",
+  session_edge: "from_session_id, to_remote_id, to_session_id",
   process: "session_id, id",
   execution: "session_id, id",
   inbox: "recipient_session_id, id",
   machine: "name",
-  peer: "id",
+  remote: "id",
   outbox: "id",
 } as const

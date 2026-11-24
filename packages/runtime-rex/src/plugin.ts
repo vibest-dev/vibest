@@ -7,7 +7,7 @@ import { Config, Effect, Option } from "effect"
 
 import { caller } from "./caller.ts"
 import { connect } from "./client.ts"
-import { KIND, make } from "./terminal-runtime.ts"
+import { make } from "./terminal-runtime.ts"
 
 const set = (name: string) => Config.option(Config.String(name)).pipe(Config.map(Option.filter((v) => v !== "")))
 
@@ -46,13 +46,14 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
       const socket = yield* socketPath.pipe(Effect.orDie)
       const shell = Option.getOrElse(yield* set("SHELL").pipe(Effect.orDie), () => "/bin/sh")
 
-      const runtime = yield* make({
+      const definition = yield* make({
         connect: connect((at) => NodeSocket.makeNet({ path: at }), socket),
         socket,
         scope: yield* Effect.scope,
         shell,
+        caller,
       })
 
-      yield* context.runtime.transform((editor) => editor.add({ ...runtime, id: KIND, caller }))
+      yield* context.runtime.transform((editor) => editor.add(definition))
     }),
 })

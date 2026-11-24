@@ -1,8 +1,7 @@
-import type { VibestClient } from "@vibest/client/client"
 import type { RuntimeDoctor as RuntimeDoctorSchema } from "@vibest/protocol/rpc"
 import { Layout } from "@vibest/schema/layout"
 import { type HarnessChoice, LaunchFailed } from "@vibest/schema/session"
-import { Config, Console, Effect, FileSystem, Option, Path, Predicate, Schedule, Schema, Stream } from "effect"
+import { Config, Console, Effect, FileSystem, Option, Path, Schedule, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { askChoice, askYesNo, interactive } from "./ask.ts"
@@ -299,19 +298,6 @@ export const chooseHarness = <E>(client: Client<E>, o: { readonly saveWithoutAsk
 
     return picked
   })
-
-export const hasEntrySession = (client: Pick<VibestClient, "Watch">, projectId: string) =>
-  client.Watch(undefined).pipe(
-    Stream.runHead,
-    Effect.map((first) =>
-      Option.match(first, {
-        onNone: () => false,
-        onSome: (event) =>
-          Predicate.isTagged(event, "Snapshot") &&
-          event.projects.some((project) => project.id === projectId && project.entrySessionId !== null),
-      }),
-    ),
-  )
 
 export const attachCommand = (argv: ReadonlyArray<string>) =>
   Effect.gen(function* () {

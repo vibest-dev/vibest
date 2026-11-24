@@ -32,9 +32,11 @@ import { Load } from "@vibest/server/machine/load"
 import { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
+import * as Ws from "@vibest/server/ws"
 import * as effect from "effect"
-import { Cause, Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
+import { Cause, Duration, Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
+import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, type HttpClient } from "effect/http"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
@@ -91,6 +93,8 @@ const user = Layer.succeed(UserPlatform, {
 
 const platform = Layer.mergeAll(
   BunServices.layer,
+  Digest.layerWebCrypto,
+  SecureRandom.layerWebCrypto,
   FetchHttpClient.layer,
   unrefStdio,
   HerdrBun.layerSocketConnector,
@@ -311,7 +315,17 @@ export const lock: Host["lock"] = (file) =>
       try: () => {
         const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600)
 
-        if (libc.symbols.flock(fd, LOCK_EX_NB) === 0) return fd
+        try {
+          if (libc.symbols.flock(fd, LOCK_EX_NB) === 0) {
+            fs.fchmodSync(fd, 0o600)
+
+            return fd
+          }
+        } catch (cause) {
+          fs.closeSync(fd)
+          throw cause
+        }
+
         fs.closeSync(fd)
 
         return undefined
@@ -404,7 +418,8 @@ const platformNode = LayerNode.make({ name: "vibest/Platform", layer: platform, 
 export const replacements: LayerNode.Replacements = [
   PlatformNode.fileSystem.replace(platformNode),
   PlatformNode.path.replace(platformNode),
-  PlatformNode.crypto.replace(platformNode),
+  PlatformNode.digest.replace(platformNode),
+  PlatformNode.secureRandom.replace(platformNode),
   PlatformNode.childProcessSpawner.replace(platformNode),
   PlatformNode.sqlClientLayer.replace(
     LayerNode.make({
@@ -427,7 +442,7 @@ export const replacements: LayerNode.Replacements = [
       deps: [
         PlatformNode.fileSystem,
         PlatformNode.path,
-        PlatformNode.crypto,
+        PlatformNode.digest,
         PlatformNode.layout,
         PlatformNode.childProcessSpawner,
       ],
@@ -454,6 +469,22 @@ export const replacements: LayerNode.Replacements = [
       ),
       deps: [PlatformNode.layout],
     }),
+  ),
+  Ws.wsServerLayer.replace(
+    Layer.succeed(
+      Ws.WsServerLayer,
+      BunHttpServer.layerServer({
+        hostname: "127.0.0.1",
+        port: 0,
+        gracefulShutdownTimeout: Duration.seconds(1),
+        websocket: {
+          maxPayloadLength: 64 * 1024,
+          backpressureLimit: 1024 * 1024,
+          closeOnBackpressureLimit: true,
+          idleTimeout: 120,
+        },
+      }),
+    ),
   ),
   Identity.hostFactsNode.replace(
     Layer.succeed(Identity.HostFacts, { name: os.hostname(), id: hostId, pid: process.pid }),

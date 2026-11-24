@@ -288,13 +288,13 @@ describe("multi-repository isolated workspace", () => {
       const app = yield* repositoryWithOneCommitOnMain(root, "app")
       const sdk = yield* repositoryWithOneCommitOnMain(root, "sdk")
 
-      const entry = yield* db.session.startEntry(
+      const entry = yield* db.session.startRoot(
         yield* projectOf(root),
         "pi",
         false,
         {
           runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
+          target: { id: "test/coord" },
         },
         { agent: "coordinator" },
       )
@@ -343,15 +343,15 @@ describe("multi-repository isolated workspace", () => {
 
       yield* fakeGit.checkout(sdkWt, { state: { branch: "feat/sdk", pushed: false, saved: true, why: "" } })
       yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: false, why: "uncommitted changes" } })
-      const kept = (yield* sessions.remove(id))!
+      const kept = (yield* sessions.archive(id))!
       assert.strictEqual(kept.worktree, "kept")
       assert.match(kept.reasons.join("\n"), /app: worktree kept: uncommitted changes/)
-      assert.strictEqual(kept.branch, "sdk=feat/sdk")
+      assert.deepStrictEqual(kept.branches, [{ repository: "sdk", branch: "feat/sdk" }])
       assert.isTrue(yield* fs.exists(appWt))
       assert.isFalse(yield* fs.exists(sdkWt))
 
       yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: true, why: "" } })
-      const removed = (yield* sessions.remove(id))!
+      const removed = (yield* sessions.archive(id))!
       assert.strictEqual(removed.worktree, "removed")
       assert.isFalse(yield* fs.exists(workspace))
     }),
@@ -371,11 +371,11 @@ describe("multi-repository isolated workspace", () => {
       yield* repositoryWithOneCommitOnMain(root, "sdk")
       const raw = yield* connect(layout.socket)
 
-      const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["Project.EntrySession"]({
+      const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["Session.Claim"]({
         agent: "coordinator",
         harness: "pi",
         fresh: false,
-        terminal: "coord",
+        terminal: { id: "coord" },
       })
 
       const { id } = yield* authed(
@@ -413,11 +413,11 @@ describe("multi-repository isolated workspace", () => {
       const raw = yield* connect((yield* Layout).socket)
       const cli = authed(raw, cliHeaders(root))
 
-      const { sessionId, projectId } = yield* cli["Project.EntrySession"]({
+      const { sessionId, projectId } = yield* cli["Session.Claim"]({
         agent: "coordinator",
         harness: "pi",
         fresh: false,
-        terminal: "coord",
+        terminal: { id: "coord" },
       })
 
       const { id } = yield* authed(

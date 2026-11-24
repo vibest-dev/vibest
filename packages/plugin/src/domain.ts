@@ -1,9 +1,12 @@
 import type { ExecutionOutcome } from "@vibest/schema/event"
 import type { AgentStatus } from "@vibest/schema/session"
 import type { Subscription, SubscriptionLimit } from "@vibest/schema/subscription"
+import type { SessionRef } from "@vibest/schema/terminal"
 import { Schema } from "effect"
 
-export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
+export class SessionRefused extends Schema.TaggedError<SessionRefused>()("SessionRefused", { reason: Schema.String }) {}
+
+export class ToolRefused extends Schema.TaggedError<ToolRefused>()("ToolRefused", { reason: Schema.String }) {}
 
 export class SessionSendFailed extends Schema.TaggedError<SessionSendFailed>()("SessionSendFailed", {
   message: Schema.String,
@@ -15,8 +18,11 @@ export class SessionStopFailed extends Schema.TaggedError<SessionStopFailed>()("
 
 export interface PluginSession {
   readonly id: string
+  readonly projectId: string
+  readonly agent: string
   readonly title: string
   readonly parentId: string | null
+  readonly to: ReadonlyArray<SessionRef>
   readonly status: AgentStatus
   readonly lastActive: number
   readonly waiting: boolean
@@ -78,7 +84,7 @@ export interface HarnessOption {
   readonly problem?: string | undefined
 }
 
-interface AgentContext {
+interface SessionContext {
   readonly project: string
   readonly agent: string
   readonly parentSessionId: string | undefined
@@ -86,7 +92,7 @@ interface AgentContext {
   readonly subscriptions: ReadonlyArray<Subscription>
 }
 
-export interface AgentStartBefore extends AgentContext {
+export interface SessionStartBefore extends SessionContext {
   prompt: string
   readonly files: ReadonlyArray<string>
   harness: string | undefined
@@ -98,33 +104,33 @@ export interface AgentStartBefore extends AgentContext {
   readonly machines: ReadonlyArray<MachineInfo>
 }
 
-export interface AgentHooks {
-  readonly "start.before": AgentStartBefore
-}
-
-export interface AgentFailures extends Record<keyof AgentHooks, unknown> {
-  readonly "start.before": AgentRefused
-}
-
-export interface GuardCall {
+export interface SessionToolExecuteBefore {
+  readonly session: {
+    readonly id: string
+    readonly agent: string
+    readonly project: string
+    readonly projectDir: string
+    readonly directory: string
+  }
   readonly tool: string
   readonly input: Schema.JsonObject
   readonly cwd: string
-  readonly programs: ReadonlyArray<ReadonlyArray<string>>
-  readonly writes: ReadonlyArray<string> | undefined
-  readonly session: {
-    readonly id: string
-    readonly projectFolder: string
-    readonly harnessBinaries: ReadonlySet<string>
-    readonly runtimePrograms: ReadonlySet<string>
-  }
+}
+
+export interface SessionHooks {
+  readonly "start.before": SessionStartBefore
+  readonly "tool.execute.before": SessionToolExecuteBefore
+}
+
+export interface SessionFailures extends Record<keyof SessionHooks, unknown> {
+  readonly "start.before": SessionRefused
+  readonly "tool.execute.before": ToolRefused
 }
 
 export interface AgentDefinition {
   readonly id: string
   readonly description: string
   readonly system: string
-  readonly guard?: (call: GuardCall) => string | undefined
   readonly harness?: string
   readonly provider?: string
   readonly model?: string

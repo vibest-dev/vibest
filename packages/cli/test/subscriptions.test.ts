@@ -94,8 +94,9 @@ const fakeMachine = (options: {
 
   const spawner = ChildProcessSpawner.make((command) => {
     if (!ChildProcess.isStandardCommand(command)) return Effect.die("piped")
-    const id = [command.command, ...command.args].join(" ")
-    spawned.push({ command: command.command, args: command.args, stdin: command.options.stdin })
+    const args = command.args.map(String)
+    const id = [command.command, ...args].join(" ")
+    spawned.push({ command: command.command, args, stdin: command.options.stdin })
 
     return Effect.succeed(
       output(hanging.has(id) ? "" : (options.commands[id] ?? ""), hanging.has(id) ? Effect.never : Effect.succeed(0)),
@@ -139,13 +140,14 @@ const fakeMachine = (options: {
 
       const ctx: Parameters<typeof plugin.effect>[0] = {
         options: {},
-        agent: { hook: () => Effect.succeed(registration), transform: () => Effect.succeed(registration) },
+        agent: { transform: () => Effect.succeed(registration) },
         machine: { hook: () => Effect.succeed(registration) },
         runtime: { transform: () => Effect.succeed(registration) },
         harness: { transform: (edit) => Effect.sync(() => (edit(editor), registration)) },
         subscription: { report: () => Effect.void },
         event: { subscribe: () => Stream.never },
         session: {
+          hook: () => Effect.succeed(registration),
           list: () => Effect.succeed([]),
           get: () => Effect.succeed(undefined),
           sentIn: () => Effect.succeed(0),
@@ -494,7 +496,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nowhere" })))),
   )
 
-  it.effect("a plugin report is what agent.start.before receives", () =>
+  it.effect("a plugin report is what session.start.before receives", () =>
     Effect.gen(function* () {
       const limits = [{ window: "monthly", percent: 3, status: "limited" as const, resetTime: 9 }]
       let seen: unknown
@@ -504,7 +506,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         effect: (ctx) =>
           Effect.gen(function* () {
             yield* ctx.subscription.report({ harness: "claude", provider: "example-proxy", limits })
-            yield* ctx.agent.hook("start.before", (event) =>
+            yield* ctx.session.hook("start.before", (event) =>
               Effect.sync(() => {
                 seen = event.subscriptions
               }),

@@ -1,12 +1,11 @@
 import { type Sender } from "@vibest/schema/event"
-import { NoSuchSession } from "@vibest/schema/session"
+import { AmbiguousSession, NoSuchSession } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, Schema } from "effect"
 
 import { archived } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
-import { Placement } from "./placement.ts"
 
 export * as Sends from "./sends.ts"
 
@@ -17,7 +16,6 @@ export class SendRefused extends Schema.TaggedError<SendRefused>()("SendRefused"
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service
   const fs = yield* FileSystem.FileSystem
-  const { worktreeOf } = yield* Placement.Service
 
   const getRow = (id: string) =>
     db.session
@@ -37,33 +35,16 @@ export const make = Effect.gen(function* () {
     const session = yield* getRow(id)
 
     if (request !== undefined && (yield* db.inbox.queuedFrom(sender, request))) return
-    const worktree = yield* worktreeOf(session)
+    const directory = yield* db.session.sessionDirectory(id)
 
-    if (archived(session) || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
+    if (
+      archived(session) ||
+      (directory !== undefined && directory !== "" && !(yield* fs.exists(directory).pipe(Effect.orDie)))
+    )
       return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
     const row = yield* db.inbox.insertSend(id, message, sender, request)
 
     if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-  })
-
-  const toEntry = (id: string, message: string, sender: Sender, request?: string) =>
-    Effect.gen(function* () {
-      if (!(yield* db.inbox.insertSend(id, message, sender, request)))
-        return yield* new NoSuchSession({
-          id,
-          message: `${id} is the entry session of this project and is not running`,
-        })
-    })
-
-  const deliverTo = Effect.fn("Sends.deliverTo")(function* (
-    id: string,
-    message: string,
-    sender: Sender = { type: "user" },
-    request?: string,
-  ) {
-    if (!(yield* db.session.sessionIdentity(id))?.entry) return yield* send(id, message, sender, request)
-
-    return yield* toEntry(id, message, sender, request)
   })
 
   const admit = Effect.fn("Sends.admit")(function* (
@@ -72,15 +53,18 @@ export const make = Effect.gen(function* () {
     message: string,
     request?: string,
   ) {
-    const toOrigin = yield* db.remote.sendToOrigin(sender.sessionId, input, message, request)
+    const toRemote = yield* db.remote.sendToLinkedRemote(sender.sessionId, input, message, request)
 
-    if (toOrigin === false)
+    if (toRemote === "unknown")
       return yield* new NoSuchSession({
         id: input,
         message: `${input} is on another machine that vibestd does not know; nothing was sent`,
       })
 
-    if (toOrigin === true) return { id: input }
+    if (toRemote !== undefined && "ambiguous" in toRemote)
+      return yield* new AmbiguousSession({ prefix: input, matches: toRemote.ambiguous })
+
+    if (toRemote !== undefined && "sent" in toRemote) return { id: toRemote.sent }
     const id = yield* db.session.resolveSession(input)
 
     if (id === sender.sessionId)
@@ -89,24 +73,22 @@ export const make = Effect.gen(function* () {
 
     if (target?.projectId !== sender.projectId)
       return yield* new SendRefused({
-        message: `${id} belongs to another entry session's project; a message goes only to an agent of your own project`,
+        message: `${id} belongs to another project; a message goes only to an agent of your own project`,
       })
     const creator = (yield* db.session.creatorOf(sender.sessionId)) ?? undefined
     const mine = creator !== undefined && "local" in creator ? creator.local : undefined
 
     if (!(yield* db.inbox.maySend(sender.sessionId, id)))
       return yield* new SendRefused({
-        message: `${id} is not the agent that started you, you did not start it, and it is not in your team${mine === undefined ? "" : `; you may send to ${mine}`}`,
+        message: `${id} is not linked from this session; link them with vibest session link${mine === undefined || mine === id ? "" : ` (you may send to ${mine})`}`,
       })
     const session = yield* db.session.getSession(id)
     const stopped = !session || archived(session)
     const from = { type: "agent" as const, session: sender.sessionId }
 
     if (!(stopped && mine === id)) {
-      if (stopped && !target.entry) return yield* new NoSuchSession({ id, message: `${id} was archived` })
-
-      if (target.entry) yield* toEntry(id, message, from, request)
-      else yield* send(id, message, from, request)
+      if (stopped) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+      yield* send(id, message, from, request)
 
       return { id }
     }
@@ -119,8 +101,8 @@ export const make = Effect.gen(function* () {
         message: `${id} has ended and no session above it is running; the user reads your last reply with vibest result`,
       })
 
-    if ("peer" in heir) {
-      if (!(yield* db.remote.sendToPeer(sender.sessionId, heir.peer, heir.session, message, request)))
+    if ("remote" in heir) {
+      if (!(yield* db.remote.sendToRemote(sender.sessionId, heir.remote, heir.session, message, request)))
         return yield* new NoSuchSession({
           id,
           message: `${id} has ended and the session above it is on another machine that vibestd does not know; nothing was sent`,
@@ -129,20 +111,10 @@ export const make = Effect.gen(function* () {
       return { id: heir.session }
     }
 
-    if ((yield* db.session.sessionIdentity(heir.local))?.entry) yield* toEntry(heir.local, message, from, request)
-    else yield* send(heir.local, message, from, request)
+    yield* send(heir.local, message, from, request)
 
     return { id: heir.local }
   })
-
-  const toLocal = (id: string, message: string, sender: Sender, request?: string) =>
-    db.session
-      .sessionIdentity(id)
-      .pipe(
-        Effect.flatMap((identity) =>
-          identity?.entry ? toEntry(id, message, sender, request) : send(id, message, sender, request),
-        ),
-      )
 
   const relay = Effect.fn("Sends.relay")(function* (to: string, message: string, sender: Sender, request?: string) {
     const target = yield* db.session.sessionIdentity(to)
@@ -150,8 +122,8 @@ export const make = Effect.gen(function* () {
     if (target === undefined) return yield* new NoSuchSession({ id: to, message: `no session ${to}` })
     const session = yield* db.session.getSession(to)
 
-    if (target.entry || (session !== undefined && !archived(session))) {
-      yield* toLocal(to, message, sender, request)
+    if (session !== undefined && !archived(session)) {
+      yield* send(to, message, sender, request)
 
       return { id: to }
     }
@@ -161,16 +133,16 @@ export const make = Effect.gen(function* () {
     if (heir === undefined)
       return yield* new NoSuchSession({ id: to, message: `${to} has ended and no session above it is running` })
 
-    if ("peer" in heir)
+    if ("remote" in heir)
       return yield* new SendRefused({
         message: `${to} has ended and the session above it is on another machine; this send goes only to sessions on this machine`,
       })
-    yield* toLocal(heir.local, message, sender, request)
+    yield* send(heir.local, message, sender, request)
 
     return { id: heir.local }
   })
 
-  return { send, deliverTo, admit, relay }
+  return { send, admit, relay }
 })
 
 export type Interface = Effect.Success<typeof make>
@@ -182,5 +154,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Db.node, Placement.node, PlatformNode.fileSystem],
+  deps: [Db.node, PlatformNode.fileSystem],
 })

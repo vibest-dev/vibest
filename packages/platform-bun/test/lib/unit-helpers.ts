@@ -30,7 +30,7 @@ export const session = (
   model: null,
   harnessSessionId: null,
   runtime: RUNTIME,
-  address: { machine: "local", id: "default" },
+  terminal: { id: "default" },
   status: "unknown",
   startedAt: null,
   exitedAt: null,
@@ -41,4 +41,4 @@ export const session = (
   ...patch,
 })
 
-export const place = { runtime: RUNTIME, address: { machine: "local", id: "test/p1" } }
+export const place = { runtime: RUNTIME, target: { id: "test/p1" } }

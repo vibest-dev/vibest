@@ -1,48 +1,48 @@
 import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
-import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
-import type { PeerScope } from "@vibest/core/database/remote"
+import type { RemoteScope } from "@vibest/core/database/remote"
 import { Identity } from "@vibest/core/identity"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
-import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
+import { REMOTE_BY_USER, REMOTE_PROJECT_HEADER } from "@vibest/protocol/protocol"
 import { Caller, type CallerIdentity, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
 import { MachineIncompatible } from "@vibest/schema/machine"
-import type { NotInRepository } from "@vibest/schema/session"
+import { AmbiguousSession, type NotInRepository } from "@vibest/schema/session"
+import { formatSessionRef, type SessionRef } from "@vibest/schema/terminal"
 import { Context, Effect, Layer, Predicate, Stream } from "effect"
 
 import * as Listing from "../listing.ts"
+import { Inbound } from "../machine/inbound.ts"
 import { Load } from "../machine/load.ts"
 import { Machines } from "../machine/machines.ts"
-import { Peer } from "../machine/peer.ts"
-import { address, type At, ListScope, Remote } from "../machine/remote.ts"
+import { type At, ListScope, Remote } from "../machine/remote.ts"
 import * as CallerChecks from "./caller.ts"
 import type { Handlers } from "./caller.ts"
 import { group } from "./group.ts"
 
-type Routed = "Send" | "Interrupt" | "Stop" | "Remove" | "Get" | "Peek"
+type Routed = "Send" | "Interrupt" | "Stop" | "Archive" | "Get" | "Peek"
 
 type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
-const notPeer = (method: string) => new Forbidden({ method, message: `${method} is for another vibestd` })
+const notRemote = (method: string) => new Forbidden({ method, message: `${method} is for another vibestd` })
 
-const byOf = (c: CallerIdentity) => (Predicate.isTagged(c, "Session") ? c.sessionId : PEER_BY_USER)
+const byOf = (c: CallerIdentity) => (Predicate.isTagged(c, "Session") ? c.sessionId : REMOTE_BY_USER)
 
-const peerOf = (method: string) =>
+const remoteOf = (method: string) =>
   Effect.flatMap(Caller, (c) =>
-    Predicate.isTagged(c, "Peer") ? Effect.succeed(c.peerId) : Effect.fail(notPeer(method)),
+    Predicate.isTagged(c, "Remote") ? Effect.succeed(c.remoteId) : Effect.fail(notRemote(method)),
   )
 
-const peerScope = (method: string) =>
-  Effect.flatMap(Caller, (c): Effect.Effect<PeerScope | undefined, Forbidden> => {
-    if (!Predicate.isTagged(c, "Peer")) return Effect.succeed(undefined)
+const remoteScope = (method: string) =>
+  Effect.flatMap(Caller, (c): Effect.Effect<RemoteScope | undefined, Forbidden> => {
+    if (!Predicate.isTagged(c, "Remote")) return Effect.succeed(undefined)
 
     if (c.projectId === undefined)
       return Effect.fail(
-        new Forbidden({ method, message: `${method} needs the calling project (${PEER_PROJECT_HEADER})` }),
+        new Forbidden({ method, message: `${method} needs the calling project (${REMOTE_PROJECT_HEADER})` }),
       )
 
     return Effect.succeed({
-      peer: c.peerId,
+      remote: c.remoteId,
       project: c.projectId,
       ...(c.session !== undefined && { session: c.session }),
     })
@@ -54,11 +54,11 @@ const makeRouting = Effect.gen(function* () {
   const machines = yield* Machines.Service
   const db = yield* Db.Service
 
-  const senderHere = (by: string) => (by === PEER_BY_USER ? Effect.succeed(undefined) : db.remote.senderOf(by))
+  const senderHere = (by: string) => (by === REMOTE_BY_USER ? Effect.succeed(undefined) : db.remote.senderOf(by))
 
   const reach = (method: Routed | "List") =>
     Effect.gen(function* () {
-      const scope = yield* peerScope(method)
+      const scope = yield* remoteScope(method)
 
       if (scope !== undefined) return { c: undefined, scope }
 
@@ -70,31 +70,56 @@ const makeRouting = Effect.gen(function* () {
 
   const routed = <A, E, R2, B, F>(
     method: Routed,
-    input: string,
+    ref: SessionRef,
     local: Local<A, E, R2>,
     forwarded: (at: At, project: string, by: string) => Effect.Effect<B, F>,
-  ) => {
-    const at = address(input)
-
-    return Predicate.isTagged(at, "Local")
-      ? local(at.id)
+  ) =>
+    ref.machine === undefined
+      ? local(ref.id)
       : deps.agent(method).pipe(
           Effect.flatMap((c) =>
             deps.projectOf(c, method).pipe(
               Effect.catchTag("NotInRepository", refused(method)),
-              Effect.flatMap((project) => forwarded(at, project.id, byOf(c))),
+              Effect.flatMap((project) => forwarded({ machine: ref.machine!, id: ref.id }, project.id, byOf(c))),
             ),
           ),
         )
-  }
 
   return {
     reach,
     routed: {
       Send: <A, E, R2>(p: PayloadOf<"Send">, local: Local<A, E, R2>) =>
-        routed("Send", p.id, local, (at, project, by) =>
-          Effect.flatMap(senderHere(by), (from) =>
-            remote.forward(at, project, by, (c, { id }, o) =>
+        routed("Send", p, local, (at, project, by) =>
+          Effect.gen(function* () {
+            let targetAt = at
+            let forwardBy = by
+
+            if (by !== REMOTE_BY_USER) {
+              const machineRow = yield* db.remote.machineNamed(at.machine)
+
+              if (machineRow !== undefined) {
+                const matches = yield* db.session.resolveRemoteEdges(by, at.id, machineRow.remoteId)
+
+                if (matches.length === 0)
+                  return yield* new Forbidden({
+                    method: "Send",
+                    message: `${formatSessionRef(p)} is not linked from this session; link them with vibest session link`,
+                  })
+
+                if (matches.length > 1)
+                  return yield* new AmbiguousSession({
+                    prefix: at.id,
+                    matches: matches.map((m) => `${at.machine}/${m.session}`),
+                  })
+
+                targetAt = { ...at, id: matches[0]!.session }
+                forwardBy = REMOTE_BY_USER
+              }
+            }
+
+            const from = yield* senderHere(by)
+
+            return yield* remote.forward(targetAt, project, forwardBy, (c, { id }, o) =>
               c.Send(
                 {
                   id,
@@ -104,19 +129,19 @@ const makeRouting = Effect.gen(function* () {
                 },
                 o,
               ),
-            ),
-          ),
+            )
+          }),
         ),
       Interrupt: <A, E, R2>(p: PayloadOf<"Interrupt">, local: Local<A, E, R2>) =>
-        routed("Interrupt", p.id, local, (at, project, by) =>
-          remote.forward(at, project, by, (c, { id }, o) => c.Interrupt({ ...p, id }, o)),
+        routed("Interrupt", p, local, (at, project, by) =>
+          remote.forward(at, project, by, (c, { id }, o) => c.Interrupt({ id }, o)),
         ),
       Stop: <A, E, R2>(p: PayloadOf<"Stop">, local: Local<A, E, R2>) =>
-        routed("Stop", p.id, local, (at, project, by) =>
+        routed("Stop", p, local, (at, project, by) =>
           machines.link(at.machine).pipe(
             Effect.flatMap((link) =>
               link.capabilities.stop === true
-                ? remote.forward(at, project, by, (c, { id }, o) => c.Stop({ ...p, id }, o))
+                ? remote.forward(at, project, by, (c, { id }, o) => c.Stop({ id }, o))
                 : Effect.fail(
                     new MachineIncompatible({
                       machine: at.machine,
@@ -126,14 +151,16 @@ const makeRouting = Effect.gen(function* () {
             ),
           ),
         ),
-      Remove: <A, E, R2>(p: PayloadOf<"Remove">, local: Local<A, E, R2>) =>
-        routed("Remove", p.id, local, (at, project, by) =>
-          remote.forward(at, project, by, (c, { id }, o) => c.Remove({ ...p, id }, o)),
+      Archive: <A, E, R2>(p: PayloadOf<"Archive">, local: Local<A, E, R2>) =>
+        routed("Archive", p, local, (at, project, by) =>
+          remote.forward(at, project, by, (c, { id }, o) =>
+            c.Archive({ id, ...(p.keepWorktree !== undefined && { keepWorktree: p.keepWorktree }) }, o),
+          ),
         ),
       Get: <A, E, R2>(p: PayloadOf<"Get">, local: Local<A, E, R2>) =>
-        routed("Get", p.id, local, (at, project, by) => remote.get(at, project, by, p)),
+        routed("Get", p, local, (at, project, by) => remote.get(at, project, by)),
       Peek: <A, E, R2>(p: PayloadOf<"Peek">, local: Local<A, E, R2>) =>
-        routed("Peek", p.id, local, (at, project, by) => remote.peek(at, project, by, p)),
+        routed("Peek", p, local, (at, project, by) => remote.peek(at, project, by, p)),
     },
 
     spawnOn: (machine: string, input: PayloadOf<"Spawn">, session: string, project: string) =>
@@ -156,20 +183,20 @@ const make = Effect.gen(function* () {
   const { version } = yield* App.Service
   const machines = yield* Machines.Service
   const load = yield* Load.Service
-  const peers = yield* Peer.Service
+  const inbound = yield* Inbound.Service
   const remote = yield* Remote.Service
   const runtimes = yield* Runtimes.Service
-  const { cliOnly, findAt } = checks
+  const { cliOnly, userOnly, findAt } = checks
 
   const listScope = (all: boolean | undefined) =>
     Effect.gen(function* () {
       const { c, scope } = yield* reach("List")
 
-      if (c === undefined) return ListScope.Peer(scope)
+      if (c === undefined) return ListScope.Remote(scope)
 
       if (Predicate.isTagged(c, "Session")) return ListScope.Project({ id: c.projectId })
 
-      if (all === true) return ListScope.All()
+      if (Predicate.isTagged(c, "Ui") || all === true) return ListScope.All()
 
       return yield* findAt(c.repositoryRoot).pipe(
         Effect.map((row): ListScope => (row === undefined ? ListScope.Nothing() : ListScope.Project({ id: row.id }))),
@@ -187,49 +214,56 @@ const make = Effect.gen(function* () {
         return { sessions: [...local, ...away.sessions], machines: away.machines }
       }),
 
-    "Peer.Hello": ({ id, name }: PayloadOf<"Peer.Hello">) =>
+    "Remote.Hello": ({ id, name }: PayloadOf<"Remote.Hello">) =>
       Effect.gen(function* () {
-        if ((yield* peerOf("Peer.Hello")) !== id)
+        if ((yield* remoteOf("Remote.Hello")) !== id)
           return yield* new Forbidden({
-            method: "Peer.Hello",
-            message: "Peer.Hello names the vibestd that calls it",
+            method: "Remote.Hello",
+            message: "Remote.Hello names the vibestd that calls it",
           })
 
-        if (id !== self.id) yield* db.remote.notePeer({ id, name })
+        if (id !== self.id) yield* db.remote.noteRemote({ id, name })
 
         return { id: self.id, name: self.name, version, runtimes: yield* runtimesHere(runtimes) }
       }),
 
-    "Peer.Spawn": (input: PayloadOf<"Peer.Spawn">) =>
+    "Remote.Spawn": (input: PayloadOf<"Remote.Spawn">) =>
       Effect.gen(function* () {
-        const scope = yield* peerScope("Peer.Spawn")
+        const scope = yield* remoteScope("Remote.Spawn")
 
-        if (scope === undefined) return yield* notPeer("Peer.Spawn")
+        if (scope === undefined) return yield* notRemote("Remote.Spawn")
 
         if (scope.session === undefined)
           return yield* new Forbidden({
-            method: "Peer.Spawn",
-            message: "Peer.Spawn is started by a session; it is not run in the user's name",
+            method: "Remote.Spawn",
+            message: "Remote.Spawn is started by a session; it is not run in the user's name",
           })
 
-        return yield* peers.spawn(scope.peer, scope.project, scope.session, input)
+        return yield* inbound.spawn(scope.remote, scope.project, scope.session, input)
       }),
 
     "Project.Clone": ({ url, directory, machine }: PayloadOf<"Project.Clone">) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const away = machine !== undefined && machine !== LOCAL_MACHINE
+          const away = machine !== undefined
 
-          if (away && Predicate.isTagged(yield* Caller, "Peer"))
-            return yield* new Forbidden({ method: "Project.Clone", message: "a peer clones only on this machine" })
+          if (away && Predicate.isTagged(yield* Caller, "Remote"))
+            return yield* new Forbidden({ method: "Project.Clone", message: "a remote clones only on this machine" })
 
           return remote.clone(away ? machine : undefined, { url, directory })
         }),
       ),
 
-    "Peer.Outbox": () => Stream.unwrap(Effect.map(peerOf("Peer.Outbox"), (peer) => peers.outbox(peer))),
+    "Remote.Outbox": () => Stream.unwrap(Effect.map(remoteOf("Remote.Outbox"), (id) => inbound.outbox(id))),
 
-    "Peer.Ack": ({ ids }: PayloadOf<"Peer.Ack">) => Effect.flatMap(peerOf("Peer.Ack"), (peer) => peers.ack(peer, ids)),
+    "Remote.Ack": ({ ids }: PayloadOf<"Remote.Ack">) =>
+      Effect.flatMap(remoteOf("Remote.Ack"), (id) => inbound.ack(id, ids)),
+
+    "Remote.Link": ({ edges }: PayloadOf<"Remote.Link">) =>
+      remoteOf("Remote.Link").pipe(Effect.andThen(inbound.link(edges))),
+
+    "Remote.Unlink": ({ edges }: PayloadOf<"Remote.Unlink">) =>
+      remoteOf("Remote.Unlink").pipe(Effect.andThen(inbound.unlink(edges))),
 
     "Machine.Add": ({ name, target }: PayloadOf<"Machine.Add">) =>
       cliOnly("Machine.Add").pipe(Effect.andThen(machines.add(name, target))),
@@ -238,9 +272,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const caller = yield* Caller
 
-        if (Predicate.isTagged(caller, "Peer")) {
+        if (Predicate.isTagged(caller, "Remote")) {
           if (machine !== undefined)
-            return yield* new Forbidden({ method: "Machine.Load", message: "a peer reads its own machine" })
+            return yield* new Forbidden({ method: "Machine.Load", message: "a remote reads its own machine" })
 
           return yield* load.read()
         }
@@ -256,7 +290,7 @@ const make = Effect.gen(function* () {
         return yield* machines.reading(machine)
       }),
 
-    "Machine.List": () => cliOnly("Machine.List").pipe(Effect.andThen(machines.listing)),
+    "Machine.List": () => userOnly("Machine.List").pipe(Effect.andThen(machines.listing)),
 
     "Machine.Remove": ({ name }: PayloadOf<"Machine.Remove">) =>
       cliOnly("Machine.Remove").pipe(Effect.andThen(machines.remove(name))),
@@ -265,11 +299,13 @@ const make = Effect.gen(function* () {
 
 export const layer = group([
   "List",
-  "Peer.Hello",
-  "Peer.Spawn",
+  "Remote.Hello",
+  "Remote.Spawn",
   "Project.Clone",
-  "Peer.Outbox",
-  "Peer.Ack",
+  "Remote.Outbox",
+  "Remote.Ack",
+  "Remote.Link",
+  "Remote.Unlink",
   "Machine.Add",
   "Machine.Load",
   "Machine.List",

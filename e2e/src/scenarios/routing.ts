@@ -15,7 +15,7 @@ type Entry = {
   provider: string | null
   model: string | null
   projectId: string
-  address: { id: string }
+  terminal: { runtime: string; target: { pane?: string } } | null
   routing?: { decidedBy: Record<string, string> }
 }
 
@@ -135,7 +135,7 @@ import { Plugin } from "@vibest/plugin"
 export default Plugin.define({
   id: "promised",
   setup: async (ctx) => {
-    await ctx.agent.hook("start.before", async (e) => {
+    await ctx.session.hook("start.before", async (e) => {
       if (e.prompt.includes("done-promised")) e.provider = "second"
     })
     void (async () => {
@@ -151,7 +151,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G5",
     title:
-      "a routing plugin's agent.start.before changes the start: the run starts Pi, ls names the plugin as the decider of the field it changed, and its answer arrives",
+      "a routing plugin's session.start.before changes the start: the run starts Pi, ls names the plugin as the decider of the field it changed, and its answer arrives",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "route")
@@ -162,7 +162,7 @@ const checks: ReadonlyArray<Check> = [
         await writePlugin(
           w,
           "router",
-          `ctx.agent.hook("start.before", (e) => Effect.sync(() => { if (e.prompt.includes("done-routed")) e.provider = "second" }))`,
+          `ctx.session.hook("start.before", (e) => Effect.sync(() => { if (e.prompt.includes("done-routed")) e.provider = "second" }))`,
         )
         const id = await runId(w, ["--", ask("routed")])
         const e = await entry(w, id)
@@ -288,7 +288,7 @@ const checks: ReadonlyArray<Check> = [
 
         await until("the entry session ready", () => processes().some((p) => p.readyAt !== null), 60_000)
         const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
-        await herdr(socket, "pane.close", { pane_id: entryRow.address.id.split("/").pop()! })
+        await herdr(socket, "pane.close", { pane_id: entryRow.terminal!.target.pane! })
         await until("the entry session's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
         const again = await w.vibest(["--headless"], { env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 60_000 })
         expect(again.code === 0, `restart without --harness: ${again.code} ${again.stderr}${again.stdout}`)
@@ -332,7 +332,7 @@ const checks: ReadonlyArray<Check> = [
         const router = await writePlugin(
           w,
           "router",
-          `ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.harness = "pi" }))`,
+          `ctx.session.hook("start.before", (e) => Effect.sync(() => { e.harness = "pi" }))`,
         )
 
         const pi = await startedIn("dflt-pi", { PI_CODING_AGENT_DIR: dir })

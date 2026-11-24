@@ -7,7 +7,7 @@ export const harnessDefaultPlugin = (configured: Effect.Effect<string | undefine
   Plugin.define({
     id: "vibest.harness-default",
     effect: (context) =>
-      context.agent.hook("start.before", (event) =>
+      context.session.hook("start.before", (event) =>
         Effect.gen(function* () {
           if (event.harness !== undefined) return
 

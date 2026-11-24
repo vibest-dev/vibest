@@ -1,6 +1,6 @@
 import { Plugin } from "@vibest/plugin/effect"
-import { Crypto, Effect, FileSystem, Path } from "effect"
-import { Hex } from "effect/encoding"
+import { Effect, FileSystem, Path } from "effect"
+import { Digest } from "effect/crypto"
 
 import { type AgentFile, agentsFrom } from "./agent-file.ts"
 
@@ -13,7 +13,7 @@ export const agentFilesPlugin = (home: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const crypto = yield* Crypto.Crypto
+    const digest = yield* Digest.Digest
     const folder = path.join(home, "agents")
     let lastRead: ReadonlyArray<AgentFile> = []
 
@@ -55,9 +55,9 @@ export const agentFilesPlugin = (home: string) =>
 
     const revise = Effect.gen(function* () {
       const snapshot = yield* read
-      const digest = yield* crypto.digest("SHA-256", new TextEncoder().encode(JSON.stringify(snapshot)))
+      const hex = yield* digest.digestHex(Digest.sha256, new TextEncoder().encode(JSON.stringify(snapshot)))
 
-      return { revision: Hex.encode(digest).slice(0, 12), plugin: pluginFor(snapshot) }
+      return { revision: hex.slice(0, 12), plugin: pluginFor(snapshot) }
     }).pipe(Effect.orElseSucceed(() => ({ revision: "unhashed", plugin: pluginFor({ files: lastRead }) })))
 
     return { plugin: pluginFor({ files: [] }), revise }

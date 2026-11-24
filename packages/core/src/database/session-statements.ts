@@ -3,6 +3,7 @@ import {
   ExecutionFailed,
   ExecutionInput,
   ExecutionInterrupted,
+  type ExecutionOutcome,
   ExecutionStarted,
   ExecutionSucceeded,
   ExecutionUnresolved,
@@ -19,9 +20,10 @@ import {
 } from "@vibest/schema/event"
 import { newId, sessionLabel } from "@vibest/schema/id"
 import { Routing } from "@vibest/schema/plugin"
-import { type AgentStatus, RuntimeAddress } from "@vibest/schema/session"
+import { type AgentStatus } from "@vibest/schema/session"
+import { canonicalTarget, TerminalTarget } from "@vibest/schema/terminal"
 import { Effect, Schema } from "effect"
-import { SqlClient, type SqlError, type Statement } from "effect/sql"
+import { SqlClient, type Statement } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 import { SessionLive } from "../session/live.ts"
@@ -32,13 +34,13 @@ export type Current = {
   readonly id: number
   readonly start: ProcessStart
   readonly ended: number | null
-  readonly terminal: string | null
+  readonly terminal: TerminalTarget | null
   readonly harnessSessionId: string | null
   readonly integration: Integration | undefined
   readonly readyAt: number | null
 }
 
-export type Creator = { readonly local: string } | { readonly peer: string; readonly session: string } | undefined
+export type Creator = { readonly local: string } | { readonly remote: string; readonly session: string } | undefined
 
 type ProcessColumns = {
   readonly id: number
@@ -60,29 +62,35 @@ const encodeRouting = Schema.encodeSync(Routing)
 
 const decodeRoutingJson = Schema.decodeSync(Schema.fromJsonString(Routing))
 
+const decodeTerminalJson = Schema.decodeSync(Schema.fromJsonString(TerminalTarget))
+
 const routingJson = (routing: Routing | undefined) =>
   routing === undefined ? null : JSON.stringify(encodeRouting(routing))
 
-const currentOf = (row: ProcessColumns): Current => ({
-  id: row.id,
-  start: {
-    harness: row.harness,
-    ...(row.provider !== null && { provider: row.provider }),
-    ...(row.model !== null && { model: row.model }),
-    ...(row.routing !== null && { routing: decodeRoutingJson(row.routing) }),
-    runtime: row.runtime,
-    terminal: row.terminal ?? "",
-    ...(row.pid !== null && { pid: row.pid }),
-  },
-  ended: row.endedAt,
-  terminal: row.terminal,
-  harnessSessionId: row.harnessSessionId,
-  integration:
-    row.integrationVersion === null || row.integrationProtocol === null
-      ? undefined
-      : { version: row.integrationVersion, protocol: row.integrationProtocol },
-  readyAt: row.readyAt,
-})
+const currentOf = (row: ProcessColumns): Current => {
+  const terminal = row.terminal === null ? null : decodeTerminalJson(row.terminal)
+
+  return {
+    id: row.id,
+    start: {
+      harness: row.harness,
+      ...(row.provider !== null && { provider: row.provider }),
+      ...(row.model !== null && { model: row.model }),
+      ...(row.routing !== null && { routing: decodeRoutingJson(row.routing) }),
+      runtime: row.runtime,
+      ...(terminal !== null && { terminal }),
+      ...(row.pid !== null && { pid: row.pid }),
+    },
+    ended: row.endedAt,
+    terminal,
+    harnessSessionId: row.harnessSessionId,
+    integration:
+      row.integrationVersion === null || row.integrationProtocol === null
+        ? undefined
+        : { version: row.integrationVersion, protocol: row.integrationProtocol },
+    readyAt: row.readyAt,
+  }
+}
 
 const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, terminal, pid, harness_session_id,
   integration_version, integration_protocol, ready_at, ended_at`
@@ -96,7 +104,7 @@ export const statements = Effect.gen(function* () {
   const reads = ledgerReads(sql)
   const moving = new Set<string>()
 
-  const remember = (row: Pick<SessionRow, "id" | "status" | "entry" | "endedAt">) =>
+  const remember = (row: Pick<SessionRow, "id" | "status" | "endedAt">) =>
     archived(row) ? sessionLive.ended(row.id) : sessionLive.setStatus(row.id, row.status)
 
   const running = sql`p_ended IS NULL`
@@ -131,18 +139,11 @@ export const statements = Effect.gen(function* () {
       Effect.map((rows) => (rows[0] === undefined ? undefined : currentOf(rows[0]))),
     )
 
-  const placed = (projectIdValue: string, current: Current | undefined) =>
-    current !== undefined && current.ended === null && current.terminal !== null && !moving.has(projectIdValue)
-
-  const findEntrySessions = (project?: string) =>
-    selectSessions(project === undefined ? [] : [sql`s.project_id = ${project}`], sql`entry = 1`).pipe(
-      Effect.map((rows) =>
-        rows.map((row) =>
-          moving.has(row.projectId) && row.process !== null
-            ? { ...row, process: { ...row.process, terminal: null } }
-            : row,
-        ),
-      ),
+  const latestRoot = (project: string) =>
+    sql<{ id: string }>`SELECT id FROM session
+      WHERE project_id = ${project} AND parent_session_id IS NULL AND origin_remote IS NULL AND ended_at IS NULL
+      ORDER BY coalesce(active_at, created_at) DESC, rowid DESC LIMIT 1`.pipe(
+      Effect.flatMap((rows) => (rows[0] === undefined ? Effect.succeed(undefined) : findSession(rows[0].id))),
     )
 
   const openExecution = (sessionId: string) =>
@@ -227,8 +228,10 @@ export const statements = Effect.gen(function* () {
       Effect.map((rows) => rows.length > 0),
     )
 
-  const isEntry = (id: string) =>
-    sql`SELECT 1 FROM project WHERE entry_session_id = ${id}`.pipe(Effect.map((rows) => rows.length > 0))
+  const isRoot = (id: string) =>
+    sql`SELECT 1 FROM session WHERE id = ${id} AND parent_session_id IS NULL AND origin_remote IS NULL`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
 
   const fromOldProcess = (id: string, process: number | undefined) =>
     Effect.map(currentProcessId(id), (current) => process !== undefined && process !== current)
@@ -265,7 +268,7 @@ export const statements = Effect.gen(function* () {
     live.start.runtime === start.runtime &&
     routingJson(live.start.routing) === routingJson(start.routing)
 
-  const placeProcess = (id: string, terminal: string, pid?: number, at?: number) =>
+  const placeProcess = (id: string, terminal: TerminalTarget, pid?: number, at?: number) =>
     Effect.gen(function* () {
       const live = yield* liveProcess(id)
 
@@ -284,7 +287,7 @@ export const statements = Effect.gen(function* () {
       const live = yield* liveProcess(id)
       const stamp = at === undefined ? {} : { at }
 
-      if (live !== undefined && live.terminal === null && start.terminal !== "" && sameChoice(live, start)) {
+      if (live !== undefined && live.terminal === null && start.terminal !== undefined && sameChoice(live, start)) {
         yield* placeProcess(id, start.terminal, start.pid, at)
 
         if (start.resume && start.resume !== live.harnessSessionId)
@@ -310,7 +313,7 @@ export const statements = Effect.gen(function* () {
           ...(start.routing !== undefined && { routing: start.routing }),
           ...(start.resume && { resume: start.resume }),
           runtime: start.runtime,
-          ...(start.terminal !== "" && { terminal: start.terminal }),
+          ...(start.terminal !== undefined && { terminal: start.terminal }),
           ...(start.pid !== undefined && { pid: start.pid }),
         },
       })
@@ -521,39 +524,39 @@ export const statements = Effect.gen(function* () {
       yield* observe({ type: "session.changed", sessionId: id })
     })
 
-  const processesAt = (runtime: string, address: RuntimeAddress) =>
+  const processesAt = (runtime: string, target: TerminalTarget) =>
     sql<{ sessionId: string; process: number }>`SELECT s.id AS session_id, p.id AS process FROM session s
       JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-      WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL`
+      WHERE p.runtime = ${runtime} AND p.terminal = ${canonicalTarget(target)} AND p.ended_at IS NULL`
 
-  const lastSessionAt = (runtime: string, address: RuntimeAddress) =>
-    sql<{ sessionId: string }>`SELECT session_id FROM process WHERE runtime = ${runtime} AND terminal = ${address.id}
+  const lastSessionAt = (runtime: string, target: TerminalTarget) =>
+    sql<{
+      sessionId: string
+    }>`SELECT session_id FROM process WHERE runtime = ${runtime} AND terminal = ${canonicalTarget(target)}
       ORDER BY started_at DESC, rowid DESC LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.sessionId))
 
   const lastProjectTerminal = (projectId: string, runtime: string) =>
     sql<{ terminal: string }>`SELECT p.terminal FROM process p
       JOIN session s ON s.id = p.session_id
       WHERE s.project_id = ${projectId}
-        AND s.origin_peer IS NULL
+        AND s.origin_remote IS NULL
         AND p.runtime = ${runtime}
         AND p.terminal IS NOT NULL
-        AND p.terminal != ''
       ORDER BY p.ended_at IS NOT NULL, p.started_at DESC, p.rowid DESC
       LIMIT 1`.pipe(
-      Effect.map((rows): RuntimeAddress | undefined =>
-        rows[0] === undefined ? undefined : { machine: "local", id: rows[0].terminal },
+      Effect.map((rows): TerminalTarget | undefined =>
+        rows[0] === undefined ? undefined : decodeTerminalJson(rows[0].terminal),
       ),
     )
 
-  const entrySessionsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
+  const liveSessionsAt = (runtime: string, target: TerminalTarget, except?: string) =>
     Effect.gen(function* () {
-      const rows = yield* sql<{ id: string; project: string }>`SELECT s.id, s.project_id AS project FROM session s
-        JOIN project q ON q.entry_session_id = s.id
+      const rows = yield* sql<{ id: string }>`SELECT s.id FROM session s
         JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-        WHERE p.runtime = ${runtime} AND p.terminal = ${address.id} AND p.ended_at IS NULL
-          ${except === undefined ? sql`` : sql`AND s.project_id != ${except}`}`
+        WHERE p.runtime = ${runtime} AND p.terminal = ${canonicalTarget(target)} AND p.ended_at IS NULL
+          ${except === undefined ? sql`` : sql`AND s.id != ${except}`}`
 
-      return rows.filter((r) => !moving.has(r.project))
+      return rows.filter((r) => !moving.has(r.id))
     })
 
   const sessionPrefixTaken = (short: string) =>
@@ -564,13 +567,13 @@ export const statements = Effect.gen(function* () {
   const unusedId = newId(sessionPrefixTaken)
 
   const creatorOf = (id: string): Effect.Effect<Creator> =>
-    sql<{ parent: string | null; peer: string | null; session: string | null }>`SELECT
-        parent_session_id AS parent, origin_peer AS peer, origin_session AS session
+    sql<{ parent: string | null; remote: string | null; session: string | null }>`SELECT
+        parent_session_id AS parent, origin_remote AS remote, origin_session AS session
       FROM session WHERE id = ${id}`.pipe(
       Effect.map(([row]): Creator => {
         if (row === undefined) return undefined
 
-        if (row.peer !== null && row.session !== null) return { peer: row.peer, session: row.session }
+        if (row.remote !== null && row.session !== null) return { remote: row.remote, session: row.session }
 
         if (row.parent !== null) return { local: row.parent }
 
@@ -586,44 +589,13 @@ export const statements = Effect.gen(function* () {
       for (;;) {
         const creator = yield* creatorOf(current)
 
-        if (creator === undefined || "peer" in creator) return creator
+        if (creator === undefined || "remote" in creator) return creator
 
         if ((yield* sql`SELECT 1 FROM session WHERE id = ${creator.local} AND ended_at IS NULL`).length > 0)
           return creator
         current = creator.local
       }
     }).pipe(Effect.orDie)
-
-  const teamOwner = (project: string, team: string) =>
-    sql<{ owner: string | null }>`SELECT parent_session_id AS owner FROM session
-      WHERE project_id = ${project} AND team = ${team} LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.owner ?? undefined))
-
-  const unusedTeamId = (project: string): Effect.Effect<string, SqlError.SqlError> =>
-    sql<{ id: string }>`SELECT 't-' || lower(hex(randomblob(2))) AS id`.pipe(
-      Effect.flatMap(([row]) =>
-        teamOwner(project, row!.id).pipe(
-          Effect.flatMap((owner) => (owner === undefined ? Effect.succeed(row!.id) : unusedTeamId(project))),
-        ),
-      ),
-    )
-
-  const teamLive = (project: string, team: string) =>
-    sql`SELECT 1 FROM session WHERE project_id = ${project} AND team = ${team} AND ended_at IS NULL LIMIT 1`.pipe(
-      Effect.map((rows) => rows.length > 0),
-    )
-
-  const mayListTeam = (project: string, team: string, caller: string) =>
-    sql`SELECT 1 FROM session WHERE project_id = ${project} AND team = ${team}
-      AND (id = ${caller} OR parent_session_id = ${caller}) LIMIT 1`.pipe(
-      Effect.map((rows) => rows.length > 0),
-      Effect.orDie,
-    )
-
-  const teamMembers = (project: string, team: string) =>
-    sql<{ id: string; parent: string | null }>`SELECT id, parent_session_id AS parent FROM session
-      WHERE project_id = ${project} AND team = ${team} AND ended_at IS NULL ORDER BY created_at, rowid`.pipe(
-      Effect.orDie,
-    )
 
   const fromCurrentHarness = (sessionId: string, current: number, reporter?: number, pid?: number) =>
     Effect.gen(function* () {
@@ -649,7 +621,7 @@ export const statements = Effect.gen(function* () {
           AND p.harness_session_id = ${harnessSessionId}
       )
       OR (
-        EXISTS (SELECT 1 FROM project WHERE entry_session_id = ${sessionId})
+        EXISTS (SELECT 1 FROM session WHERE id = ${sessionId} AND parent_session_id IS NULL AND origin_remote IS NULL)
         AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND harness_session_id = ${harnessSessionId})
       )
     ) AS ok`.pipe(
@@ -660,7 +632,7 @@ export const statements = Effect.gen(function* () {
   const latestReply = (sessionId: string) =>
     sql<{
       execution: number
-      status: string
+      status: typeof ExecutionOutcome.Type
       text: string | null
       failure: string | null
       endedAt: number
@@ -680,8 +652,7 @@ export const statements = Effect.gen(function* () {
     findSession,
     currentProcess,
     currentProcessId,
-    placed,
-    findEntrySessions,
+    latestRoot,
     openExecution,
     workingExecutions,
     allocateExecution,
@@ -692,7 +663,7 @@ export const statements = Effect.gen(function* () {
     recordObservedEnd,
     accept,
     observable,
-    isEntry,
+    isRoot,
     fromOldProcess,
     endProcess,
     placeProcess,
@@ -703,18 +674,13 @@ export const statements = Effect.gen(function* () {
     archive,
     noteConversation,
     setStatus,
-    entrySessionsAt,
+    liveSessionsAt,
     processesAt,
     lastSessionAt,
     lastProjectTerminal,
     unusedId,
     creatorOf,
     nearestAlive,
-    teamOwner,
-    unusedTeamId,
-    teamLive,
-    mayListTeam,
-    teamMembers,
     fromCurrentHarness,
     canResumeConversation,
     latestReply,

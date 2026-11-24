@@ -88,11 +88,11 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
     yield* herdr.seedAgent("wC:p1")
     const raw = yield* client
 
-    const { sessionId, projectId } = yield* authed(raw, cliHeaders(repo))["Project.EntrySession"]({
+    const { sessionId, projectId } = yield* authed(raw, cliHeaders(repo))["Session.Claim"]({
       agent: "coordinator",
       harness,
       fresh: true,
-      terminal: "wC:p1",
+      terminal: { id: "wC:p1" },
     })
 
     if (harness === "claude") yield* db.session.noteConversation(sessionId, "claude-session")
@@ -130,11 +130,11 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       assert.strictEqual(
         tagOf(
           yield* Effect.exit(
-            user["Project.EntrySession"]({
+            user["Session.Claim"]({
               agent: "coordinator",
               harness: "claude",
               fresh: true,
-              terminal: "test/late",
+              terminal: { id: "test/late" },
             }),
           ),
         ),
@@ -303,7 +303,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       const held = yield* (yield* FakeProcesses).holdCwd()
-      const removing = yield* Effect.forkScoped(sessions.remove(id))
+      const removing = yield* Effect.forkScoped(sessions.archive(id))
       yield* held.reached
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining

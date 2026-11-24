@@ -53,7 +53,7 @@ const storedRow = (
   model: null,
   harnessSessionId: null,
   runtime: RUNTIME,
-  address: { machine: "local", id: "test/" },
+  terminal: { id: "test/" },
   status: "idle",
   startedAt: 1,
   exitedAt: null,
@@ -159,10 +159,10 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       yield* marker(elsewhere)
       yield* db.session.insertSession(storedRow(outside), key, { cwd: elsewhere })
       yield* db.session.insertSession(storedRow(none), key)
-      const left = (yield* sessions.remove(outside))!
+      const left = (yield* sessions.archive(outside))!
       assert.strictEqual(left.worktree, "kept")
       assert.include(left.reasons.join("\n"), "left alone")
-      const empty = (yield* sessions.remove(none))!
+      const empty = (yield* sessions.archive(none))!
       assert.strictEqual(empty.worktree, "kept")
       assert.strictEqual(empty.path, "")
       assert.include(empty.reasons.join("\n"), "nothing was deleted")

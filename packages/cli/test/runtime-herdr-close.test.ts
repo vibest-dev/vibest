@@ -3,8 +3,8 @@ import os from "node:os"
 import path from "node:path"
 
 import { afterAll, assert, describe, it } from "@effect/vitest"
+import type { Runtime } from "@vibest/plugin/effect"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
-import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { ConfigProvider, Effect, Exit, Ref, Stream } from "effect"
 
 import {
@@ -33,7 +33,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               .pipe(Effect.provide(env))
 
           return Effect.gen(function* () {
-            const log = yield* Ref.make<ReadonlyArray<TerminalRuntime.RuntimeEvent>>([])
+            const log = yield* Ref.make<ReadonlyArray<Runtime.RuntimeEvent>>([])
             yield* (runtime.events ?? Stream.empty).pipe(
               Stream.runForEach((event) => Ref.update(log, (events) => [...events, event])),
               Effect.forkScoped,
@@ -49,7 +49,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             git(repo, "-c", "user.email=v@v", "-c", "user.name=v", "commit", "-q", "--allow-empty", "-m", "x")
             git(repo, "worktree", "add", "-q", "--detach", path.join(dir, "linked"))
             const main = yield* open(repo)
-            const mainPane = TerminalRuntime.parseTerminal(main)!.paneId
+            const mainPane = main.pane!
 
             const linked = yield* herdr.call("worktree.open", {
               cwd: repo,
@@ -68,24 +68,21 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             const first = yield* open(plain)
             const second = yield* open(plain)
 
-            const ws = (yield* herdr.call("pane.get", { pane_id: TerminalRuntime.parseTerminal(first)!.paneId })).pane
-              .workspace_id
+            const ws = (yield* herdr.call("pane.get", { pane_id: first.pane! })).pane.workspace_id
 
             yield* runtime.close(first)
-            assert.strictEqual(
-              (yield* herdr.call("pane.get", { pane_id: TerminalRuntime.parseTerminal(second)!.paneId })).pane
-                .workspace_id,
-              ws,
-            )
+            assert.strictEqual((yield* herdr.call("pane.get", { pane_id: second.pane! })).pane.workspace_id, ws)
             yield* runtime.close(second)
-            assert.isTrue(
-              Exit.isFailure(
-                yield* Effect.exit(herdr.call("pane.get", { pane_id: TerminalRuntime.parseTerminal(second)!.paneId })),
-              ),
-            )
+            assert.isTrue(Exit.isFailure(yield* Effect.exit(herdr.call("pane.get", { pane_id: second.pane! }))))
             yield* waitFor(
               Ref.get(log),
-              (events) => events.some((event) => event.type === "exited" && event.terminal.id === second.id),
+              (events) =>
+                events.some(
+                  (event) =>
+                    event.type === "exited" &&
+                    event.terminal.session === second.session &&
+                    event.terminal.pane === second.pane,
+                ),
               "closed in place: gone under its own id, which a move would have changed",
             )
           })

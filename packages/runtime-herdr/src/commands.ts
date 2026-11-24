@@ -4,11 +4,10 @@ import { Claim, type VibestClient, type VibestClients } from "@vibest/client/cli
 import { Host } from "@vibest/plugin/host"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
-import { VibestCommand } from "@vibest/schema/layout"
 import { Config, Console, Effect, Option, Predicate, Schema } from "effect"
 import { Command } from "effect/cli"
 
-import { agentName, KIND, parseTerminal } from "./terminal-runtime.ts"
+import { agentName, KIND } from "./terminal-runtime.ts"
 
 export class BadPluginContext extends Schema.TaggedError<BadPluginContext>()("BadPluginContext", {
   message: Schema.String,
@@ -232,7 +231,7 @@ const toLive = (session: SessionInfo): LiveSession => ({
   agent: session.agent,
   harness: session.harness,
   status: session.status,
-  paneId: parseTerminal(session.address)?.paneId,
+  paneId: session.terminal?.runtime === KIND ? session.terminal.target.pane : undefined,
 })
 
 const daemonOn = ({ withVibest }: VibestClients) => {
@@ -243,20 +242,33 @@ const daemonOn = ({ withVibest }: VibestClients) => {
     republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
     openEntry: (directory: string) =>
       Effect.gen(function* () {
-        const focused = yield* ask(directory, (client) => client["Project.FocusEntry"]({}))
-
-        if (focused)
-          return { action: focused.focused ? ("focused" as const) : ("runs in" as const), place: focused.place }
-        const self = yield* VibestCommand
+        const env = callerEnvOf()
 
         const opened = yield* ask(directory, (client) =>
-          client.Launch({
-            argv: [...self],
-            agent: "coordinator",
-            focus: true,
-            runtime: KIND,
-            callerEnv: callerEnvOf(),
-          }),
+          client
+            .Launch({
+              agent: "coordinator",
+              focus: true,
+              runtime: KIND,
+              callerEnv: env,
+            })
+            .pipe(
+              Effect.catchTag("Forbidden", () =>
+                client["Session.Attach"]({ callerEnv: env, runtime: KIND }).pipe(
+                  Effect.flatMap((attached) =>
+                    client.Launch({
+                      projectId: attached.projectId,
+                      agent: "coordinator",
+                      fresh: true,
+                      ...(attached.running !== null && { harness: attached.running.harness }),
+                      focus: true,
+                      runtime: KIND,
+                      callerEnv: env,
+                    }),
+                  ),
+                ),
+              ),
+            ),
         )
 
         return { action: "opened" as const, place: opened.place }

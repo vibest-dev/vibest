@@ -1,6 +1,5 @@
 import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/database/db"
-import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import { harnessCatalog } from "@vibest/core/harness"
 import { Harnesses, unprovided } from "@vibest/core/harnesses"
 import { type HookCaller, Integration } from "@vibest/core/integration"
@@ -35,17 +34,17 @@ export const make = Effect.gen(function* () {
       const row = yield* db.session.sessionIdentity(sessionId)
 
       if (!row || row.harness !== harness) return
-      yield* run({ id: row.id, entry: row.entry, harness, process: processOf(read) })
+      yield* run({ id: row.id, harness, process: processOf(read) })
     }).pipe(Effect.orDie)
 
   return {
     "Harnesses.List": ({ provider, machine }, { headers }) =>
       Effect.gen(function* () {
-        if (machine !== undefined && machine !== LOCAL_MACHINE) {
-          if (reader(headers)(CALLER_HEADER) === "peer")
+        if (machine !== undefined) {
+          if (reader(headers)(CALLER_HEADER) === "remote")
             return yield* new Forbidden({
               method: "Harnesses.List",
-              message: "a peer asks for this machine's harnesses only",
+              message: "a remote asks for this machine's harnesses only",
             })
 
           return yield* remote.harnesses(machine, provider)
@@ -58,11 +57,11 @@ export const make = Effect.gen(function* () {
 
     "Agents.List": ({ machine }, { headers }) =>
       Effect.gen(function* () {
-        if (machine !== undefined && machine !== LOCAL_MACHINE) {
-          if (reader(headers)(CALLER_HEADER) === "peer")
+        if (machine !== undefined) {
+          if (reader(headers)(CALLER_HEADER) === "remote")
             return yield* new Forbidden({
               method: "Agents.List",
-              message: "a peer asks for this machine's agents only",
+              message: "a remote asks for this machine's agents only",
             })
 
           return yield* remote.agents(machine)

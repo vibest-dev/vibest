@@ -1,5 +1,6 @@
 import { sessionLabel } from "@vibest/schema/id"
 import { NotReady } from "@vibest/schema/session"
+import { canonicalTarget } from "@vibest/schema/terminal"
 import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, Ref, Schedule, Schema } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
@@ -57,7 +58,7 @@ export const busyOf = (seen: AgentSeen) => {
 
 const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
 
-const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
+const sameTerminal = (a: Terminal, b: Terminal) => canonicalTarget(a) === canonicalTarget(b)
 
 export const make = Effect.gen(function* () {
   const db = yield* Db.Service

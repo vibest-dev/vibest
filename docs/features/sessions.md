@@ -148,33 +148,30 @@ list` names the plugin that added each agent; a plugin loaded later replaces an 
 it and vibestd copies it to `<project folder>/sessions/<session id>/files/<file name>`; two files of the same name are
 both kept (the second as `<name>-2.<extension>`). The file content is not put into the task: the task ends with one line,
 `Attached files: <absolute path>, …`, naming the copies, and the agent reads them itself (every harness can read the
-project folder). A plugin sees that line in `agent.start.before` `prompt` and the copies' paths in `files`. Archiving the
+project folder). A plugin sees that line in `session.start.before` `prompt` and the copies' paths in `files`. Archiving the
 session removes `<project folder>/sessions/<session id>/`. A file over 10 MiB, one that cannot be read, or one that is
 not a regular file refuses the run. With `--machine`, the files go with the run and the vibestd there copies them into its own project folder, so
 the line names paths on that machine; a vibestd there that cannot take files refuses the run and says to run `vibest
 update` there.
 
-## S67. Teams
+## S67. Session links
 
-A team is a running group of sessions, as a session is a run of an agent definition: it has an id, not a name.
-`vibest run --team` with no id starts the session as the first member of a new team whose id vibest makes (`t-` and four hex
-digits, unique in the project) and prints it with the session id: `{"id": …, "team": "t-3f2a"}`. `vibest run --team
-<team id>` adds the session to that team and prints the id too. The word after `--team` is taken as the id only when it has the
-id's form (`t-` and four lowercase hex digits); anything else (a harness name, `--`, another flag) is left alone, so
-`vibest run --team pi -- <task>` starts a new team and runs Pi. Only the session that created the team may add members;
-any other session is refused with an error naming that session, and an id no team in this project has is refused; in both
-cases nothing starts. A team whose members have all been archived has ended: `--team <id>` is then refused and the id
-never comes back; this is checked in the same transaction as the new member, so a last archive and an addition happen in
-one order. Two bare `--team` always give two teams, whoever runs them. A session's team is set when it is
-created and never changes; a session started without `--team` is in no team, even when its creator is. `--team` with `--machine` is
-refused.
+Sessions form a directed messaging graph (`session_edge`). By default, `vibest run` links the new session bidirectionally
+with its creator (`parent <-> child`), and siblings cannot message each other. `vibest run` also accepts repeatable
+`--from <id>`, `--to <id>` and `--with <id>` flags to add directed or bidirectional edges to existing unarchived
+sessions in the same project when the session starts (`--from`, `--to` and `--with` with `--machine` are refused).
 
-Members of one team may `vibest send` to each other while they are unfinished (S46, S47 still refuse everyone else); a
-send to an archived teammate is refused and goes to no one else. Interrupt, peek and archive stay with the session that
-started each one. `vibest ls --team [<team id>]` prints JSON `{team, members}`: each unfinished member's id, agent,
-title, status and `startedBy`; without an id it is the caller's own team, and a session in no team gets an error. It answers only the session that
-created the team and its members; any other session is refused, even when it knows the id. A
-member's system prompt names its team id and says that `vibest ls --team` lists who is in it now.
+`vibest session link` and `vibest session unlink` manage directed messaging edges between live sessions in the same
+project and print JSON `{edges}`:
+
+- `vibest session link <a> <b> [<c>...]` adds all-to-all mutual edges between the named sessions.
+- `vibest session link <a...> --to <b...>` adds directed edges from each positional session to each `--to` session.
+- `vibest session link --chain <a> <b> [<c>...]` adds a directed chain (`a -> b -> c`).
+- `vibest session unlink` takes the same forms to remove edges.
+
+Linking and unlinking are idempotent. Self-loops, archived sessions, and sessions from another project are refused.
+A session's system prompt lists the sessions it is linked to (other than its creator) so it knows whom it may message
+directly with `vibest send`.
 
 ## S58. Listing worktrees
 

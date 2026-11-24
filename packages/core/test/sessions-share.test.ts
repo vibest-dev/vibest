@@ -75,7 +75,7 @@ describe.concurrent("Session", () => {
         )
 
         yield* parked.reached
-        const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
+        const archiving = yield* Effect.forkChild(owner.sessions.archive(owner.id))
 
         const listed = yield* Effect.race(
           cwd.reached.pipe(Effect.as(true)),
@@ -128,7 +128,7 @@ describe.concurrent("Session", () => {
 
         yield* split.reached
         const admitted = yield* Fiber.join(spawning)
-        const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
+        const archiving = yield* Effect.forkChild(owner.sessions.archive(owner.id))
         yield* until(
           Effect.sync(() => archiving.pollUnsafe()),
           (exit) => exit !== undefined,
@@ -176,7 +176,7 @@ describe.concurrent("Session", () => {
       yield* Effect.gen(function* () {
         const spawning = yield* Effect.forkChild(owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: mid.id }))
         yield* parkedBehindShare.reached
-        const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
+        const archiving = yield* Effect.forkChild(owner.sessions.archive(owner.id))
 
         const listed = yield* Effect.race(
           cwd.reached.pipe(Effect.as(true)),
@@ -242,7 +242,7 @@ describe.concurrent("Session", () => {
       const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
       yield* until(
         owner.db.session.getSession(id),
-        (w) => w !== undefined && exitedAt(w) === null && terminalOf(w).id !== "",
+        (w) => w !== undefined && exitedAt(w) === null && terminalOf(w) !== null,
       )
       assert.strictEqual(yield* owner.db.session.currentProcessId(id), reporter)
       assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
