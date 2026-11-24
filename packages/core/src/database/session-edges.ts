@@ -177,18 +177,16 @@ export const make = Effect.gen(function* () {
     ),
 
     linkedTargets: Effect.fn("Db.session.linkedTargets")((id: string, exclude?: string) =>
-      sql<{ id: string; name: string; entry: string | null }>`SELECT e.to_session_id AS id, s.name,
-          p.entry_session_id AS entry
+      sql<{ id: string; name: string }>`SELECT e.to_session_id AS id, s.name
         FROM session_edge e
         JOIN session s ON s.id = e.to_session_id
-        JOIN project p ON p.id = s.project_id
         WHERE e.from_session_id = ${id} AND e.to_remote_id = '' AND s.ended_at IS NULL
           ${exclude === undefined ? sql`` : sql`AND e.to_session_id != ${exclude}`}
         ORDER BY s.created_at, s.rowid`.pipe(
         Effect.map((rows) =>
           rows.map((row) => ({
             id: row.id,
-            label: row.id === row.entry ? "the entry session" : row.name ? `agent ${row.name}` : row.id,
+            label: row.name ? `agent ${row.name}` : row.id,
           })),
         ),
         Effect.orDie,

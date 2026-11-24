@@ -193,10 +193,14 @@ export const make = Effect.gen(function* () {
         }
       }
 
+      const managedWorktree = worktree.startsWith(`${layout.worktrees}/`)
+
       const confirmed =
         pane === "kept"
           ? { state: "unknown" as const, why: "its terminal was not closed, so nothing is proven" }
-          : yield* confirmExited
+          : managedWorktree
+            ? yield* confirmExited
+            : { state: "exited" as const, why: "" }
 
       const ownState = (): ProcessState => {
         if (exitedAt(session) !== null) return "exited"
@@ -318,7 +322,7 @@ export const make = Effect.gen(function* () {
         if (kept !== undefined) reasons.push(kept)
       }
 
-      if ((tree !== "kept" || shared) && processState === "exited") {
+      if ((tree !== "kept" || shared || !managedWorktree) && processState === "exited") {
         yield* removeSystemPrompt(id)
       }
 

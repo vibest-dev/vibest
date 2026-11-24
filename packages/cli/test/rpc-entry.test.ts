@@ -4,27 +4,43 @@ import { projectRoot } from "@vibest/core/project/create"
 import { FakeRuntime, makeRepository, until, projectOf } from "@vibest/platform-bun/test/lib/fakes"
 import { test, client, asCli, asEntry } from "@vibest/platform-bun/test/lib/rpc-helpers"
 import { Plugin } from "@vibest/plugin/effect"
-import { Effect, Fiber, Path, Predicate, Ref } from "effect"
+import { Effect, Fiber, FileSystem, Predicate, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 
 describe("vibest.sock", () => {
   const seenDirectory = { project: "" }
   test(
-    "Project.StartEntry schedules with the project directory, not its key; with no harness it fails until an entry session exists, then takes its harness",
+    "Session.Claim schedules with the project directory, not its key; with no harness it fails until a root session exists, then takes its harness",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
-      const first = yield* Effect.flip(c["Project.StartEntry"]({ agent: "general", runtime: "herdr" }))
+
+      const first = yield* Effect.flip(
+        c["Session.Claim"]({ agent: "general", runtime: "herdr", fresh: false, terminal: "test/p1" }),
+      )
+
       assert.strictEqual(first._tag, "LaunchFailed")
       assert.match(first.message, /no harness to inherit/)
-      assert.strictEqual(
-        (yield* c["Project.StartEntry"]({ agent: "general", runtime: "herdr", harness: "pi" })).harness,
-        "pi",
-      )
+
+      const claimed = yield* c["Session.Claim"]({
+        agent: "coordinator",
+        runtime: "herdr",
+        harness: "claude",
+        fresh: false,
+        terminal: "test/p1",
+      })
+
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
       assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
-      yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "claude", fresh: false, terminal: "test/p1" })
-      assert.strictEqual((yield* c["Project.StartEntry"]({ agent: "general", runtime: "herdr" })).harness, "claude")
+
+      const resumed = yield* c["Session.Claim"]({
+        agent: "coordinator",
+        runtime: "herdr",
+        fresh: false,
+        terminal: "test/p1",
+      })
+
+      assert.strictEqual(resumed.sessionId, claimed.sessionId)
     }),
     {
       plugins: [
@@ -42,14 +58,14 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "List shows the entry session's live status from its pane, not a stored unknown",
+    "List shows the root session's live status from its pane, not a stored unknown",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const pane = "w1:coord"
       yield* herdr.seedAgent(pane)
-      yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: pane })
+      yield* c["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: pane })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "working" }))
       yield* until(c.List({}), (list) => list.sessions[0]?.status === "working")
       assert.deepInclude((yield* c.List({})).sessions[0], { agent: "coordinator", status: "working" })
@@ -81,13 +97,14 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "archive refuses an entry session and names its project",
+    "archive archives a root session and leaves its checkout directory untouched",
     Effect.gen(function* () {
       const db = yield* Db.Service
-      const path = yield* Path.Path
+      const fs = yield* FileSystem.FileSystem
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      yield* db.session.startEntry(
+
+      const started = yield* db.session.startRoot(
         projectId,
         "pi",
         false,
@@ -95,26 +112,24 @@ describe("vibest.sock", () => {
           runtime: "herdr",
           address: { machine: "local", id: "test/main" },
         },
-        { agent: "coordinator" },
+        { agent: "coordinator", projectDirectory: repo },
       )
-      const entry = (yield* db.session.entryOf(projectId))!
-      const failed = yield* Effect.flip(asCli(yield* client, repo).Archive({ id: entry.id }))
-      assert.strictEqual(failed._tag, "NoSuchSession")
-      assert.strictEqual(
-        "message" in failed ? failed.message : "",
-        `${entry.id} is the session you opened in a terminal (project ${path.basename(repo)}); stop it in that terminal.`,
-      )
+
+      const outcome = yield* asCli(yield* client, repo).Archive({ id: started.sessionId })
+      assert.isNotNull(outcome)
+      assert.strictEqual(outcome?.worktree, "kept")
+      assert.isTrue(yield* fs.exists(repo))
+      assert.isNotNull((yield* db.session.getSession(started.sessionId))?.endedAt)
     }),
   )
 
   test(
-    "FocusEntry reports a runtime that cannot focus",
+    "--new with a missing harness does not archive the current root session",
     Effect.gen(function* () {
       const db = yield* Db.Service
-      const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      yield* db.session.startEntry(
+      yield* db.session.startRoot(
         projectId,
         "pi",
         false,
@@ -124,50 +139,27 @@ describe("vibest.sock", () => {
         },
         { agent: "coordinator" },
       )
-      yield* herdr.seedAgent("test/main")
-      const focused = yield* asCli(yield* client, repo)["Project.FocusEntry"]({})
-      assert.strictEqual(focused?.focused, false)
-      assert.strictEqual((yield* herdr.callsTo("focus")).length, 0)
-    }),
-    { noFocus: true },
-  )
-
-  test(
-    "--new with a missing harness does not archive the current entry session",
-    Effect.gen(function* () {
-      const db = yield* Db.Service
-      const repo = yield* makeRepository
-      const projectId = yield* projectOf(repo)
-      yield* db.session.startEntry(
-        projectId,
-        "pi",
-        false,
-        {
-          runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
-        },
-        { agent: "coordinator" },
-      )
-      const before = (yield* db.session.entryOf(projectId))!.id
+      const before = (yield* db.session.latestRoot(projectId))!.id
 
       const failed = yield* Effect.flip(
         asCli(yield* client, repo).Launch({
           agent: "coordinator",
           callerEnv: {},
-          argv: ["/bin/vibest", "--harness", "cursor", "--new"],
+          harness: "cursor",
+          fresh: true,
           focus: false,
           runtime: "herdr",
         }),
       )
 
       assert.ok(Predicate.isTagged(failed, "LaunchFailed") || Predicate.isTagged(failed, "SessionRefused"), failed._tag)
-      assert.strictEqual((yield* db.session.entryOf(projectId))!.id, before)
+      assert.strictEqual((yield* db.session.latestRoot(projectId))!.id, before)
     }),
     { missingBinary: ["cursor"] },
   )
 
   test(
-    "an entry launch whose typing fails leaves no open execution: the next start runs its first input",
+    "a root launch whose typing fails leaves no open execution: the next start runs its first input",
     Effect.gen(function* () {
       const db = yield* Db.Service
       const sql = yield* SqlClient.SqlClient
@@ -179,7 +171,7 @@ describe("vibest.sock", () => {
         asCli(c, repo).Launch({
           agent: "coordinator",
           callerEnv: {},
-          argv: ["/bin/vibest", "--harness", "cursor"],
+          harness: "cursor",
           focus: false,
           runtime: "herdr",
         }),
@@ -191,7 +183,7 @@ describe("vibest.sock", () => {
       yield* held.release("failed")
       assert.strictEqual((yield* Fiber.join(failing))._tag, "LaunchFailed")
       yield* launch
-      const id = (yield* db.session.entryOf(projectId))!.id
+      const id = (yield* db.session.latestRoot(projectId))!.id
 
       const executions = yield* sql<{ outcome: string | null }>`SELECT outcome FROM execution
         WHERE session_id = ${id} ORDER BY id`
@@ -200,6 +192,126 @@ describe("vibest.sock", () => {
         executions.map((e) => e.outcome),
         ["not_started", null],
       )
+    }),
+  )
+
+  test(
+    "Launch passes VIBEST_PROJECT_ID and VIBEST_SESSION_ID to open and calls rt.present with session and projectId",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const c = asCli(yield* client, repo)
+
+      const opened = yield* c.Launch({
+        projectId,
+        agent: "coordinator",
+        harness: "pi",
+        focus: false,
+        runtime: "herdr",
+        callerEnv: {},
+      })
+
+      const opens = yield* herdr.callsTo("open")
+      const lastOpen = opens.at(-1)
+      assert.isDefined(lastOpen)
+      assert.strictEqual(lastOpen?.env.VIBEST_PROJECT_ID, projectId)
+      assert.strictEqual(lastOpen?.env.VIBEST_SESSION_ID, opened.sessionId)
+
+      const presents = yield* herdr.callsTo("present")
+      const matched = presents.find((call) => call.info.session === opened.sessionId)
+      assert.isDefined(matched)
+      assert.strictEqual(matched?.info.projectId, projectId)
+    }),
+  )
+
+  test(
+    "Launch with an exited child sessionId opens in the child worktree with the child system prompt",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const fs = yield* FileSystem.FileSystem
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const raw = yield* client
+      const spawner = yield* asEntry(raw, repo)
+      const { id: childId } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      yield* until(
+        db.session.getSession(childId),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+      const childWorktree = yield* db.session.sessionDirectory(childId)
+      assert.isDefined(childWorktree)
+      assert.notStrictEqual(childWorktree, repo)
+
+      yield* db.session.endProcess(childId, "exited")
+
+      const c = asCli(raw, repo)
+      yield* c.Launch({
+        projectId,
+        sessionId: childId,
+        focus: false,
+        runtime: "herdr",
+        callerEnv: {},
+      })
+
+      const opens = yield* herdr.callsTo("open")
+      const lastOpen = opens.at(-1)
+      assert.strictEqual(lastOpen?.cwd, childWorktree)
+
+      const runs = yield* herdr.callsTo("run")
+      const lastRun = runs.at(-1)
+      assert.isDefined(lastRun)
+      const promptFlagIndex = lastRun!.argv.indexOf("--append-system-prompt")
+      const promptPath = promptFlagIndex === -1 ? undefined : lastRun!.argv[promptFlagIndex + 1]
+      assert.isDefined(promptPath)
+      const promptText = yield* fs.readFileString(promptPath!)
+      assert.notInclude(promptText, "do not edit files here")
+    }),
+  )
+
+  test(
+    "Launch refuses a running root session without move, and moves it when move: true is passed",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const c = asCli(yield* client, repo)
+
+      const first = yield* c.Launch({
+        projectId,
+        agent: "coordinator",
+        harness: "pi",
+        focus: false,
+        runtime: "herdr",
+        callerEnv: {},
+      })
+
+      const refused = yield* Effect.flip(
+        c.Launch({
+          projectId,
+          agent: "coordinator",
+          harness: "pi",
+          focus: false,
+          runtime: "herdr",
+          callerEnv: {},
+        }),
+      )
+
+      assert.strictEqual(refused._tag, "Forbidden")
+
+      const moved = yield* c.Launch({
+        projectId,
+        sessionId: first.sessionId,
+        move: true,
+        agent: "coordinator",
+        harness: "pi",
+        focus: false,
+        runtime: "herdr",
+        callerEnv: {},
+      })
+
+      assert.strictEqual(moved.sessionId, first.sessionId)
+      assert.notStrictEqual(moved.terminal, first.terminal)
     }),
   )
 })

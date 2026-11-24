@@ -27,7 +27,7 @@ describe.concurrent("an exited session", () => {
     Effect.gen(function* () {
       const w = yield* exitedSession
       const address = { machine: "local", id: w.row.process!.terminal! }
-      yield* w.db.session.startEntry(
+      yield* w.db.session.startRoot(
         w.row.projectId,
         "claude",
         false,

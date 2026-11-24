@@ -680,7 +680,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "present")
 
-        if (cut(info.entrySession) !== undefined) yield* watch(place.session, place.paneId)
+        if (cut(info.session) !== undefined) yield* watch(place.session, place.paneId)
 
         if (["agent", "harness", "project", "live"].every((key) => cut(info[key]) === undefined)) return
         const h = yield* client(place.session)

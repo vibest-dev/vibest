@@ -47,7 +47,6 @@ export const memoryPluginHost = Layer.mergeAll(
   }),
   Layer.succeed(Sends.Service, {
     send: () => noSessions,
-    deliverTo: () => noSessions,
     admit: () => noSessions,
     relay: () => noSessions,
   }),

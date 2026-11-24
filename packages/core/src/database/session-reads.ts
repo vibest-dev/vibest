@@ -55,14 +55,14 @@ export const make = Effect.gen(function* () {
         agent: string
         directory: string
         harness: string
-        entry: number
+        parentId: string | null
       }>`SELECT a.id, a.project_id, a.agent, a.directory,
           coalesce(p.harness, '') AS harness,
-          q.entry_session_id = a.id AS entry
-        FROM session a JOIN project q ON q.id = a.project_id
+          a.parent_session_id AS parent_id
+        FROM session a
         LEFT JOIN process p ON p.session_id = a.id AND p.id = a.process_id
         WHERE a.id = ${id}`.pipe(
-        Effect.map((rows) => (rows[0] === undefined ? undefined : { ...rows[0], entry: rows[0].entry === 1 })),
+        Effect.map((rows) => rows[0]),
         Effect.orDie,
       ),
     ),

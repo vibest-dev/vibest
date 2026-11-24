@@ -18,7 +18,7 @@ export const ACCESS = {
   ExecutionEnd: "open",
   Prompt: "open",
   Spawn: "agent",
-  Launch: "cli",
+  Launch: ["cli", "remote"],
   List: ["agent", "remote"],
   "Session.Link": "agent",
   "Session.Unlink": "agent",
@@ -28,14 +28,10 @@ export const ACCESS = {
   Watch: ["cli", "remote"],
   Events: "cli",
   "Session.Seen": "cli",
-  "Project.Open": "cli",
+  "Session.Attach": "cli",
+  "Session.Claim": "cli",
+  "Project.Open": ["cli", "remote"],
   "Project.Move": "cli",
-  "Project.EntryPlace": "cli",
-  "Project.EntrySession": "cli",
-  "Project.StartEntry": "cli",
-  "Project.FocusEntry": "cli",
-  "Project.RunningEntry": "agent",
-  "Project.StopEntry": "cli",
   "Project.Create": "cli",
   "Project.Clone": ["agent", "remote"],
   "Project.Info": "agent",
@@ -62,7 +58,24 @@ export const ACCESS = {
   "Machine.Remove": "cli",
 } as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly Access[]>
 
-export const UI_WS_CALLS: ReadonlySet<string> = new Set(["Watch"])
+export const UI_WS_CALLS: ReadonlySet<string> = new Set([
+  "Watch",
+  "Launch",
+  "Project.Open",
+  "Project.Create",
+  "Send",
+  "Session.Link",
+  "Session.Unlink",
+  "Interrupt",
+  "Stop",
+  "Archive",
+  "Peek",
+  "Get",
+  "Session.Seen",
+  "Machine.List",
+  "Harnesses.List",
+  "Agents.List",
+])
 
 export const REMOTE_CALLS: ReadonlySet<string> = new Set(
   Object.entries(ACCESS)
@@ -79,6 +92,8 @@ export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
       method !== "Machine.Load" &&
       method !== "Worktree.List" &&
       method !== "Project.Clone" &&
+      method !== "Project.Open" &&
+      method !== "Launch" &&
       method !== "Watch" &&
       !method.startsWith("Remote."),
   ),

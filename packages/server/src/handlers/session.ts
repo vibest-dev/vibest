@@ -97,25 +97,7 @@ export const make = Effect.gen(function* () {
 
       const session = yield* db.session.getSession(id)
 
-      if (!session || session.entry) {
-        const identity = yield* db.session.sessionIdentity(id)
-
-        if (identity?.entry) {
-          const directory = yield* db.project.projectDirectory(identity.projectId)
-
-          const name =
-            directory !== undefined && directory !== ""
-              ? directory.slice(directory.lastIndexOf("/") + 1)
-              : identity.projectId
-
-          return yield* new NoSuchSession({
-            id,
-            message: `${id} is the session you opened in a terminal (project ${name}); stop it in that terminal.`,
-          })
-        }
-
-        return yield* new NoSuchSession({ id, message: `no session ${id}` })
-      }
+      if (!session) return yield* new NoSuchSession({ id, message: `no session ${id}` })
 
       const manager = yield* db.session.nearestAlive(id)
 
@@ -131,11 +113,34 @@ export const make = Effect.gen(function* () {
       return id
     })
 
-  const linkProject = (method: "Session.Link" | "Session.Unlink") =>
-    scope(method).pipe(
-      Effect.map((project) => project.id),
-      Effect.catchTag("NotInRepository", (e) => Effect.fail(new Forbidden({ method, message: e.message }))),
-    )
+  const linkProject = (
+    method: "Session.Link" | "Session.Unlink",
+    spec:
+      | { readonly _tag: "Mutual"; readonly ids: ReadonlyArray<string> }
+      | { readonly _tag: "Directed"; readonly from: ReadonlyArray<string>; readonly to: ReadonlyArray<string> }
+      | { readonly _tag: "Chain"; readonly ids: ReadonlyArray<string> },
+  ) =>
+    Effect.gen(function* () {
+      const c = yield* Caller
+
+      if (Predicate.isTagged(c, "Ui")) {
+        const ref = Predicate.isTagged(spec, "Directed") ? spec.from[0] : spec.ids[0]
+
+        if (ref === undefined) return yield* new Forbidden({ method, message: `${method} needs at least one session` })
+        const id = yield* db.session.resolveSession(ref)
+        const identity = yield* db.session.sessionIdentity(id)
+
+        if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
+
+        return identity.projectId
+      }
+
+      const project = yield* scope(method).pipe(
+        Effect.catchTag("NotInRepository", (e) => Effect.fail(new Forbidden({ method, message: e.message }))),
+      )
+
+      return project.id
+    })
 
   const resolveEndpoint = (method: string, projectId: string, ref: string) =>
     Effect.gen(function* () {
@@ -308,12 +313,12 @@ export const make = Effect.gen(function* () {
       }),
 
     "Session.Link": ({ spec }) =>
-      linkProject("Session.Link").pipe(
+      linkProject("Session.Link", spec).pipe(
         Effect.flatMap((projectId) => applyCrossMachineEdges("Session.Link", projectId, spec, "link")),
       ),
 
     "Session.Unlink": ({ spec }) =>
-      linkProject("Session.Unlink").pipe(
+      linkProject("Session.Unlink", spec).pipe(
         Effect.flatMap((projectId) => applyCrossMachineEdges("Session.Unlink", projectId, spec, "unlink")),
       ),
 
@@ -350,7 +355,7 @@ export const make = Effect.gen(function* () {
               message: `${target} was not started by the session that called, and it did not start it; a message goes only to the session that started it or to a session it started`,
             })
           const from = Predicate.isTagged(caller, "Remote") ? yield* remoteSender(caller, p.from) : undefined
-          yield* sessions.deliverTo(target, p.message, from ?? { type: "user" }, p.request)
+          yield* sessions.send(target, p.message, from ?? { type: "user" }, p.request)
 
           return { id: target }
         }),
@@ -475,7 +480,7 @@ export const make = Effect.gen(function* () {
           if (!Predicate.isTagged(caller, "Remote")) yield* userOnly("Watch")
 
           const localChanges = yield* watchFeed.subscribe
-          const sessionRows = yield* watched(yield* listed(ListScope.All(), false))
+          const sessionRows = yield* watched(yield* listed(ListScope.All(), false, true))
           const localProjects = yield* snapshotProjects(sessionRows)
 
           if (Predicate.isTagged(caller, "Remote")) {
@@ -503,7 +508,7 @@ export const make = Effect.gen(function* () {
 
     "Session.Seen": ({ id, finished }) =>
       Effect.gen(function* () {
-        yield* cliOnly("Session.Seen")
+        yield* userOnly("Session.Seen")
         const identity = yield* db.session.sessionIdentity(id)
 
         if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
@@ -535,7 +540,7 @@ export const make = Effect.gen(function* () {
         if (conversation !== undefined) {
           const row = yield* db.session.sessionIdentity(id)
 
-          if (row?.entry === true && conversation.harness === row.harness)
+          if (row?.parentId === null && conversation.harness === row.harness)
             yield* integration.conversation(id, conversation.id, processOf(read))
 
           return {}
