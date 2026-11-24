@@ -1,5 +1,6 @@
 import { Layout } from "@vibest/schema/layout"
-import { Context, Crypto, Effect, FileSystem, Layer, Path } from "effect"
+import { Context, Effect, FileSystem, Layer, Path } from "effect"
+import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, HttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient, type SqlError } from "effect/sql"
@@ -11,7 +12,8 @@ export * as PlatformNode from "./platform.ts"
 
 export const fileSystem = LayerNode.unbound(FileSystem.FileSystem)
 export const path = LayerNode.unbound(Path.Path)
-export const crypto = LayerNode.unbound(Crypto.Crypto)
+export const digest = LayerNode.unbound(Digest.Digest)
+export const secureRandom = LayerNode.unbound(SecureRandom.SecureRandom)
 export const childProcessSpawner = LayerNode.unbound(ChildProcessSpawner.ChildProcessSpawner)
 
 export class SqlClientLayer extends Context.Service<

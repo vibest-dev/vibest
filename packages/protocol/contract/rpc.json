@@ -148,20 +148,16 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -397,17 +393,13 @@
             "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -569,18 +561,14 @@
           "after": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -605,17 +593,13 @@
             "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -872,51 +856,43 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/AmbiguousSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/SessionBusyEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeUnreachableEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoRuntimeEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/AmbiguousSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/SessionBusyEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeUnreachableEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoRuntimeEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -1258,18 +1234,14 @@
           "max": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -1418,36 +1390,28 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/WrongInstanceEncoded"
-              },
-              {
-                "$ref": "#/$defs/DaemonBusyEncoded"
-              },
-              {
-                "$ref": "#/$defs/DaemonStoppingEncoded"
-              },
-              {
-                "$ref": "#/$defs/LaunchFailedEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/WrongInstanceEncoded"
+          },
+          {
+            "$ref": "#/$defs/DaemonBusyEncoded"
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "$ref": "#/$defs/LaunchFailedEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -1729,33 +1693,25 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/WrongInstanceEncoded"
-              },
-              {
-                "$ref": "#/$defs/DaemonBusyEncoded"
-              },
-              {
-                "$ref": "#/$defs/DaemonStoppingEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/WrongInstanceEncoded"
+          },
+          {
+            "$ref": "#/$defs/DaemonBusyEncoded"
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -2006,7 +1962,8 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 0
+                "minimum": 0,
+                "maximum": 9007199254740991
               },
               {
                 "type": "null"
@@ -2081,30 +2038,22 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "not": {}
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -2449,18 +2398,14 @@
           "startedAt": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -2471,18 +2416,14 @@
           "exitedAt": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -2783,18 +2724,14 @@
                   "endedAt": {
                     "anyOf": [
                       {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
                         ]
                       },
                       {
@@ -2838,77 +2775,73 @@
           "reply": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "execution": {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
-                        ]
+                "type": "object",
+                "properties": {
+                  "execution": {
+                    "anyOf": [
+                      {
+                        "type": "number"
                       },
-                      "status": {
-                        "type": "string"
-                      },
-                      "text": {
-                        "anyOf": [
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "failure": {
-                        "anyOf": [
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "endedAt": {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
                         ]
                       }
-                    },
-                    "required": [
-                      "execution",
-                      "status",
-                      "text",
-                      "failure",
-                      "endedAt"
-                    ],
-                    "additionalProperties": true
+                    ]
                   },
-                  {
-                    "type": "null"
+                  "status": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "failure": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "endedAt": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
                   }
-                ]
+                },
+                "required": [
+                  "execution",
+                  "status",
+                  "text",
+                  "failure",
+                  "endedAt"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
               },
               {
                 "type": "null"
@@ -2944,39 +2877,31 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/AmbiguousSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/AmbiguousSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -3323,20 +3248,16 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -3523,27 +3444,19 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
             "not": {}
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -3854,24 +3767,16 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -4056,27 +3961,19 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/HarnessUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              }
-            ]
+            "$ref": "#/$defs/HarnessUnavailableEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -4285,51 +4182,43 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/AmbiguousSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/SessionBusyEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeUnreachableEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoRuntimeEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/AmbiguousSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/SessionBusyEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeUnreachableEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoRuntimeEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -4697,6 +4586,16 @@
               }
             ]
           },
+          "move": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "harness": {
             "anyOf": [
               {
@@ -4860,63 +4759,55 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchProjectEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/LaunchFailedEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoRuntimeEncoded"
-              },
-              {
-                "$ref": "#/$defs/AgentRefusedEncoded"
-              },
-              {
-                "$ref": "#/$defs/PluginsNotActiveEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownAgentEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NotInRepositoryEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchProjectEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/LaunchFailedEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoRuntimeEncoded"
+          },
+          {
+            "$ref": "#/$defs/AgentRefusedEncoded"
+          },
+          {
+            "$ref": "#/$defs/PluginsNotActiveEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownAgentEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -5410,18 +5301,14 @@
                 "startedAt": {
                   "anyOf": [
                     {
-                      "anyOf": [
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "Infinity",
-                            "-Infinity",
-                            "NaN"
-                          ]
-                        }
+                      "type": "number"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "Infinity",
+                        "-Infinity",
+                        "NaN"
                       ]
                     },
                     {
@@ -5432,18 +5319,14 @@
                 "exitedAt": {
                   "anyOf": [
                     {
-                      "anyOf": [
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "Infinity",
-                            "-Infinity",
-                            "NaN"
-                          ]
-                        }
+                      "type": "number"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "Infinity",
+                        "-Infinity",
+                        "NaN"
                       ]
                     },
                     {
@@ -5744,18 +5627,14 @@
                         "endedAt": {
                           "anyOf": [
                             {
-                              "anyOf": [
-                                {
-                                  "type": "number"
-                                },
-                                {
-                                  "type": "string",
-                                  "enum": [
-                                    "Infinity",
-                                    "-Infinity",
-                                    "NaN"
-                                  ]
-                                }
+                              "type": "number"
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "Infinity",
+                                "-Infinity",
+                                "NaN"
                               ]
                             },
                             {
@@ -5885,24 +5764,16 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -6133,33 +6004,25 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineFailedEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              },
-              {
-                "$ref": "#/$defs/AlreadyAddedEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/MachineFailedEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
+          },
+          {
+            "$ref": "#/$defs/AlreadyAddedEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -6539,18 +6402,14 @@
             "runtimesAt": {
               "anyOf": [
                 {
-                  "anyOf": [
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "Infinity",
-                        "-Infinity",
-                        "NaN"
-                      ]
-                    }
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
                   ]
                 },
                 {
@@ -6635,17 +6494,13 @@
             "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -6854,18 +6709,14 @@
               "utilization": {
                 "anyOf": [
                   {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Infinity",
+                      "-Infinity",
+                      "NaN"
                     ]
                   },
                   {
@@ -6957,33 +6808,25 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -7266,27 +7109,19 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -7474,18 +7309,14 @@
           "lines": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -7536,45 +7367,37 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/AmbiguousSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoRuntimeEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeUnreachableEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/AmbiguousSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoRuntimeEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeUnreachableEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -7890,17 +7713,13 @@
             "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -8152,17 +7971,13 @@
             "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -8396,17 +8211,13 @@
             "not": {}
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -8894,72 +8705,64 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoProjectEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoCommitEncoded"
-              },
-              {
-                "$ref": "#/$defs/PromptTooLargeEncoded"
-              },
-              {
-                "$ref": "#/$defs/AllocationFailedEncoded"
-              },
-              {
-                "$ref": "#/$defs/HarnessUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoCallingSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoHarnessChosenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoRuntimeEncoded"
-              },
-              {
-                "$ref": "#/$defs/AgentRefusedEncoded"
-              },
-              {
-                "$ref": "#/$defs/PluginsNotActiveEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownAgentEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeUnreachableEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoProjectEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoCommitEncoded"
+          },
+          {
+            "$ref": "#/$defs/PromptTooLargeEncoded"
+          },
+          {
+            "$ref": "#/$defs/AllocationFailedEncoded"
+          },
+          {
+            "$ref": "#/$defs/HarnessUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoCallingSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoHarnessChosenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoRuntimeEncoded"
+          },
+          {
+            "$ref": "#/$defs/AgentRefusedEncoded"
+          },
+          {
+            "$ref": "#/$defs/PluginsNotActiveEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownAgentEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeUnreachableEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeIncompatibleEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -9448,18 +9251,14 @@
           "protocol": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -9514,18 +9313,14 @@
                   "checked": {
                     "anyOf": [
                       {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
                         ]
                       },
                       {
@@ -9562,18 +9357,14 @@
           "pid": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -9607,18 +9398,14 @@
           "startedAt": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -9966,30 +9753,22 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "anyOf": [
-                  {
-                    "$ref": "#/$defs/ProjectCloneFailedEncoded"
-                  },
-                  {
-                    "$ref": "#/$defs/NoSuchSessionEncoded"
-                  },
-                  {
-                    "$ref": "#/$defs/UnknownMachineEncoded"
-                  },
-                  {
-                    "$ref": "#/$defs/MachineUnavailableEncoded"
-                  },
-                  {
-                    "$ref": "#/$defs/MachineIncompatibleEncoded"
-                  }
-                ]
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/ProjectCloneFailedEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
           },
           {
             "not": {}
@@ -9998,17 +9777,13 @@
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -10349,30 +10124,22 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/ProjectCreateFailedEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/ProjectCreateFailedEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -10596,27 +10363,19 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/NotInRepositoryEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -10836,30 +10595,22 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/MoveRefusedEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/NotInRepositoryEncoded"
+          },
+          {
+            "$ref": "#/$defs/MoveRefusedEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -11097,36 +10848,28 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/NotInRepositoryEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -11405,27 +11148,19 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/NotInRepositoryEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -12080,42 +11815,34 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/AmbiguousSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/AmbiguousSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -12543,42 +12270,34 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/LaunchFailedEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeUnreachableEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NotInRepositoryEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/LaunchFailedEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeUnreachableEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeIncompatibleEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -12897,18 +12616,14 @@
           "pid": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -13003,63 +12718,55 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoHarnessChosenEncoded"
-              },
-              {
-                "$ref": "#/$defs/AgentRefusedEncoded"
-              },
-              {
-                "$ref": "#/$defs/PluginsNotActiveEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeUnreachableEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeIncompatibleEncoded"
-              },
-              {
-                "$ref": "#/$defs/HarnessUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoRuntimeEncoded"
-              },
-              {
-                "$ref": "#/$defs/LaunchFailedEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownAgentEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NotInRepositoryEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoHarnessChosenEncoded"
+          },
+          {
+            "$ref": "#/$defs/AgentRefusedEncoded"
+          },
+          {
+            "$ref": "#/$defs/PluginsNotActiveEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeUnreachableEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeIncompatibleEncoded"
+          },
+          {
+            "$ref": "#/$defs/HarnessUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoRuntimeEncoded"
+          },
+          {
+            "$ref": "#/$defs/LaunchFailedEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownAgentEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -13589,33 +13296,25 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/AmbiguousSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/AmbiguousSessionEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -13819,18 +13518,14 @@
           "pid": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -13874,18 +13569,14 @@
           "process": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "string",
-                    "enum": [
-                      "Infinity",
-                      "-Infinity",
-                      "NaN"
-                    ]
-                  }
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
                 ]
               },
               {
@@ -13900,27 +13591,19 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -14106,33 +13789,25 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeUnreachableEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeUnreachableEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -14443,33 +14118,25 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/AmbiguousSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/AmbiguousSessionEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -15065,90 +14732,82 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineFailedEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoProjectEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoCommitEncoded"
-              },
-              {
-                "$ref": "#/$defs/PromptTooLargeEncoded"
-              },
-              {
-                "$ref": "#/$defs/AllocationFailedEncoded"
-              },
-              {
-                "$ref": "#/$defs/HarnessUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoCallingSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoHarnessChosenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoRuntimeEncoded"
-              },
-              {
-                "$ref": "#/$defs/AgentRefusedEncoded"
-              },
-              {
-                "$ref": "#/$defs/PluginsNotActiveEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownAgentEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/AmbiguousSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeUnreachableEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineFailedEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoProjectEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoCommitEncoded"
+          },
+          {
+            "$ref": "#/$defs/PromptTooLargeEncoded"
+          },
+          {
+            "$ref": "#/$defs/AllocationFailedEncoded"
+          },
+          {
+            "$ref": "#/$defs/HarnessUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/NotInRepositoryEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoCallingSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoHarnessChosenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoRuntimeEncoded"
+          },
+          {
+            "$ref": "#/$defs/AgentRefusedEncoded"
+          },
+          {
+            "$ref": "#/$defs/PluginsNotActiveEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownAgentEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/AmbiguousSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeUnreachableEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeIncompatibleEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -15796,51 +15455,43 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/AmbiguousSessionEncoded"
-              },
-              {
-                "$ref": "#/$defs/SessionBusyEncoded"
-              },
-              {
-                "$ref": "#/$defs/RuntimeUnreachableEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoRuntimeEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/AmbiguousSessionEncoded"
+          },
+          {
+            "$ref": "#/$defs/SessionBusyEncoded"
+          },
+          {
+            "$ref": "#/$defs/RuntimeUnreachableEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoRuntimeEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
           },
           {
             "$ref": "#/$defs/DaemonStoppingEncoded"
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -16263,18 +15914,14 @@
                   "resetTime": {
                     "anyOf": [
                       {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
                         ]
                       },
                       {
@@ -16555,18 +16202,14 @@
                     "startedAt": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "string",
-                              "enum": [
-                                "Infinity",
-                                "-Infinity",
-                                "NaN"
-                              ]
-                            }
+                          "type": "number"
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "Infinity",
+                            "-Infinity",
+                            "NaN"
                           ]
                         },
                         {
@@ -16577,18 +16220,14 @@
                     "exitedAt": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "string",
-                              "enum": [
-                                "Infinity",
-                                "-Infinity",
-                                "NaN"
-                              ]
-                            }
+                          "type": "number"
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "Infinity",
+                            "-Infinity",
+                            "NaN"
                           ]
                         },
                         {
@@ -16889,18 +16528,14 @@
                             "endedAt": {
                               "anyOf": [
                                 {
-                                  "anyOf": [
-                                    {
-                                      "type": "number"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "enum": [
-                                        "Infinity",
-                                        "-Infinity",
-                                        "NaN"
-                                      ]
-                                    }
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "Infinity",
+                                    "-Infinity",
+                                    "NaN"
                                   ]
                                 },
                                 {
@@ -16954,18 +16589,14 @@
                     "finished": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "string",
-                              "enum": [
-                                "Infinity",
-                                "-Infinity",
-                                "NaN"
-                              ]
-                            }
+                          "type": "number"
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "Infinity",
+                            "-Infinity",
+                            "NaN"
                           ]
                         },
                         {
@@ -17212,18 +16843,14 @@
                   "startedAt": {
                     "anyOf": [
                       {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
                         ]
                       },
                       {
@@ -17234,18 +16861,14 @@
                   "exitedAt": {
                     "anyOf": [
                       {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
                         ]
                       },
                       {
@@ -17546,18 +17169,14 @@
                           "endedAt": {
                             "anyOf": [
                               {
-                                "anyOf": [
-                                  {
-                                    "type": "number"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "enum": [
-                                      "Infinity",
-                                      "-Infinity",
-                                      "NaN"
-                                    ]
-                                  }
+                                "type": "number"
+                              },
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "Infinity",
+                                  "-Infinity",
+                                  "NaN"
                                 ]
                               },
                               {
@@ -17611,18 +17230,14 @@
                   "finished": {
                     "anyOf": [
                       {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
                         ]
                       },
                       {
@@ -17794,30 +17409,22 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/WatchLaggedEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/WatchLaggedEncoded"
           },
           {
             "not": {}
           },
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
+            "$ref": "#/$defs/InvalidCallerEncoded"
+          },
+          {
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchSessionEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
@@ -18078,18 +17685,14 @@
                             "changed": {
                               "anyOf": [
                                 {
-                                  "anyOf": [
-                                    {
-                                      "type": "number"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "enum": [
-                                        "Infinity",
-                                        "-Infinity",
-                                        "NaN"
-                                      ]
-                                    }
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "Infinity",
+                                    "-Infinity",
+                                    "NaN"
                                   ]
                                 },
                                 {
@@ -18160,23 +17763,19 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchProjectEncoded"
-              },
-              {
-                "$ref": "#/$defs/UnknownMachineEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineUnavailableEncoded"
-              },
-              {
-                "$ref": "#/$defs/MachineIncompatibleEncoded"
-              }
-            ]
+            "$ref": "#/$defs/ForbiddenEncoded"
+          },
+          {
+            "$ref": "#/$defs/NoSuchProjectEncoded"
+          },
+          {
+            "$ref": "#/$defs/UnknownMachineEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineUnavailableEncoded"
+          },
+          {
+            "$ref": "#/$defs/MachineIncompatibleEncoded"
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"

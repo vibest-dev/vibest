@@ -484,6 +484,7 @@ export class VibestRpcs extends RpcGroup.make(
           projectId: Schema.optional(Schema.String),
           sessionId: Schema.optional(Schema.String),
           fresh: Schema.optional(Schema.Boolean),
+          move: Schema.optional(Schema.Boolean),
           harness: Schema.optional(Schema.String),
           provider: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),

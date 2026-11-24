@@ -632,7 +632,7 @@ describe("Db", () => {
             sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             message: "n",
           })
-          yield* db.session.endExited(entry.sessionId, "exited", undefined)
+          yield* db.session.endProcess(entry.sessionId, "exited", undefined)
           assert.strictEqual(yield* noticeStatus("n"), "pending")
         }),
       ),

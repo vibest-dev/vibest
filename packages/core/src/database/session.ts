@@ -667,11 +667,6 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(endProcess(id, "stopped", undefined, undefined, by)).pipe(Effect.orDie),
       ),
 
-      endExited: Effect.fn("Db.session.endExited")(
-        (id: string, reason: "exited" | "launch_failed", process: number | undefined) =>
-          tx(endProcess(id, reason, undefined, process)).pipe(Effect.orDie),
-      ),
-
       detachSession: Effect.fn("Db.session.detachSession")(
         (sessionId: string, runtime: string, address: RuntimeAddress) =>
           Effect.gen(function* () {

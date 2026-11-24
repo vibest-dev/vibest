@@ -1,9 +1,9 @@
-import { entryPlace, filterCallerEnv, specHits } from "@vibest/core/caller"
+import { attachPlace, filterCallerEnv, specHits } from "@vibest/core/caller"
 import { Db } from "@vibest/core/database/db"
 import { LOCAL_MACHINE } from "@vibest/core/database/ledger-read"
 import { Identity } from "@vibest/core/identity"
 import { Runtimes } from "@vibest/core/runtimes"
-import { EntrySession } from "@vibest/core/session/entry"
+import { SessionLaunch } from "@vibest/core/session/entry"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import { Caller, Forbidden, InvalidCaller } from "@vibest/protocol/rpc"
 import { NoSuchProject } from "@vibest/schema/project"
@@ -25,7 +25,7 @@ export const make = Effect.gen(function* () {
   const self = yield* Identity.Service
   const machines = yield* Machines.Service
   const runtimes = yield* Runtimes.Service
-  const entrySession = yield* EntrySession.Service
+  const sessionLaunch = yield* SessionLaunch.Service
 
   return {
     Launch: (input) =>
@@ -67,12 +67,13 @@ export const make = Effect.gen(function* () {
               })
             : { id: LOCAL_MACHINE }
 
-        return yield* entrySession.launch({
+        return yield* sessionLaunch.launch({
           projectId: project.id,
           root: project.directory,
           at,
           sessionId: input.sessionId,
           fresh: input.fresh === true,
+          move: input.move === true,
           harness: input.harness,
           provider: input.provider,
           model: input.model,
@@ -98,7 +99,7 @@ export const make = Effect.gen(function* () {
         const specs = yield* runtimes.callers
         const env = filterCallerEnv(specs, callerEnv)
         const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
-        const place = entryPlace({ runtime, hits, loaded: specs.map((spec) => spec.id) })
+        const place = attachPlace({ runtime, hits, loaded: specs.map((spec) => spec.id) })
 
         if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
 
@@ -116,7 +117,7 @@ export const make = Effect.gen(function* () {
         const running =
           fresh === true
             ? null
-            : yield* entrySession.running(project.id, place.in === "terminal" ? place.terminal : "", sessionId)
+            : yield* sessionLaunch.running(project.id, place.in === "terminal" ? place.terminal : "", sessionId)
 
         return { projectId: project.id, directory: project.directory, hasRoot, place, running }
       }),
@@ -139,7 +140,7 @@ export const make = Effect.gen(function* () {
           Effect.flatMap((c) => resolveAt(c.repositoryRoot)),
         )
 
-        return yield* entrySession.claim({
+        return yield* sessionLaunch.claim({
           projectId: id,
           directory,
           sessionId,

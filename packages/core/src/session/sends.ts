@@ -47,15 +47,6 @@ export const make = Effect.gen(function* () {
     if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
   })
 
-  const deliverTo = Effect.fn("Sends.deliverTo")(function* (
-    id: string,
-    message: string,
-    sender: Sender = { type: "user" },
-    request?: string,
-  ) {
-    return yield* send(id, message, sender, request)
-  })
-
   const admit = Effect.fn("Sends.admit")(function* (
     sender: { readonly sessionId: string; readonly projectId: string },
     input: string,
@@ -148,7 +139,7 @@ export const make = Effect.gen(function* () {
     return { id: heir.local }
   })
 
-  return { send, deliverTo, admit, relay }
+  return { send, admit, relay }
 })
 
 export type Interface = Effect.Success<typeof make>

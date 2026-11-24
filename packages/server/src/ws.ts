@@ -276,6 +276,12 @@ const wsLayer = Layer.unwrap(
                 return protocol.send(clientId, ServerMessages.Exit({ requestId: message.id, exit }))
               }
 
+              if (Predicate.isTagged(message, "Request")) {
+                const headers = [...new Map(message.headers.map(([k, v]) => [k.toLowerCase(), v] as const)).entries()]
+
+                return writeRequest(clientId, { ...message, headers })
+              }
+
               return writeRequest(clientId, message)
             }),
           ),

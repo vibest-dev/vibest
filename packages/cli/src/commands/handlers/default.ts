@@ -103,10 +103,16 @@ export default Runtime.handler(Commands, (o) =>
           return yield* chooseHarness(client, { saveWithoutAsking: false })
         })
 
+        const action = o.fresh ? undefined : yield* resolveRunning(placed.running)
+        const fresh = o.fresh || action?._tag === "New"
+        const move = action?._tag === "Move"
+
         if (placed.place.in === "launch") {
           const opened = yield* client.Launch({
             projectId: placed.projectId,
-            fresh: o.fresh,
+            ...(action?._tag === "Move" && { sessionId: action.sessionId }),
+            fresh,
+            ...(move && { move: true }),
             ...(chosenHarness !== undefined && { harness: chosenHarness }),
             ...(provider !== undefined && { provider }),
             ...(model !== undefined && { model }),
@@ -128,10 +134,6 @@ export default Runtime.handler(Commands, (o) =>
 
         if (here !== placed.directory) yield* Effect.sync(() => process.chdir(placed.directory))
         const terminal = placed.place.terminal
-
-        const action = o.fresh ? undefined : yield* resolveRunning(placed.running)
-        const fresh = o.fresh || action?._tag === "New"
-        const move = action?._tag === "Move"
 
         const started = yield* client["Session.Claim"]({
           ...(action?._tag === "Move" && { sessionId: action.sessionId }),

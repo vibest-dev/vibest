@@ -23,17 +23,17 @@ import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Harness, startableOptions } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"
-import { entryIdle } from "../inbox.ts"
+import { terminalPresence } from "../inbox.ts"
 import * as Launch from "../launch.ts"
 import { Plugins } from "../plugin.ts"
 import { Processes } from "../processes.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks, terminalLock } from "./locks.ts"
-import { runtimeEnv } from "./placement.ts"
+import { Placement, runtimeEnv } from "./placement.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "./release.ts"
 
-export * as EntrySession from "./entry.ts"
+export * as SessionLaunch from "./entry.ts"
 
 export const PRESENT_TIMEOUT = Duration.seconds(5)
 
@@ -83,6 +83,12 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path
   const projectLocked = yield* KeyedMutex.make<string>()
   const locks = yield* SessionLocks.Service
+  const placement = yield* Placement.Service
+
+  const sessionCwd = (existing: SessionRow | undefined, fallback: string) =>
+    existing === undefined
+      ? Effect.succeed(fallback)
+      : db.session.sessionDirectory(existing.id).pipe(Effect.map((dir) => (dir && dir !== "" ? dir : fallback)))
 
   const withHarness = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -175,7 +181,7 @@ const make = Effect.gen(function* () {
 
       if (!(yield* restarting.has(session.id))) {
         if (found === undefined) return null
-        const presence = yield* entryIdle(found, place.address).pipe(Effect.option)
+        const presence = yield* terminalPresence(found, place.address).pipe(Effect.option)
 
         if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
       }
@@ -189,7 +195,7 @@ const make = Effect.gen(function* () {
       }
     })
 
-  const running = Effect.fn("EntrySession.running")(function* (
+  const running = Effect.fn("SessionLaunch.running")(function* (
     projectId: string,
     terminal: string,
     sessionId?: string,
@@ -200,13 +206,6 @@ const make = Effect.gen(function* () {
   })
 
   const onlyRuntime = Effect.map(runtimes.all, (all) => (all.length === 1 ? all[0]?.id : undefined))
-
-  const notRunning = (session: SessionRow | undefined, terminal: string) =>
-    Effect.flatMap(runningOf(session, terminal), (found) =>
-      found
-        ? Effect.fail(new SessionRunning({ sessionId: found.sessionId, harness: found.harness, place: found.place }))
-        : Effect.void,
-    )
 
   const stopSession = (session: SessionRow, runtime: string, address: string) =>
     Effect.gen(function* () {
@@ -229,12 +228,42 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.provideService(Bus.Service, bus), Effect.provideService(Processes.Service, processes))
     })
 
-  const launch = Effect.fn("EntrySession.launch")(function* (input: {
+  const ensureNotRunning = (existing: SessionRow | undefined, terminal: string, move: boolean) =>
+    Effect.gen(function* () {
+      if (existing === undefined) return
+      const live = yield* runningOf(existing, terminal)
+
+      if (live === null) return
+
+      if (!move)
+        return yield* new SessionRunning({
+          sessionId: live.sessionId,
+          harness: live.harness,
+          place: live.place,
+        })
+      const stopped = yield* stopSession(existing, live.runtime, live.address)
+
+      if (stopped.result === "moved")
+        return yield* new LaunchFailed({ message: "not starting: the session moved meanwhile; run vibest again" })
+
+      if (stopped.result === "unsupported")
+        return yield* new LaunchFailed({
+          message: `not starting: the session (${live.harness}) runs in ${live.place} and cannot be moved from here: ${stopped.reason}. Exit it there first`,
+        })
+
+      if (stopped.result === "running")
+        return yield* new LaunchFailed({
+          message: `not starting: the session (${live.harness}) runs in ${live.place} and did not exit; nothing changed. Exit it there first`,
+        })
+    })
+
+  const launch = Effect.fn("SessionLaunch.launch")(function* (input: {
     readonly projectId: string
     readonly root: string
     readonly at: RuntimeMachine
     readonly sessionId: string | undefined
     readonly fresh: boolean
+    readonly move?: boolean | undefined
     readonly harness: string | undefined
     readonly provider: string | undefined
     readonly model: string | undefined
@@ -293,22 +322,29 @@ const make = Effect.gen(function* () {
             ),
     )
 
+    const cwd = yield* sessionCwd(current, root)
+    const existingPrompt = current === undefined ? undefined : yield* placement.systemPromptOf(current)
+
     return yield* Effect.gen(function* () {
       const command = yield* withHarness(
-        Launch.entryCommand({
+        Launch.sessionCommand({
           harness: chosen,
           agent,
           root,
+          worktree: cwd,
+          ...(existingPrompt !== undefined && { systemPrompt: existingPrompt }),
           provider: decision.provider ?? null,
           model: decision.model ?? null,
           session: projectLocked.withLock(id)(
             Effect.gen(function* () {
               const existing = yield* targetSession(id, input.sessionId, fresh)
-
-              if (existing !== undefined) yield* notRunning(existing, "")
+              yield* ensureNotRunning(existing, "", input.move === true)
 
               const sessionId =
                 existing === undefined ? yield* db.session.allocateSessionId().pipe(Effect.orDie) : existing.id
+
+              const openCwd = yield* sessionCwd(existing, root)
+              const title = existing?.name || entryLabel(root)
 
               const near =
                 at.target === undefined || at.target === ""
@@ -317,8 +353,10 @@ const make = Effect.gen(function* () {
 
               const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
                 root,
-                label: existing?.name ?? entryLabel(root),
+                cwd: openCwd,
+                label: title,
                 home: layout.home,
+                env: { VIBEST_PROJECT_ID: id, VIBEST_SESSION_ID: sessionId },
                 focus: input.focus,
                 near,
               }).pipe(
@@ -354,6 +392,11 @@ const make = Effect.gen(function* () {
                   ),
                   Effect.uninterruptible,
                 )
+
+              if (rt.present !== undefined)
+                yield* rt
+                  .present(pane, { session: claimed.sessionId, projectId: id, title })
+                  .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
 
               return { ...claimed, runtime: runtimeEnv(rt.id, pane) }
             }),
@@ -391,7 +434,7 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeLaunched)))
   })
 
-  const claim = Effect.fn("EntrySession.claim")(function* (input: {
+  const claim = Effect.fn("SessionLaunch.claim")(function* (input: {
     readonly projectId: string
     readonly directory: string
     readonly sessionId: string | undefined
@@ -449,35 +492,12 @@ const make = Effect.gen(function* () {
     return yield* projectLocked.withLock(projectId)(
       Effect.gen(function* () {
         const existing = yield* targetSession(projectId, input.sessionId, fresh)
-
-        if (existing !== undefined) {
-          const live = yield* runningOf(existing, terminal)
-
-          if (live !== null) {
-            if (!input.move)
-              return yield* new SessionRunning({
-                sessionId: live.sessionId,
-                harness: live.harness,
-                place: live.place,
-              })
-            const stopped = yield* stopSession(existing, live.runtime, live.address)
-
-            if (stopped.result === "moved")
-              return yield* new LaunchFailed({ message: "not starting: the session moved meanwhile; run vibest again" })
-
-            if (stopped.result === "unsupported")
-              return yield* new LaunchFailed({
-                message: `not starting: the session (${live.harness}) runs in ${live.place} and cannot be moved from here: ${stopped.reason}. Exit it there first`,
-              })
-
-            if (stopped.result === "running")
-              return yield* new LaunchFailed({
-                message: `not starting: the session (${live.harness}) runs in ${live.place} and did not exit; nothing changed. Exit it there first`,
-              })
-          }
-        }
+        yield* ensureNotRunning(existing, terminal, input.move)
 
         const address = { machine: "local", id: terminal }
+        const cwd = yield* sessionCwd(existing, directory)
+        const existingPrompt = existing === undefined ? undefined : yield* placement.systemPromptOf(existing)
+        const title = existing?.name || entryLabel(directory)
 
         let claimed:
           | {
@@ -490,10 +510,12 @@ const make = Effect.gen(function* () {
           | undefined
 
         const command = yield* withHarness(
-          Launch.entryCommand({
+          Launch.sessionCommand({
             harness: chosenHarness,
             agent,
             root: directory,
+            worktree: cwd,
+            ...(existingPrompt !== undefined && { systemPrompt: existingPrompt }),
             provider: decision.provider ?? null,
             model: decision.model ?? null,
             session: Effect.gen(function* () {
@@ -531,34 +553,12 @@ const make = Effect.gen(function* () {
 
         if (rt.present !== undefined)
           yield* rt
-            .present(address, { session: claimed.sessionId, projectId, title: entryLabel(directory) })
+            .present(address, { session: claimed.sessionId, projectId, title })
             .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
 
-        const typed = yield* Launch.launchLine(command).pipe(
+        const [file, ...args] = yield* Launch.launchLine(command).pipe(
           Effect.mapError((e) => new LaunchFailed({ message: e.message })),
         )
-
-        let at = 0
-
-        if (typed[0] === "env") {
-          at = 1
-
-          while (at < typed.length) {
-            if (typed[at] === "-u") {
-              at += 2
-              continue
-            }
-
-            if (/^[A-Z_]+=/.test(typed[at]!)) {
-              at += 1
-              continue
-            }
-
-            break
-          }
-        }
-
-        const [file, ...args] = typed.slice(at)
 
         return {
           sessionId: claimed.sessionId,
@@ -577,7 +577,7 @@ const make = Effect.gen(function* () {
 
 export type Interface = Effect.Success<typeof make>
 
-export class Service extends Context.Service<Service, Interface>()("vibest/EntrySession") {}
+export class Service extends Context.Service<Service, Interface>()("vibest/SessionLaunch") {}
 
 export const layer = Layer.effect(Service, make)
 
@@ -590,6 +590,7 @@ export const node = LayerNode.make({
     Db.node,
     Harness.node,
     Harnesses.node,
+    Placement.node,
     Plugins.node,
     Processes.node,
     Runtimes.node,

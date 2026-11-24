@@ -194,4 +194,124 @@ describe("vibest.sock", () => {
       )
     }),
   )
+
+  test(
+    "Launch passes VIBEST_PROJECT_ID and VIBEST_SESSION_ID to open and calls rt.present with session and projectId",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const c = asCli(yield* client, repo)
+
+      const opened = yield* c.Launch({
+        projectId,
+        agent: "coordinator",
+        harness: "pi",
+        focus: false,
+        runtime: "herdr",
+        callerEnv: {},
+      })
+
+      const opens = yield* herdr.callsTo("open")
+      const lastOpen = opens.at(-1)
+      assert.isDefined(lastOpen)
+      assert.strictEqual(lastOpen?.env.VIBEST_PROJECT_ID, projectId)
+      assert.strictEqual(lastOpen?.env.VIBEST_SESSION_ID, opened.sessionId)
+
+      const presents = yield* herdr.callsTo("present")
+      const matched = presents.find((call) => call.info.session === opened.sessionId)
+      assert.isDefined(matched)
+      assert.strictEqual(matched?.info.projectId, projectId)
+    }),
+  )
+
+  test(
+    "Launch with an exited child sessionId opens in the child worktree with the child system prompt",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const fs = yield* FileSystem.FileSystem
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const raw = yield* client
+      const spawner = yield* asEntry(raw, repo)
+      const { id: childId } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      yield* until(
+        db.session.getSession(childId),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+      const childWorktree = yield* db.session.sessionDirectory(childId)
+      assert.isDefined(childWorktree)
+      assert.notStrictEqual(childWorktree, repo)
+
+      yield* db.session.endProcess(childId, "exited")
+
+      const c = asCli(raw, repo)
+      yield* c.Launch({
+        projectId,
+        sessionId: childId,
+        focus: false,
+        runtime: "herdr",
+        callerEnv: {},
+      })
+
+      const opens = yield* herdr.callsTo("open")
+      const lastOpen = opens.at(-1)
+      assert.strictEqual(lastOpen?.cwd, childWorktree)
+
+      const runs = yield* herdr.callsTo("run")
+      const lastRun = runs.at(-1)
+      assert.isDefined(lastRun)
+      const promptFlagIndex = lastRun!.argv.indexOf("--append-system-prompt")
+      const promptPath = promptFlagIndex === -1 ? undefined : lastRun!.argv[promptFlagIndex + 1]
+      assert.isDefined(promptPath)
+      const promptText = yield* fs.readFileString(promptPath!)
+      assert.notInclude(promptText, "do not edit files here")
+    }),
+  )
+
+  test(
+    "Launch refuses a running root session without move, and moves it when move: true is passed",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const c = asCli(yield* client, repo)
+
+      const first = yield* c.Launch({
+        projectId,
+        agent: "coordinator",
+        harness: "pi",
+        focus: false,
+        runtime: "herdr",
+        callerEnv: {},
+      })
+
+      const refused = yield* Effect.flip(
+        c.Launch({
+          projectId,
+          agent: "coordinator",
+          harness: "pi",
+          focus: false,
+          runtime: "herdr",
+          callerEnv: {},
+        }),
+      )
+
+      assert.strictEqual(refused._tag, "Forbidden")
+
+      const moved = yield* c.Launch({
+        projectId,
+        sessionId: first.sessionId,
+        move: true,
+        agent: "coordinator",
+        harness: "pi",
+        focus: false,
+        runtime: "herdr",
+        callerEnv: {},
+      })
+
+      assert.strictEqual(moved.sessionId, first.sessionId)
+      assert.notStrictEqual(moved.terminal, first.terminal)
+    }),
+  )
 })

@@ -56,7 +56,7 @@ export const make = Effect.gen(function* () {
   const { prompt, interruptAgent } = yield* Executions.Service
   const exits = yield* Exits.Service
   const { notice, resume, taskInput } = yield* Placement.Service
-  const { send, deliverTo, admit } = yield* Sends.Service
+  const { send, admit } = yield* Sends.Service
   const reactor = yield* Reactor.make
   const starts = yield* Starts.Service
   const { locked } = locks
@@ -425,7 +425,7 @@ export const make = Effect.gen(function* () {
       yield* wakes.wake(id, { rows: new Set(), ended: true })
   }
 
-  return { deliverQueued, send, deliverTo, admit, interrupt, userPrompt, typeTaken }
+  return { deliverQueued, send, admit, interrupt, userPrompt, typeTaken }
 })
 
 export type Interface = Effect.Success<typeof make>

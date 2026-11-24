@@ -510,7 +510,7 @@ describe.concurrent("Session", () => {
       )
 
       yield* db.session.patchLive(sessionId, { ready: yield* Clock.currentTimeMillis })
-      yield* sessions.deliverTo(sessionId, "hello entry")
+      yield* sessions.send(sessionId, "hello entry")
       yield* untilVirtual(herdr.callsTo("send"), (calls) =>
         calls.some((c) => c.terminal === "test/cursor-entry" && c.text?.includes("hello entry") === true),
       )

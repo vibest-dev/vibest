@@ -48,7 +48,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief, waiting?: Pro
   executionState: executionStateOf(session),
   projectId: session.projectId,
   runtime: session.process === null && waiting !== undefined ? waiting.runtime : runtimeOf(session),
-  address: terminalOf(session),
+  address: exitedAt(session) !== null ? { machine: "local", id: "" } : terminalOf(session),
   worktree: session.worktree,
   repositoryRoot: session.repositoryRoot ?? null,
   git: session.git ?? null,
@@ -150,7 +150,9 @@ export const sessionListing = (deps: {
         (row) =>
           Effect.map(resolveRepositories(row.id, row.directory, true), (repositories): ProjectRow => ({
             ...row,
-            activity: projectActivity(sessions.flatMap((s) => (s.projectId === row.id ? [s.status] : []))),
+            activity: projectActivity(
+              sessions.flatMap((s) => (s.projectId === row.id && s.exitedAt === null ? [s.status] : [])),
+            ),
             repositories,
           })),
         { concurrency: 8 },
@@ -205,7 +207,7 @@ export const sessionListing = (deps: {
 
   const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
     Effect.gen(function* () {
-      const rows = yield* db.session.listSessions({ unarchived: true })
+      const rows = yield* db.session.listSessions()
 
       return rows
         .filter(
@@ -234,7 +236,7 @@ export const sessionListing = (deps: {
         )
           for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
         else if (event.type === "runtime.reset")
-          for (const info of yield* listed(ListScope.All(), false, true))
+          for (const info of yield* listed(ListScope.All(), false))
             if (info.runtime === event.runtime) sessionIds.add(info.id)
       }
 

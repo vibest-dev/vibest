@@ -36,6 +36,7 @@ import * as Ws from "@vibest/server/ws"
 import * as effect from "effect"
 import { Cause, Duration, Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
+import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, type HttpClient } from "effect/http"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
@@ -92,6 +93,8 @@ const user = Layer.succeed(UserPlatform, {
 
 const platform = Layer.mergeAll(
   BunServices.layer,
+  Digest.layerWebCrypto,
+  SecureRandom.layerWebCrypto,
   FetchHttpClient.layer,
   unrefStdio,
   HerdrBun.layerSocketConnector,
@@ -415,7 +418,8 @@ const platformNode = LayerNode.make({ name: "vibest/Platform", layer: platform, 
 export const replacements: LayerNode.Replacements = [
   PlatformNode.fileSystem.replace(platformNode),
   PlatformNode.path.replace(platformNode),
-  PlatformNode.crypto.replace(platformNode),
+  PlatformNode.digest.replace(platformNode),
+  PlatformNode.secureRandom.replace(platformNode),
   PlatformNode.childProcessSpawner.replace(platformNode),
   PlatformNode.sqlClientLayer.replace(
     LayerNode.make({
@@ -438,7 +442,7 @@ export const replacements: LayerNode.Replacements = [
       deps: [
         PlatformNode.fileSystem,
         PlatformNode.path,
-        PlatformNode.crypto,
+        PlatformNode.digest,
         PlatformNode.layout,
         PlatformNode.childProcessSpawner,
       ],

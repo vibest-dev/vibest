@@ -2,7 +2,7 @@ import path from "node:path"
 
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
-import { EntrySession } from "@vibest/core/session/entry"
+import { SessionLaunch } from "@vibest/core/session/entry"
 import { Placement } from "@vibest/core/session/placement"
 import { Effect } from "effect"
 
@@ -226,10 +226,10 @@ describe.concurrent("Placement project near-terminal", () => {
   )
 
   test(
-    "EntrySession.launch reuses lastProjectTerminal when target is omitted and respects explicit target",
+    "SessionLaunch.launch reuses lastProjectTerminal when target is omitted and respects explicit target",
     Effect.gen(function* () {
       const db = yield* Db.Service
-      const entry = yield* EntrySession.Service
+      const entry = yield* SessionLaunch.Service
       const fake = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)

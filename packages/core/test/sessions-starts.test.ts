@@ -6,7 +6,7 @@ import { LIVE_PROCESS_COUNT } from "@vibest/core/database/session"
 import { Drain } from "@vibest/core/drain"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
-import { EntrySession } from "@vibest/core/session/entry"
+import { SessionLaunch } from "@vibest/core/session/entry"
 import { Starts } from "@vibest/core/session/starts"
 import { Deferred, Effect, Fiber, PubSub, Ref } from "effect"
 import { SqlClient } from "effect/sql"
@@ -61,7 +61,7 @@ const exit = (id: string) =>
 
 const claimEntry = (root: string, terminal: string, fresh = false) =>
   Effect.gen(function* () {
-    const entry = yield* EntrySession.Service
+    const entry = yield* SessionLaunch.Service
 
     return yield* entry.claim({
       projectId: yield* projectOf(root),
@@ -253,7 +253,7 @@ describe("a cap on live harness processes", () => {
     "a new entry session that replaces a stopped one takes the place of the one it replaces",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const entries = yield* EntrySession.Service
+      const entries = yield* SessionLaunch.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)

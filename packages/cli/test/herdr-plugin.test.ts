@@ -388,7 +388,7 @@ const served = Server.layer.pipe(
 
 describe("herdr open-entry", () => {
   it.effect(
-    "refuses a project that never had an entry session, launches the last one's harness, and focuses a running one",
+    "refuses a project that never had an entry session, launches the last one's harness, and opens a parallel session when one is running",
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout
@@ -420,12 +420,14 @@ describe("herdr open-entry", () => {
         const stopped = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.strictEqual(stopped.code, 0, stopped.stderr)
         assert.match(stopped.stdout, /^opened /)
-        assert.ok((yield* herdr.callsTo("open")).length > 0)
+        const opensBefore = (yield* herdr.callsTo("open")).length
+        assert.ok(opensBefore > 0)
         const entryId = terminalOf((yield* db.session.latestRoot(projectId))!)!.id
         yield* herdr.seedAgent(entryId)
         const again = yield* runVibest(repo, env, ["herdr", "open-entry"])
-        assert.notStrictEqual(again.code, 0)
-        assert.match(again.stderr, /is still running in/)
+        assert.strictEqual(again.code, 0, again.stderr)
+        assert.match(again.stdout, /^opened /)
+        assert.isAbove((yield* herdr.callsTo("open")).length, opensBefore)
       }).pipe(Effect.provide(served)),
   )
 })

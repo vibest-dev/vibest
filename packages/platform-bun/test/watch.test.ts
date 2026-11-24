@@ -23,6 +23,7 @@ import {
   projectOf,
   tempDirectory,
   testLayer,
+  until,
   type TestServices,
   wire,
 } from "./lib/fakes.ts"
@@ -534,6 +535,39 @@ describe("Watch", () => {
       )
 
       assert.deepStrictEqual(unlinked.session.to, [entryId])
+    }),
+  )
+
+  test(
+    "exited unarchived sessions report empty address.id and are excluded from Snapshot project.activity",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const { repo, entryId, entryClient } = yield* withEntry
+
+      const { id: childId } = yield* entryClient.Spawn({
+        agent: "general",
+        callerEnv: {},
+        harness: "pi",
+        prompt: "work",
+      })
+
+      yield* until(
+        db.session.getSession(childId),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+
+      yield* db.session.endProcess(entryId, "exited")
+      yield* db.session.endProcess(childId, "exited")
+
+      const { next } = yield* watching(repo)
+      const snapshot = yield* next(isSnapshot)
+      const exitedChild = snapshot.sessions.find((s) => s.id === childId)
+      assert.isDefined(exitedChild)
+      assert.isNotNull(exitedChild?.exitedAt)
+      assert.strictEqual(exitedChild?.address.id, "")
+
+      const project = snapshot.projects.find((p) => p.id === exitedChild?.projectId)
+      assert.strictEqual(project?.activity, "idle")
     }),
   )
 })

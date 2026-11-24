@@ -209,7 +209,7 @@ export const make = Effect.gen(function* () {
               message: `${target} was not started by the session that called, and it did not start it; a message goes only to the session that started it or to a session it started`,
             })
           const from = Predicate.isTagged(caller, "Peer") ? yield* peerSender(caller, p.from) : undefined
-          yield* sessions.deliverTo(target, p.message, from ?? { type: "user" }, p.request)
+          yield* sessions.send(target, p.message, from ?? { type: "user" }, p.request)
 
           return { id: target }
         }),
