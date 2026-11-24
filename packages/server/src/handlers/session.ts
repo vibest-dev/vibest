@@ -134,22 +134,10 @@ export const make = Effect.gen(function* () {
     })
 
   const linkProject = (method: "Session.Link" | "Session.Unlink") =>
-    Effect.gen(function* () {
-      const c = yield* Caller
-
-      if (Predicate.isTagged(c, "Remote")) {
-        if (c.projectId === undefined)
-          return yield* new Forbidden({ method, message: `${method} needs the calling project` })
-
-        return c.projectId
-      }
-
-      const project = yield* scope(method).pipe(
-        Effect.catchTag("NotInRepository", (e) => Effect.fail(new Forbidden({ method, message: e.message }))),
-      )
-
-      return project.id
-    })
+    scope(method).pipe(
+      Effect.map((project) => project.id),
+      Effect.catchTag("NotInRepository", (e) => Effect.fail(new Forbidden({ method, message: e.message }))),
+    )
 
   const resolveEndpoint = (method: string, projectId: string, ref: string) =>
     Effect.gen(function* () {
@@ -242,14 +230,14 @@ export const make = Effect.gen(function* () {
       const tos = yield* Effect.forEach(toRefs, resolve)
 
       if (froms.length === 0 || tos.length === 0)
-        return yield* new Forbidden({ method, message: "give at least one --from and one --to session" })
+        return yield* new Forbidden({ method, message: "give at least one source and one target session" })
 
       const pairs: Array<readonly [ResolvedEndpoint, ResolvedEndpoint]> = []
       const seen = new Set<string>()
 
       for (const a of froms) {
         for (const b of tos) {
-          if (sameEndpoint(a, b)) return yield* new Forbidden({ method, message: "a session does not link to itself" })
+          if (sameEndpoint(a, b)) return yield* new Forbidden({ method, message: "a session cannot target itself" })
           const key = `${formatEndpoint(a)}\0${formatEndpoint(b)}`
 
           if (seen.has(key)) continue
@@ -286,15 +274,15 @@ export const make = Effect.gen(function* () {
       const endpoints = yield* Effect.forEach(spec.ids, resolve)
 
       if (Predicate.isTagged(spec, "Mutual")) {
-        if (endpoints.length < 2) return yield* new Forbidden({ method, message: "give at least two sessions to link" })
+        if (endpoints.length < 2)
+          return yield* new Forbidden({ method, message: "give at least two distinct sessions" })
 
         for (let i = 0; i < endpoints.length; i++) {
           for (let j = i + 1; j < endpoints.length; j++) {
             const a = endpoints[i]!
             const b = endpoints[j]!
 
-            if (sameEndpoint(a, b))
-              return yield* new Forbidden({ method, message: "a session does not link to itself" })
+            if (sameEndpoint(a, b)) return yield* new Forbidden({ method, message: "a session cannot target itself" })
             push(a, b)
             push(b, a)
           }
@@ -307,7 +295,7 @@ export const make = Effect.gen(function* () {
           const a = endpoints[i]!
           const b = endpoints[i + 1]!
 
-          if (sameEndpoint(a, b)) return yield* new Forbidden({ method, message: "a session does not link to itself" })
+          if (sameEndpoint(a, b)) return yield* new Forbidden({ method, message: "a session cannot target itself" })
           push(a, b)
         }
       }

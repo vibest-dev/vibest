@@ -99,7 +99,7 @@ export const make = Effect.gen(function* () {
 
     if (!(yield* db.inbox.maySend(sender.sessionId, id)))
       return yield* new SendRefused({
-        message: `${id} is not linked from this session; link them with vibest session link${mine === undefined ? "" : ` (you may send to ${mine})`}`,
+        message: `${id} is not linked from this session; link them with vibest session link${mine === undefined || mine === id ? "" : ` (you may send to ${mine})`}`,
       })
     const session = yield* db.session.getSession(id)
     const stopped = !session || archived(session)

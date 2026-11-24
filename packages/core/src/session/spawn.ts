@@ -91,6 +91,20 @@ export const attachmentNames = (names: ReadonlyArray<string>) => {
 export const withAttachedFiles = (prompt: string, paths: ReadonlyArray<string>) =>
   paths.length === 0 ? prompt : `${prompt}${prompt.endsWith("\n") ? "\n" : "\n\n"}Attached files: ${paths.join(", ")}`
 
+export const resolveLiveTarget = (db: Db.Interface, projectId: string) => (ref: string) =>
+  Effect.gen(function* () {
+    const id = yield* db.session.resolveSession(ref)
+    const row = yield* db.session.getSession(id)
+
+    if (row === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
+
+    if (row.projectId !== projectId) return yield* new LinkRefused({ message: `${id} belongs to another project` })
+
+    if (archived(row)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+
+    return id
+  })
+
 export interface SpawnInput {
   readonly machine: RuntimeMachine
   readonly root: string
@@ -231,20 +245,7 @@ export const make = Effect.gen(function* () {
           ? namedShare
           : undefined
 
-      const resolveLink = (ref: string) =>
-        Effect.gen(function* () {
-          const targetId = yield* db.session.resolveSession(ref)
-          const target = yield* db.session.getSession(targetId)
-
-          if (target === undefined) return yield* new NoSuchSession({ id: targetId, message: `no session ${targetId}` })
-
-          if (target.projectId !== input.projectId)
-            return yield* new LinkRefused({ message: `${targetId} belongs to another project` })
-
-          if (archived(target)) return yield* new NoSuchSession({ id: targetId, message: `${targetId} was archived` })
-
-          return targetId
-        })
+      const resolveLink = resolveLiveTarget(db, input.projectId)
 
       const fromLinks = yield* Effect.forEach(input.from ?? [], resolveLink)
       const toLinks = yield* Effect.forEach(input.to ?? [], resolveLink)

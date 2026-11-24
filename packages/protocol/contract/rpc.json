@@ -15087,10 +15087,7 @@
       }
     },
     "Session.Link": {
-      "access": [
-        "agent",
-        "remote"
-      ],
+      "access": "agent",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -15170,16 +15167,6 @@
                   "ids"
                 ],
                 "additionalProperties": true
-              }
-            ]
-          },
-          "machine": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
               }
             ]
           }
@@ -16035,10 +16022,7 @@
       }
     },
     "Session.Unlink": {
-      "access": [
-        "agent",
-        "remote"
-      ],
+      "access": "agent",
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -16118,16 +16102,6 @@
                   "ids"
                 ],
                 "additionalProperties": true
-              }
-            ]
-          },
-          "machine": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
               }
             ]
           }

@@ -169,7 +169,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
           if (creator === undefined) return undefined
 
-          if ("remote" in creator) return { id: creator.session, label: "the agent that started you" }
+          if ("remote" in creator)
+            return { id: creator.session, label: "the agent that started you", remote: creator.remote }
 
           const [row] = yield* sql<{ entry: string | null; name: string | null }>`SELECT
               p.entry_session_id AS entry, c.name AS name
@@ -183,7 +184,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 ? `agent ${row.name}`
                 : "the agent that started you"
 
-          return { id: creator.local, label }
+          return { id: creator.local, label, remote: undefined }
         }).pipe(Effect.orDie),
       ),
 

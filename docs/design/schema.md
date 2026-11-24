@@ -146,6 +146,13 @@ CREATE TABLE session_edge (                           -- directed messaging grap
 ) STRICT;
 CREATE INDEX session_edge_to ON session_edge (to_remote_id, to_session_id);
 
+CREATE TABLE session_edge (                           -- directed messaging graph; projected from session.linked / session.unlinked
+  from_session_id       TEXT NOT NULL,
+  to_session_id         TEXT NOT NULL,
+  PRIMARY KEY (from_session_id, to_session_id)
+) STRICT;
+CREATE INDEX session_edge_to ON session_edge (to_session_id);
+
 CREATE TABLE process (                                -- id: the seq of its process.started in the session
   session_id           TEXT    NOT NULL,
   id                   INTEGER NOT NULL,
@@ -260,9 +267,9 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | project.moved                       | from, to, repositories                                                                                                                                                       |
 | project.repositories_changed        | repositories                                                                                                                                                                 |
 | project.entry_changed               | session? (none: the project has no entry session)                                                                                                                            |
-| session.created                     | project, agent, name, directory, parent?, origin? {peer, project, session?}, message? (the original delegation seq)                                                          |
-| session.linked                      | to (target session id for directed messaging edge from this session)                                                                                                         |
-| session.unlinked                    | to (target session id removed from directed messaging edges of this session)                                                                                                 |
+| session.created                     | project, agent, name, directory, parent?, origin? {remote, project, session?}, message? (the original delegation seq)                                                        |
+| session.linked                      | to, remote? (target session id and optional remote vibestd id for directed messaging edge from this session)                                                                 |
+| session.unlinked                    | to, remote? (target session id and optional remote vibestd id removed from directed messaging edges of this session)                                                         |
 | session.renamed                     | name                                                                                                                                                                         |
 | session.directory_changed           | directory                                                                                                                                                                    |
 | session.ended                       | reason: archived, replaced (vibest --new)                                                                                                                                    |

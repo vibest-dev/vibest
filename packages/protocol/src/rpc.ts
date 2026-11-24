@@ -571,7 +571,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Session.Link", {
-        payload: { spec: EdgeSpec, machine: Schema.optional(Schema.String) },
+        payload: { spec: EdgeSpec },
         success: Schema.Struct({ edges: Schema.Array(SessionEdge) }),
         error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
       }),
@@ -580,7 +580,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Session.Unlink", {
-        payload: { spec: EdgeSpec, machine: Schema.optional(Schema.String) },
+        payload: { spec: EdgeSpec },
         success: Schema.Struct({ edges: Schema.Array(SessionEdge) }),
         error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
       }),

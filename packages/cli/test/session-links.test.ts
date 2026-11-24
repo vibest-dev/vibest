@@ -1,6 +1,10 @@
 import { assert, describe } from "@effect/vitest"
-import { makeRepository } from "@vibest/platform-bun/test/lib/fakes"
+import { Db } from "@vibest/core/database/db"
+import { Placement } from "@vibest/core/session/placement"
+import { authed, makeRepository } from "@vibest/platform-bun/test/lib/fakes"
 import { asCli, asEntry, asSession, client, test } from "@vibest/platform-bun/test/lib/rpc-helpers"
+import { session as draftSession } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { remoteHeaders } from "@vibest/protocol/protocol"
 import { EdgeChain, EdgeDirected, EdgeMutual } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
 
@@ -110,6 +114,62 @@ describe("Session graph links RPC", () => {
       )
 
       assert.strictEqual(remoteLinks._tag, "MachineFailed")
+      assert.notInclude(remoteLinks.message, "not available with --machine")
+
+      const remote = authed(base, remoteHeaders("remote-1", opened.projectId))
+
+      const remoteLink = yield* Effect.flip(
+        remote["Session.Link"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) }),
+      )
+
+      assert.strictEqual(remoteLink._tag, "InvalidCaller")
+
+      const remoteUnlink = yield* Effect.flip(
+        remote["Session.Unlink"]({ spec: EdgeDirected.make({ from: [a.id], to: [b.id] }) }),
+      )
+
+      assert.strictEqual(remoteUnlink._tag, "InvalidCaller")
+
+      const singleUnlink = yield* Effect.flip(cli["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [a.id] }) }))
+      assert.strictEqual(singleUnlink._tag, "Forbidden")
+      assert.notInclude(singleUnlink.message, "to link")
+
+      const db = yield* Db.Service
+      const placement = yield* Placement.Service
+      const rowA = (yield* db.session.getSession(a.id))!
+      const entryId = (yield* db.session.sessionParents([a.id])).get(a.id)!
+
+      const promptBefore = yield* placement.systemPromptOf(rowA)
+      assert.include(promptBefore, `vibest send ${entryId}`)
+
+      yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [a.id], to: [entryId] }) })
+
+      const refusedParent = yield* Effect.flip(fromA.Send({ id: entryId, message: "to-unlinked-parent" }))
+      assert.strictEqual(refusedParent._tag, "Forbidden")
+      assert.notInclude(refusedParent.message, `you may send to ${entryId}`)
+
+      const promptAfter = yield* placement.systemPromptOf(rowA)
+      assert.notInclude(promptAfter, `vibest send ${entryId}`)
+      assert.include(promptAfter, "not linked to message it directly")
+
+      const remoteCreatorId = "99999999-9999-4999-8999-999999999999"
+      const remoteSessionId = "88888888-8888-4888-8888-888888888888"
+
+      yield* db.session.insertSession(draftSession(remoteSessionId), opened.projectId, {
+        cwd: repo,
+        task: "remote task",
+        origin: { remote: "remote-1", project: "77777777-7777-4777-8777-777777777777", reportTo: remoteCreatorId },
+      })
+
+      const remoteRow = (yield* db.session.getSession(remoteSessionId))!
+      const remotePrompt = yield* placement.systemPromptOf(remoteRow)
+      assert.include(remotePrompt, `vibest send ${remoteCreatorId}`)
+      assert.notInclude(remotePrompt, "not linked to message it directly")
+
+      yield* db.session.unlinkSessions([{ from: remoteSessionId, to: remoteCreatorId, remote: "remote-1" }])
+      const remotePromptUnlinked = yield* placement.systemPromptOf(remoteRow)
+      assert.notInclude(remotePromptUnlinked, `vibest send ${remoteCreatorId}`)
+      assert.include(remotePromptUnlinked, "not linked to message it directly")
     }),
   )
 })
