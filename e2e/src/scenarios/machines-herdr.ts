@@ -264,8 +264,8 @@ const checks: ReadonlyArray<Check> = [
 
         const id8 = printed.slice(0, 8)
 
-        const bRow = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
-          r.id.startsWith(id8),
+        const bRow = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find(
+          (r) => r.id === printed,
         )
 
         expect(bRow?.runtime === "herdr", `B's row: ${JSON.stringify(bRow)}`)
@@ -289,7 +289,7 @@ const checks: ReadonlyArray<Check> = [
 
         const onB = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions
         expect(
-          onB.find((r) => r.id.startsWith(coordinator.slice(0, 8)))?.agent === "coordinator",
+          onB.find((r) => r.id === coordinator)?.agent === "coordinator",
           `B's rows: ${JSON.stringify(onB.map((r) => [r.id, r.agent]))}`,
         )
         expect(onB.length === 2, `the refused run left a session on B: ${onB.length}`)

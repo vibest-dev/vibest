@@ -433,7 +433,7 @@ const checks: ReadonlyArray<Check> = [
 
         expect(
           started?.remote === a.id &&
-            /inbox\.enqueued session\.created .*process\.started .*execution\.allocated .*execution\.started .*execution\.succeeded .*session\.ended/.test(
+            /inbox\.enqueued session\.created .*process\.started .*execution\.allocated .*execution\.started .*execution\.succeeded .*session\.archived/.test(
               started.facts,
             ),
           `B's session started for A: ${JSON.stringify(started)}`,
@@ -454,25 +454,24 @@ const checks: ReadonlyArray<Check> = [
         const notes = path.join(w.root, "m1-notes.md")
         await fs.writeFile(notes, "the answer is m1-word-hazel\n")
 
-        const attachedTo = (
-          JSON.parse(
-            await w.okViaEntry(
-              [
-                "run",
-                "--machine",
-                "mb",
-                "pi",
-                "--file",
-                notes,
-                "--",
-                "Reply done-mfile with the word in the attached file.",
-              ],
-              { env: s.aEnv, asIs: true },
-            ),
-          ) as { id: string }
-        ).id
+        const attached = JSON.parse(
+          await w.okViaEntry(
+            [
+              "run",
+              "--machine",
+              "mb",
+              "pi",
+              "--file",
+              notes,
+              "--",
+              "Reply done-mfile with the word in the attached file.",
+            ],
+            { env: s.aEnv, asIs: true },
+          ),
+        ) as { id: string; machine?: string }
 
-        const remoteId = attachedTo
+        expect(attached.machine === "mb", `run --machine --file: ${JSON.stringify(attached)}`)
+        const remoteId = attached.id
         const projects = path.join(s.bEnv.VIBEST_HOME, "projects")
 
         const sessionFolders = async () =>
@@ -495,7 +494,7 @@ const checks: ReadonlyArray<Check> = [
         expect(
           bFolder !== undefined &&
             (await fs.readFile(path.join(bFolder, "files", "m1-notes.md"), "utf8")) === "the answer is m1-word-hazel\n",
-          `B has no copy for ${attachedTo}: ${JSON.stringify(await sessionFolders())}`,
+          `B has no copy for ${remoteId}: ${JSON.stringify(await sessionFolders())}`,
         )
         await until(
           "the session on B answers with the word from its copy",

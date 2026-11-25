@@ -179,14 +179,15 @@ const checks: ReadonlyArray<Check> = [
         await s.okA(["machine", "add", "mb", "b-host"])
         await s.refusedOnA("mtwo", "has several projects for", `${secondId} (`, "shop-two)", "pass --project")
 
-        const id8 = (
-          JSON.parse(
-            await w.okViaEntry(["run", "--machine", "mb", "--project", "shop-two", "pi", "--", ask("mchosen")], {
-              env: s.aEnv,
-              asIs: true,
-            }),
-          ) as { id: string }
-        ).id.slice(0, 8)
+        const chosen = JSON.parse(
+          await w.okViaEntry(["run", "--machine", "mb", "--project", "shop-two", "pi", "--", ask("mchosen")], {
+            env: s.aEnv,
+            asIs: true,
+          }),
+        ) as { id: string; machine?: string }
+
+        expect(chosen.machine === "mb", `run --machine --project: ${JSON.stringify(chosen)}`)
+        const id8 = chosen.id.slice(0, 8)
 
         await until("the message on A", () => s!.notices(id8, "mchosen") === 1, 120_000)
         const got = JSON.parse(await s.okA(["result", id8, "--machine", "mb"])) as { worktree: string }
