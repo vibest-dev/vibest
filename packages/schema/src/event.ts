@@ -233,9 +233,6 @@ export const PublicCatalog = {
   [SessionArchived.type]: SessionArchived,
   [SessionLinked.type]: SessionLinked,
   [SessionUnlinked.type]: SessionUnlinked,
-  [ProcessStarted.type]: ProcessStarted,
-  [ProcessReady.type]: ProcessReady,
-  [ProcessEnded.type]: ProcessEnded,
   [ExecutionAllocated.type]: ExecutionAllocated,
   [ExecutionStarted.type]: ExecutionStarted,
   [ExecutionSucceeded.type]: ExecutionSucceeded,
@@ -253,7 +250,10 @@ export const PublicCatalog = {
 
 export const Catalog = {
   ...PublicCatalog,
+  [ProcessStarted.type]: ProcessStarted,
   [ProcessUpdated.type]: ProcessUpdated,
+  [ProcessReady.type]: ProcessReady,
+  [ProcessEnded.type]: ProcessEnded,
   [InboxDelivering.type]: InboxDelivering,
   [MachineConnected.type]: MachineConnected,
   [RemoteSeen.type]: RemoteSeen,

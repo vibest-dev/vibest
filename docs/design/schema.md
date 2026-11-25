@@ -254,7 +254,7 @@ message.
 
 ## Facts
 
-`packages/schema/src/event.ts` defines 31 types in `Catalog` (25 public domain types in `PublicCatalog` for plugin subscriptions, plus 6 internal bookkeeping/transport types: `process.updated`, `session.inbox.delivering`, `machine.connected`, `remote.seen`, `remote.outbox.queued`, `remote.outbox.acked`), each with its aggregate kind (`session`, `project` or `ledger`) and a
+`packages/schema/src/event.ts` defines 31 types in `Catalog` (22 public domain types in `PublicCatalog` for plugin subscriptions, plus 9 internal process/bookkeeping/transport types: `process.started`, `process.updated`, `process.ready`, `process.ended`, `session.inbox.delivering`, `machine.connected`, `remote.seen`, `remote.outbox.queued`, `remote.outbox.acked`), each with its aggregate kind (`session`, `project` or `ledger`) and a
 Schema for its data. `Bus.publish` takes the aggregate from the kind: a session fact needs a session id and no project
 id, a project fact a project id and no session id, a ledger fact neither. A key marked optional is absent, never null, and a string key that is present is never empty. Encoding and
 decoding refuse keys a definition does not have, and encoding fails when its JSON does not decode back. `Routing` and

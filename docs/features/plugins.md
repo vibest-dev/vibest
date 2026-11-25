@@ -68,9 +68,9 @@ does not set it up again; editing the plugin itself does.
 
 ## G12. A plugin observes the ledger's facts
 
-A plugin that subscribes with `ctx.event.subscribe` to `session.created`, `process.started`, `session.execution.started` and
+A plugin that subscribes with `ctx.event.subscribe` to `session.inbox.enqueued`, `session.created`, `session.execution.started` and
 `session.execution.succeeded` gets those facts of a real Pi subagent, in that order, and none it did not ask for. A plugin that
-subscribes to every fact gets only public facts (`PublicCatalog`, excluding internal bookkeeping/transport facts) and no signal. After the plugin is edited, the new revision gets the next agent's
+subscribes to every fact gets only public facts (`PublicCatalog`: `project.*`, `session.*` including `session.execution.*` and public `session.inbox.*`, and `machine.added` / `machine.removed` — excluding `process.*` and internal bookkeeping/transport facts) and no signal. After the plugin is edited, the new revision gets the next agent's
 facts and the old one gets nothing more.
 
 ## G13. A plugin written with Promises

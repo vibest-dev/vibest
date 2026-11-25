@@ -550,10 +550,11 @@ describe("plugins: event.subscribe", () => {
       release()
       yield* until(
         Effect.sync(() => held),
-        (facts) => facts.some((fact) => fact.sessionId === second.id && fact.type === "process.started"),
+        (facts) => facts.some((fact) => fact.sessionId === second.id && fact.type === "session.execution.allocated"),
       )
 
       assert.isTrue(held.every((fact) => Object.hasOwn(PublicCatalog, fact.type)))
+      assert.isFalse(held.some((fact) => fact.type.startsWith("process.")))
 
       for (const aggregate of new Set(held.map((fact) => fact.aggregate))) {
         const seqs = held.flatMap((fact) => (fact.aggregate === aggregate ? [fact.seq] : []))
