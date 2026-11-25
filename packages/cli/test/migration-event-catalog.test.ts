@@ -24,9 +24,22 @@ const MIGRATION = "20261124050000_clean_event_catalog"
 
 const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
 
+const assertCheckLedger = (file: string) =>
+  Effect.gen(function* () {
+    const stored = yield* Layer.build(Platform.sqlite(file)).pipe(
+      Effect.flatMap((context) => SqlClient.SqlClient.pipe(Effect.provide(context))),
+    )
+
+    const checked = yield* Effect.exit(
+      checkLedger(stored).pipe(Effect.provide(Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+    )
+
+    assert.isTrue(Exit.isSuccess(checked), String(checked))
+  }).pipe(Effect.scoped)
+
 describe("ledger migration 20261124050000_clean_event_catalog", () => {
   it.effect(
-    "remaps seq references when execution.accepted and inbox.unresolved precede process.started and inbox.enqueued, merges process.updated, rewrites hook names, and passes checkLedger",
+    "remaps non-identity seq shifts across message, process, processId, and messageId, merges process.updated, rewrites hook names, and passes checkLedger",
     () =>
       Effect.gen(function* () {
         const path = yield* Path.Path
@@ -48,13 +61,7 @@ describe("ledger migration 20261124050000_clean_event_catalog", () => {
             [ledger, 3, 4, "outbox.queued", { id: ITEM_2, remote: REMOTE, session: S, kind: "send", content: "two" }],
             [ledger, 4, 5, "outbox.acked", { remote: REMOTE, ids: [ITEM_1] }],
             [S, 1, 10, "execution.accepted", { execution: 1 }],
-            [
-              S,
-              2,
-              11,
-              "inbox.unresolved",
-              { history: "route", sender: { type: "user" }, content: "routed", requestId: "req-route" },
-            ],
+            [S, 2, 11, "execution.accepted", { execution: 2 }],
             [S, 3, 12, "inbox.enqueued", { sender: { type: "user" }, content: "delegation" }],
             [S, 4, 13, "session.created", { project: P, agent: "general", name: "sub", directory: "/p/s", message: 3 }],
             [
@@ -80,16 +87,23 @@ describe("ledger migration 20261124050000_clean_event_catalog", () => {
             [S, 12, 21, "inbox.delivery_started", { messageId: 3, execution: 1 }],
             [S, 13, 22, "inbox.delivered", { messageId: 3, recipientExecutionId: 1 }],
             [S, 14, 23, "execution.succeeded", { executionId: 1, reply: "ok" }],
-            [S, 15, 24, "inbox.enqueued", { sender: { type: "user" }, content: "failed-msg" }],
-            [S, 16, 25, "inbox.unresolved", { history: "failed_unspecified", messageId: 15 }],
-            [S, 17, 26, "inbox.enqueued", { sender: { type: "user" }, content: "unconfirmed-msg" }],
-            [S, 18, 27, "inbox.unresolved", { history: "unconfirmed", messageId: 17 }],
-            [S, 19, 28, "process.ended", { process: 5, reason: "archived" }],
-            [S, 20, 29, "session.ended", { reason: "archived" }],
-            [R, 1, 30, "session.created", { project: P, agent: "general", name: "rel", directory: "/p/r" }],
-            [R, 2, 31, "inbox.enqueued", { sender: { type: "user" }, content: "released-pending" }],
-            [R, 3, 32, "inbox.delivery_started", { messageId: 2, execution: 1 }],
-            [R, 4, 33, "inbox.unresolved", { history: "released", messageId: 2 }],
+            [
+              S,
+              15,
+              24,
+              "inbox.unresolved",
+              { history: "route", sender: { type: "user" }, content: "routed", requestId: "req-route" },
+            ],
+            [S, 16, 25, "inbox.enqueued", { sender: { type: "user" }, content: "failed-msg" }],
+            [S, 17, 26, "inbox.unresolved", { history: "failed_unspecified", messageId: 16 }],
+            [S, 18, 27, "inbox.enqueued", { sender: { type: "user" }, content: "unconfirmed-msg" }],
+            [S, 19, 28, "inbox.unresolved", { history: "unconfirmed", messageId: 18 }],
+            [S, 20, 29, "process.ended", { process: 5, reason: "archived" }],
+            [S, 21, 30, "session.ended", { reason: "archived" }],
+            [R, 1, 31, "session.created", { project: P, agent: "general", name: "rel", directory: "/p/r" }],
+            [R, 2, 32, "inbox.enqueued", { sender: { type: "user" }, content: "released-pending" }],
+            [R, 3, 33, "inbox.delivery_started", { messageId: 2, execution: 1 }],
+            [R, 4, 34, "inbox.unresolved", { history: "released", messageId: 2 }],
           ] as const
 
           for (const [aggregate, seq, at, type, data] of legacyFacts)
@@ -97,35 +111,9 @@ describe("ledger migration 20261124050000_clean_event_catalog", () => {
               VALUES (${aggregate}, ${seq}, ${at}, ${type}, ${JSON.stringify(data)})`
         }).pipe(Effect.provide(Platform.sqlite(file)))
 
-        yield* Effect.gen(function* () {
-          const stored = yield* Layer.build(Platform.sqlite(file)).pipe(
-            Effect.flatMap((context) => SqlClient.SqlClient.pipe(Effect.provide(context))),
-          )
-
-          const checked = yield* Effect.exit(
-            checkLedger(stored).pipe(
-              Effect.provide(Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))),
-            ),
-          )
-
-          assert.isTrue(Exit.isSuccess(checked), String(checked))
-        }).pipe(Effect.scoped)
-
+        yield* assertCheckLedger(file)
         yield* open().pipe(Effect.provide(runner(file)))
-
-        yield* Effect.gen(function* () {
-          const stored = yield* Layer.build(Platform.sqlite(file)).pipe(
-            Effect.flatMap((context) => SqlClient.SqlClient.pipe(Effect.provide(context))),
-          )
-
-          const checked = yield* Effect.exit(
-            checkLedger(stored).pipe(
-              Effect.provide(Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))),
-            ),
-          )
-
-          assert.isTrue(Exit.isSuccess(checked), String(checked))
-        }).pipe(Effect.scoped)
+        yield* assertCheckLedger(file)
 
         const projected = yield* Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -171,18 +159,18 @@ describe("ledger migration 20261124050000_clean_event_catalog", () => {
           return { sess, proc, exec, inboxS, inboxR, outbox }
         }).pipe(Effect.provide(Platform.sqlite(file)))
 
-        assert.deepStrictEqual(projected.sess, { messageId: 3, processId: 5, endedAt: 29 })
-        assert.strictEqual(projected.proc?.id, 5)
+        assert.deepStrictEqual(projected.sess, { messageId: 1, processId: 3, endedAt: 30 })
+        assert.strictEqual(projected.proc?.id, 3)
         assert.strictEqual(projected.proc?.terminal, canonicalTarget({ id: "t1" }))
         assert.strictEqual(projected.proc?.placedAt, 15)
         assert.strictEqual(projected.proc?.pid, 102)
         assert.strictEqual(projected.proc?.harnessSessionId, "conv-1")
-        assert.strictEqual(projected.proc?.endedAt, 28)
+        assert.strictEqual(projected.proc?.endedAt, 29)
         assert.strictEqual(JSON.parse(projected.proc?.routing ?? "{}").trace[0].hook, "session.start.before")
-        assert.deepStrictEqual(projected.exec, { id: 1, processId: 5, outcome: "completed" })
+        assert.deepStrictEqual(projected.exec, { id: 1, processId: 3, outcome: "completed" })
         assert.deepStrictEqual(projected.inboxS, [
-          { id: 1, content: "routed", status: "dropped", recipientExecutionId: null },
-          { id: 3, content: "delegation", status: "delivered", recipientExecutionId: 1 },
+          { id: 1, content: "delegation", status: "delivered", recipientExecutionId: 1 },
+          { id: 13, content: "routed", status: "dropped", recipientExecutionId: null },
           { id: 15, content: "failed-msg", status: "failed", recipientExecutionId: null },
           { id: 17, content: "unconfirmed-msg", status: "dropped", recipientExecutionId: null },
         ])
@@ -193,6 +181,66 @@ describe("ledger migration 20261124050000_clean_event_catalog", () => {
         ])
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
+
+  for (const mode of ["in-place-delete", "route-expansion"] as const) {
+    it.effect(
+      `preserves cross-aggregate event.position order for project.moved and post-archive outbox.queued (${mode})`,
+      () =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path
+          const file = path.join(yield* tempDirectory(`vibest-clean-order-${mode}-`), "vibest.db")
+          yield* Effect.void.pipe(Effect.provide(database(file)))
+
+          yield* Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const [ledgerRow] = yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`
+            const ledger = ledgerRow!.value
+
+            yield* sql`DELETE FROM migration WHERE id >= ${MIGRATION}`
+            yield* sql`UPDATE meta SET value = '15' WHERE key = 'catalog'`
+
+            const restructuringFact =
+              mode === "in-place-delete"
+                ? ([S, 2, 3, "execution.accepted", { execution: 1 }] as const)
+                : ([S, 2, 3, "inbox.unresolved", { history: "route", sender: { type: "user" }, content: "r" }] as const)
+
+            const interleaved = [
+              [P, 1, 1, "project.created", { directory: "/old", repositories: [] }],
+              [S, 1, 2, "session.created", { project: P, agent: "general", name: "sub", directory: "/old/work" }],
+              restructuringFact,
+              [S, 3, 4, "session.ended", { reason: "archived" }],
+              [P, 2, 5, "project.moved", { from: "/old", to: "/new", repositories: [] }],
+              [
+                ledger,
+                1,
+                6,
+                "outbox.queued",
+                { id: ITEM_1, remote: REMOTE, session: S, kind: "send", content: "forwarded" },
+              ],
+            ] as const
+
+            for (const [aggregate, seq, at, type, data] of interleaved)
+              yield* sql`INSERT INTO event (aggregate, seq, at, type, data)
+                VALUES (${aggregate}, ${seq}, ${at}, ${type}, ${JSON.stringify(data)})`
+          }).pipe(Effect.provide(Platform.sqlite(file)))
+
+          yield* assertCheckLedger(file)
+          yield* open().pipe(Effect.provide(runner(file)))
+          yield* assertCheckLedger(file)
+
+          const { sessionDirectory, outboxRemoteId } = yield* Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const [sess] = yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${S}`
+            const [out] = yield* sql<{ remoteId: string }>`SELECT remote_id FROM outbox WHERE id = ${ITEM_1}`
+
+            return { sessionDirectory: sess?.directory, outboxRemoteId: out?.remoteId }
+          }).pipe(Effect.provide(Platform.sqlite(file)))
+
+          assert.strictEqual(sessionDirectory, "/new/work")
+          assert.strictEqual(outboxRemoteId, REMOTE)
+        }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    )
+  }
 
   it.effect("noteRemote deduplicates unchanged remote.seen and publishes when name changes", () =>
     Effect.gen(function* () {

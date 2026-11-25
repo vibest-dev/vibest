@@ -24,7 +24,19 @@ type EventRow = {
 }
 
 type OutRow = {
+  readonly position: number
+  readonly aggregate: string
   readonly oldSeq: number
+  readonly at: number
+  readonly type: string
+  readonly data: JsonObject
+  readonly changed: boolean
+}
+
+type FinalRow = {
+  readonly position: number
+  readonly aggregate: string
+  readonly seq: number
   readonly at: number
   readonly type: string
   readonly data: JsonObject
@@ -104,6 +116,84 @@ const isLaterSettlement = (row: EventRow, parsed: JsonObject, messageId: number)
   return false
 }
 
+const transformRow = (row: EventRow, record: JsonObject): ReadonlyArray<OutRow> => {
+  const base = { position: row.position, aggregate: row.aggregate, oldSeq: row.seq, at: row.at }
+
+  if (row.type === "execution.accepted") return []
+
+  if (row.type === "inbox.unresolved") {
+    const history = record.history
+
+    if (history === "route" && record.sender !== undefined && record.content !== undefined)
+      return [
+        {
+          ...base,
+          type: "session.inbox.enqueued",
+          data: {
+            sender: record.sender,
+            content: record.content,
+            ...(record.senderExecutionId !== undefined && { senderExecutionId: record.senderExecutionId }),
+            ...(record.requestId !== undefined && { requestId: record.requestId }),
+            ...(record.transferId !== undefined && { transferId: record.transferId }),
+            ...(record.aboutSessionId !== undefined && { aboutSessionId: record.aboutSessionId }),
+          },
+          changed: true,
+        },
+        {
+          ...base,
+          oldSeq: -1,
+          type: "session.inbox.dropped",
+          data: { messageId: row.seq, reason: "route" },
+          changed: true,
+        },
+      ]
+
+    if (history === "failed_unspecified" && Predicate.isNumber(record.messageId))
+      return [
+        {
+          ...base,
+          type: "session.inbox.failed",
+          data: { messageId: record.messageId, reason: "unrecorded" },
+          changed: true,
+        },
+      ]
+
+    if (
+      (history === "unconfirmed" || history === "delivered_without_execution") &&
+      Predicate.isNumber(record.messageId)
+    )
+      return [
+        {
+          ...base,
+          type: "session.inbox.dropped",
+          data: { messageId: record.messageId, reason: history },
+          changed: true,
+        },
+      ]
+
+    return []
+  }
+
+  if (row.type === "session.ended") return [{ ...base, type: "session.archived", data: {}, changed: true }]
+
+  if (row.type === "process.started") {
+    const next = rewriteProcessStarted(record)
+
+    return [{ ...base, type: row.type, data: next.data, changed: next.changed }]
+  }
+
+  if (row.type === "process.placed" || row.type === "process.pid" || row.type === "process.conversation")
+    return [{ ...base, type: "process.updated", data: pickProcessUpdated(record), changed: true }]
+
+  const renamed = SIMPLE_RENAMES.get(row.type)
+
+  return [
+    renamed !== undefined
+      ? { ...base, type: renamed, data: record, changed: true }
+      : { ...base, type: row.type, data: record, changed: false },
+  ]
+}
+
 export const migration = {
   id: "20261124050000_clean_event_catalog",
   up: (tx: SqlClient.SqlClient) =>
@@ -115,13 +205,21 @@ export const migration = {
         WHERE type LIKE 'session.%' OR type LIKE 'process.%' OR type LIKE 'execution.%' OR type LIKE 'inbox.%'
         ORDER BY aggregate`
 
+      const plans: Array<{
+        readonly aggregate: string
+        readonly deletedPositions: ReadonlyArray<number>
+        readonly finalRows: ReadonlyArray<FinalRow>
+      }> = []
+
+      let anyExpanded = false
+
       for (const { aggregate } of aggregates) {
         const rows = yield* tx<EventRow>`SELECT position, aggregate, seq, at, type, data FROM event
           WHERE aggregate = ${aggregate} ORDER BY position`
 
-        const decoded: Array<{ readonly row: EventRow; readonly record: JsonObject }> = []
-
-        for (const row of rows) decoded.push({ row, record: yield* decodeRecord(row.data) })
+        const decoded = yield* Effect.forEach(rows, (row) =>
+          decodeRecord(row.data).pipe(Effect.map((record) => ({ row, record }))),
+        )
 
         const dropDeliveryStartedPositions = new Set<number>()
 
@@ -148,143 +246,116 @@ export const migration = {
         }
 
         const out: Array<OutRow> = []
-        let structureChanged = false
+        const deletedPositions: Array<number> = []
+        let expanded = false
 
         for (const { row, record } of decoded) {
           if (dropDeliveryStartedPositions.has(row.position)) {
-            structureChanged = true
+            deletedPositions.push(row.position)
             continue
           }
 
-          if (row.type === "execution.accepted") {
-            structureChanged = true
+          const emitted = transformRow(row, record)
+
+          if (emitted.length === 0) {
+            deletedPositions.push(row.position)
             continue
           }
 
-          if (row.type === "inbox.unresolved") {
-            const history = record.history
-
-            if (history === "route" && record.sender !== undefined && record.content !== undefined) {
-              structureChanged = true
-              out.push({
-                oldSeq: row.seq,
-                at: row.at,
-                type: "session.inbox.enqueued",
-                data: {
-                  sender: record.sender,
-                  content: record.content,
-                  ...(record.senderExecutionId !== undefined && { senderExecutionId: record.senderExecutionId }),
-                  ...(record.requestId !== undefined && { requestId: record.requestId }),
-                  ...(record.transferId !== undefined && { transferId: record.transferId }),
-                  ...(record.aboutSessionId !== undefined && { aboutSessionId: record.aboutSessionId }),
-                },
-                changed: true,
-              })
-              out.push({
-                oldSeq: -1,
-                at: row.at,
-                type: "session.inbox.dropped",
-                data: { messageId: row.seq, reason: "route" },
-                changed: true,
-              })
-              continue
-            }
-
-            if (history === "released") {
-              structureChanged = true
-              continue
-            }
-
-            if (history === "failed_unspecified" && Predicate.isNumber(record.messageId)) {
-              out.push({
-                oldSeq: row.seq,
-                at: row.at,
-                type: "session.inbox.failed",
-                data: { messageId: record.messageId, reason: "unrecorded" },
-                changed: true,
-              })
-              continue
-            }
-
-            if (
-              (history === "unconfirmed" || history === "delivered_without_execution") &&
-              Predicate.isNumber(record.messageId)
-            ) {
-              out.push({
-                oldSeq: row.seq,
-                at: row.at,
-                type: "session.inbox.dropped",
-                data: { messageId: record.messageId, reason: history },
-                changed: true,
-              })
-              continue
-            }
-
-            structureChanged = true
-            continue
-          }
-
-          if (row.type === "session.ended") {
-            out.push({ oldSeq: row.seq, at: row.at, type: "session.archived", data: {}, changed: true })
-            continue
-          }
-
-          if (row.type === "process.started") {
-            const next = rewriteProcessStarted(record)
-            out.push({ oldSeq: row.seq, at: row.at, type: row.type, data: next.data, changed: next.changed })
-            continue
-          }
-
-          if (row.type === "process.placed" || row.type === "process.pid" || row.type === "process.conversation") {
-            out.push({
-              oldSeq: row.seq,
-              at: row.at,
-              type: "process.updated",
-              data: pickProcessUpdated(record),
-              changed: true,
-            })
-            continue
-          }
-
-          const renamed = SIMPLE_RENAMES.get(row.type)
-
-          if (renamed !== undefined) {
-            out.push({ oldSeq: row.seq, at: row.at, type: renamed, data: record, changed: true })
-            continue
-          }
-
-          out.push({ oldSeq: row.seq, at: row.at, type: row.type, data: record, changed: false })
+          if (emitted.length > 1) expanded = true
+          out.push(...emitted)
         }
 
-        if (!structureChanged) {
-          for (let i = 0; i < out.length; i++) {
-            const item = out[i]!
-
-            if (!item.changed) continue
-            const original = rows[i]!
-            yield* tx`UPDATE event SET type = ${item.type}, data = ${JSON.stringify(item.data)}
-              WHERE position = ${original.position}`
-          }
-
-          continue
-        }
+        if (expanded) anyExpanded = true
+        const structureChanged = deletedPositions.length > 0 || expanded
 
         const seqMap = new Map<number, number>()
 
-        for (let i = 0; i < out.length; i++) {
-          const item = out[i]!
+        if (structureChanged) {
+          for (let i = 0; i < out.length; i++) {
+            const item = out[i]!
 
-          if (item.oldSeq > 0) seqMap.set(item.oldSeq, i + 1)
+            if (item.oldSeq > 0) seqMap.set(item.oldSeq, i + 1)
+          }
         }
 
-        yield* tx`DELETE FROM event WHERE aggregate = ${aggregate}`
+        const finalRows: ReadonlyArray<FinalRow> = out.map((item, i) => ({
+          position: item.position,
+          aggregate: item.aggregate,
+          seq: structureChanged ? i + 1 : item.oldSeq,
+          at: item.at,
+          type: item.type,
+          data: structureChanged ? remapData(item.type, item.data, seqMap) : item.data,
+          changed: structureChanged || item.changed,
+        }))
 
-        for (let i = 0; i < out.length; i++) {
-          const item = out[i]!
-          const remapped = remapData(item.type, item.data, seqMap)
-          yield* tx`INSERT INTO event (aggregate, seq, at, type, data)
-            VALUES (${aggregate}, ${i + 1}, ${item.at}, ${item.type}, ${JSON.stringify(remapped)})`
+        plans.push({ aggregate, deletedPositions, finalRows })
+      }
+
+      if (!anyExpanded) {
+        for (const plan of plans) {
+          if (plan.deletedPositions.length === 0) {
+            for (const row of plan.finalRows) {
+              if (!row.changed) continue
+              yield* tx`UPDATE event SET type = ${row.type}, data = ${JSON.stringify(row.data)}
+                WHERE position = ${row.position}`
+            }
+
+            continue
+          }
+
+          for (const pos of plan.deletedPositions) yield* tx`DELETE FROM event WHERE position = ${pos}`
+          yield* tx`UPDATE event SET seq = -position WHERE aggregate = ${plan.aggregate}`
+
+          for (const row of plan.finalRows)
+            yield* tx`UPDATE event SET seq = ${row.seq}, type = ${row.type}, data = ${JSON.stringify(row.data)}
+              WHERE position = ${row.position}`
+        }
+
+        return
+      }
+
+      const sessionAggregates = new Set(plans.map((plan) => plan.aggregate))
+      const byPosition = new Map<number, Array<FinalRow>>()
+
+      for (const plan of plans) {
+        for (const row of plan.finalRows) {
+          const list = byPosition.get(row.position) ?? []
+          list.push(row)
+          byPosition.set(row.position, list)
         }
       }
+
+      const allRows = yield* tx<EventRow>`SELECT position, aggregate, seq, at, type, data FROM event ORDER BY position`
+
+      const rewritten: Array<{
+        readonly aggregate: string
+        readonly seq: number
+        readonly at: number
+        readonly type: string
+        readonly data: string
+      }> = []
+
+      for (const row of allRows) {
+        if (!sessionAggregates.has(row.aggregate)) {
+          rewritten.push({ aggregate: row.aggregate, seq: row.seq, at: row.at, type: row.type, data: row.data })
+          continue
+        }
+
+        for (const emitted of byPosition.get(row.position) ?? [])
+          rewritten.push({
+            aggregate: emitted.aggregate,
+            seq: emitted.seq,
+            at: emitted.at,
+            type: emitted.type,
+            data: JSON.stringify(emitted.data),
+          })
+      }
+
+      yield* tx`DELETE FROM event`
+
+      for (const row of rewritten)
+        yield* tx`INSERT INTO event (aggregate, seq, at, type, data)
+          VALUES (${row.aggregate}, ${row.seq}, ${row.at}, ${row.type}, ${row.data})`
     }),
 }

@@ -34,18 +34,17 @@ export const factsFor =
 
     if (asked.length > 0 && known.size === 0) return Stream.unwrap(Effect.as(warned, Stream.never))
 
-    const definitions: ReadonlyArray<{ readonly type: PublicFactType }> =
-      known.size === 0 ? Object.values(PublicCatalog) : [...known].map((type) => ({ type }))
-
-    const wanted: ReadonlySet<string> = new Set(definitions.map((definition) => definition.type))
-    const isWanted = (event: Bus.BusEvent): event is PublicFactOf<T> => wanted.has(event.type)
+    if (known.size > 0)
+      return Stream.unwrap(
+        Effect.andThen(
+          warned,
+          Effect.map(bus.subscribe([...known].map((type) => ({ type }))), Stream.fromSubscription),
+        ),
+      )
 
     return Stream.unwrap(
-      Effect.andThen(
-        warned,
-        Effect.map(bus.subscribe(definitions), (subscription) =>
-          Stream.fromSubscription(subscription).pipe(Stream.filter(isWanted)),
-        ),
+      Effect.map(bus.subscribe(Object.values(PublicCatalog)), (subscription) =>
+        Stream.fromSubscription(subscription).pipe(Stream.filter((_event): _event is PublicFactOf<T> => true)),
       ),
     )
   }
