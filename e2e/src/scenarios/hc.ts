@@ -5,7 +5,18 @@ import type { Schema } from "effect"
 
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
-import { binary, expect, parseTerminalJson, row, SESSIONS, Skip, until, vibestd, type World } from "../world.ts"
+import {
+  binary,
+  expect,
+  parseTerminalJson,
+  row,
+  SESSIONS,
+  Skip,
+  until,
+  vibestd,
+  vibestdWatch,
+  type World,
+} from "../world.ts"
 import { project } from "./inbox.ts"
 
 type Entry = { id: string; agent: string; status: string; executionState: string }
@@ -534,9 +545,8 @@ const checks: ReadonlyArray<Check> = [
         let last: Watched | undefined
 
         const snapshot = async () => {
-          const answer = await vibestd(w, repo, "Watch", null)
-          const first = (answer.result as Array<Watched> | undefined)?.[0]
-          expect(first?._tag === "Snapshot", `Watch did not answer a Snapshot: ${JSON.stringify(answer).slice(0, 400)}`)
+          const first = (await vibestdWatch(w, repo)) as Watched | undefined
+          expect(first?._tag === "Snapshot", `Watch did not answer a Snapshot: ${JSON.stringify(first).slice(0, 400)}`)
           last = first
 
           return first!
@@ -559,7 +569,7 @@ const checks: ReadonlyArray<Check> = [
           last!.projects.find((p) => p.id === projectId)?.activity === "done",
           `the project is not done: ${JSON.stringify(last!.projects)}`,
         )
-        const marked = await vibestd(w, repo, "Session.Seen", { id: sub, finished })
+        const marked = await vibestd(w, repo, "POST", `/api/session/${sub}/seen`, { finished })
         expect(marked.error === undefined, `Session.Seen: ${JSON.stringify(marked)}`)
         await until(
           "the subagent idle after Session.Seen",

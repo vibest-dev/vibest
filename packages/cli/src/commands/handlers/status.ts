@@ -1,8 +1,7 @@
-import { cliHeaders, connect, readPing } from "@vibest/client/client"
+import { cliHeaders, connect, readPing, withHeaders } from "@vibest/client/client"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import * as Daemon from "@vibest/server/daemon"
 import { Effect, Exit, Option, Path } from "effect"
-import { RpcClient } from "effect/rpc"
 
 import { json } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
@@ -22,8 +21,8 @@ export default Runtime.handler(Commands.commands.status, () =>
     yield* noticeFrom(Effect.succeed(ping))
 
     const load = Option.exists(ping, (p) => p.capabilities?.load === true)
-      ? yield* RpcClient.withHeaders(
-          connect(layout.socket).pipe(Effect.flatMap((c) => c["Machine.Load"]({}))),
+      ? yield* withHeaders(
+          connect(layout.socket).pipe(Effect.flatMap((c) => c["server.machine"]["machine.load"]({ query: {} }))),
           cliHeaders(path.resolve(".")),
         ).pipe(Effect.scoped, Effect.timeout(LOAD_TIMEOUT), Effect.exit, Effect.map(Exit.getSuccess))
       : Option.none()

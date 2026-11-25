@@ -19,11 +19,13 @@ export default Runtime.handler(Commands.commands.worktree.commands.list, (o) =>
     const listed = yield* withVibest(
       c.claim,
       (client) =>
-        client["Worktree.List"]({
-          ...(project !== undefined && { project }),
-          ...(machine !== undefined && { machine }),
+        client["server.worktree"]["worktree.list"]({
+          query: {
+            ...(project !== undefined && { project }),
+            ...(machine !== undefined && { machine }),
+          },
         }),
-      { start: !c.agent, needs: { capability: "worktrees", method: "Worktree.List" } },
+      { start: !c.agent, needs: { capability: "worktrees", method: "worktree.list" } },
     )
 
     yield* json(listed)

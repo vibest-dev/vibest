@@ -1,7 +1,6 @@
-import { Claim, cliHeaders, connect, type VibestClient, readPing } from "@vibest/client/client"
+import { Claim, cliHeaders, connect, type VibestClient, readPing, withHeaders } from "@vibest/client/client"
 import { compareVersions, UpdateError } from "@vibest/client/release"
-import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
-import { type Ping } from "@vibest/protocol/rpc"
+import type { Ping } from "@vibest/protocol/schemas"
 import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
 import { Layout, shellQuote } from "@vibest/schema/layout"
@@ -23,7 +22,6 @@ import {
 } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { RpcClient } from "effect/rpc"
 
 import { askYesNo, interactive } from "./ask.ts"
 import { withVibest } from "./client.ts"
@@ -255,11 +253,13 @@ export const handoffDaemon = (
     if (reported !== target.version)
       return `\`${target.command.join(" ")} --version\` reports ${reported}, not ${target.version}; the old vibestd still runs. Next: vibest update`
 
-    const reply = yield* RpcClient.withHeaders(
+    const reply = yield* withHeaders(
       connect(layout.socket).pipe(
-        Effect.flatMap((c) => c["Daemon.Handoff"]({ instance: old.instance!, command: target.command })),
+        Effect.flatMap((c) =>
+          c["server.daemon"]["daemon.handoff"]({ payload: { instance: old.instance!, command: target.command } }),
+        ),
       ),
-      { ...cliHeaders((yield* Path.Path).resolve(".")), [PROTOCOL_HEADER]: String(old.protocol) },
+      cliHeaders((yield* Path.Path).resolve(".")),
     ).pipe(Effect.scoped, Effect.exit)
 
     if (Exit.isFailure(reply)) {
@@ -303,7 +303,7 @@ export const restartAgents = (
     const ask = <A, E>(f: (client: VibestClient) => Effect.Effect<A, E>) =>
       withVibest(Claim.cli({ repositoryRoot: cwd }), f, { start: false })
 
-    const outdated = yield* ask((client) => client["Agents.Outdated"]())
+    const outdated = yield* ask((client) => client["server.agent"]["agent.outdated"]())
 
     if (outdated.length === 0)
       return command === "vibest update" ? undefined : yield* Console.log("No agent runs an old integration.")
@@ -336,7 +336,9 @@ export const restartAgents = (
         return yield* Console.log(`They keep the old integration; ${refused}.`)
     }
 
-    yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after }))
+    yield* ask((client) =>
+      client["server.agent"]["agent.restart"]({ payload: { ids: restartable.map((a) => a.id), after } }),
+    )
     yield* Console.log(
       `Restarting ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command exits (outcomes in ${(yield* Layout).home}/vibestd.log).`,
     )

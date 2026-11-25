@@ -1,4 +1,4 @@
-import { EdgeChain, EdgeDirected, EdgeMutual, type EdgeSpec } from "@vibest/protocol/rpc"
+import { EdgeChain, EdgeDirected, EdgeMutual, type EdgeSpec } from "@vibest/protocol/schemas"
 import { Effect, Option } from "effect"
 
 import { toSessionRef } from "../../../caller.ts"

@@ -7,17 +7,17 @@ import { Commands } from "../../commands.ts"
 
 const NO_LOAD_HERE = "this vibestd cannot read machine load; run vibest daemon restart"
 
-export default Runtime.handler(Commands.commands.machine.commands.ls, () =>
-  userOnly("machine ls").pipe(
+export default Runtime.handler(Commands.commands.machine.commands.list, () =>
+  userOnly("machine list").pipe(
     Effect.andThen(
       vibest((client) =>
         Effect.gen(function* () {
-          const reads = (yield* client.Ping(undefined)).capabilities?.load === true
-          const machines = yield* client["Machine.List"]()
+          const reads = (yield* client["server.daemon"]["daemon.ping"]()).capabilities?.load === true
+          const machines = yield* client["server.machine"]["machine.list"]()
 
           const withLoad = (machine: MachineInfo) =>
             reads
-              ? client["Machine.Load"]({ machine: machine.name }).pipe(
+              ? client["server.machine"]["machine.load"]({ query: { machine: machine.name } }).pipe(
                   Effect.match({
                     onSuccess: (load) => ({ ...machine, load }),
                     onFailure: (e) => ({ ...machine, loadError: e.message }),

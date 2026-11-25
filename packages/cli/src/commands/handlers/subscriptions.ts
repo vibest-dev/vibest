@@ -5,5 +5,5 @@ import { Runtime } from "../../framework/runtime.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.subscriptions, () =>
-  vibest((client) => client.Subscriptions().pipe(Effect.flatMap(json))),
+  vibest((client) => client["server.subscription"]["subscription.list"]().pipe(Effect.flatMap(json))),
 )

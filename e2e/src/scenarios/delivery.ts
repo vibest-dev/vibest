@@ -757,7 +757,7 @@ const checks: ReadonlyArray<Check> = [
 
         const refusedHere = await typed(`${binary} machine ls`, hinted)
         expect(refusedHere.includes(`session=${id}`), `the new terminal did not inherit the identity: ${refusedHere}`)
-        const wayOut = "env -u VIBEST_SESSION_ID vibest machine ls"
+        const wayOut = "env -u VIBEST_SESSION_ID vibest machine list"
         expect(
           refusedHere.includes("Forbidden") &&
             refusedHere.includes(`This shell carries agent session ${id}`) &&

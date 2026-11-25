@@ -1,8 +1,8 @@
 import { awaitDaemon, type VibestClient } from "@vibest/client/client"
-import { type Ping } from "@vibest/protocol/rpc"
+import type { Ping } from "@vibest/protocol/schemas"
 import { Layout } from "@vibest/schema/layout"
 import { Effect } from "effect"
-import { RpcClientError as ClientError } from "effect/rpc"
+import { HttpClientError } from "effect/http"
 
 import { caller } from "./caller.ts"
 import { withVibest } from "./client.ts"
@@ -12,7 +12,7 @@ export const requested = <A, E, R>(
     client: VibestClient,
     request: string | undefined,
     ping: Ping,
-  ) => Effect.Effect<A, E | ClientError.RpcClientError, R>,
+  ) => Effect.Effect<A, E | HttpClientError.HttpClientError, R>,
 ) =>
   Effect.gen(function* () {
     const c = yield* caller
@@ -20,7 +20,7 @@ export const requested = <A, E, R>(
     const request = crypto.randomUUID()
     let known = false
 
-    const call = (firstError?: ClientError.RpcClientError) =>
+    const call = (firstError?: HttpClientError.HttpClientError) =>
       withVibest(
         c.claim,
         (client, ping) => {
@@ -35,7 +35,7 @@ export const requested = <A, E, R>(
 
     return yield* call().pipe(
       Effect.catch((error) =>
-        known && error instanceof ClientError.RpcClientError
+        known && HttpClientError.isHttpClientError(error)
           ? awaitDaemon(socket).pipe(Effect.andThen(call(error)))
           : Effect.fail(error),
       ),

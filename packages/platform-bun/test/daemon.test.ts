@@ -170,11 +170,11 @@ describe.concurrent("vibestd.pid lock", () => {
         const info = yield* recordedInfo(layout.daemonInfo, ping.instance)
 
         assert.strictEqual((yield* fs.stat(layout.daemonInfo)).mode & 0o777, 0o600)
-        assert.isDefined(info.ws)
-        assert.strictEqual(info.ws?.url, `ws://127.0.0.1:${info.ws?.port}`)
-        assert.isAbove(info.ws?.port ?? 0, 0)
-        assert.match(info.ws?.token ?? "", /^[a-f0-9]{64}$/)
-        assert.strictEqual(info.ws?.protocol, PROTOCOL)
+        assert.isDefined(info.http)
+        assert.strictEqual(info.http?.url, `http://127.0.0.1:${info.http?.port}`)
+        assert.isAbove(info.http?.port ?? 0, 0)
+        assert.match(info.http?.token ?? "", /^[a-f0-9]{64}$/)
+        assert.strictEqual(info.http?.protocol, PROTOCOL)
         assert.isFalse(yield* fs.exists(staleWsInfo))
 
         process.kill(ping.pid!, "SIGTERM")
@@ -185,14 +185,14 @@ describe.concurrent("vibestd.pid lock", () => {
   )
 
   it.live(
-    "omits ws from DaemonInfo when disabled via VIBEST_WEBSOCKET=0",
+    "omits http from DaemonInfo when disabled via VIBEST_WEBSOCKET=0",
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-ws-env-"))
         const proc = yield* Effect.forkScoped(daemon(layout.home, { VIBEST_WEBSOCKET: "0" }))
         const ping = yield* pingOf(layout.socket)
         const info = yield* recordedInfo(layout.daemonInfo, ping.instance)
-        assert.isUndefined(info.ws)
+        assert.isUndefined(info.http)
         process.kill(ping.pid!, "SIGTERM")
         yield* Fiber.await(proc)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),

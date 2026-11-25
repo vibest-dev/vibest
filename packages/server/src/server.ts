@@ -21,27 +21,37 @@ import { Session } from "@vibest/core/session"
 import { SessionLaunch } from "@vibest/core/session/entry"
 import { Starts } from "@vibest/core/session/starts"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { VibestRpcs } from "@vibest/protocol/rpc"
+import { VibestApi } from "@vibest/protocol/api"
 import { Context, Effect, Layer } from "effect"
-import { RpcSerialization, RpcServer } from "effect/rpc"
-import * as SocketServer from "effect/socket/SocketServer"
+import { Etag, HttpPlatform, HttpRouter, HttpServer } from "effect/http"
+import { HttpApiBuilder } from "effect/http-api"
+import type { ServeError } from "effect/http/HttpServerError"
 
-import { AdmissionLive, CallerGateLive, ProtocolGateLive } from "./gates.ts"
+import { AdmissionLive, CallerMiddlewareLive, ProtocolMiddlewareLive } from "./gates.ts"
+import { AgentHandler } from "./handlers/agent.ts"
 import * as CallerChecks from "./handlers/caller.ts"
-import { DaemonHandlers } from "./handlers/daemon.ts"
-import * as EntryHandlers from "./handlers/entry.ts"
-import * as InboxHandlers from "./handlers/inbox.ts"
-import * as IntegrationHandlers from "./handlers/integration.ts"
-import * as ProjectHandlers from "./handlers/project.ts"
-import * as RemoteHandlers from "./handlers/remote.ts"
-import * as SessionHandlers from "./handlers/session.ts"
-import * as WorktreeHandlers from "./handlers/worktree.ts"
+import { DaemonHandler, DaemonHandlers } from "./handlers/daemon.ts"
+import { EventHandler } from "./handlers/event.ts"
+import { HarnessHandler } from "./handlers/harness.ts"
+import { HookHandler } from "./handlers/hook.ts"
+import { InboxHandler } from "./handlers/inbox.ts"
+import { MachineHandler } from "./handlers/machine.ts"
+import { PluginHandler } from "./handlers/plugin.ts"
+import { ProjectHandler } from "./handlers/project.ts"
+import { RemoteHandler, routingLayer } from "./handlers/remote.ts"
+import { RuntimeHandler } from "./handlers/runtime.ts"
+import { SessionHandler } from "./handlers/session.ts"
+import { SubscriptionHandler } from "./handlers/subscription.ts"
+import { WatchHandler } from "./handlers/watch.ts"
+import { WorktreeHandler } from "./handlers/worktree.ts"
 import * as Listing from "./listing.ts"
 import { Inbound } from "./machine/inbound.ts"
 import { Load } from "./machine/load.ts"
 import { Machines } from "./machine/machines.ts"
 import { RemoteWatch } from "./machine/remote-watch.ts"
 import { Remote } from "./machine/remote.ts"
+import { defectResponseLayer } from "./middleware/defect-response.ts"
+import { schemaErrorLayer } from "./middleware/schema-error.ts"
 import { services } from "./services.ts"
 import { UpdateCheck } from "./update-check.ts"
 import { WatchFeed } from "./watch-feed.ts"
@@ -49,98 +59,95 @@ import { WatchFeed } from "./watch-feed.ts"
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
 export const handlersCore = Layer.mergeAll(
-  DaemonHandlers.layer,
-  SessionHandlers.layer,
-  InboxHandlers.layer,
-  IntegrationHandlers.layer,
-  EntryHandlers.layer,
-  ProjectHandlers.layer,
-  RemoteHandlers.layer,
-  WorktreeHandlers.layer,
-).pipe(Layer.provide(RemoteHandlers.routingLayer.pipe(Layer.provideMerge(CallerChecks.layer))))
+  DaemonHandler,
+  ProjectHandler,
+  SessionHandler,
+  InboxHandler,
+  HookHandler,
+  WorktreeHandler,
+  AgentHandler,
+  HarnessHandler,
+  RuntimeHandler,
+  PluginHandler,
+  SubscriptionHandler,
+  MachineHandler,
+  RemoteHandler,
+  EventHandler,
+  WatchHandler,
+).pipe(Layer.provide(routingLayer.pipe(Layer.provideMerge(CallerChecks.layer))))
 
 export const handlers = handlersCore.pipe(
   Layer.provide(Layer.merge(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer)), RemoteWatch.layer)),
 )
 
-const socketServerRpcLayer = RpcServer.layer(VibestRpcs).pipe(
-  Layer.provide(CallerGateLive),
-  Layer.provide(RpcServer.layerProtocolSocketServer),
-  Layer.provide(RpcSerialization.layerNdJsonRpc()),
+const apiRoutes = HttpApiBuilder.layer(VibestApi, { openapiPath: "/openapi.json" }).pipe(
+  Layer.provide(handlersCore),
+  Layer.provide(CallerMiddlewareLive),
+  Layer.provide(AdmissionLive),
+  Layer.provide(ProtocolMiddlewareLive),
+  Layer.provide(schemaErrorLayer),
+  Layer.merge(defectResponseLayer),
 )
 
-export const layer = socketServerRpcLayer.pipe(Layer.provide(Layer.mergeAll(handlers, AdmissionLive, ProtocolGateLive)))
+const unixServerLayer = HttpRouter.serve(apiRoutes).pipe(Layer.provide(Layer.merge(HttpPlatform.layer, Etag.layerWeak)))
 
-export class SocketServerLayer extends Context.Service<
-  SocketServerLayer,
-  Layer.Layer<SocketServer.SocketServer, SocketServer.SocketServerError>
->()("vibest/SocketServerLayer") {}
+export const layer = unixServerLayer.pipe(
+  Layer.provide(Layer.merge(WatchFeed.layer.pipe(Layer.provideMerge(Listing.layer)), RemoteWatch.layer)),
+)
 
-export const socketServerLayer = LayerNode.unbound(SocketServerLayer)
+export class HttpServerLayer extends Context.Service<HttpServerLayer, Layer.Layer<HttpServer.HttpServer, ServeError>>()(
+  "vibest/HttpServerLayer",
+) {}
 
-export const socketServer = LayerNode.make({
-  service: SocketServer.SocketServer,
-  layer: Layer.unwrap(Effect.map(SocketServerLayer, (layer) => layer)),
-  deps: [socketServerLayer],
+export const httpServerLayer = LayerNode.unbound(HttpServerLayer)
+
+export const httpServer = LayerNode.make({
+  service: HttpServer.HttpServer,
+  layer: Layer.unwrap(Effect.map(HttpServerLayer, (layer) => layer)),
+  deps: [httpServerLayer],
 })
 
-export const handlersNode = LayerNode.make({
-  name: "vibest/RpcHandlers",
-  layer: handlersCore,
-  deps: [
-    services,
-    Agents.node,
-    Bus.node,
-    Concurrency.node,
-    Starts.node,
-    Db.node,
-    Drain.node,
-    Git.node,
-    Harness.node,
-    Harnesses.node,
-    DaemonHandlers.identityNode,
-    Inbox.node,
-    Integration.node,
-    SessionLaunch.node,
-    Listing.node,
-    Load.node,
-    Machines.node,
-    RemoteWatch.node,
-    Inbound.node,
-    Plugins.node,
-    Processes.node,
-    Project.node,
-    Remote.node,
-    Runtimes.node,
-    Session.node,
-    DaemonHandlers.shutdownNode,
-    RepositoryUrl.node,
-    Subscriptions.node,
-    UpdateCheck.node,
-    WatchFeed.node,
-    App.node,
-    Identity.node,
-    PlatformNode.childProcessSpawner,
-    PlatformNode.fileSystem,
-    PlatformNode.layout,
-    PlatformNode.path,
-  ],
-})
-
-export const admissionNode = LayerNode.make({
-  name: "vibest/Admission",
-  layer: AdmissionLive,
-  deps: [Drain.node],
-})
-
-export const protocolGateNode = LayerNode.make({
-  name: "vibest/ProtocolGate",
-  layer: ProtocolGateLive,
-  deps: [Db.node, App.node],
-})
+export const handlerDeps = [
+  services,
+  Agents.node,
+  Bus.node,
+  Concurrency.node,
+  Starts.node,
+  Db.node,
+  Drain.node,
+  Git.node,
+  Harness.node,
+  Harnesses.node,
+  DaemonHandlers.identityNode,
+  Inbox.node,
+  Integration.node,
+  SessionLaunch.node,
+  Listing.node,
+  Load.node,
+  Machines.node,
+  RemoteWatch.node,
+  Inbound.node,
+  Plugins.node,
+  Processes.node,
+  Project.node,
+  Remote.node,
+  Runtimes.node,
+  Session.node,
+  DaemonHandlers.shutdownNode,
+  RepositoryUrl.node,
+  Subscriptions.node,
+  UpdateCheck.node,
+  WatchFeed.node,
+  App.node,
+  Identity.node,
+  PlatformNode.childProcessSpawner,
+  PlatformNode.fileSystem,
+  PlatformNode.layout,
+  PlatformNode.path,
+] as const
 
 export const node = LayerNode.make({
-  name: "vibest/RpcServer",
-  layer: socketServerRpcLayer,
-  deps: [handlersNode, admissionNode, protocolGateNode, Db.node, socketServer],
+  name: "vibest/HttpServer",
+  layer: unixServerLayer,
+  deps: [...handlerDeps, httpServer],
 })

@@ -1,6 +1,6 @@
 import net from "node:net"
 
-import { readPing } from "@vibest/client/client"
+import { readPing, withHeaders as withRequestHeaders } from "@vibest/client/client"
 import { App } from "@vibest/core/app"
 import { Db } from "@vibest/core/database/db"
 import { Processes } from "@vibest/core/processes"
@@ -16,7 +16,7 @@ import {
   runtimesLayer,
   subscriptionsLayer,
 } from "@vibest/core/test/lib/harnesses"
-import { NOT_CHECKED } from "@vibest/protocol/rpc"
+import { NOT_CHECKED } from "@vibest/protocol/schemas"
 import { Layout } from "@vibest/schema/layout"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import { UpdateCheck } from "@vibest/server/update-check"
@@ -51,27 +51,39 @@ export {
 
 export const TEST_HERDR = "herdr"
 
+const RUNTIME_DEFAULT_ENDPOINTS = new Set(["session.spawn", "session.launch", "session.claim"])
+
 export const authed = <C extends object>(client: C, headers: Record<string, string>): C => {
-  const withHeaders = { ...client }
+  const wrapped = { ...client }
 
-  for (const [method, call] of Object.entries(client)) {
-    if (!Predicate.isFunction(call)) continue
+  for (const [groupName, group] of Object.entries(client)) {
+    if (!Predicate.isObject(group)) continue
+    const wrappedGroup = { ...group }
 
-    Object.assign(withHeaders, {
-      [method]: (input: { readonly runtime?: string } | undefined, options?: { headers?: Record<string, string> }) => {
-        const payload =
-          input !== undefined &&
-          !("runtime" in input) &&
-          (method === "Spawn" || method === "Launch" || method === "Session.Claim")
-            ? { ...input, runtime: TEST_HERDR }
-            : input
+    for (const [method, call] of Object.entries(group)) {
+      if (!Predicate.isFunction(call)) continue
 
-        return call.call(client, payload, { ...options, headers: { ...headers, ...options?.headers } })
-      },
-    })
+      Object.assign(wrappedGroup, {
+        [method]: (input?: { readonly payload?: Schema.JsonObject }) => {
+          const next =
+            input?.payload !== undefined &&
+            Predicate.isObject(input.payload) &&
+            !("runtime" in input.payload) &&
+            RUNTIME_DEFAULT_ENDPOINTS.has(method)
+              ? { ...input, payload: { ...input.payload, runtime: TEST_HERDR } }
+              : input
+
+          const result = call.call(group, next)
+
+          return Effect.isEffect(result) ? withRequestHeaders(result, headers) : result
+        },
+      })
+    }
+
+    Object.assign(wrapped, { [groupName]: wrappedGroup })
   }
 
-  return withHeaders
+  return wrapped
 }
 
 export const savedSession = (sessionId: string) =>

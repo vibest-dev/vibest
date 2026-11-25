@@ -2,12 +2,20 @@ import { Schema, Struct } from "effect"
 
 import { AgentFrom } from "./event.ts"
 
-export class MachineFailed extends Schema.TaggedError<MachineFailed>()("MachineFailed", { message: Schema.String }) {}
+export class MachineFailed extends Schema.TaggedError<MachineFailed>()(
+  "MachineFailed",
+  { message: Schema.String },
+  { httpApiStatus: 502 },
+) {}
 
-export class UnknownMachine extends Schema.TaggedError<UnknownMachine>()("UnknownMachine", {
-  machine: Schema.String,
-  machines: Schema.Array(Schema.String),
-}) {
+export class UnknownMachine extends Schema.TaggedError<UnknownMachine>()(
+  "UnknownMachine",
+  {
+    machine: Schema.String,
+    machines: Schema.Array(Schema.String),
+  },
+  { httpApiStatus: 404 },
+) {
   override get message() {
     const known =
       this.machines.length === 0 ? "none is added (vibest machine add)" : `machines: ${this.machines.join(", ")}`
@@ -16,20 +24,32 @@ export class UnknownMachine extends Schema.TaggedError<UnknownMachine>()("Unknow
   }
 }
 
-export class MachineUnavailable extends Schema.TaggedError<MachineUnavailable>()("MachineUnavailable", {
-  machine: Schema.String,
-  message: Schema.String,
-}) {}
+export class MachineUnavailable extends Schema.TaggedError<MachineUnavailable>()(
+  "MachineUnavailable",
+  {
+    machine: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 503 },
+) {}
 
-export class MachineIncompatible extends Schema.TaggedError<MachineIncompatible>()("MachineIncompatible", {
-  machine: Schema.String,
-  message: Schema.String,
-}) {}
+export class MachineIncompatible extends Schema.TaggedError<MachineIncompatible>()(
+  "MachineIncompatible",
+  {
+    machine: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 409 },
+) {}
 
-export class AlreadyAdded extends Schema.TaggedError<AlreadyAdded>()("AlreadyAdded", {
-  machine: Schema.String,
-  id: Schema.String,
-}) {
+export class AlreadyAdded extends Schema.TaggedError<AlreadyAdded>()(
+  "AlreadyAdded",
+  {
+    machine: Schema.String,
+    id: Schema.String,
+  },
+  { httpApiStatus: 409 },
+) {
   override get message() {
     return `this is the vibestd already added as ${this.machine} (${this.id.slice(0, 8)}); use that name`
   }
@@ -99,15 +119,27 @@ export const ListedMachine = MachineInfo.mapFields(Struct.pick(["name", "state",
 
 export type ListedMachine = typeof ListedMachine.Type
 
-export class NoProject extends Schema.TaggedError<NoProject>()("NoProject", { message: Schema.String }) {}
+export class NoProject extends Schema.TaggedError<NoProject>()(
+  "NoProject",
+  { message: Schema.String },
+  { httpApiStatus: 422 },
+) {}
 
-export class NoCommit extends Schema.TaggedError<NoCommit>()("NoCommit", { message: Schema.String }) {}
+export class NoCommit extends Schema.TaggedError<NoCommit>()(
+  "NoCommit",
+  { message: Schema.String },
+  { httpApiStatus: 422 },
+) {}
 
 export const OUTBOX_ITEM_MAX = 1024 * 1024
 
 export const PROMPT_MAX = 1024 * 1024
 
-export class PromptTooLarge extends Schema.TaggedError<PromptTooLarge>()("PromptTooLarge", { bytes: Schema.Number }) {
+export class PromptTooLarge extends Schema.TaggedError<PromptTooLarge>()(
+  "PromptTooLarge",
+  { bytes: Schema.Number },
+  { httpApiStatus: 422 },
+) {
   override get message() {
     return `the prompt is ${this.bytes} bytes; another machine takes at most ${PROMPT_MAX} bytes (1 MiB)`
   }

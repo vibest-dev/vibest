@@ -1,18 +1,18 @@
 # @vibest/claude: the vibest Claude Code plugin
 
 One ordinary Claude Code plugin, one hooks module. Every call to vibest is an HTTP request from `$.http.fetch` to
-vibestd's unix socket `<VIBEST_HOME>/vibest-http.sock`; the plugin runs no `vibest` process.
+vibestd's unix socket `<VIBEST_HOME>/vibest.sock`; the plugin runs no `vibest` process.
 
-- `turn.complete` posts each main-loop execution end to `/hooks/claude/execution-end` with its `reason`, the answer and the
+- `turn.complete` posts each main-loop execution end to `/api/hook/claude/execution-end` with its `reason`, the answer and the
   current Claude session id. vibest maps the reason: `answer` is the result as it is; `aborted` is an interrupted
   (failed) result when the person pressed Esc, and nothing when `vibest interrupt` (or remove, archive) stopped the
   execution; `refusal` and `error` are failed results. A subagent's loop (`agentId` set) reports nothing. For the
   entry session vibestd records only the conversation id.
-- `prompt.submit` posts a worker's prompt with its `origin.kind` to `/hooks/claude/prompt`; vibest keeps only what
+- `prompt.submit` posts a worker's prompt with its `origin.kind` to `/api/hook/claude/prompt`; vibest keeps only what
   the person submitted (`composer`, or `bridge` for Remote Control).
-- `tool.call` posts each tool call, a subagent's included, to `/hooks/claude/guard` and returns `{ deny }` when vibest
+- `tool.call` posts each tool call, a subagent's included, to `/api/hook/claude/guard` and returns `{ deny }` when vibest
   refuses it. It tries for 2 s, then again after 100, 300 and 900 ms; when nothing answers, the call is refused.
-- The **inbox**: from `session.start`, a session asks `/inbox/take` every second while it is idle (after `session.start`
+- The **inbox**: from `session.start`, a session asks `/api/inbox/take` every second while it is idle (after `session.start`
   and `turn.complete`, never while an execution runs). A batch comes with its execution id,
   the two-line form (`Message from @General · <title> (<id>)` then the first line; a notice is `Message from Vibest`, a user send is `Message from You`) and its full text. The line is submitted with
   `$.prompt.submit` from the AbovePrompt `ui.render` hook, one batch per draw, and this module's own `prompt.submit`

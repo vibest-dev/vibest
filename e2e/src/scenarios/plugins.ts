@@ -454,20 +454,24 @@ export default Plugin.define({
           "-w",
           "\n%{http_code}",
           "--unix-socket",
-          path.join(w.vibestHome, "vibest-http.sock"),
+          path.join(w.vibestHome, "vibest.sock"),
           "-X",
           "POST",
           "-H",
           `vibest-protocol: ${PROTOCOL}`,
+          "-H",
+          "vibest-caller: session",
           "-H",
           `vibest-session-id: ${entry.id}`,
           "-H",
           `vibest-project-id: ${entry.projectId}`,
           "-H",
           `vibest-harness: ${entry.harness}`,
+          "-H",
+          "content-type: text/plain",
           "--data-binary",
           JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository }),
-          `http://vibest/hooks/${entry.harness}/guard`,
+          `http://vibest/api/hook/${entry.harness}/guard`,
         ])
 
         expect(r.code === 0, `guard curl exited ${r.code}: ${r.stderr}`)
@@ -492,11 +496,11 @@ export default Plugin.define({
       )
 
       const builtinHook = await guard("Shell", {
-        command: 'curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready',
+        command: 'curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready',
       })
 
       expect(
-        builtinHook === "vibest-http.sock is the harness's hook socket, not for agent commands.",
+        builtinHook === "vibest.sock is the vibestd daemon socket, not for agent commands.",
         `hook refusal: ${JSON.stringify(builtinHook)}`,
       )
 

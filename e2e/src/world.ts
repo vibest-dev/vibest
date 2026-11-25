@@ -1,5 +1,6 @@
 import fs from "node:fs"
 import fsPromises from "node:fs/promises"
+import http from "node:http"
 import os from "node:os"
 import path from "node:path"
 
@@ -824,37 +825,126 @@ export const herdr = (socket: string, method: string, params: Schema.JsonObject)
     }).catch(reject)
   })
 
-const firstAnswer = (w: World, request: Schema.JsonObject) =>
-  new Promise<{ result?: unknown; error?: unknown }>((resolve, reject) => {
-    let buffer = ""
-    Bun.connect({
-      unix: path.join(w.vibestHome, "vibest.sock"),
-      socket: {
-        open: (s) => void s.write(`${JSON.stringify(request)}\n`),
-        data: (s, chunk) => {
-          buffer += Buffer.from(chunk).toString("utf8")
-          const line = buffer.split("\n").find((l, i, all) => i < all.length - 1 && l.trim() !== "")
-
-          if (line === undefined) return
-          s.end()
-          resolve(JSON.parse(line) as { result?: unknown; error?: unknown })
+const unixHttp = (
+  socketPath: string,
+  method: string,
+  urlPath: string,
+  headers: Readonly<Record<string, string>>,
+  body?: string,
+) =>
+  new Promise<{ readonly status: number; readonly body: string }>((resolve, reject) => {
+    const req = http.request(
+      {
+        socketPath,
+        method,
+        path: urlPath,
+        headers: {
+          ...(body !== undefined && {
+            "content-type": "application/json",
+            "content-length": String(Buffer.byteLength(body)),
+          }),
+          ...headers,
         },
-        error: (_s, e) => reject(e),
       },
-    }).catch(reject)
+      (res) => {
+        let out = ""
+        res.on("data", (chunk: Buffer) => {
+          out += chunk.toString("utf8")
+        })
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: out }))
+      },
+    )
+
+    req.on("error", reject)
+
+    if (body !== undefined) req.write(body)
+    req.end()
   })
 
-export const vibestd = async (w: World, repo: string, method: string, params: Schema.Json) => {
-  const ping = await firstAnswer(w, { jsonrpc: "2.0", id: 1, method: "Ping", params: null, headers: [] })
-  const protocol = String((ping.result as { protocol?: number } | undefined)?.protocol)
+const firstSseEvent = (socketPath: string, urlPath: string, headers: Readonly<Record<string, string>>) =>
+  new Promise<{ readonly status: number; readonly data: unknown }>((resolve, reject) => {
+    let settled = false
 
-  const headers = [
-    ["vibest-protocol", protocol],
-    ["vibest-caller", "cli"],
-    ["vibest-repository", repo],
-  ]
+    const finish = (err?: Error, value?: { readonly status: number; readonly data: unknown }) => {
+      if (settled) return
+      settled = true
+      req.destroy()
 
-  return firstAnswer(w, { jsonrpc: "2.0", id: 1, method, params, headers })
+      if (err !== undefined) reject(err)
+      else resolve(value!)
+    }
+
+    const req = http.request({ socketPath, method: "GET", path: urlPath, headers }, (res) => {
+      const status = res.statusCode ?? 0
+      let buf = ""
+      res.on("data", (chunk: Buffer) => {
+        buf += chunk.toString("utf8")
+
+        if (status >= 400) return
+
+        for (const line of buf.split("\n")) {
+          if (!line.startsWith("data:")) continue
+          const payload = line.slice(5).trim()
+
+          if (payload === "") continue
+          finish(undefined, { status, data: JSON.parse(payload) as unknown })
+
+          return
+        }
+      })
+      res.on("end", () => {
+        if (settled) return
+
+        if (status >= 400) finish(new Error(`${urlPath} (${status}): ${buf}`))
+        else finish(new Error(`${urlPath} ended before first SSE event`))
+      })
+    })
+
+    req.on("error", (e) => finish(e))
+    req.end()
+  })
+
+const vibestdProtocol = async (socketPath: string) => {
+  const ping = await unixHttp(socketPath, "GET", "/api/daemon/ping", {})
+  const parsed = JSON.parse(ping.body) as { protocol?: number }
+
+  return String(parsed.protocol)
+}
+
+export const vibestd = async (w: World, repo: string, method: string, urlPath: string, body?: Schema.Json) => {
+  const socketPath = path.join(w.vibestHome, "vibest.sock")
+  const protocol = await vibestdProtocol(socketPath)
+
+  const headers = {
+    "vibest-protocol": protocol,
+    "vibest-caller": "cli",
+    "vibest-repository": repo,
+  }
+
+  const reply = await unixHttp(
+    socketPath,
+    method,
+    urlPath,
+    headers,
+    body === undefined ? undefined : JSON.stringify(body),
+  )
+
+  const parsed = reply.body.trim() === "" ? undefined : (JSON.parse(reply.body) as unknown)
+
+  return reply.status >= 400 ? { error: parsed } : { result: parsed }
+}
+
+export const vibestdWatch = async (w: World, repo: string) => {
+  const socketPath = path.join(w.vibestHome, "vibest.sock")
+  const protocol = await vibestdProtocol(socketPath)
+
+  const reply = await firstSseEvent(socketPath, "/api/watch", {
+    "vibest-protocol": protocol,
+    "vibest-caller": "cli",
+    "vibest-repository": repo,
+  })
+
+  return reply.data
 }
 
 export const replyOf = async (w: World, sub: string, cwd?: string) =>

@@ -461,6 +461,7 @@ const worktree = Spec.make("worktree", {
   description: "Worktrees vibest made for projects on this machine",
   commands: [
     Spec.make("list", {
+      alias: "ls",
       description:
         "The worktrees vibest made, grouped by project, as JSON. Each has its path, and for every repository in it (one, or one folder each in a project of several) that repository's folder, its branch or detached commit, and its state computed now with git: dirty with the number of changed files, unsaved (commits on no branch, lost if the worktree is removed), or clean. Sessions whose recorded directory is that worktree are listed with their id, title, and whether they are live or archived. --project limits the list to one project. --machine asks another machine, which answers for its own projects",
       params: {
@@ -469,7 +470,7 @@ const worktree = Spec.make("worktree", {
           Flag.optional,
         ),
         machine: Flag.String("machine").pipe(
-          Flag.withDescription("Ask another machine (vibest machine ls); it lists its own worktrees"),
+          Flag.withDescription("Ask another machine (vibest machine list); it lists its own worktrees"),
           Flag.optional,
         ),
       },
@@ -490,11 +491,13 @@ const machine = Spec.make("machine", {
         ),
       },
     }),
-    Spec.make("ls", {
+    Spec.make("list", {
+      alias: "ls",
       description:
         "The machines this vibestd connects to: connection, runtimes, whether this machine shows their terminals, and their load (cores, CPU in use, memory, working executions; loadError when it cannot be read). JSON",
     }),
-    Spec.make("rm", {
+    Spec.make("remove", {
+      alias: "rm",
       description:
         "Forget a machine and stop its connection. Agents there keep running; adding it again delivers their results",
       params: { name: Argument.String("name") },

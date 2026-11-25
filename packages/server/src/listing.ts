@@ -23,7 +23,7 @@ import {
   type SessionInfo,
   type WatchEvent,
   type WatchSession,
-} from "@vibest/protocol/rpc"
+} from "@vibest/protocol/schemas"
 import { canonicalTarget, type Terminal, type TerminalTarget } from "@vibest/schema/terminal"
 import { Context, Data, Effect, Layer, Predicate } from "effect"
 

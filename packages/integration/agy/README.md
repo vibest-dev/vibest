@@ -5,11 +5,11 @@ loads from the install's `harnesses/agy` folder, which vibest adds to each sessi
 `.agents/plugins/vibest/` holds `plugin.json`, `hooks.json`, `hook.sh` and the builtin skills.
 
 - **the conversation and the execution start**: `SessionStart` (after the first input) and `PreInvocation` (before each
-  model call) post to `POST /hooks/agy/prompt` on `$VIBEST_HOME/vibest-http.sock`; vibestd records the conversation id it resumes with
+  model call) post to `POST /api/hook/agy/prompt` on `$VIBEST_HOME/vibest.sock`; vibestd records the conversation id it resumes with
   `agy --conversation` and shows the session working.
-- **the execution end**: `Stop` posts to `POST /hooks/agy/execution-end`; the execution completes, or fails with
+- **the execution end**: `Stop` posts to `POST /api/hook/agy/execution-end`; the execution completes, or fails with
   agy's `error`. agy's `Stop` carries no answer, so there is no reply text: `vibest peek` shows it.
-- **the tool guard**: `PreToolUse` posts to `POST /hooks/agy/guard`; vibestd answers in agy's shape and
+- **the tool guard**: `PreToolUse` posts to `POST /api/hook/agy/guard`; vibestd answers in agy's shape and
   a refused call does not run. When vibestd is unreachable, `hook.sh` answers `deny` itself.
 - **the first message**: a process vibest starts (a new session, or a resume after its terminal is gone) gets its first
   message as `agy --prompt-interactive <message>`, so agy takes it once it is ready itself: herdr-core has no state for

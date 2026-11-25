@@ -1,4 +1,4 @@
-import { type VibestClient } from "@vibest/client/client"
+import type { AttachSuccess } from "@vibest/protocol/payloads"
 import { LaunchFailed, NO_RUNTIME_DETECTED } from "@vibest/schema/session"
 import { Console, Data, Effect, FileSystem, Option, Path } from "effect"
 
@@ -13,7 +13,7 @@ import { Commands } from "../commands.ts"
 
 const DEFAULT_AGENT = "coordinator"
 
-export type RunningRoot = Effect.Success<ReturnType<VibestClient["Session.Attach"]>>["running"]
+export type RunningRoot = (typeof AttachSuccess.Type)["running"]
 
 export type RunningAction = { readonly _tag: "Move"; readonly sessionId: string } | { readonly _tag: "New" }
 
@@ -68,11 +68,13 @@ export default Runtime.handler(Commands, (o) =>
           return yield* new LaunchFailed({ message: "this vibestd does not take --agent; run vibest update" })
 
         const attach = (runtime: string | undefined) =>
-          client["Session.Attach"]({
-            callerEnv: callerEnvOf(),
-            fresh: o.fresh,
-            ...(agentNamed && { agent, agentNamed: true }),
-            ...(runtime !== undefined && { runtime }),
+          client["server.session"]["session.attach"]({
+            payload: {
+              callerEnv: callerEnvOf(),
+              fresh: o.fresh,
+              ...(agentNamed && { agent, agentNamed: true }),
+              ...(runtime !== undefined && { runtime }),
+            },
           })
 
         const inPlainTerminal = (refused: LaunchFailed) =>
@@ -109,20 +111,22 @@ export default Runtime.handler(Commands, (o) =>
         const move = action?._tag === "Move"
 
         if (placed.place.in === "launch") {
-          const opened = yield* client.Launch({
-            projectId: placed.projectId,
-            ...(action?._tag === "Move" && { sessionId: action.sessionId }),
-            fresh,
-            ...(move && { move: true }),
-            ...(chosenHarness !== undefined && { harness: chosenHarness }),
-            ...(provider !== undefined && { provider }),
-            ...(model !== undefined && { model }),
-            agent,
-            agentNamed,
-            focus: !o.headless,
-            runtime: placed.place.runtime,
-            callerEnv: callerEnvOf(),
-            ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
+          const opened = yield* client["server.session"]["session.launch"]({
+            payload: {
+              projectId: placed.projectId,
+              ...(action?._tag === "Move" && { sessionId: action.sessionId }),
+              fresh,
+              ...(move && { move: true }),
+              ...(chosenHarness !== undefined && { harness: chosenHarness }),
+              ...(provider !== undefined && { provider }),
+              ...(model !== undefined && { model }),
+              agent,
+              agentNamed,
+              focus: !o.headless,
+              runtime: placed.place.runtime,
+              callerEnv: callerEnvOf(),
+              ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
+            },
           })
 
           return { launched: opened } as const
@@ -136,18 +140,20 @@ export default Runtime.handler(Commands, (o) =>
         if (here !== placed.directory) yield* Effect.sync(() => process.chdir(placed.directory))
         const terminal = placed.place.terminal
 
-        const started = yield* client["Session.Claim"]({
-          ...(action?._tag === "Move" && { sessionId: action.sessionId }),
-          ...(chosenHarness !== undefined && { harness: chosenHarness }),
-          agent,
-          agentNamed,
-          fresh,
-          ...(move && { move: true }),
-          terminal,
-          runtime: placed.place.runtime,
-          ...(provider !== undefined && { provider }),
-          ...(model !== undefined && { model }),
-          pid: process.pid,
+        const started = yield* client["server.session"]["session.claim"]({
+          payload: {
+            ...(action?._tag === "Move" && { sessionId: action.sessionId }),
+            ...(chosenHarness !== undefined && { harness: chosenHarness }),
+            agent,
+            agentNamed,
+            fresh,
+            ...(move && { move: true }),
+            terminal,
+            runtime: placed.place.runtime,
+            ...(provider !== undefined && { provider }),
+            ...(model !== undefined && { model }),
+            pid: process.pid,
+          },
         })
 
         if (started.routing !== undefined) yield* Console.error(`session: ${started.routing}`)

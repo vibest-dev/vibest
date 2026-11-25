@@ -6,7 +6,9 @@ import { withVibest } from "./client.ts"
 
 export const catalog = (provider?: string, machine?: string) =>
   Effect.flatMap(caller, (c) =>
-    withVibest(c.claim, (client) => client["Harnesses.List"]({ provider, machine }), { start: !c.agent }),
+    withVibest(c.claim, (client) => client["server.harness"]["harness.list"]({ query: { provider, machine } }), {
+      start: !c.agent,
+    }),
   )
 
 export const modelsOf = (harness: string | undefined, provider: Option.Option<string>) =>

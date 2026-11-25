@@ -1,4 +1,4 @@
-import type { RuntimeDoctor as RuntimeDoctorSchema } from "@vibest/protocol/rpc"
+import type { RuntimeDoctor as RuntimeDoctorSchema } from "@vibest/protocol/schemas"
 import { Layout } from "@vibest/schema/layout"
 import { type HarnessChoice, LaunchFailed } from "@vibest/schema/session"
 import { Config, Console, Effect, FileSystem, Option, Path, Schedule, Schema } from "effect"
@@ -27,10 +27,16 @@ const FETCH_AND_RUN_INSTALLER = 'set -e; script=$(curl -fsSL "$1"); printf "%s\\
 type RuntimeDoctor = typeof RuntimeDoctorSchema.Type
 
 interface Client<E> {
-  readonly "Runtimes.Doctor": (payload: {
-    readonly harnesses: ReadonlyArray<string>
-  }) => Effect.Effect<ReadonlyArray<RuntimeDoctor>, E>
-  readonly "Harnesses.List": (payload: {}) => Effect.Effect<ReadonlyArray<HarnessChoice>, E>
+  readonly "server.runtime": {
+    readonly "runtime.doctor": (args: {
+      readonly payload: { readonly harnesses: ReadonlyArray<string> }
+    }) => Effect.Effect<ReadonlyArray<RuntimeDoctor>, E>
+  }
+  readonly "server.harness": {
+    readonly "harness.list": (args: {
+      readonly query: { readonly provider?: string | undefined; readonly machine?: string | undefined }
+    }) => Effect.Effect<ReadonlyArray<HarnessChoice>, E>
+  }
 }
 
 export type Setting = "defaultRuntime" | "defaultHarness"
@@ -133,7 +139,7 @@ const rank = (kind: string) => {
 
 export const availableRuntimes = <E>(client: Client<E>) =>
   Effect.gen(function* () {
-    const rows = yield* client["Runtimes.Doctor"]({ harnesses: [] })
+    const rows = yield* client["server.runtime"]["runtime.doctor"]({ payload: { harnesses: [] } })
     const hc = yield* findHc
 
     return rows
@@ -143,7 +149,7 @@ export const availableRuntimes = <E>(client: Client<E>) =>
   })
 
 const hcOnline = <E>(client: Client<E>) =>
-  Effect.map(client["Runtimes.Doctor"]({ harnesses: [] }), (rows) =>
+  Effect.map(client["server.runtime"]["runtime.doctor"]({ payload: { harnesses: [] } }), (rows) =>
     rows.some((row) => row.kind === HC && row.status === "online"),
   )
 
@@ -276,7 +282,7 @@ export const chooseRuntime = <E>(
 
 export const chooseHarness = <E>(client: Client<E>, o: { readonly saveWithoutAsking: boolean }) =>
   Effect.gen(function* () {
-    const rows = yield* client["Harnesses.List"]({})
+    const rows = yield* client["server.harness"]["harness.list"]({ query: {} })
     const usable = rows.filter((row) => row.problem === null).map((row) => row.harness)
 
     if (usable.length <= 1 || !(yield* interactive)) {

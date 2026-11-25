@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
+import { withHeaders } from "@vibest/client/unix-http"
 import { sessionHeaders } from "@vibest/protocol/protocol"
-import { EdgeDirected, EdgeMutual } from "@vibest/protocol/rpc"
+import { EdgeDirected, EdgeMutual } from "@vibest/protocol/schemas"
 import { Effect, Predicate, Stream } from "effect"
-import { RpcClient } from "effect/rpc"
 
 import * as Platform from "#platform"
 
@@ -12,17 +12,23 @@ import { inboxOf, outboxRows, peerSession, repoStack, twoMachines } from "./lib/
 const asSession =
   (sessionId: string, projectId: string, repositoryRoot: string) =>
   <A, E>(effect: Effect.Effect<A, E>) =>
-    RpcClient.withHeaders(effect, sessionHeaders({ sessionId, projectId, repositoryRoot }))
+    withHeaders(effect, sessionHeaders({ sessionId, projectId, repositoryRoot }))
 
 describe("cross-machine directed session graph", () => {
   it.effect("Session.Link/Unlink across local<->remote enforces directed sends and updates WatchSession.to", () =>
     Effect.gen(function* () {
       const { a, b, entryId, asEntry } = yield* twoMachines()
 
-      const local = yield* asEntry(a.raw.Spawn({ agent: "general", prompt: "local worker", callerEnv: {} }))
+      const local = yield* asEntry(
+        a.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", prompt: "local worker", callerEnv: {} },
+        }),
+      )
 
       const remote = yield* asEntry(
-        a.raw.Spawn({ agent: "general", machine: "mb", prompt: "remote worker", callerEnv: {} }),
+        a.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", machine: "mb", prompt: "remote worker", callerEnv: {} },
+        }),
       )
 
       const remoteId = remote.id
@@ -31,15 +37,37 @@ describe("cross-machine directed session graph", () => {
       const asLocal = asSession(local.id, a.project, a.directory)
       const asRemote = asSession(remoteId, b.project, b.directory)
 
-      const blockedForward = yield* Effect.flip(asLocal(a.raw.Send({ ...remoteRef, message: "blocked" })))
+      const blockedForward = yield* Effect.flip(
+        asLocal(
+          a.raw["server.session"]["session.send"]({
+            params: { id: remoteRef.id },
+            payload: { machine: remoteRef.machine, message: "blocked" },
+          }),
+        ),
+      )
+
       assert.strictEqual(blockedForward._tag, "Forbidden")
 
-      const blockedBack = yield* Effect.flip(asRemote(b.raw.Send({ id: local.id, message: "blocked back" })))
+      const blockedBack = yield* Effect.flip(
+        asRemote(
+          b.raw["server.session"]["session.send"]({ params: { id: local.id }, payload: { message: "blocked back" } }),
+        ),
+      )
+
       assert.strictEqual(blockedBack._tag, "NoSuchSession")
 
-      yield* asEntry(a.raw["Session.Link"]({ spec: EdgeDirected.make({ from: [localRef], to: [remoteRef] }) }))
+      yield* asEntry(
+        a.raw["server.session"]["session.link"]({
+          payload: { spec: EdgeDirected.make({ from: [localRef], to: [remoteRef] }) },
+        }),
+      )
 
-      yield* asLocal(a.raw.Send({ ...remoteRef, message: "local to remote" }))
+      yield* asLocal(
+        a.raw["server.session"]["session.send"]({
+          params: { id: remoteRef.id },
+          payload: { machine: remoteRef.machine, message: "local to remote" },
+        }),
+      )
 
       const bInbox = yield* until(b.run(inboxOf(remoteId)), (rows) =>
         rows.some((r) => r.content.includes("local to remote")),
@@ -47,11 +75,25 @@ describe("cross-machine directed session graph", () => {
 
       assert.isTrue(bInbox.some((r) => r.content.includes("local to remote")))
 
-      const stillBlockedBack = yield* Effect.flip(asRemote(b.raw.Send({ id: local.id, message: "still blocked" })))
+      const stillBlockedBack = yield* Effect.flip(
+        asRemote(
+          b.raw["server.session"]["session.send"]({ params: { id: local.id }, payload: { message: "still blocked" } }),
+        ),
+      )
+
       assert.strictEqual(stillBlockedBack._tag, "NoSuchSession")
 
-      yield* asEntry(a.raw["Session.Link"]({ spec: EdgeDirected.make({ from: [remoteRef], to: [localRef] }) }))
-      yield* asRemote(b.raw.Send({ id: local.id.slice(0, 8), message: "remote to local" }))
+      yield* asEntry(
+        a.raw["server.session"]["session.link"]({
+          payload: { spec: EdgeDirected.make({ from: [remoteRef], to: [localRef] }) },
+        }),
+      )
+      yield* asRemote(
+        b.raw["server.session"]["session.send"]({
+          params: { id: local.id.slice(0, 8) },
+          payload: { message: "remote to local" },
+        }),
+      )
 
       const aInbox = yield* until(a.run(inboxOf(local.id)), (rows) =>
         rows.some((r) => r.content.includes("remote to local")),
@@ -59,27 +101,46 @@ describe("cross-machine directed session graph", () => {
 
       assert.isTrue(aInbox.some((r) => r.content.includes("remote to local")))
 
-      const [snap] = yield* until(a.cli(a.raw.Watch(undefined).pipe(Stream.take(1), Stream.runCollect)), (chunk) => {
-        const first = chunk[0]
+      const [snap] = yield* until(
+        a.cli(
+          a.raw["server.watch"]
+            ["watch.subscribe"]({})
+            .pipe(Effect.flatMap((stream) => stream.pipe(Stream.take(1), Stream.runCollect))),
+        ),
+        (chunk) => {
+          const first = chunk[0]
 
-        if (first === undefined || !Predicate.isTagged(first, "Snapshot")) return false
-        const localRow = first.sessions.find((s) => s.id === local.id && s.machine === undefined)
-        const remoteRow = first.sessions.find((s) => s.id === remoteId && s.machine === "mb")
+          if (first === undefined || !Predicate.isTagged(first, "Snapshot")) return false
+          const localRow = first.sessions.find((s) => s.id === local.id && s.machine === undefined)
+          const remoteRow = first.sessions.find((s) => s.id === remoteId && s.machine === "mb")
 
-        return (
-          localRow !== undefined &&
-          remoteRow !== undefined &&
-          localRow.to.some((t) => t.id === remoteId && t.machine === "mb") &&
-          remoteRow.to.some((t) => t.id === local.id) &&
-          remoteRow.to.some((t) => t.id === entryId)
-        )
-      })
+          return (
+            localRow !== undefined &&
+            remoteRow !== undefined &&
+            localRow.to.some((t) => t.id === remoteId && t.machine === "mb") &&
+            remoteRow.to.some((t) => t.id === local.id) &&
+            remoteRow.to.some((t) => t.id === entryId)
+          )
+        },
+      )
 
       assert.isDefined(snap)
 
-      yield* asEntry(a.raw["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [localRef, remoteRef] }) }))
+      yield* asEntry(
+        a.raw["server.session"]["session.unlink"]({
+          payload: { spec: EdgeMutual.make({ ids: [localRef, remoteRef] }) },
+        }),
+      )
 
-      const afterUnlink = yield* Effect.flip(asLocal(a.raw.Send({ ...remoteRef, message: "after unlink" })))
+      const afterUnlink = yield* Effect.flip(
+        asLocal(
+          a.raw["server.session"]["session.send"]({
+            params: { id: remoteRef.id },
+            payload: { machine: remoteRef.machine, message: "after unlink" },
+          }),
+        ),
+      )
+
       assert.strictEqual(afterUnlink._tag, "Forbidden")
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
@@ -88,15 +149,21 @@ describe("cross-machine directed session graph", () => {
     Effect.gen(function* () {
       const { a, b, asEntry } = yield* twoMachines()
 
-      const local = yield* asEntry(a.raw.Spawn({ agent: "general", prompt: "local sibling", callerEnv: {} }))
+      const local = yield* asEntry(
+        a.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", prompt: "local sibling", callerEnv: {} },
+        }),
+      )
 
       const remote = yield* asEntry(
-        a.raw.Spawn({
-          agent: "general",
-          machine: "mb",
-          prompt: "remote sibling",
-          with: [{ id: local.id }],
-          callerEnv: {},
+        a.raw["server.session"]["session.spawn"]({
+          payload: {
+            agent: "general",
+            machine: "mb",
+            prompt: "remote sibling",
+            with: [{ id: local.id }],
+            callerEnv: {},
+          },
         }),
       )
 
@@ -104,10 +171,17 @@ describe("cross-machine directed session graph", () => {
       const asLocal = asSession(local.id, a.project, a.directory)
       const asRemote = asSession(remoteId, b.project, b.directory)
 
-      yield* asLocal(a.raw.Send({ id: remoteId, machine: "mb", message: "ping via --with" }))
+      yield* asLocal(
+        a.raw["server.session"]["session.send"]({
+          params: { id: remoteId },
+          payload: { machine: "mb", message: "ping via --with" },
+        }),
+      )
       yield* until(b.run(inboxOf(remoteId)), (rows) => rows.some((r) => r.content.includes("ping via --with")))
 
-      yield* asRemote(b.raw.Send({ id: local.id, message: "pong via --with" }))
+      yield* asRemote(
+        b.raw["server.session"]["session.send"]({ params: { id: local.id }, payload: { message: "pong via --with" } }),
+      )
       yield* until(a.run(inboxOf(local.id)), (rows) => rows.some((r) => r.content.includes("pong via --with")))
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
@@ -117,22 +191,38 @@ describe("cross-machine directed session graph", () => {
       const { net, a, b, asEntry } = yield* twoMachines()
       const c = yield* repoStack(net)
       net.route("c-host", c.layout.socket)
-      yield* a.cli(a.raw["Machine.Add"]({ name: "mc", target: "c-host" }))
-      yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows.every((r) => r.state === "connected"))
+      yield* a.cli(a.raw["server.machine"]["machine.add"]({ payload: { name: "mc", target: "c-host" } }))
+      yield* until(a.cli(a.raw["server.machine"]["machine.list"]({})), (rows) =>
+        rows.every((r) => r.state === "connected"),
+      )
 
-      const onMb = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "on b", callerEnv: {} }))
-      const onMc = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mc", prompt: "on c", callerEnv: {} }))
+      const onMb = yield* asEntry(
+        a.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", machine: "mb", prompt: "on b", callerEnv: {} },
+        }),
+      )
+
+      const onMc = yield* asEntry(
+        a.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", machine: "mc", prompt: "on c", callerEnv: {} },
+        }),
+      )
+
       const rbId = onMb.id
       const rcId = onMc.id
 
       yield* asEntry(
-        a.raw["Session.Link"]({
-          spec: EdgeDirected.make({ from: [{ id: rbId, machine: "mb" }], to: [{ id: rcId, machine: "mc" }] }),
+        a.raw["server.session"]["session.link"]({
+          payload: {
+            spec: EdgeDirected.make({ from: [{ id: rbId, machine: "mb" }], to: [{ id: rcId, machine: "mc" }] }),
+          },
         }),
       )
 
       const asRb = asSession(rbId, b.project, b.directory)
-      yield* asRb(b.raw.Send({ id: rcId, message: "relay from mb to mc" }))
+      yield* asRb(
+        b.raw["server.session"]["session.send"]({ params: { id: rcId }, payload: { message: "relay from mb to mc" } }),
+      )
 
       const cInbox = yield* until(c.run(inboxOf(rcId)), (rows) =>
         rows.some((r) => r.content.includes("relay from mb to mc")),
@@ -148,12 +238,20 @@ describe("cross-machine directed session graph", () => {
       Effect.gen(function* () {
         const { a, b, asEntry } = yield* twoMachines()
 
-        const s1 = yield* asEntry(a.raw.Spawn({ agent: "general", prompt: "s1", callerEnv: {} }))
-        const s2 = yield* asEntry(a.raw.Spawn({ agent: "general", prompt: "s2", callerEnv: {} }))
+        const s1 = yield* asEntry(
+          a.raw["server.session"]["session.spawn"]({ payload: { agent: "general", prompt: "s1", callerEnv: {} } }),
+        )
+
+        const s2 = yield* asEntry(
+          a.raw["server.session"]["session.spawn"]({ payload: { agent: "general", prompt: "s2", callerEnv: {} } }),
+        )
+
         const r1 = { id: s1.id }
         const r2 = { id: s2.id }
 
-        const mutualDup = yield* asEntry(a.raw["Session.Link"]({ spec: EdgeMutual.make({ ids: [r1, r2, r1] }) }))
+        const mutualDup = yield* asEntry(
+          a.raw["server.session"]["session.link"]({ payload: { spec: EdgeMutual.make({ ids: [r1, r2, r1] }) } }),
+        )
 
         assert.deepStrictEqual(mutualDup.edges, [
           { from: r1, to: r2 },
@@ -161,14 +259,16 @@ describe("cross-machine directed session graph", () => {
         ])
 
         const mutualSelf = yield* Effect.flip(
-          asEntry(a.raw["Session.Link"]({ spec: EdgeMutual.make({ ids: [r1, r1] }) })),
+          asEntry(a.raw["server.session"]["session.link"]({ payload: { spec: EdgeMutual.make({ ids: [r1, r1] }) } })),
         )
 
         assert.strictEqual(mutualSelf._tag, "Forbidden")
         assert.include(mutualSelf.message, "at least two distinct sessions")
 
         const directedOverlap = yield* asEntry(
-          a.raw["Session.Link"]({ spec: EdgeDirected.make({ from: [r1, r2], to: [r1, r2] }) }),
+          a.raw["server.session"]["session.link"]({
+            payload: { spec: EdgeDirected.make({ from: [r1, r2], to: [r1, r2] }) },
+          }),
         )
 
         assert.deepStrictEqual(directedOverlap.edges, [
@@ -178,12 +278,14 @@ describe("cross-machine directed session graph", () => {
 
         const invalidSpawn = yield* Effect.flip(
           asEntry(
-            a.raw.Spawn({
-              agent: "general",
-              machine: "mb",
-              prompt: "should not start",
-              with: [{ id: "00000000-0000-4000-8000-000000000000" }],
-              callerEnv: {},
+            a.raw["server.session"]["session.spawn"]({
+              payload: {
+                agent: "general",
+                machine: "mb",
+                prompt: "should not start",
+                with: [{ id: "00000000-0000-4000-8000-000000000000" }],
+                callerEnv: {},
+              },
             }),
           ),
         )
@@ -191,23 +293,37 @@ describe("cross-machine directed session graph", () => {
         assert.strictEqual(invalidSpawn._tag, "NoSuchSession")
         assert.lengthOf(b.spawns, 0)
 
-        const remote = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "r1", callerEnv: {} }))
+        const remote = yield* asEntry(
+          a.raw["server.session"]["session.spawn"]({
+            payload: { agent: "general", machine: "mb", prompt: "r1", callerEnv: {} },
+          }),
+        )
+
         const remoteId = remote.id
         const remoteRef = { id: remoteId, machine: "mb" }
-        yield* asEntry(a.raw["Session.Link"]({ spec: EdgeDirected.make({ from: [r1], to: [remoteRef] }) }))
+        yield* asEntry(
+          a.raw["server.session"]["session.link"]({
+            payload: { spec: EdgeDirected.make({ from: [r1], to: [remoteRef] }) },
+          }),
+        )
 
         const asS1 = asSession(s1.id, a.project, a.directory)
 
         const shortSend = yield* Effect.flip(
-          asS1(a.raw.Send({ id: remoteId.slice(0, 4), machine: "mb", message: "short" })),
+          asS1(
+            a.raw["server.session"]["session.send"]({
+              params: { id: remoteId.slice(0, 4) },
+              payload: { machine: "mb", message: "short" },
+            }),
+          ),
         )
 
         assert.strictEqual(shortSend._tag, "Forbidden")
 
         const shortLink = yield* Effect.flip(
           asEntry(
-            a.raw["Session.Link"]({
-              spec: EdgeDirected.make({ from: [r1], to: [{ id: remoteId.slice(0, 4), machine: "mb" }] }),
+            a.raw["server.session"]["session.link"]({
+              payload: { spec: EdgeDirected.make({ from: [r1], to: [{ id: remoteId.slice(0, 4), machine: "mb" }] }) },
             }),
           ),
         )
@@ -218,7 +334,11 @@ describe("cross-machine directed session graph", () => {
         yield* b.db.session.archive(remoteId)
 
         const archivedLink = yield* Effect.flip(
-          asEntry(a.raw["Session.Link"]({ spec: EdgeDirected.make({ from: [r1], to: [remoteRef] }) })),
+          asEntry(
+            a.raw["server.session"]["session.link"]({
+              payload: { spec: EdgeDirected.make({ from: [r1], to: [remoteRef] }) },
+            }),
+          ),
         )
 
         assert.strictEqual(archivedLink._tag, "NoSuchSession")
@@ -230,26 +350,45 @@ describe("cross-machine directed session graph", () => {
       const { net, a, b, asEntry } = yield* twoMachines()
       const c = yield* repoStack(net)
       net.route("c-host", c.layout.socket)
-      yield* a.cli(a.raw["Machine.Add"]({ name: "mc", target: "c-host" }))
-      yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows.every((r) => r.state === "connected"))
+      yield* a.cli(a.raw["server.machine"]["machine.add"]({ payload: { name: "mc", target: "c-host" } }))
+      yield* until(a.cli(a.raw["server.machine"]["machine.list"]({})), (rows) =>
+        rows.every((r) => r.state === "connected"),
+      )
 
-      const onMb = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "on b", callerEnv: {} }))
-      const onMc = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mc", prompt: "on c", callerEnv: {} }))
+      const onMb = yield* asEntry(
+        a.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", machine: "mb", prompt: "on b", callerEnv: {} },
+        }),
+      )
+
+      const onMc = yield* asEntry(
+        a.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", machine: "mc", prompt: "on c", callerEnv: {} },
+        }),
+      )
+
       const rbId = onMb.id
       const rcId = onMc.id
 
       yield* asEntry(
-        a.raw["Session.Link"]({
-          spec: EdgeDirected.make({ from: [{ id: rbId, machine: "mb" }], to: [{ id: rcId, machine: "mc" }] }),
+        a.raw["server.session"]["session.link"]({
+          payload: {
+            spec: EdgeDirected.make({ from: [{ id: rbId, machine: "mb" }], to: [{ id: rcId, machine: "mc" }] }),
+          },
         }),
       )
 
       net.fail("c-host", 255, "connection refused")
       yield* net.cutAll("c-host")
-      yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows.find((r) => r.name === "mc")?.state === "unreachable")
+      yield* until(
+        a.cli(a.raw["server.machine"]["machine.list"]({})),
+        (rows) => rows.find((r) => r.name === "mc")?.state === "unreachable",
+      )
 
       const asRb = asSession(rbId, b.project, b.directory)
-      yield* asRb(b.raw.Send({ id: rcId, message: "queued while mc down" }))
+      yield* asRb(
+        b.raw["server.session"]["session.send"]({ params: { id: rcId }, payload: { message: "queued while mc down" } }),
+      )
 
       const pending = yield* until(b.run(outboxRows), (rows) => rows.length === 1)
       assert.lengthOf(pending, 1)
@@ -287,13 +426,16 @@ describe("cross-machine directed session graph", () => {
           })
         }
 
-        const local = yield* asEntry(a.raw.Spawn({ agent: "general", prompt: "local", callerEnv: {} }))
+        const local = yield* asEntry(
+          a.raw["server.session"]["session.spawn"]({ payload: { agent: "general", prompt: "local", callerEnv: {} } }),
+        )
+
         const asLocal = asSession(local.id, a.project, a.directory)
 
         const ambigLink = yield* Effect.flip(
           asEntry(
-            a.raw["Session.Link"]({
-              spec: EdgeDirected.make({ from: [{ id: local.id.slice(0, 8) }], to: [{ id: "756c38b6" }] }),
+            a.raw["server.session"]["session.link"]({
+              payload: { spec: EdgeDirected.make({ from: [{ id: local.id.slice(0, 8) }], to: [{ id: "756c38b6" }] }) },
             }),
           ),
         )
@@ -306,8 +448,10 @@ describe("cross-machine directed session graph", () => {
         }
 
         const linked1 = yield* asEntry(
-          a.raw["Session.Link"]({
-            spec: EdgeDirected.make({ from: [{ id: local.id.slice(0, 8) }], to: [{ id: "756c38b6-101c" }] }),
+          a.raw["server.session"]["session.link"]({
+            payload: {
+              spec: EdgeDirected.make({ from: [{ id: local.id.slice(0, 8) }], to: [{ id: "756c38b6-101c" }] }),
+            },
           }),
         )
 
@@ -317,33 +461,53 @@ describe("cross-machine directed session graph", () => {
         assert.deepInclude(targets, { id: r1Id, label: "on mb" })
 
         yield* asEntry(
-          a.raw["Session.Link"]({
-            spec: EdgeDirected.make({ from: [{ id: local.id.slice(0, 8) }], to: [{ id: "756c38b6-202d" }] }),
+          a.raw["server.session"]["session.link"]({
+            payload: {
+              spec: EdgeDirected.make({ from: [{ id: local.id.slice(0, 8) }], to: [{ id: "756c38b6-202d" }] }),
+            },
           }),
         )
 
-        const ambigSend = yield* Effect.flip(asLocal(a.raw.Send({ id: "756c38b6", message: "ambig" })))
+        const ambigSend = yield* Effect.flip(
+          asLocal(
+            a.raw["server.session"]["session.send"]({ params: { id: "756c38b6" }, payload: { message: "ambig" } }),
+          ),
+        )
+
         assert.strictEqual(ambigSend._tag, "AmbiguousSession")
 
         if (Predicate.isTagged(ambigSend, "AmbiguousSession")) {
           assert.deepStrictEqual([...ambigSend.matches].sort(), [r1Id, r2Id].sort())
         }
 
-        const sent = yield* asLocal(a.raw.Send({ id: "756c38b6-101c", message: "resolved-13-chars" }))
+        const sent = yield* asLocal(
+          a.raw["server.session"]["session.send"]({
+            params: { id: "756c38b6-101c" },
+            payload: { message: "resolved-13-chars" },
+          }),
+        )
+
         assert.strictEqual(sent.id, r1Id)
         yield* until(b.run(inboxOf(r1Id)), (rows) => rows.some((r) => r.content.includes("resolved-13-chars")))
 
         const localWithRemote = yield* asEntry(
-          a.raw.Spawn({
-            agent: "general",
-            prompt: "spawned with unqualified remote",
-            with: [{ id: "756c38b6-202d" }],
-            callerEnv: {},
+          a.raw["server.session"]["session.spawn"]({
+            payload: {
+              agent: "general",
+              prompt: "spawned with unqualified remote",
+              with: [{ id: "756c38b6-202d" }],
+              callerEnv: {},
+            },
           }),
         )
 
         const asSpawned = asSession(localWithRemote.id, a.project, a.directory)
-        yield* asSpawned(a.raw.Send({ id: "756c38b6-202d", message: "from spawned --with" }))
+        yield* asSpawned(
+          a.raw["server.session"]["session.send"]({
+            params: { id: "756c38b6-202d" },
+            payload: { message: "from spawned --with" },
+          }),
+        )
         yield* until(b.run(inboxOf(r2Id)), (rows) => rows.some((r) => r.content.includes("from spawned --with")))
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
@@ -383,12 +547,14 @@ describe("cross-machine directed session graph", () => {
           terminal: { id: "p-remote-col" },
         })
 
-        const peer = yield* asEntry(a.raw.Spawn({ agent: "general", prompt: "peer", callerEnv: {} }))
+        const peer = yield* asEntry(
+          a.raw["server.session"]["session.spawn"]({ payload: { agent: "general", prompt: "peer", callerEnv: {} } }),
+        )
 
         const ambigLiveLink = yield* Effect.flip(
           asEntry(
-            a.raw["Session.Link"]({
-              spec: EdgeDirected.make({ from: [{ id: peer.id.slice(0, 8) }], to: [{ id: "756c38b6" }] }),
+            a.raw["server.session"]["session.link"]({
+              payload: { spec: EdgeDirected.make({ from: [{ id: peer.id.slice(0, 8) }], to: [{ id: "756c38b6" }] }) },
             }),
           ),
         )
@@ -401,11 +567,13 @@ describe("cross-machine directed session graph", () => {
 
         const ambigLiveSpawn = yield* Effect.flip(
           asEntry(
-            a.raw.Spawn({
-              agent: "general",
-              prompt: "colliding --with",
-              with: [{ id: "756c38b6" }],
-              callerEnv: {},
+            a.raw["server.session"]["session.spawn"]({
+              payload: {
+                agent: "general",
+                prompt: "colliding --with",
+                with: [{ id: "756c38b6" }],
+                callerEnv: {},
+              },
             }),
           ),
         )
@@ -421,8 +589,8 @@ describe("cross-machine directed session graph", () => {
 
         const ambigArchivedLocalLink = yield* Effect.flip(
           asEntry(
-            a.raw["Session.Link"]({
-              spec: EdgeDirected.make({ from: [{ id: peer.id.slice(0, 8) }], to: [{ id: "756c38b6" }] }),
+            a.raw["server.session"]["session.link"]({
+              payload: { spec: EdgeDirected.make({ from: [{ id: peer.id.slice(0, 8) }], to: [{ id: "756c38b6" }] }) },
             }),
           ),
         )
@@ -437,8 +605,10 @@ describe("cross-machine directed session graph", () => {
         }
 
         const completedRemote = yield* asEntry(
-          a.raw["Session.Link"]({
-            spec: EdgeDirected.make({ from: [{ id: peer.id.slice(0, 8) }], to: [{ id: "756c38b6-202d" }] }),
+          a.raw["server.session"]["session.link"]({
+            payload: {
+              spec: EdgeDirected.make({ from: [{ id: peer.id.slice(0, 8) }], to: [{ id: "756c38b6-202d" }] }),
+            },
           }),
         )
 

@@ -90,10 +90,14 @@ const fakeClient = (o: {
   readonly runtimes?: () => ReadonlyArray<{ readonly kind: string; readonly status: string }>
   readonly harnesses?: ReadonlyArray<string>
 }): Client => ({
-  "Runtimes.Doctor": () =>
-    Effect.sync(() => (o.runtimes?.() ?? []).map((row) => ({ ...row, name: row.kind, checks: [] }))),
-  "Harnesses.List": () =>
-    Effect.succeed((o.harnesses ?? []).map((harness) => ({ harness, binary: harness, problem: null, models: [] }))),
+  "server.runtime": {
+    "runtime.doctor": () =>
+      Effect.sync(() => (o.runtimes?.() ?? []).map((row) => ({ ...row, name: row.kind, checks: [] }))),
+  },
+  "server.harness": {
+    "harness.list": () =>
+      Effect.succeed((o.harnesses ?? []).map((harness) => ({ harness, binary: harness, problem: null, models: [] }))),
+  },
 })
 
 const runtimes = (rows: () => ReadonlyArray<{ readonly kind: string; readonly status: string }>) =>

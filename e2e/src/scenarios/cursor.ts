@@ -353,13 +353,13 @@ const reports = (runtime: Runtime): Check => ({
 })
 
 const SEND_THEN_GUARD =
-  'Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready > guard-ran.txt. Then reply with exactly: pong'
+  'Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready > guard-ran.txt. Then reply with exactly: pong'
 
 const noApprovalDialog: Check = {
   id: "I12",
   tier: "agent",
   title:
-    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to curl vibest-http.sock, it does not run",
+    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to curl vibest.sock, it does not run",
   run: async (w) => {
     const c = await cursorWorld(w, "herdr", "i12")
     await fs.writeFile(

@@ -5,8 +5,8 @@ import pkg from "../package.json" with { type: "json" }
 export const PLUGIN = ".agents/plugins/vibest"
 
 export const HOOK = `#!/bin/sh
-# @vibest/agy ${pkg.version}: posts hooks directly to vibest-http.sock.
-sock="\${VIBEST_HOME:-$HOME/.vibest}/vibest-http.sock"
+# @vibest/agy ${pkg.version}: posts hooks directly to vibest.sock.
+sock="\${VIBEST_HOME:-$HOME/.vibest}/vibest.sock"
 log="\${VIBEST_HOME:-$HOME/.vibest}/vibestd.log"
 post() {
   route="$1"
@@ -14,7 +14,7 @@ post() {
   tmp=$(mktemp "\${TMPDIR:-/tmp}/vibest-agy-hook.XXXXXX") || return 1
   trap 'rm -f "$tmp"' EXIT INT TERM
   for delay in 0.1 0.3 0.9 ""; do
-    set -- -sS --max-time 5 --unix-socket "$sock" -o "$tmp" -w '%{http_code}' -X POST -H "vibest-protocol: ${PROTOCOL}" -H "vibest-plugin-version: ${pkg.version}" -H "vibest-session-id: $VIBEST_SESSION_ID" -H "vibest-project-id: $VIBEST_PROJECT_ID" -H "vibest-harness: agy"
+    set -- -sS --max-time 5 --unix-socket "$sock" -o "$tmp" -w '%{http_code}' -X POST -H "content-type: text/plain" -H "vibest-protocol: ${PROTOCOL}" -H "vibest-caller: session" -H "vibest-plugin-version: ${pkg.version}" -H "vibest-session-id: $VIBEST_SESSION_ID" -H "vibest-project-id: $VIBEST_PROJECT_ID" -H "vibest-harness: agy"
     if [ -n "\${VIBEST_PROCESS:-}" ]; then
       set -- "$@" -H "vibest-process: $VIBEST_PROCESS"
     fi
@@ -49,7 +49,7 @@ case "\${1:-}" in
     if [ -z "\${VIBEST_SESSION_ID:-}" ] || [ -z "\${VIBEST_PROJECT_ID:-}" ]; then cat >/dev/null; echo '{"decision":"allow"}'; exit 0; fi
     input=$(cat)
     # agy runs a tool whose hook fails or times out: a failed check answers deny itself.
-    out=$(post /hooks/agy/guard "$input")
+    out=$(post /api/hook/agy/guard "$input")
     if [ $? -eq 0 ] && [ -n "$out" ]; then
       printf '%s\\n' "$out"
     else
@@ -59,14 +59,14 @@ case "\${1:-}" in
   prompt)
     input=$(cat)
     if [ -n "\${VIBEST_SESSION_ID:-}" ] && [ -n "\${VIBEST_PROJECT_ID:-}" ] && own_conversation; then
-      post /hooks/agy/prompt "$input" >/dev/null
+      post /api/hook/agy/prompt "$input" >/dev/null
     fi
     echo '{}'
     ;;
   stop)
     input=$(cat)
     if [ -n "\${VIBEST_SESSION_ID:-}" ] && [ -n "\${VIBEST_PROJECT_ID:-}" ] && own_conversation; then
-      post /hooks/agy/execution-end "$input" >/dev/null
+      post /api/hook/agy/execution-end "$input" >/dev/null
     fi
     echo '{"decision":"allow"}'
     ;;
