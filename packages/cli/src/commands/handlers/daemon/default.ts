@@ -4,7 +4,7 @@ import * as Daemon from "@vibest/server/daemon"
 import { HANDOFF_ENV } from "@vibest/server/server"
 import { Console, Effect } from "effect"
 
-import { captureDaemonLog } from "#platform"
+import { captureDaemonLog, restoreNormalJitPolicy } from "#platform"
 
 import { userOnly } from "../../../caller.ts"
 import { Runtime } from "../../../framework/runtime.ts"
@@ -21,6 +21,7 @@ export default Runtime.handler(Commands.commands.daemon, ({ foreground, handoff 
           delete process.env[HANDOFF_ENV]
           yield* Console.log(`vibestd log: ${layout.log}`)
           yield* captureDaemonLog(layout.log)
+          yield* restoreNormalJitPolicy
 
           return yield* Daemon.run(host.daemon, host.replacements, { handoff })
         }
