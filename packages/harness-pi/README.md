@@ -1,6 +1,6 @@
-# @vibest/pi: the vibest Pi extension
+# @vibest/harness-pi: the vibest Pi extension
 
-Implementation notes for the Pi [harness adapter](../../../docs/design/architecture.md#8-harness-adapters).
+Implementation notes for the Pi [harness adapter](../../docs/design/architecture.md#8-harness-adapters).
 
 `pi -e <dir>/extension.mjs` loads `src/extension.ts` bundled with everything it imports except
 Pi's own packages, which Pi resolves for the extensions it loads. With `VIBEST_SESSION_ID` it

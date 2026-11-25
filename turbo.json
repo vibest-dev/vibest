@@ -1,6 +1,11 @@
 {
   "$schema": "https://turborepo.com/schema.v2.json",
-  "globalDependencies": ["tools/tsconfig/base.json", "vitest.config.ts"],
+  "globalDependencies": [
+    "tools/tsconfig/base.json",
+    "tools/tsconfig/neutral.json",
+    "tools/tsconfig/web-globals.d.ts",
+    "vitest.config.ts"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

@@ -90,6 +90,7 @@
     },
     {
       "files": [
+        "packages/platform-bun/src/**",
         "packages/*/src/**/bun.ts",
         "packages/*/src/**/*.bun.ts",
         "packages/*/src/platform/**",

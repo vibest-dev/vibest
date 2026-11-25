@@ -215,6 +215,10 @@ describe("import policy", () => {
       expect(scopedFindings(bun, file)).toEqual(refused)
   })
 
+  it("platform-bun accepts Bun in any source file", () => {
+    expect(scopedFindings(bun, "packages/platform-bun/src/helper.ts")).toEqual([])
+  })
+
   it("util refuses every workspace package and Bun", () => {
     expect(scopedFindings(importing("@vibest/schema/id"), "packages/util/src/a.ts")).toEqual(outside)
     expect(scopedFindings(bun, "packages/util/src/a.ts")).toEqual(refused)

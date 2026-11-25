@@ -55,7 +55,7 @@ export class Pi extends Context.Service<
     ) => Effect.Effect<void, never, R | Scope.Scope>
     readonly sendMessage: (...args: Parameters<ExtensionAPI["sendMessage"]>) => Effect.Effect<void>
   }
->()("@vibest/pi/Pi") {
+>()("@vibest/harness-pi/Pi") {
   static readonly layer = (api: Pick<ExtensionAPI, "on" | "sendMessage">) =>
     Layer.succeed(
       Pi,

@@ -37,7 +37,7 @@ ${variants.map((v) => `  ${JSON.stringify(v.tag)}: ${v.name};`).join("\n")}
 
 export type ResultTag = keyof ResultByTag;
 
-/** See scripts/gen/method-result-map.ts. */
+/** See script/gen/method-result-map.ts. */
 export const METHOD_RESULT = ${JSON.stringify(METHOD_RESULT, null, 2)} as const;
 `
 }

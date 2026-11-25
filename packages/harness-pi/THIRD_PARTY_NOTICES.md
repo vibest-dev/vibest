@@ -1,4 +1,4 @@
-Notices for source adapted into src/tui/user-message-padding.ts. This file does not choose a license for @vibest/pi.
+Notices for source adapted into src/tui/user-message-padding.ts. This file does not choose a license for @vibest/harness-pi.
 
 The temporary Markdown render trim, and restoring that child's own render, is adapted from extensions/user-messages.ts in KevinZonda/pi-cc-extension-patches at 2866e85ae1eb0d252dde8467aecbfabb0676b7f8. That file's trailing B+C placement is not used.
 

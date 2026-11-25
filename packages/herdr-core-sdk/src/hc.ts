@@ -101,7 +101,7 @@ export interface HcClient {
   readonly subscribe: (params: ParamsOf<"events.subscribe">) => Stream.Stream<Notice, HcFailure>
 }
 
-export class Hc extends Context.Service<Hc, HcClient>()("effect-herdr-core-sdk/Hc") {
+export class Hc extends Context.Service<Hc, HcClient>()("@vibest/herdr-core-sdk/Hc") {
   static readonly make = (socketPath: string): Effect.Effect<HcClient, never, SocketConnector> =>
     Effect.map(SocketConnector, (connect) => makeClient(socketPath, connect))
   static readonly layer = (

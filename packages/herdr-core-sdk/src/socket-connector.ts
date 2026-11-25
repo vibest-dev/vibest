@@ -4,4 +4,4 @@ import type * as Socket from "effect/socket/Socket"
 export class SocketConnector extends Context.Service<
   SocketConnector,
   (endpoint: string) => Effect.Effect<Socket.Socket>
->()("effect-herdr-core-sdk/SocketConnector") {}
+>()("@vibest/herdr-core-sdk/SocketConnector") {}

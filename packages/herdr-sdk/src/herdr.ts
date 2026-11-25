@@ -40,7 +40,7 @@ export interface HerdrClient {
   readonly subscribe: (subscriptions: ReadonlyArray<Subscription>) => Stream.Stream<Frame, HerdrFailure>
 }
 
-export class Herdr extends Context.Service<Herdr, HerdrClient>()("effect-herdr-sdk/Herdr") {
+export class Herdr extends Context.Service<Herdr, HerdrClient>()("@vibest/herdr-sdk/Herdr") {
   static readonly verifyProtocol = (herdr: HerdrClient): Effect.Effect<void, HerdrFailure | HerdrProtocolMismatch> =>
     herdr.call("ping", {}).pipe(
       Effect.flatMap((pong) =>

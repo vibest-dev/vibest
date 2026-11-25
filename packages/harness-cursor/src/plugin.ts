@@ -3,7 +3,7 @@ import { PROTOCOL } from "@vibest/schema/version"
 import pkg from "../package.json" with { type: "json" }
 
 export const HOOK = `#!/bin/sh
-# @vibest/cursor ${pkg.version}: posts hooks directly to vibest.sock.
+# @vibest/harness-cursor ${pkg.version}: posts hooks directly to vibest.sock.
 sock="\${VIBEST_HOME:-$HOME/.vibest}/vibest.sock"
 log="\${VIBEST_HOME:-$HOME/.vibest}/vibestd.log"
 post() {

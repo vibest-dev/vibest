@@ -1,4 +1,4 @@
-# @vibest/cursor: the vibest Cursor CLI plugin
+# @vibest/harness-cursor: the vibest Cursor CLI plugin
 
 vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`):
 

@@ -17,7 +17,7 @@ interface Recorded {
   readonly body: string
 }
 
-describe("@vibest/cursor", () => {
+describe("@vibest/harness-cursor", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-cursor-"))
 
   for (const [name, text] of Object.entries(files)) {

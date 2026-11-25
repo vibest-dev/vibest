@@ -17,7 +17,7 @@ interface Recorded {
   readonly body: string
 }
 
-describe("@vibest/agy", () => {
+describe("@vibest/harness-agy", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-agy-"))
 
   for (const [name, text] of Object.entries(files)) {

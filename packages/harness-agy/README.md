@@ -1,4 +1,4 @@
-# @vibest/agy: the vibest Antigravity CLI plugin
+# @vibest/harness-agy: the vibest Antigravity CLI plugin
 
 vibest's integration for the [Antigravity CLI](https://antigravity.google/docs/cli) (`agy`): a workspace plugin that agy
 loads from the install's `harnesses/agy` folder, which vibest adds to each session with `--add-dir`.

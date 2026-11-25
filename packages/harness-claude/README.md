@@ -1,4 +1,4 @@
-# @vibest/claude: the vibest Claude Code plugin
+# @vibest/harness-claude: the vibest Claude Code plugin
 
 One ordinary Claude Code plugin, one hooks module. Every call to vibest is an HTTP request from `$.http.fetch` to
 vibestd's unix socket `<VIBEST_HOME>/vibest.sock`; the plugin runs no `vibest` process.
@@ -43,9 +43,9 @@ It ships inside `@vibest/cli` and is loaded only into the Claude sessions vibest
 ## Build
 
 This package is private: the plugin is published as part of `@vibest/cli`, whose build writes it to
-`packages/cli/harnesses/claude` (`scripts/build-harnesses.ts`).
+`packages/cli/harnesses/claude` (`script/build-harnesses.ts`).
 
-    bun scripts/build.ts <outdir>           # the complete plugin directory in <outdir>
+    bun script/build.ts <outdir>           # the complete plugin directory in <outdir>
     bun run build                           # the generated files in place, for the tests
 
 The plugin directory holds exactly:
@@ -90,7 +90,7 @@ does not read or change either. The AbovePrompt drain needs an interactive UI: u
 
 `src/plugin.ts` imports types from `claude-code`. Those declarations are not in this repository. `bun scripts/prepare-claude-types.ts`,
 which `pnpm run typecheck` runs before the plugin project (`tsconfig.plugin.json`), writes an ignored cache at
-`packages/integration/claude/.cache/claude-code.d.ts`. A cold cache needs network access to GitHub.
+`packages/harness-claude/.cache/claude-code.d.ts`. A cold cache needs network access to GitHub.
 It reuses that file only when its SHA-256 is `e51e637fbbebb2a6a49c4bdc3860a251c2ca2295884822dff0f4c3e3ec802163`, including a copy placed there by hand for offline use. Otherwise it fetches
 `https://raw.githubusercontent.com/anthropics/claude-code/2eff7a8d21c80be48904f62ebdea36d945d7b504/mods/types/claude-code.d.ts` and keeps the result only when that checksum matches.
 The pin is anthropics/claude-code `2eff7a8d21c80be48904f62ebdea36d945d7b504`, `mods/types/claude-code.d.ts`. The file's own

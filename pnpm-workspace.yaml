@@ -20,6 +20,6 @@ overrides:
 # pnpm 11+ waits 24h before installing a new release by default; our own just-published packages would be blocked.
 minimumReleaseAge: 0
 allowBuilds:
-  # Transitive dependencies of @earendil-works/pi-coding-agent, which @vibest/pi only uses for types: their scripts are not needed.
+  # Transitive dependencies of @earendil-works/pi-coding-agent, which @vibest/harness-pi only uses for types: their scripts are not needed.
   "@google/genai": false
   protobufjs: false
