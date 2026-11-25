@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite"
 import fs from "node:fs"
 import fsPromises from "node:fs/promises"
 import os from "node:os"
@@ -16,6 +15,7 @@ import {
   worldTmpBase,
 } from "./runner/cleanup.ts"
 import { alive } from "./world/alive.ts"
+import { entrySessionId, foreignTerminalsIn, herdrPane, readDb } from "./world/db.ts"
 import { copyEvidence, privateValues, redactor } from "./world/redact.ts"
 import { claudeShadow, cursorShadow, piShadow, type Profile } from "./world/shadow.ts"
 import { endHerdrSocket, stopOwners, stopRecordedDaemon, stopSocketsUnder } from "./world/teardown.ts"
@@ -299,25 +299,8 @@ export class World {
     return this.run(options.cwd ?? this.repository, [binary, ...this.withSession(args)], options)
   }
 
-  async entryOf(cwd: string, home = this.vibestHome) {
-    const file = path.join(home, "vibest.db")
-
-    if (!fs.existsSync(file)) return undefined
-    const directory = await fsPromises.realpath(cwd)
-    const db = readDb(file)
-
-    try {
-      const found = db
-        .query(
-          `SELECT s.id FROM project p JOIN session s ON s.id = p.entry_session_id
-            WHERE p.directory = ? AND s.ended_at IS NULL`,
-        )
-        .get(directory) as { id: string } | null
-
-      return found?.id
-    } finally {
-      db.close()
-    }
+  entryOf(cwd: string, home = this.vibestHome) {
+    return entrySessionId(cwd, home)
   }
 
   async entry(options: Omit<Parameters<World["startEntry"]>[0], "harness" | "env" | "timeoutMs"> = {}) {
@@ -402,36 +385,7 @@ export class World {
   }
 
   foreignTerminals(): ReadonlyArray<string> {
-    const file = path.join(this.vibestHome, "vibest.db")
-
-    if (!fs.existsSync(file)) return []
-    const db = readDb(file)
-
-    try {
-      const rows = db
-        .query(
-          `SELECT s.id, p.runtime, p.terminal
-           FROM session s
-           LEFT JOIN process p ON p.session_id = s.id AND p.id = (SELECT max(id) FROM process WHERE session_id = s.id)`,
-        )
-        .all() as Array<{
-        id: string
-        runtime: string | null
-        terminal: string | null
-      }>
-
-      return rows.flatMap((r) => {
-        if (r.runtime === null || this.ownRuntimes.has(r.runtime)) return []
-        const terminal = r.terminal ?? ""
-        const session = terminal.split("/")[0] ?? ""
-
-        return session === "" || session === this.herdrSession || session.startsWith(`${this.herdrSession}-`)
-          ? []
-          : [`${r.id} at ${terminal}`]
-      })
-    } finally {
-      db.close()
-    }
+    return foreignTerminalsIn(this.vibestHome, this.root, this.herdrSession, this.ownRuntimes)
   }
 
   tty(
@@ -668,28 +622,8 @@ export class World {
       await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
     }
 
-    await until(
-      "the entry session",
-      () => {
-        const file = path.join(this.vibestHome, "vibest.db")
-
-        if (!fs.existsSync(file)) return false
-        const db = readDb(file)
-
-        try {
-          return (
-            db
-              .query("SELECT s.id FROM project p JOIN session s ON s.id = p.entry_session_id WHERE s.ended_at IS NULL")
-              .get() !== null
-          )
-        } catch {
-          return false
-        } finally {
-          db.close()
-        }
-      },
-      timeoutMs,
-    )
+    const entryHome = input.env?.VIBEST_HOME ?? input.processEnv?.VIBEST_HOME ?? this.vibestHome
+    await until("the entry session", async () => (await this.entryOf(cwd, entryHome)) !== undefined, timeoutMs)
     await this.noteDaemon(this.vibestHome)
 
     if (input.env?.VIBEST_HOME !== undefined) await this.noteDaemon(input.env.VIBEST_HOME)
@@ -769,21 +703,7 @@ export class World {
   }
 }
 
-export const SESSIONS = `(SELECT s.id, s.project_id, s.agent AS agent_type, s.directory, s.created_at, s.ended_at,
-    p.harness, p.provider,
-    CASE WHEN p.id IS NULL THEN NULL ELSE json_object('kind', p.runtime, 'id', coalesce(p.terminal, '')) END AS runtime,
-    p.harness_session_id, p.pid, p.integration_version AS version,
-    p.ended_at AS exited_at
-  FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = (SELECT max(id) FROM process WHERE session_id = s.id))`
-
-export const EXECUTIONS = `(SELECT id, session_id, coalesce(outcome, 'working') AS status FROM execution)`
-
-export const readDb = (file: string) => {
-  const db = new Database(file, { readonly: true })
-  db.run("PRAGMA busy_timeout = 5000")
-
-  return db
-}
+export { EXECUTIONS, herdrPane, ledgerSnapshot, parseTerminalJson, readDb, SESSIONS } from "./world/db.ts"
 
 export const row = <A>(w: World, sql: string, ...args: Array<string | number>) => {
   const db = readDb(path.join(w.vibestHome, "vibest.db"))
@@ -855,32 +775,6 @@ export const expectReplied = async (w: World, sub: string) => {
   )
 }
 
-const READ_MODEL = ["session", "process", "execution", "inbox"] as const
-
-export const ledgerSnapshot = (home: string) => {
-  const file = path.join(home, "vibest.db")
-
-  if (!fs.existsSync(file)) return undefined
-  const db = readDb(file)
-
-  try {
-    const facts = (
-      db.query("SELECT aggregate, seq, at, type, data FROM event ORDER BY position").all() as Array<{
-        data: string
-      }>
-    ).map((fact) => ({ ...fact, data: JSON.parse(fact.data) as unknown }))
-
-    return {
-      facts,
-      ...Object.fromEntries(
-        READ_MODEL.map((table) => [table, db.query(`SELECT * FROM ${table} ORDER BY rowid`).all()]),
-      ),
-    }
-  } finally {
-    db.close()
-  }
-}
-
 export const exitStatusOf = (content: string) => (/^\d+\s*$/.test(content) ? Number(content) : undefined)
 
 const publishedStatus = (file: string) =>
@@ -890,8 +784,6 @@ export const until = async (what: string, ok: () => Promise<boolean> | boolean, 
   for (const deadline = Date.now() + timeoutMs; !(await ok()); await Bun.sleep(100))
     if (Date.now() > deadline) fail(`timed out waiting for ${what}`)
 }
-
-export const herdrPane = (terminal: string | null | undefined) => terminal?.split("/")[1]
 
 export const paneOf = (w: World, id: string) =>
   herdrPane(

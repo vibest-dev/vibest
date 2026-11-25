@@ -5,7 +5,7 @@ import type { Schema } from "effect"
 
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
-import { binary, expect, row, SESSIONS, Skip, until, vibestd, type World } from "../world.ts"
+import { binary, expect, parseTerminalJson, row, SESSIONS, Skip, until, vibestd, type World } from "../world.ts"
 import { project } from "./inbox.ts"
 
 type Entry = { id: string; agent: string; status: string; executionState: string }
@@ -74,7 +74,16 @@ export const isolatedCore = async (w: World, piAgentDir: string, tag: string) =>
   }
 }
 
-export const addressOf = (id: string) => id.slice(0, id.indexOf("@"))
+export const addressOf = (id: string) => {
+  const parsed = parseTerminalJson(id)
+
+  if (parsed !== undefined) return parsed.address ?? ""
+
+  return id.split("@")[0] ?? ""
+}
+
+const onHcSocket = (id: string | undefined, address: string, socket: string) =>
+  id === address || id === `${address}@${socket}`
 
 const configureRuntime = async (w: World, runtime: string | undefined) => {
   const file = path.join(w.vibestHome, "vibest.json")
@@ -89,7 +98,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S33",
     title:
-      "herdr-core runtime: a Pi entry session started with --runtime hc runs `vibest run`, the subagent starts in hc as its child (no notes, outlives it), results and a send go both ways; the entry session terminal carries herdr.space=<project> and herdr.tab=<entry session id>, with readable project and task names",
+      "herdr-core runtime: a Pi entry session started with --runtime hc runs `vibest run`, the subagent starts in hc as its child (no notes, outlives it), results and a send go both ways; the entry session terminal carries vibest.project=<project> and vibest.session=<entry session id>, with no herdr.space/tab labels, and readable project and task names",
     run: async (w) => {
       for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi", { heldMs: 3_000 })
@@ -195,12 +204,12 @@ const checks: ReadonlyArray<Check> = [
         const entryTerminal = await core.get(addressOf(entryAt.id!))
         expect(entryTerminal.name === "hc-main", `the entry session terminal name: ${entryTerminal.name}`)
         expect(
-          entryAt.id === `${entryTerminal.address}@${w.hcSocket}`,
+          onHcSocket(entryAt.id, entryTerminal.address, w.hcSocket),
           `the entry session identity changed: ${entryAt.id}`,
         )
         expect(
-          entryTerminal.labels["herdr.space"] === projectId &&
-            entryTerminal.labels["herdr.tab"] === entryId &&
+          entryTerminal.labels["herdr.space"] === undefined &&
+            entryTerminal.labels["herdr.tab"] === undefined &&
             entryTerminal.labels["vibest.runtime"] === "hc" &&
             entryTerminal.labels["vibest.session"] === entryId &&
             entryTerminal.labels["vibest.project"] === projectId,
@@ -221,7 +230,7 @@ const checks: ReadonlyArray<Check> = [
           subTerminal.name === `${taskSlug}-${sub.slice(0, 4)}`,
           `the task-derived terminal name: ${subTerminal.name}`,
         )
-        expect(subAt.id === `${subTerminal.address}@${w.hcSocket}`, `the subagent identity changed: ${subAt.id}`)
+        expect(onHcSocket(subAt.id, subTerminal.address, w.hcSocket), `the subagent identity changed: ${subAt.id}`)
         expect(
           subTerminal.parent === entryTerminal.address &&
             subTerminal.notify === false &&
@@ -321,20 +330,22 @@ const checks: ReadonlyArray<Check> = [
         ) as { kind?: string; id?: string }
 
         expect(
-          at.kind === "hc" && at.id === `${users.address}@${w.hcSocket}`,
+          at.kind === "hc" && onHcSocket(at.id, users.address, w.hcSocket),
           `the entry session runs in ${JSON.stringify(at)}, not in ${users.address} on ${w.hcSocket}`,
         )
         const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, entryId)?.p
         await until(
-          "herdr-app labels on the user's terminal",
+          "vibest labels on the user's terminal",
           async () => {
             const { name, labels } = await core.get("users-own")
 
             return (
               name === "users-own" &&
               labels["vibest.runtime"] === "hc" &&
-              labels["herdr.space"] === projectId &&
-              labels["herdr.tab"] === entryId
+              labels["vibest.project"] === projectId &&
+              labels["vibest.session"] === entryId &&
+              labels["herdr.space"] === undefined &&
+              labels["herdr.tab"] === undefined
             )
           },
           30_000,
@@ -412,7 +423,7 @@ const checks: ReadonlyArray<Check> = [
         })
         const entryAt = runtimeOf(entryId)
         expect(
-          entryAt.kind === "hc" && entryAt.id === `${caller.address}@${w.hcSocket}`,
+          entryAt.kind === "hc" && onHcSocket(entryAt.id, caller.address, w.hcSocket),
           `the entry session runs in ${JSON.stringify(entryAt)}, not in ${caller.address} on ${w.hcSocket}`,
         )
         await w.okViaEntry(["run", "pi", "--runtime", "hc", "--env", env, "--title", "Wake parent", ask("zero")], {
@@ -437,11 +448,11 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         const subAt = runtimeOf(sub)
+        const subTerminal = await core.get(addressOf(subAt.id!))
         expect(
-          subAt.kind === "hc" && subAt.id?.endsWith(`@${w.hcSocket}`) === true,
+          subAt.kind === "hc" && onHcSocket(subAt.id, subTerminal.address, w.hcSocket),
           `the subagent runs in ${JSON.stringify(subAt)}`,
         )
-        const subTerminal = await core.get(addressOf(subAt.id!))
         expect(
           subTerminal.parent === caller.address,
           `the subagent's parent is ${subTerminal.parent}, not ${caller.address}`,

@@ -85,9 +85,10 @@ const move = (harness: "claude" | "pi"): Check => ({
           terminal: string
         }>(
           w,
-          `SELECT p.session_id AS session, p.pid, p.ready_at AS ready, p.harness_session_id AS conversation, p.terminal FROM process p
-            JOIN project q ON q.entry_session_id = p.session_id
-            WHERE p.ended_at IS NULL ORDER BY p.id DESC LIMIT 1`,
+          `SELECT p.session_id AS session, p.pid, p.ready_at AS ready, p.harness_session_id AS conversation, p.terminal
+            FROM process p JOIN session s ON s.id = p.session_id
+            WHERE s.parent_session_id IS NULL AND s.origin_remote IS NULL AND s.ended_at IS NULL AND p.ended_at IS NULL
+            ORDER BY p.id DESC LIMIT 1`,
         )
 
       await until(`${harness} placed in terminal A`, () => entryProcess() !== undefined, 60_000)
@@ -146,11 +147,15 @@ const move = (harness: "claude" | "pi"): Check => ({
       await until("B's shell", async () => /\S/.test(await screen(socket, b)), 30_000)
       await type(socket, b, `vibest --harness ${harness}`)
       await until(
-        "B asks to move the entry session",
-        async () => (await screen(socket, b)).includes("Move it here and continue? [y/N]"),
+        "B asks to move the running session",
+        async () => {
+          const shown = await screen(socket, b)
+
+          return shown.includes("Move it to this terminal") && shown.includes("Choose [1]:")
+        },
         60_000,
       )
-      await type(socket, b, "y")
+      await type(socket, b, "1")
 
       if (harness === "claude") {
         await until("Claude resumed in B", () => herdrPane(entryProcess()?.terminal) === b, 60_000)

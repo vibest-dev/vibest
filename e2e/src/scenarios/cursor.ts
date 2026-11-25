@@ -111,7 +111,7 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
   const terminalOf = (id: string) => {
     const at = runtimeOf(id)
 
-    return core ? at.slice(0, at.indexOf("@")) : (at.split("/")[1] ?? "")
+    return core ? (at.split("@")[0] ?? "") : (at.split("/")[1] ?? "")
   }
 
   const screen = async (id: string) => {

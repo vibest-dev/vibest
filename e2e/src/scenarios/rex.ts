@@ -257,7 +257,12 @@ type Process = { terminal: string | null; conversation: string | null; reason: s
 const processesOf = (w: World, id: string) =>
   rows<Process>(
     w,
-    "SELECT terminal, harness_session_id AS conversation, end_reason AS reason FROM process WHERE session_id = ? ORDER BY id",
+    `SELECT CASE
+        WHEN terminal IS NULL THEN NULL
+        WHEN NOT json_valid(terminal) THEN terminal
+        ELSE coalesce((terminal ->> '$.session') || '/' || (terminal ->> '$.block'), terminal ->> '$.id', terminal)
+      END AS terminal, harness_session_id AS conversation, end_reason AS reason
+      FROM process WHERE session_id = ? ORDER BY id`,
     id,
   )
 
