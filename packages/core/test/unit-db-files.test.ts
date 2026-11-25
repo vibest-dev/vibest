@@ -1,13 +1,17 @@
-import { Database } from "bun:sqlite"
+import { Database as SqliteDatabase } from "bun:sqlite"
 import url from "node:url"
 
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import { APPLICATION_ID } from "@vibest/core/database/db-schema"
+import { Database } from "@vibest/core/database/database"
 import { checkLedger, type Migration, migrations, open } from "@vibest/core/database/migration"
-import * as Projectors from "@vibest/core/database/projectors"
+import { APPLICATION_ID } from "@vibest/core/database/schema.sql"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Projectors } from "@vibest/core/reactor"
+import { RemoteStore } from "@vibest/core/remote/store"
 import { SessionLive } from "@vibest/core/session/live"
+import { SessionStore } from "@vibest/core/session/store"
 import { Event } from "@vibest/schema/event"
 import { ID } from "@vibest/schema/id"
 import { tempDirectory, projectOf } from "@vibest/testkit/fakes"
@@ -49,7 +53,8 @@ describe("Db", () => {
     })
 
   const brokenInstall = (file: string, how: "fail" | "interrupt") =>
-    Db.layer.pipe(
+    Layer.mergeAll(ProjectStore.layer, SessionStore.layer, InboxStore.layer, RemoteStore.layer).pipe(
+      Layer.provideMerge(Database.layer),
       Layer.provide(Projectors.layer),
       Layer.provide(Bus.layer),
       Layer.provide(SessionLive.layer),
@@ -84,7 +89,7 @@ describe("Db", () => {
         )
         assert.deepStrictEqual(yield* header(file), { applicationId: 0, userVersion: 0, objects: 0 })
         yield* Effect.gen(function* () {
-          const db = yield* Db.Service
+          const db = { session: yield* SessionStore.Service }
           assert.isTrue(
             yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r")),
           )
@@ -109,7 +114,7 @@ describe("Db", () => {
       const quietPlace = { ...place, target: { id: "test/p2" } }
 
       const ids = yield* Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = { session: yield* SessionStore.Service }
         const reported = yield* db.session.startRoot(yield* projectOf("known"), "pi", false, place, ENTRY)
         yield* db.session.noteConversation(reported.sessionId, "conv-known")
         const quiet = yield* db.session.startRoot(yield* projectOf("unknown"), "pi", false, quietPlace, ENTRY)
@@ -348,7 +353,7 @@ describe("Db", () => {
       Effect.gen(function* () {
         const file = yield* fileAt(yield* tempDirectory("vibest-import-check-"), "vibest.db")
         yield* Effect.gen(function* () {
-          const db = yield* Db.Service
+          const db = { session: yield* SessionStore.Service }
           yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
         }).pipe(Effect.provide(database(file)))
         yield* Platform.daemon.checkDatabase(file)
@@ -381,7 +386,7 @@ describe("Db", () => {
         assert.isFalse(yield* fs.exists(`${file}-shm`))
         assert.match(yield* refusal(file), /application_id 0x0, v1/)
         assert.deepStrictEqual(yield* fs.readFile(file), before)
-        const reader = new Database(file, { readonly: true })
+        const reader = new SqliteDatabase(file, { readonly: true })
         assert.strictEqual((reader.query("SELECT note FROM other").get() as { note: string } | null)?.note, "keep-me")
         reader.close()
 
@@ -472,7 +477,7 @@ describe("Db", () => {
         assert.include(pretty, "application_id 0x0, v1")
         assert.deepStrictEqual(yield* fs.readFile(file), dbBefore)
         assert.deepStrictEqual(yield* fs.readFile(`${file}-wal`), walBefore)
-        const reader = new Database(file, { readonly: true })
+        const reader = new SqliteDatabase(file, { readonly: true })
         assert.strictEqual(
           (reader.query("SELECT note FROM other WHERE id = 1").get() as { note: string } | null)?.note,
           "keep-me",
@@ -487,25 +492,15 @@ describe("Db", () => {
       const dir = yield* tempDirectory("vibest-schema-race-")
       const file = yield* fileAt(dir, "vibest.db")
       const script = yield* fileAt(dir, "open.ts")
-      const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/database/db.ts", import.meta.url))
-      const busModule = url.fileURLToPath(new URL("../../../packages/core/src/bus.ts", import.meta.url))
-
-      const projectorsModule = url.fileURLToPath(
-        new URL("../../../packages/core/src/database/projectors.ts", import.meta.url),
-      )
-
-      const liveModule = url.fileURLToPath(new URL("../../../packages/core/src/session/live.ts", import.meta.url))
+      const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/database/database.ts", import.meta.url))
       const platformModule = url.fileURLToPath(new URL("../../platform-bun/src/bun.ts", import.meta.url))
       yield* fs.writeFileString(
         script,
         [
           'import { Effect, Layer } from "effect"',
-          `import { Bus } from ${JSON.stringify(busModule)}`,
-          `import * as Projectors from ${JSON.stringify(projectorsModule)}`,
-          `import { SessionLive } from ${JSON.stringify(liveModule)}`,
-          `import { Db } from ${JSON.stringify(dbModule)}`,
+          `import { Database } from ${JSON.stringify(dbModule)}`,
           `import * as Platform from ${JSON.stringify(platformModule)}`,
-          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Projectors.layer), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer), Layer.provide(Platform.sqlite(process.argv[2]!))))))",
+          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Database.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!))))))",
           "",
         ].join("\n"),
       )
@@ -518,6 +513,38 @@ describe("Db", () => {
 
       assert.deepStrictEqual([codeA, errA, codeB, errB], [0, "", 0, ""])
       assert.strictEqual((yield* header(file)).applicationId, APPLICATION_ID)
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("restricts vibest.db and its WAL/SHM sidecars to owner-only 0o600 permissions on POSIX", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return
+      const fs = yield* FileSystem.FileSystem
+      const dir = yield* tempDirectory("vibest-db-perms-")
+      const file = yield* fileAt(dir, "vibest.db")
+      yield* fs.writeFileString(file, "")
+      yield* fs.writeFileString(`${file}-wal`, "")
+      yield* fs.writeFileString(`${file}-shm`, "")
+      yield* fs.chmod(file, 0o644)
+      yield* fs.chmod(`${file}-wal`, 0o644)
+      yield* fs.chmod(`${file}-shm`, 0o644)
+
+      yield* Effect.void.pipe(Effect.provide(Database.layer.pipe(Layer.provide(Platform.sqlite(file)))))
+
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const candidate = `${file}${suffix}`
+
+        if (yield* fs.exists(candidate)) {
+          const info = yield* fs.stat(candidate)
+          assert.strictEqual(info.mode & 0o777, 0o600)
+        }
+      }
+
+      const foreign = yield* fileAt(dir, "foreign.db")
+      yield* writeSql(foreign, ["CREATE TABLE other (id INTEGER PRIMARY KEY)"])
+      yield* fs.chmod(foreign, 0o644)
+      assert.include(yield* refusal(foreign), "not this vibest's schema")
+      assert.strictEqual((yield* fs.stat(foreign)).mode & 0o777, 0o644)
     }).pipe(Effect.provide(Platform.services)),
   )
 })

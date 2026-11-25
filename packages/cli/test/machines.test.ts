@@ -4,8 +4,10 @@ import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { connectPipe, stdioSocket } from "@vibest/client/pipe"
 import { withHeaders } from "@vibest/client/unix-http"
-import { Db } from "@vibest/core/database/db"
 import { Identity } from "@vibest/core/identity"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { SessionStore } from "@vibest/core/session/store"
 import { servePipe } from "@vibest/platform-bun/pipe-server"
 import { REMOTE_BY_USER, remoteHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
@@ -384,8 +386,15 @@ describe("machine add, ls and rm", () => {
 
 const peerB = repoStack()
 
-const finish = (db: Db.Interface, session: string, message: string) =>
-  db.inbox.insertInbox({ sessionId: session, message })
+const finish = (
+  db: {
+    readonly session: SessionStore.Interface
+    readonly inbox: InboxStore.Interface
+    readonly remote: RemoteStore.Interface
+  },
+  session: string,
+  message: string,
+) => db.inbox.insertInbox({ sessionId: session, message })
 
 describe("another machine's vibestd runs agents here", () => {
   it.effect("Remote.Spawn for an agent id machine B does not know is refused before any session is made", () =>

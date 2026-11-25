@@ -2,8 +2,8 @@ import net from "node:net"
 
 import { readPing, withHeaders as withRequestHeaders } from "@vibest/client/client"
 import { App } from "@vibest/core/app"
-import { Db } from "@vibest/core/database/db"
-import { Processes } from "@vibest/core/processes"
+import { Processes } from "@vibest/core/runtime/processes"
+import { SessionStore } from "@vibest/core/session/store"
 import * as Platform from "@vibest/platform-bun/bun"
 import { NOT_CHECKED } from "@vibest/protocol/schemas"
 import { Layout } from "@vibest/schema/layout"
@@ -78,8 +78,8 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
 
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
-    const db = yield* Db.Service
-    const row = yield* db.session.getSession(sessionId)
+    const sessionStore = yield* SessionStore.Service
+    const row = yield* sessionStore.getSession(sessionId)
 
     return row?.process?.harnessSessionId ?? null
   })

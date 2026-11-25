@@ -1,8 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import * as Projectors from "@vibest/core/database/projectors"
+import { Database } from "@vibest/core/database/database"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Projectors } from "@vibest/core/reactor"
+import { RemoteStore } from "@vibest/core/remote/store"
 import { SessionLive } from "@vibest/core/session/live"
+import { SessionStore } from "@vibest/core/session/store"
 import { MachineEvent } from "@vibest/schema/machine-event"
 import { SessionEvent } from "@vibest/schema/session-event"
 import { projectOf } from "@vibest/testkit/fakes"
@@ -14,7 +18,8 @@ import { SqlClient } from "effect/sql"
 const S = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
 const memoryDb = () =>
-  Db.layer.pipe(
+  Layer.mergeAll(ProjectStore.layer, SessionStore.layer, InboxStore.layer, RemoteStore.layer).pipe(
+    Layer.provideMerge(Database.layer),
     Layer.provide(Projectors.layer),
     Layer.provideMerge(Bus.layer),
     Layer.provide(SessionLive.layer),
@@ -22,7 +27,7 @@ const memoryDb = () =>
   )
 
 const withSession = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const db = { session: yield* SessionStore.Service, inbox: yield* InboxStore.Service }
   yield* db.session.insertSession(session(S), yield* projectOf("life"))
 
   return db

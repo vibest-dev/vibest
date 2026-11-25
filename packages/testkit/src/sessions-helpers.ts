@@ -1,8 +1,9 @@
 import { it } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
-import { executionStateOf, exitedAt, type SessionRow } from "@vibest/core/database/db-rows"
-import { sessionEnvelope, unwrapped } from "@vibest/core/replies"
+import { executionStateOf, exitedAt, type SessionRow } from "@vibest/core/database/rows"
+import { InboxStore } from "@vibest/core/inbox/store"
 import { Session } from "@vibest/core/session"
+import { sessionEnvelope, unwrapped } from "@vibest/core/session/replies"
+import { SessionStore } from "@vibest/core/session/store"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { HarnessId } from "@vibest/schema/session"
 import { Effect, type Scope } from "effect"
@@ -25,13 +26,13 @@ export const harnessOf = (argv: ReadonlyArray<string>) => {
 
 export const entryOfProject = (repo: string) =>
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
     const projectId = yield* projectOf(repo)
-    const found = yield* db.session.latestRoot(projectId)
+    const found = yield* sessionStore.latestRoot(projectId)
 
     if (found !== undefined) return found.id
 
-    return (yield* db.session.startRoot(
+    return (yield* sessionStore.startRoot(
       projectId,
       PULLING_PI.id,
       false,
@@ -73,20 +74,20 @@ export const claudeEnd = (reason: string) => ({
 export const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
     const sessions = yield* Session.Service
-    const db = yield* Db.Service
-
+    const sessionStore = yield* SessionStore.Service
+    const inboxStore = yield* InboxStore.Service
     const { id } = yield* sessions.spawn(yield* spawnInput(repo, harness))
 
     yield* until(
-      db.session.getSession(id),
+      sessionStore.getSession(id),
       (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
     )
     yield* sessions.check(id)
     yield* (yield* FakeRuntime).seedAgent("test/coord")
     yield* settled
-    const row = (yield* db.session.getSession(id))!
+    const row = (yield* sessionStore.getSession(id))!
 
-    return { id, row, sessions, db, entryId: yield* entryOfProject(repo) }
+    return { id, row, sessions, sessionStore, inboxStore, entryId: yield* entryOfProject(repo) }
   })
 
 export const idleSession = (repo: string) =>
@@ -94,7 +95,7 @@ export const idleSession = (repo: string) =>
     const herdr = yield* FakeRuntime
     const w = yield* spawnWorking(repo, "pi")
     yield* herdr.endExecution(w.id)
-    const open = yield* w.db.session.openExecution(w.id)
+    const open = yield* w.sessionStore.openExecution(w.id)
     yield* writeEnd(w.id, "pi", { text: "status: completed", ...(open !== undefined && { execution: open }) })
     yield* w.sessions.check(w.id)
     yield* settled
@@ -104,7 +105,7 @@ export const idleSession = (repo: string) =>
 
 export const sessionWorktree = (id: string) =>
   Effect.gen(function* () {
-    const located = yield* (yield* Db.Service).session.sessionDirectory(id)
+    const located = yield* (yield* SessionStore.Service).sessionDirectory(id)
 
     if (!located) return yield* Effect.die(`no worktree for ${id}`)
 

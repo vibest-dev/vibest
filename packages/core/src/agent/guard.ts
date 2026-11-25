@@ -1,7 +1,7 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Config, Effect, Option, Path, Predicate, Schema } from "effect"
 
-import { Plugins } from "./plugin.ts"
+import { Plugins } from "../plugin.ts"
 
 export const toolPath = (raw: string, base: string, home: string) =>
   Effect.gen(function* () {

@@ -15,23 +15,23 @@ import { KeyedMutex } from "@vibest/util/keyed-mutex"
 import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 
-import { definitionLaunch } from "../agent-launch.ts"
-import { Agents, unknownAgent } from "../agents.ts"
+import { definitionLaunch } from "../agent/launch.ts"
+import * as Launch from "../agent/launch.ts"
+import { Agents, unknownAgent } from "../agent/registry.ts"
 import { Bus } from "../bus.ts"
-import { archived, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
-import { Db } from "../database/db.ts"
+import { archived, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/rows.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Harness, startableOptions } from "../harness.ts"
-import { Harnesses } from "../harnesses.ts"
+import { Harnesses } from "../harness/registry.ts"
 import { terminalPresence } from "../inbox.ts"
-import * as Launch from "../launch.ts"
 import { Plugins } from "../plugin.ts"
-import { Processes } from "../processes.ts"
-import { formatTerminal, machinesListing, type Runtime, Runtimes, type Terminal } from "../runtimes.ts"
+import { Processes } from "../runtime/processes.ts"
+import { formatTerminal, machinesListing, type Runtime, Runtimes, type Terminal } from "../runtime/registry.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks, terminalLock } from "./locks.ts"
 import { Placement, runtimeEnv } from "./placement.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "./release.ts"
+import { SessionStore } from "./store.ts"
 
 export * as SessionLaunch from "./entry.ts"
 
@@ -68,7 +68,7 @@ const firstStart = new LaunchFailed({
 })
 
 const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const bus = yield* Bus.Service
   const runtimes = yield* Runtimes.Service
   const restarting = (yield* SessionLive.Service).restarting
@@ -88,7 +88,7 @@ const make = Effect.gen(function* () {
   const sessionCwd = (existing: SessionRow | undefined, fallback: string) =>
     existing === undefined
       ? Effect.succeed(fallback)
-      : db.session.sessionDirectory(existing.id).pipe(Effect.map((dir) => (dir && dir !== "" ? dir : fallback)))
+      : sessionStore.sessionDirectory(existing.id).pipe(Effect.map((dir) => (dir && dir !== "" ? dir : fallback)))
 
   const withHarness = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -109,8 +109,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (fresh) return undefined
 
-      if (sessionId === undefined) return yield* db.session.latestRoot(projectId)
-      const row = yield* db.session.getSession(sessionId)
+      if (sessionId === undefined) return yield* sessionStore.latestRoot(projectId)
+      const row = yield* sessionStore.getSession(sessionId)
 
       if (row === undefined || row.projectId !== projectId)
         return yield* new NoSuchSession({ id: sessionId, message: `no session ${sessionId}` })
@@ -227,8 +227,8 @@ const make = Effect.gen(function* () {
 
       return yield* stopAgent(h, place.target, {
         pid: pidOf(session),
-        detach: db.session.detachSession(session.id, runtime, place.target),
-        reattach: db.session.reattachSession(session.id),
+        detach: sessionStore.detachSession(session.id, runtime, place.target),
+        reattach: sessionStore.reattachSession(session.id),
         wait: HARNESS_EXIT_WAIT,
       }).pipe(Effect.provideService(Bus.Service, bus), Effect.provideService(Processes.Service, processes))
     })
@@ -323,7 +323,9 @@ const make = Effect.gen(function* () {
             .close(opened)
             .pipe(
               Effect.ignore,
-              Effect.andThen(claimedId === undefined ? Effect.void : db.session.endProcess(claimedId, "launch_failed")),
+              Effect.andThen(
+                claimedId === undefined ? Effect.void : sessionStore.endProcess(claimedId, "launch_failed"),
+              ),
             ),
     )
 
@@ -347,14 +349,14 @@ const make = Effect.gen(function* () {
               yield* ensureNotRunning(existing, undefined, input.move === true)
 
               const sessionId =
-                existing === undefined ? yield* db.session.allocateSessionId().pipe(Effect.orDie) : existing.id
+                existing === undefined ? yield* sessionStore.allocateSessionId().pipe(Effect.orDie) : existing.id
 
               const openCwd = yield* sessionCwd(existing, root)
               const title = existing?.name || entryLabel(root)
 
               const near =
                 at.target === undefined || at.target === ""
-                  ? yield* db.session.lastProjectTerminal(id, rt.id)
+                  ? yield* sessionStore.lastProjectTerminal(id, rt.id)
                   : undefined
 
               const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
@@ -374,7 +376,7 @@ const make = Effect.gen(function* () {
                 Effect.uninterruptible,
               )
 
-              const claimed = yield* db.session
+              const claimed = yield* sessionStore
                 .startRoot(
                   id,
                   chosen,
@@ -526,7 +528,7 @@ const make = Effect.gen(function* () {
             model: decision.model ?? null,
             session: Effect.gen(function* () {
               const saved = yield* locks.withLock(terminalLock(rt.id, terminal))(
-                db.session.startRoot(
+                sessionStore.startRoot(
                   projectId,
                   chosenHarness,
                   fresh,
@@ -615,7 +617,7 @@ export const node = LayerNode.make({
   deps: [
     Agents.node,
     Bus.node,
-    Db.node,
+    SessionStore.node,
     Harness.node,
     Harnesses.node,
     Placement.node,

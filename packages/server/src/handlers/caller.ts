@@ -1,8 +1,8 @@
 import { callerTarget, filterCallerEnv } from "@vibest/core/caller"
-import { Db } from "@vibest/core/database/db"
-import { Git } from "@vibest/core/git"
 import { locateProject, resolveProject } from "@vibest/core/project/identity"
-import { Runtimes } from "@vibest/core/runtimes"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Runtimes } from "@vibest/core/runtime/registry"
+import { Git } from "@vibest/core/worktree/git"
 import type { ACCESS } from "@vibest/protocol/access"
 import { Forbidden } from "@vibest/protocol/errors"
 import { Caller, type CallerIdentity } from "@vibest/protocol/middleware"
@@ -20,7 +20,7 @@ export type MethodOf<A> = {
 export type Agent = Extract<CallerIdentity, { _tag: "Cli" | "Ui" | "Session" }>
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const projectStore = yield* ProjectStore.Service
   const runtimes = yield* Runtimes.Service
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -49,8 +49,11 @@ export const make = Effect.gen(function* () {
       ),
     )
 
-  const resolveAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => resolveProject(db, at)))
-  const findAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => db.project.projectAt(at.root)))
+  const resolveAt = (directory: string) =>
+    atProject(directory).pipe(Effect.flatMap((at) => resolveProject(projectStore, at)))
+
+  const findAt = (directory: string) =>
+    atProject(directory).pipe(Effect.flatMap((at) => projectStore.projectAt(at.root)))
 
   const projectOf = (c: Agent, method: string) =>
     Effect.gen(function* () {
@@ -58,7 +61,7 @@ export const make = Effect.gen(function* () {
 
       if (!Predicate.isTagged(c, "Session"))
         return yield* new Forbidden({ method, message: `${method} needs a project` })
-      const directory = yield* db.project.projectDirectory(c.projectId)
+      const directory = yield* projectStore.projectDirectory(c.projectId)
 
       if (directory !== undefined) return { id: c.projectId, directory }
 

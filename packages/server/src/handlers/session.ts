@@ -1,13 +1,15 @@
 import { withHeaders } from "@vibest/client/client"
 import { attachPlace, filterCallerEnv, specHits } from "@vibest/core/caller"
-import { Db } from "@vibest/core/database/db"
-import { dedupePairs, expandEdgeSpec, SESSION_PREFIX } from "@vibest/core/database/session-edges"
 import { Identity } from "@vibest/core/identity"
-import { Runtimes } from "@vibest/core/runtimes"
+import { ProjectStore } from "@vibest/core/project/store"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { defaultSessionName, NoSuchSession, Session } from "@vibest/core/session"
 import { SessionLaunch } from "@vibest/core/session/entry"
 import { resolveLiveTarget } from "@vibest/core/session/spawn"
+import { dedupePairs, expandEdgeSpec, SESSION_PREFIX } from "@vibest/core/session/sql-edges"
 import { Starts } from "@vibest/core/session/starts"
+import { SessionStore } from "@vibest/core/session/store"
 import { VibestApi } from "@vibest/protocol/api"
 import { Forbidden, InvalidCaller } from "@vibest/protocol/errors"
 import { Caller, type CallerIdentity } from "@vibest/protocol/middleware"
@@ -53,7 +55,9 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
     const listing = yield* Listing.Service
     const sessions = yield* Session.Service
     const sessionLaunch = yield* SessionLaunch.Service
-    const db = yield* Db.Service
+    const projectStore = yield* ProjectStore.Service
+    const sessionStore = yield* SessionStore.Service
+    const remoteStore = yield* RemoteStore.Service
     const selfIdentity = yield* Identity.Service
     const machines = yield* Machines.Service
     const runtimes = yield* Runtimes.Service
@@ -64,7 +68,7 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
       Effect.gen(function* () {
         if (caller.session === undefined && from === undefined) return undefined
 
-        const machine = yield* db.remote.nameForRemote(caller.remoteId)
+        const machine = yield* remoteStore.nameForRemote(caller.remoteId)
 
         const record: AgentFrom =
           caller.session !== undefined ? (from?.session === caller.session ? from : { session: caller.session }) : from!
@@ -79,13 +83,13 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
       })
 
     const startedByRemote = (
-      scope: NonNullable<Parameters<typeof db.session.resolveSession>[1]>,
+      scope: NonNullable<Parameters<typeof sessionStore.resolveSession>[1]>,
       id: string,
       direct: boolean,
     ) =>
       Effect.gen(function* () {
         if (scope.session === undefined) return true
-        const route = direct ? yield* db.session.creatorOf(id) : yield* db.session.nearestAlive(id)
+        const route = direct ? yield* sessionStore.creatorOf(id) : yield* sessionStore.nearestAlive(id)
 
         return (
           route !== undefined && "remote" in route && route.remote === scope.remote && route.session === scope.session
@@ -95,7 +99,7 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
     const managed = (method: MethodOf<"owner">, input: string) =>
       Effect.gen(function* () {
         const { c, scope } = yield* reach(method)
-        const id = yield* db.session.resolveSession(input, scope)
+        const id = yield* sessionStore.resolveSession(input, scope)
 
         if (c === undefined) {
           if (scope !== undefined && !(yield* startedByRemote(scope, id, false)))
@@ -107,11 +111,11 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
           return id
         }
 
-        const session = yield* db.session.getSession(id)
+        const session = yield* sessionStore.getSession(id)
 
         if (!session) return yield* new NoSuchSession({ id, message: `no session ${id}` })
 
-        const manager = yield* db.session.nearestAlive(id)
+        const manager = yield* sessionStore.nearestAlive(id)
 
         if (
           Predicate.isTagged(c, "Session") &&
@@ -153,12 +157,12 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
           const candidates = refs.filter((r) => r.machine === undefined)
 
           for (const candidate of candidates) {
-            const resolved = yield* db.session
+            const resolved = yield* sessionStore
               .resolveSession(candidate.id)
               .pipe(Effect.catchTag("NoSuchSession", () => Effect.succeed(undefined)))
 
             if (resolved !== undefined) {
-              const identity = yield* db.session.sessionIdentity(resolved)
+              const identity = yield* sessionStore.sessionIdentity(resolved)
 
               if (identity !== undefined) return identity.projectId
             }
@@ -198,14 +202,14 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
       Effect.gen(function* () {
         if (ref.machine === undefined) {
           const resolveLocal = resolveLiveTarget(
-            db,
+            sessionStore,
             projectId,
           )(ref.id).pipe(
             Effect.map((id): ResolvedEndpoint => ({ local: true, id, remoteId: selfIdentity.id })),
             Effect.catchTag("LinkRefused", (e) => Effect.fail(new Forbidden({ method, message: e.message }))),
           )
 
-          const machineRows = yield* db.remote.machines
+          const machineRows = yield* remoteStore.machines
 
           if (machineRows.length === 0 || !SESSION_PREFIX.test(ref.id)) return yield* resolveLocal
 
@@ -220,7 +224,7 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
 
           if (remoteHits.length === 0) return yield* resolveLocal
 
-          const localLookup = yield* Effect.result(db.session.resolveSession(ref.id))
+          const localLookup = yield* Effect.result(sessionStore.resolveSession(ref.id))
 
           if (Predicate.isTagged(localLookup, "Success"))
             return yield* new AmbiguousSession({
@@ -245,12 +249,12 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
 
         if (!SESSION_PREFIX.test(ref.id))
           return yield* new NoSuchSession({ id: ref.id, message: `no session ${ref.id} on ${ref.machine}` })
-        const machineRow = yield* db.remote.machineNamed(ref.machine)
+        const machineRow = yield* remoteStore.machineNamed(ref.machine)
 
         if (machineRow === undefined)
           return yield* new UnknownMachine({
             machine: ref.machine,
-            machines: (yield* db.remote.machines).map((m) => m.name),
+            machines: (yield* remoteStore.machines).map((m) => m.name),
           })
 
         const matches = yield* remoteLiveMatches(ref.machine, machineRow.remoteId, projectId, ref.id)
@@ -293,7 +297,7 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
         }
 
         if (localEdges.length > 0)
-          yield* mode === "link" ? db.session.linkSessions(localEdges) : db.session.unlinkSessions(localEdges)
+          yield* mode === "link" ? sessionStore.linkSessions(localEdges) : sessionStore.unlinkSessions(localEdges)
 
         for (const [machine, edges] of remoteByMachine)
           yield* mode === "link" ? remoteService.link(machine, edges) : remoteService.unlink(machine, edges)
@@ -348,18 +352,18 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
       .handle("session.get", ({ params: { id }, query: { machine } }) =>
         routed.get({ id, ...(machine !== undefined && { machine }) }, (input) =>
           Effect.gen(function* () {
-            const resolved = yield* db.session.resolveSession(input, (yield* reach("session.get")).scope)
+            const resolved = yield* sessionStore.resolveSession(input, (yield* reach("session.get")).scope)
             const row = yield* sessions.get(resolved)
 
             const session = Listing.toInfo(
               row,
-              (yield* db.session.sessionBriefs([resolved])).get(resolved),
+              (yield* sessionStore.sessionBriefs([resolved])).get(resolved),
               (yield* starts.choices).get(resolved),
             )
 
             return {
               ...session,
-              reply: (yield* db.session.latestReply(resolved)) ?? null,
+              reply: (yield* sessionStore.latestReply(resolved)) ?? null,
             }
           }),
         ),
@@ -387,7 +391,7 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
             const spawned = yield* spawnOn(input.machine, input, c.sessionId, project.id)
 
             if (fromEndpoints.length > 0 || toEndpoints.length > 0 || withEndpoints.length > 0) {
-              const machineRow = (yield* db.remote.machineNamed(input.machine))!
+              const machineRow = (yield* remoteStore.machineNamed(input.machine))!
 
               yield* linkSpawnedEndpoints(
                 { local: false, machine: input.machine, id: spawned.id, remoteId: machineRow.remoteId },
@@ -424,7 +428,7 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
               model: input.model,
               env: input.env,
               agent: input.agent,
-              share: input.share === undefined ? undefined : yield* db.session.resolveSession(input.share),
+              share: input.share === undefined ? undefined : yield* sessionStore.resolveSession(input.share),
               runtime: input.runtime,
               parentSessionId: c.sessionId,
               request: input.request,
@@ -479,7 +483,7 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
 
           const project = yield* Effect.gen(function* () {
             if (input.projectId !== undefined) {
-              const directory = yield* db.project.projectDirectory(input.projectId)
+              const directory = yield* projectStore.projectDirectory(input.projectId)
 
               if (directory === undefined) return yield* new NoSuchProject({ project: input.projectId })
 
@@ -553,7 +557,7 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
               rootAgent(agent ?? DEFAULT_AGENT, agentNamed),
             )
 
-          const hasRoot = (yield* db.session.latestRoot(project.id)) !== undefined
+          const hasRoot = (yield* sessionStore.latestRoot(project.id)) !== undefined
 
           const running =
             fresh === true
@@ -623,12 +627,12 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
                 )
             const { c, scope } = yield* reach("session.send")
 
-            const target = yield* db.session
+            const target = yield* sessionStore
               .resolveSession(input, scope)
               .pipe(
                 Effect.catchTag("NoSuchSession", (err) =>
                   scope !== undefined && scope.session === undefined && p.from !== undefined
-                    ? db.session.resolveSession(input)
+                    ? sessionStore.resolveSession(input)
                     : Effect.fail(err),
                 ),
               )
@@ -662,7 +666,7 @@ export const SessionHandler = HttpApiBuilder.group(VibestApi, "server.session", 
                 const caller = yield* Caller
 
                 const fromSession = Predicate.isTagged(caller, "Session")
-                  ? yield* db.remote.senderOf(caller.sessionId)
+                  ? yield* remoteStore.senderOf(caller.sessionId)
                   : undefined
 
                 const by = Predicate.isTagged(caller, "Remote")

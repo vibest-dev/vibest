@@ -1,26 +1,30 @@
-import { Agents } from "@vibest/core/agents"
+import { Agents } from "@vibest/core/agent/registry"
 import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import { Drain } from "@vibest/core/drain"
+import { Database } from "@vibest/core/database/database"
 import { PlatformNode } from "@vibest/core/effect/platform"
-import { Git } from "@vibest/core/git"
 import { Harness } from "@vibest/core/harness"
-import { Harnesses } from "@vibest/core/harnesses"
+import { Harnesses } from "@vibest/core/harness/registry"
+import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import { Identity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
+import { InboxStore } from "@vibest/core/inbox/store"
 import { type Candidate, makeHost, Plugins } from "@vibest/core/plugin"
 import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/plugin/domains"
 import { Hooks } from "@vibest/core/plugin/hooks"
-import { Processes } from "@vibest/core/processes"
-import { RepositoryUrl } from "@vibest/core/repository-url"
-import { Runtimes, make as makeRuntimes } from "@vibest/core/runtimes"
+import { RepositoryUrl } from "@vibest/core/project/repository-url"
+import { ProjectStore } from "@vibest/core/project/store"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Drain } from "@vibest/core/runtime/drain"
+import { Processes } from "@vibest/core/runtime/processes"
+import { Runtimes, make as makeRuntimes } from "@vibest/core/runtime/registry"
 import { Session } from "@vibest/core/session"
 import { Archive } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
 import { Sends } from "@vibest/core/session/sends"
+import { SessionStore } from "@vibest/core/session/store"
 import { Summaries } from "@vibest/core/session/summaries"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { Git } from "@vibest/core/worktree/git"
 import { agentPlugin } from "@vibest/plugin-builtins/agent"
 import { guardPlugin } from "@vibest/plugin-builtins/guard"
 import { runtimeChoicePlugin } from "@vibest/plugin-builtins/runtime-choice"
@@ -147,7 +151,11 @@ export const pluginsHost = (
       Agents.node,
       Archive.node,
       Bus.node,
-      Db.node,
+      Database.node,
+      ProjectStore.node,
+      SessionStore.node,
+      InboxStore.node,
+      RemoteStore.node,
       Harnesses.node,
       Hooks.node,
       Runtimes.node,
@@ -166,24 +174,25 @@ const readyOnStart = LayerNode.make({
   layer: Layer.effectDiscard(
     Effect.gen(function* () {
       const fake = yield* FakeRuntime
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const harnesses = yield* Harnesses.Service
       let pid = 50_000
       yield* Ref.set(fake.onStarted, (session, launch) =>
         Effect.gen(function* () {
           const at = yield* Clock.currentTimeMillis
-          yield* db.session.patchLive(session, { ready: at, pid: ++pid })
+          yield* sessionStore.patchLive(session, { ready: at, pid: ++pid })
           const raw = launch?.working ? launch.env.VIBEST_EXECUTION : undefined
           const execution = raw !== undefined && /^[1-9]\d*$/.test(raw) ? Number(raw) : undefined
           const harness = launch?.env.VIBEST_HARNESS
 
           if (execution !== undefined && harness !== undefined && harnesses.find(harness)?.ready === "integration")
-            if (yield* db.session.acceptExecution(session, execution)) yield* db.session.setStatus(session, "working")
+            if (yield* sessionStore.acceptExecution(session, execution))
+              yield* sessionStore.setStatus(session, "working")
         }),
       )
     }),
   ),
-  deps: [runtimeNode, Db.node, Harnesses.node],
+  deps: [runtimeNode, SessionStore.node, Harnesses.node],
 })
 
 const noTransport: Machines.MachineTransport["Service"] = () =>
@@ -193,23 +202,48 @@ const defaultSsh = Layer.succeed(RepositoryUrl.Service, { hostName: (alias) => E
 
 const defaultTransport = Layer.succeed(Machines.MachineTransport, noTransport)
 
-const sessionsDecorated = (decorate: (sessions: Session.Interface, db: Db.Interface) => Session.Interface) =>
+const sessionsDecorated = (
+  decorate: (sessions: Session.Interface, sessionStore: SessionStore.Interface) => Session.Interface,
+) =>
   Session.node.replace(
     LayerNode.make({
       service: Session.Service,
       layer: Layer.effect(
         Session.Service,
         Effect.gen(function* () {
-          return decorate(yield* Session.make, yield* Db.Service)
+          return decorate(yield* Session.make, yield* SessionStore.Service)
         }),
       ),
       deps: Session.deps,
     }),
   )
 
-export const dbReplacement = (decorate: (db: Db.Interface) => Db.Interface) =>
-  Db.node.replace(
-    Db.node.mapLayer((layer) => Layer.effect(Db.Service, Effect.map(Db.Service, decorate)).pipe(Layer.provide(layer))),
+export const sessionStoreReplacement = (decorate: (store: SessionStore.Interface) => SessionStore.Interface) =>
+  SessionStore.node.replace(
+    SessionStore.node.mapLayer((layer) =>
+      Layer.effect(SessionStore.Service, Effect.map(SessionStore.Service, decorate)).pipe(Layer.provide(layer)),
+    ),
+  )
+
+export const inboxStoreReplacement = (decorate: (store: InboxStore.Interface) => InboxStore.Interface) =>
+  InboxStore.node.replace(
+    InboxStore.node.mapLayer((layer) =>
+      Layer.effect(InboxStore.Service, Effect.map(InboxStore.Service, decorate)).pipe(Layer.provide(layer)),
+    ),
+  )
+
+export const remoteStoreReplacement = (decorate: (store: RemoteStore.Interface) => RemoteStore.Interface) =>
+  RemoteStore.node.replace(
+    RemoteStore.node.mapLayer((layer) =>
+      Layer.effect(RemoteStore.Service, Effect.map(RemoteStore.Service, decorate)).pipe(Layer.provide(layer)),
+    ),
+  )
+
+export const projectStoreReplacement = (decorate: (store: ProjectStore.Interface) => ProjectStore.Interface) =>
+  ProjectStore.node.replace(
+    ProjectStore.node.mapLayer((layer) =>
+      Layer.effect(ProjectStore.Service, Effect.map(ProjectStore.Service, decorate)).pipe(Layer.provide(layer)),
+    ),
   )
 
 type SecureRandomService = Effect.Success<typeof SecureRandom.SecureRandom>
@@ -316,13 +350,16 @@ export interface TestOptions extends FakeRuntimeOptions {
   >
   readonly pluginTimeout?: Duration.Input
   readonly activateLate?: boolean
-  readonly db?: (db: Db.Interface) => Db.Interface
+  readonly sessionStore?: (store: SessionStore.Interface) => SessionStore.Interface
+  readonly inboxStore?: (store: InboxStore.Interface) => InboxStore.Interface
+  readonly remoteStore?: (store: RemoteStore.Interface) => RemoteStore.Interface
+  readonly projectStore?: (store: ProjectStore.Interface) => ProjectStore.Interface
   readonly crypto?: (crypto: SecureRandomService) => SecureRandomService
   readonly missingBinary?: ReadonlyArray<string>
   readonly harnesses?: ReadonlyArray<HarnessDefinition>
   readonly sshHosts?: Readonly<Record<string, string>>
   readonly transport?: Machines.MachineTransport["Service"]
-  readonly sessions?: (sessions: Session.Interface, db: Db.Interface) => Session.Interface
+  readonly sessions?: (sessions: Session.Interface, sessionStore: SessionStore.Interface) => Session.Interface
   readonly identity?: DaemonIdentity
   readonly version?: string
 }
@@ -373,7 +410,10 @@ export const sessionFrom = (options: TestOptions = {}) =>
         ? []
         : [App.node.replace(Layer.succeed(App.Service, { version: options.version }))]),
       ...(options.sessions === undefined ? [] : [sessionsDecorated(options.sessions)]),
-      ...(options.db === undefined ? [] : [dbReplacement(options.db)]),
+      ...(options.sessionStore === undefined ? [] : [sessionStoreReplacement(options.sessionStore)]),
+      ...(options.inboxStore === undefined ? [] : [inboxStoreReplacement(options.inboxStore)]),
+      ...(options.remoteStore === undefined ? [] : [remoteStoreReplacement(options.remoteStore)]),
+      ...(options.projectStore === undefined ? [] : [projectStoreReplacement(options.projectStore)]),
       ...(options.crypto === undefined ? [] : [cryptoReplacement(options.crypto)]),
       RepositoryUrl.node.replace(sshHosts(options.sshHosts)),
       Machines.machineTransportNode.replace(transportLayer(options.transport)),
@@ -395,7 +435,11 @@ export const restartSessions = Effect.gen(function* () {
   const held = [
     Agents.node.replace(Layer.succeed(Agents.Service, yield* Agents.Service)),
     Bus.node.replace(Layer.succeed(Bus.Service, yield* Bus.Service)),
-    Db.node.replace(Layer.succeed(Db.Service, yield* Db.Service)),
+    Database.node.replace(Layer.succeed(Database.Service, yield* Database.Service)),
+    ProjectStore.node.replace(Layer.succeed(ProjectStore.Service, yield* ProjectStore.Service)),
+    SessionStore.node.replace(Layer.succeed(SessionStore.Service, yield* SessionStore.Service)),
+    InboxStore.node.replace(Layer.succeed(InboxStore.Service, yield* InboxStore.Service)),
+    RemoteStore.node.replace(Layer.succeed(RemoteStore.Service, yield* RemoteStore.Service)),
     Drain.node.replace(Layer.succeed(Drain.Service, yield* Drain.Service)),
     Git.node.replace(Layer.succeed(Git.Service, yield* Git.Service)),
     Harness.node.replace(Layer.succeed(Harness.Service, yield* Harness.Service)),

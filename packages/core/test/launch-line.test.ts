@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { launchLine } from "@vibest/core/launch"
+import { launchLine } from "@vibest/core/agent/launch"
 import { typedLine } from "@vibest/plugin/effect/launch"
 import * as Platform from "@vibest/testkit/bun"
 import { tempDirectory } from "@vibest/testkit/directory"

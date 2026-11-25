@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
+import { privateTmp, UserPlatform } from "@vibest/core/session/system-prompt"
 import * as Platform from "@vibest/testkit/bun"
 import { tempDirectory } from "@vibest/testkit/directory"
 import { Cause, Effect, Exit, FileSystem } from "effect"

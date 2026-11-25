@@ -1,7 +1,7 @@
 import { it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/database/db"
 import { Project } from "@vibest/core/project"
+import { SessionStore } from "@vibest/core/session/store"
 import * as Platform from "@vibest/platform-bun/bun"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
@@ -31,19 +31,19 @@ export const asCli = (raw: Effect.Success<typeof client>, repositoryRoot: string
 
 export const asSession = (raw: Effect.Success<typeof client>, sessionId: string, repositoryRoot?: string) =>
   Effect.gen(function* () {
-    const row = yield* (yield* Db.Service).session.sessionIdentity(sessionId)
+    const row = yield* (yield* SessionStore.Service).sessionIdentity(sessionId)
 
     return authed(raw, sessionHeaders({ sessionId, repositoryRoot, projectId: row && String(row.projectId) }))
   })
 
 export const asEntry = (raw: Effect.Success<typeof client>, repositoryRoot: string) =>
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
     const projectId = yield* projectOf(repositoryRoot)
 
     const entry =
-      (yield* db.session.latestRoot(projectId))?.id ??
-      (yield* db.session.startRoot(
+      (yield* sessionStore.latestRoot(projectId))?.id ??
+      (yield* sessionStore.startRoot(
         projectId,
         "pi",
         false,

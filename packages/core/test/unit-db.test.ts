@@ -1,10 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import { executionStateOf } from "@vibest/core/database/db-rows"
-import * as Projectors from "@vibest/core/database/projectors"
-import { noticeEnvelope } from "@vibest/core/replies"
+import { Database } from "@vibest/core/database/database"
+import { executionStateOf } from "@vibest/core/database/rows"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Projectors } from "@vibest/core/reactor"
+import { RemoteStore } from "@vibest/core/remote/store"
 import { SessionLive } from "@vibest/core/session/live"
+import { noticeEnvelope } from "@vibest/core/session/replies"
+import { SessionStore } from "@vibest/core/session/store"
 import { SessionEvent } from "@vibest/schema/session-event"
 import { EXECUTIONS, projectOf } from "@vibest/testkit/fakes"
 import * as Platform from "@vibest/testkit/platform"
@@ -13,7 +17,8 @@ import { Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 const memoryDb = () =>
-  Db.layer.pipe(
+  Layer.mergeAll(ProjectStore.layer, SessionStore.layer, InboxStore.layer, RemoteStore.layer).pipe(
+    Layer.provideMerge(Database.layer),
     Layer.provide(Projectors.layer),
     Layer.provideMerge(Bus.layer),
     Layer.provide(SessionLive.layer),
@@ -22,7 +27,15 @@ const memoryDb = () =>
 
 const ENTRY = { agent: "coordinator" } as const
 
-const complete = (db: Db.Interface, id: string) =>
+const complete = (
+  db: {
+    readonly project: ProjectStore.Interface
+    readonly session: SessionStore.Interface
+    readonly inbox: InboxStore.Interface
+    readonly remote: RemoteStore.Interface
+  },
+  id: string,
+) =>
   Effect.gen(function* () {
     const open = yield* db.session.openExecution(id)
 
@@ -34,7 +47,13 @@ describe("Db", () => {
     "one entry session per project; fresh starts a new one and ends the old one; a harness switch clears the conversation; a conversation report names an existing session",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = {
+          project: yield* ProjectStore.Service,
+          session: yield* SessionStore.Service,
+          inbox: yield* InboxStore.Service,
+          remote: yield* RemoteStore.Service,
+        }
+
         const first = yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)
         assert.isNull(first.harnessSessionId)
         yield* db.session.noteConversation(first.sessionId, "s1")
@@ -83,15 +102,31 @@ describe("Db", () => {
       }).pipe(Effect.provide(memoryDb())),
   )
 
-  const memory = <A, E>(program: Effect.Effect<A, E, Bus.Service | Db.Service | SqlClient.SqlClient>) =>
-    program.pipe(Effect.provide(memoryDb()))
+  const memory = <A, E>(
+    program: Effect.Effect<
+      A,
+      E,
+      | Bus.Service
+      | ProjectStore.Service
+      | SessionStore.Service
+      | InboxStore.Service
+      | RemoteStore.Service
+      | SqlClient.SqlClient
+    >,
+  ) => program.pipe(Effect.provide(memoryDb()))
 
   it.effect(
     "an execution's input is the rows delivered while it is open, or its task; the next execution with none is empty",
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db.Service
+          const db = {
+            project: yield* ProjectStore.Service,
+            session: yield* SessionStore.Service,
+            inbox: yield* InboxStore.Service,
+            remote: yield* RemoteStore.Service,
+          }
+
           const sql = yield* SqlClient.SqlClient
 
           const execution = (id: string) =>
@@ -157,7 +192,13 @@ describe("Db", () => {
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db.Service
+          const db = {
+            project: yield* ProjectStore.Service,
+            session: yield* SessionStore.Service,
+            inbox: yield* InboxStore.Service,
+            remote: yield* RemoteStore.Service,
+          }
+
           const [parent, child] = ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]
           yield* db.session.insertSession(session(parent), yield* projectOf("r"))
           yield* db.session.insertSession(session(child), yield* projectOf("r"))
@@ -178,7 +219,13 @@ describe("Db", () => {
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db.Service
+          const db = {
+            project: yield* ProjectStore.Service,
+            session: yield* SessionStore.Service,
+            inbox: yield* InboxStore.Service,
+            remote: yield* RemoteStore.Service,
+          }
+
           const sql = yield* SqlClient.SqlClient
           const [x, y] = ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]
           yield* db.session.insertSession(session(x), yield* projectOf("r"))
@@ -206,7 +253,13 @@ describe("Db", () => {
   it.effect("startObserved keeps an execution that is already open and does not record the typed text", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = {
+          project: yield* ProjectStore.Service,
+          session: yield* SessionStore.Service,
+          inbox: yield* InboxStore.Service,
+          remote: yield* RemoteStore.Service,
+        }
+
         const sql = yield* SqlClient.SqlClient
         yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
         yield* db.session.startObserved("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "kept", 1)
@@ -226,7 +279,13 @@ describe("Db", () => {
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db.Service
+          const db = {
+            project: yield* ProjectStore.Service,
+            session: yield* SessionStore.Service,
+            inbox: yield* InboxStore.Service,
+            remote: yield* RemoteStore.Service,
+          }
+
           const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
           yield* db.session.insertSession(session(id), yield* projectOf("r"))
           yield* db.session.startObserved(id, "typed", 1)
@@ -255,7 +314,13 @@ describe("Db", () => {
   it.effect("a rolled back endObserved leaves the live status working", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = {
+          project: yield* ProjectStore.Service,
+          session: yield* SessionStore.Service,
+          inbox: yield* InboxStore.Service,
+          remote: yield* RemoteStore.Service,
+        }
+
         const sql = yield* SqlClient.SqlClient
         const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         const parent = yield* db.session.startRoot(yield* projectOf("r"), "pi", false, place, ENTRY)
@@ -289,7 +354,13 @@ describe("Db", () => {
   it.effect("a rolled back patchLive ready leaves the live integration unchanged", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = {
+          project: yield* ProjectStore.Service,
+          session: yield* SessionStore.Service,
+          inbox: yield* InboxStore.Service,
+          remote: yield* RemoteStore.Service,
+        }
+
         const sql = yield* SqlClient.SqlClient
         const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         yield* db.session.insertSession(session(id), yield* projectOf("r"))
@@ -309,7 +380,13 @@ describe("Db", () => {
     "the task is the first inbox row; the open execution is the message row with no ended_at; status is memory only",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = {
+          project: yield* ProjectStore.Service,
+          session: yield* SessionStore.Service,
+          inbox: yield* InboxStore.Service,
+          remote: yield* RemoteStore.Service,
+        }
+
         const sql = yield* SqlClient.SqlClient
         yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
           cwd: "/w",
@@ -386,7 +463,13 @@ describe("Db", () => {
     "an execution-error notice goes to the nearest creator that has not ended; with none left it writes no row",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = {
+          project: yield* ProjectStore.Service,
+          session: yield* SessionStore.Service,
+          inbox: yield* InboxStore.Service,
+          remote: yield* RemoteStore.Service,
+        }
+
         const sql = yield* SqlClient.SqlClient
         const project = yield* projectOf("r")
 
@@ -429,7 +512,13 @@ describe("Db", () => {
     "a remote item for an ended session goes to its nearest living creator, once; with none, nothing is written locally",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = {
+          project: yield* ProjectStore.Service,
+          session: yield* SessionStore.Service,
+          inbox: yield* InboxStore.Service,
+          remote: yield* RemoteStore.Service,
+        }
+
         const sql = yield* SqlClient.SqlClient
         const project = yield* projectOf("r")
         const ended = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -478,7 +567,12 @@ describe("Db", () => {
 
   it.effect("sessionBriefs: the task is the session's task row; latest is its newest execution", () =>
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const db = {
+        project: yield* ProjectStore.Service,
+        session: yield* SessionStore.Service,
+        inbox: yield* InboxStore.Service,
+        remote: yield* RemoteStore.Service,
+      }
 
       const execution = (id: string, at: number, end?: { at: number; outcome: string; reply?: string }) =>
         Effect.gen(function* () {
@@ -596,7 +690,13 @@ describe("Db", () => {
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db.Service
+          const db = {
+            project: yield* ProjectStore.Service,
+            session: yield* SessionStore.Service,
+            inbox: yield* InboxStore.Service,
+            remote: yield* RemoteStore.Service,
+          }
+
           const sql = yield* SqlClient.SqlClient
 
           const noticeStatus = (content: string) =>
@@ -642,7 +742,13 @@ describe("Db", () => {
   it.effect("endProcess naming a process that is no longer the session's current one ends nothing", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = {
+          project: yield* ProjectStore.Service,
+          session: yield* SessionStore.Service,
+          inbox: yield* InboxStore.Service,
+          remote: yield* RemoteStore.Service,
+        }
+
         const project = yield* projectOf("r")
         const first = yield* db.session.startRoot(project, "claude", false, place, ENTRY)
         const old = (yield* db.session.getSession(first.sessionId))!.process!.id
@@ -658,7 +764,13 @@ describe("Db", () => {
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db.Service
+          const db = {
+            project: yield* ProjectStore.Service,
+            session: yield* SessionStore.Service,
+            inbox: yield* InboxStore.Service,
+            remote: yield* RemoteStore.Service,
+          }
+
           const project = yield* projectOf("r")
           const entry = yield* db.session.startRoot(project, "claude", false, place, ENTRY)
           const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -690,7 +802,13 @@ describe("Db", () => {
   it.effect("a reserved launch input on a finished execution is not work still waiting", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = {
+          project: yield* ProjectStore.Service,
+          session: yield* SessionStore.Service,
+          inbox: yield* InboxStore.Service,
+          remote: yield* RemoteStore.Service,
+        }
+
         const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         const project = yield* projectOf("r")
         yield* db.session.insertSession(session(id), project, { cwd: "/w", task: "do it" })
@@ -708,7 +826,13 @@ describe("Db", () => {
   it.effect("a session cancelled before it launches did not receive its first message", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = {
+          project: yield* ProjectStore.Service,
+          session: yield* SessionStore.Service,
+          inbox: yield* InboxStore.Service,
+          remote: yield* RemoteStore.Service,
+        }
+
         const sql = yield* SqlClient.SqlClient
         const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         yield* db.session.insertSession(session(id), yield* projectOf("r"), { cwd: "/w", task: "do it" })
@@ -729,7 +853,13 @@ describe("Db", () => {
 
   it.effect("moving a project whose path has a non-BMP character carries its child session directories along", () =>
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const db = {
+        project: yield* ProjectStore.Service,
+        session: yield* SessionStore.Service,
+        inbox: yield* InboxStore.Service,
+        remote: yield* RemoteStore.Service,
+      }
+
       const from = "/tmp/😀repo"
       const project = yield* projectOf(from)
       yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), project, { cwd: `${from}/sub` })

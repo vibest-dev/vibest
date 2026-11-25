@@ -1,13 +1,15 @@
 import os from "node:os"
 
-import { Db } from "@vibest/core/database/db"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { ProjectStore } from "@vibest/core/project/store"
+import { SessionStore } from "@vibest/core/session/store"
 import { Effect, FileSystem } from "effect"
 
 export const projectOf = (directory: string) =>
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const projectStore = yield* ProjectStore.Service
 
-    return (yield* db.project.projectAt(directory))?.id ?? (yield* db.project.createProject(directory, []))
+    return (yield* projectStore.projectAt(directory))?.id ?? (yield* projectStore.createProject(directory, []))
   })
 
 export const tempDirectory = (prefix: string) =>
@@ -17,7 +19,11 @@ export const tempDirectory = (prefix: string) =>
     return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ directory: os.tmpdir(), prefix }))
   }).pipe(Effect.orDie)
 
-export const entryPending = (db: Db.Interface, projectId: string) =>
-  Effect.flatMap(db.session.latestRoot(projectId), (entry) =>
-    entry === undefined ? Effect.succeed([]) : db.inbox.pendingInbox(entry.id),
+export const entryPending = (
+  sessionStore: SessionStore.Interface,
+  inboxStore: InboxStore.Interface,
+  projectId: string,
+) =>
+  Effect.flatMap(sessionStore.latestRoot(projectId), (entry) =>
+    entry === undefined ? Effect.succeed([]) : inboxStore.pendingInbox(entry.id),
   )

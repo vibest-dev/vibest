@@ -3,16 +3,21 @@ import fs from "node:fs/promises"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db, SQL_NAMES } from "@vibest/core/database/db"
-import * as Projectors from "@vibest/core/database/projectors"
+import { Database, SQL_NAMES } from "@vibest/core/database/database"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Projectors } from "@vibest/core/reactor"
+import { RemoteStore } from "@vibest/core/remote/store"
 import { SessionLive } from "@vibest/core/session/live"
+import { SessionStore } from "@vibest/core/session/store"
 import { projectOf, tempDirectory } from "@vibest/testkit/fakes"
 import * as Platform from "@vibest/testkit/platform"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { SqlClient } from "effect/sql"
 
 const database = (filename: string) =>
-  Db.layer.pipe(
+  Layer.mergeAll(ProjectStore.layer, SessionStore.layer, InboxStore.layer, RemoteStore.layer).pipe(
+    Layer.provideMerge(Database.layer),
     Layer.provide(Projectors.layer),
     Layer.provide(Bus.layer),
     Layer.provide(SessionLive.layer),
@@ -138,7 +143,7 @@ describe("SQLite", () => {
       const dir = `${file}-repo`
 
       const create = Effect.gen(function* () {
-        return yield* (yield* Db.Service).project.createProject(dir, [
+        return yield* (yield* ProjectStore.Service).createProject(dir, [
           { path: `${dir}/app`, remote: "git@example.com:a.git" },
         ])
       }).pipe(Effect.provide(open))
@@ -165,7 +170,7 @@ describe("a vibestd restart", () => {
       const file = `${yield* tempDirectory("vibest-sqlite-recover-")}/vibest.db`
 
       const id = yield* Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = { session: yield* SessionStore.Service, inbox: yield* InboxStore.Service }
         const place = { runtime: "fake", target: { id: "a" } }
 
         const { sessionId } = yield* db.session.startRoot(yield* projectOf("a"), "claude", false, place, {

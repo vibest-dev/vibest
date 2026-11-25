@@ -2,8 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { withHeaders } from "@vibest/client/unix-http"
-import { Db } from "@vibest/core/database/db"
 import { Identity } from "@vibest/core/identity"
+import { SessionStore } from "@vibest/core/session/store"
 import { Plugin } from "@vibest/plugin/effect"
 import { WatchLagged } from "@vibest/protocol/errors"
 import { DaemonGroup } from "@vibest/protocol/groups/daemon"
@@ -149,8 +149,8 @@ describe("Watch with remote machines", () => {
         const bProject = yield* b.run(projectOf(bRepo))
 
         const bEntry = yield* b.run(
-          Effect.flatMap(Db.Service, (db) =>
-            db.session.startRoot(
+          Effect.flatMap(SessionStore.Service, (sessionStore) =>
+            sessionStore.startRoot(
               bProject,
               "pi",
               false,
@@ -198,8 +198,8 @@ describe("Watch with remote machines", () => {
 
         const bSub = randomId()
         yield* b.run(
-          Effect.flatMap(Db.Service, (db) =>
-            db.session.insertSession(
+          Effect.flatMap(SessionStore.Service, (sessionStore) =>
+            sessionStore.insertSession(
               {
                 id: bSub,
                 agent: "general",
@@ -460,8 +460,8 @@ describe("Watch with remote machines", () => {
         const aProject = yield* a.run(projectOf(aRepo))
 
         const aEntry = yield* a.run(
-          Effect.flatMap(Db.Service, (db) =>
-            db.session.startRoot(
+          Effect.flatMap(SessionStore.Service, (sessionStore) =>
+            sessionStore.startRoot(
               aProject,
               "pi",
               false,
@@ -473,8 +473,8 @@ describe("Watch with remote machines", () => {
 
         const aSecondaryId = randomId()
         yield* a.run(
-          Effect.flatMap(Db.Service, (db) =>
-            db.session.insertSession(
+          Effect.flatMap(SessionStore.Service, (sessionStore) =>
+            sessionStore.insertSession(
               {
                 id: aSecondaryId,
                 agent: "general",
@@ -504,8 +504,8 @@ describe("Watch with remote machines", () => {
 
         const bRemoteId = randomId()
         yield* b.run(
-          Effect.flatMap(Db.Service, (db) =>
-            db.session.insertSession(
+          Effect.flatMap(SessionStore.Service, (sessionStore) =>
+            sessionStore.insertSession(
               {
                 id: bRemoteId,
                 agent: "general",

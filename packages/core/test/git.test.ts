@@ -1,9 +1,8 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import type { NewSession } from "@vibest/core/database/db-rows"
-import * as Projectors from "@vibest/core/database/projectors"
-import { Git, GIT_CONCURRENCY } from "@vibest/core/git"
+import { Database } from "@vibest/core/database/database"
+import type { NewSession } from "@vibest/core/database/rows"
+import { InboxStore } from "@vibest/core/inbox/store"
 import {
   createIsolatedWorktrees,
   createProject,
@@ -12,8 +11,13 @@ import {
   workspaceGit,
 } from "@vibest/core/project/create"
 import { locateProject, moveProjectHere, resolveProject } from "@vibest/core/project/identity"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Projectors } from "@vibest/core/reactor"
+import { RemoteStore } from "@vibest/core/remote/store"
 import { SessionLive } from "@vibest/core/session/live"
+import { SessionStore } from "@vibest/core/session/store"
 import { copyIncluded, gitState, mainCheckout } from "@vibest/core/worktree"
+import { Git, GIT_CONCURRENCY } from "@vibest/core/worktree/git"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout } from "@vibest/schema/layout"
 import { tempDirectory } from "@vibest/testkit/fakes"
@@ -114,7 +118,8 @@ const failure = <A, E extends { message: string }, R>(effect: Effect.Effect<A, E
   })
 
 const database = (filename: string) =>
-  Db.layer.pipe(
+  Layer.mergeAll(ProjectStore.layer, SessionStore.layer, InboxStore.layer, RemoteStore.layer).pipe(
+    Layer.provideMerge(Database.layer),
     Layer.provide(Projectors.layer),
     Layer.provide(Bus.layer),
     Layer.provide(SessionLive.layer),
@@ -483,14 +488,14 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         const file = path.join(dir, "vibest.db")
         const home = path.join(dir, "home")
         yield* Effect.gen(function* () {
-          const db = yield* Db.Service
+          const db = { project: yield* ProjectStore.Service, session: yield* SessionStore.Service }
           const layout = yield* Layout
 
           const resolve = (directory: string) =>
-            Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located))
+            Effect.flatMap(locateProject(directory), (located) => resolveProject(db.project, located))
 
           const move = (directory: string, from: string) =>
-            Effect.flatMap(locateProject(directory), (located) => moveProjectHere(db, located, from))
+            Effect.flatMap(locateProject(directory), (located) => moveProjectHere(db.project, located, from))
 
           const refusal = (directory: string, from: string) =>
             Effect.map(Effect.flip(move(directory, from)), (e) =>
@@ -574,12 +579,12 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
       const dir = yield* tempDirectory("vibest-move-")
       const home = path.join(dir, "home")
       yield* Effect.gen(function* () {
-        const db = yield* Db.Service
+        const db = { project: yield* ProjectStore.Service, session: yield* SessionStore.Service }
         const physical = yield* fs.realPath(dir).pipe(Effect.map((real) => path.join(real, "physical")))
         const repo = path.join(physical, "parent", "repo")
         yield* fs.makeDirectory(repo, { recursive: true })
         yield* sh(repo, "init", "-q", "-b", "main")
-        const first = yield* Effect.flatMap(locateProject(repo), (located) => resolveProject(db, located))
+        const first = yield* Effect.flatMap(locateProject(repo), (located) => resolveProject(db.project, located))
         const alias = path.join(dir, "alias")
         yield* fs.symlink(physical, alias)
         const moved = path.join(dir, "elsewhere", "repo")
@@ -588,7 +593,7 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         yield* fs.rename(path.join(physical, "parent"), path.join(physical, "moved-parent"))
 
         const done = yield* Effect.flatMap(locateProject(moved), (located) =>
-          moveProjectHere(db, located, path.join(alias, "parent", "repo")),
+          moveProjectHere(db.project, located, path.join(alias, "parent", "repo")),
         )
 
         assert.strictEqual(done.id, first.id)
@@ -608,13 +613,13 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
         const path = yield* Path.Path
         const dir = yield* tempDirectory("vibest-move-")
         yield* Effect.gen(function* () {
-          const db = yield* Db.Service
+          const db = { project: yield* ProjectStore.Service, session: yield* SessionStore.Service }
           const layout = yield* Layout
 
           const resolve = (directory: string) =>
-            Effect.flatMap(locateProject(directory), (located) => resolveProject(db, located))
+            Effect.flatMap(locateProject(directory), (located) => resolveProject(db.project, located))
 
-          const move = (directory: string, from: string, through = db) =>
+          const move = (directory: string, from: string, through = db.project) =>
             Effect.flatMap(locateProject(directory), (located) => moveProjectHere(through, located, from))
 
           const repo = path.join(dir, "a", "repo")
@@ -640,8 +645,8 @@ layer(live)("git, the live layer: state, paths, included files and its worktree 
           const moved = path.join(dir, "b", "repo")
           yield* fs.makeDirectory(path.dirname(moved))
           yield* fs.rename(repo, moved)
-          const dyingDb = { ...db, project: { ...db.project, moveProject: () => Effect.die("vibestd stopped") } }
-          assert.isTrue(Exit.isFailure(yield* Effect.exit(move(moved, repo, dyingDb))))
+          const dyingProject = { ...db.project, moveProject: () => Effect.die("vibestd stopped") }
+          assert.isTrue(Exit.isFailure(yield* Effect.exit(move(moved, repo, dyingProject))))
           assert.strictEqual(yield* sh(ours, "rev-parse", "--show-toplevel"), yield* fs.realPath(ours))
           assert.strictEqual(yield* db.project.projectDirectory(first.id), repo)
           const done = yield* move(moved, repo)

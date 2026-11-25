@@ -2,7 +2,7 @@ import http from "node:http"
 
 import { assert, describe } from "@effect/vitest"
 import { Claim, incompatibleDaemon } from "@vibest/client/client"
-import { Db } from "@vibest/core/database/db"
+import { SessionStore } from "@vibest/core/session/store"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import { makeRepository, tempDirectory, until } from "@vibest/testkit/fakes"
@@ -16,7 +16,7 @@ describe("vibest.sock legacy and edge cases", () => {
   test(
     "Get succeeds with reply.endedAt === null after an unresolved execution",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const repo = yield* makeRepository
       const raw = yield* client
       const cli = asCli(raw, repo)
@@ -27,10 +27,10 @@ describe("vibest.sock legacy and edge cases", () => {
       })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.openExecution !== null,
       )
-      yield* db.session.endExecution(id, { outcome: "lost" }, undefined)
+      yield* sessionStore.endExecution(id, { outcome: "lost" }, undefined)
       const got = yield* cli["server.session"]["session.get"]({ params: { id }, query: {} })
       assert.strictEqual(got.reply?.status, "lost")
       assert.strictEqual(got.reply?.endedAt, null)

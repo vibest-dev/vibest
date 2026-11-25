@@ -154,7 +154,7 @@ started, an entry session) cannot answer results with results (rule 4), and that
 ## 2. Layers
 
 **Packages.** Every workspace package lives directly under `packages/<name>` with package name `@vibest/<name>`. Most workspace packages export `./*` → `./src/*.ts`, so an import names the module
-(`@vibest/core/database/db`); `plugin`, `plugin-builtins`, the herdr SDKs and `harness-cursor` export named entries
+(`@vibest/core/database/database`); `plugin`, `plugin-builtins`, the herdr SDKs and `harness-cursor` export named entries
 (`@vibest/plugin/effect`, `@vibest/plugin/testing`; host-side helpers that vibestd and the builtin plugins share, such as `capture` and `isLimited`, are on `@vibest/plugin/host`, off the plugin API). A module imports a name from the module that defines it (no re-exports of other
 modules' names, except a domain facade re-exporting its own domain, see below).
 
@@ -219,15 +219,20 @@ path that leaves the package, and lets only `commands/handlers/daemon/default.ts
 **Core layout.** As OpenCode lays out `packages/core/src`: a domain with several files has a root facade beside a
 folder of the same name, and the facade re-exports its own domain's names; a one-file domain stays at the root.
 
-| Where                                                                                                                                                                                                                                                                                                          | Holds                                                                                                                       |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `session.ts` + `session/`                                                                                                                                                                                                                                                                                      | Sessions: spawn, placement, executions, delivery, exits, archive, move, restart, entry, reconcile, locks, live state        |
-| `plugin.ts` + `plugin/`                                                                                                                                                                                                                                                                                        | The plugin host: sources, supervisor, registry, hooks, host                                                                 |
-| `project.ts` + `project/`                                                                                                                                                                                                                                                                                      | Projects: create, identity, activity                                                                                        |
-| `database/`                                                                                                                                                                                                                                                                                                    | `db.ts` and its domain modules (`project`, `session`, `inbox`, `remote`), the journal, projectors, ledger reads, migrations |
-| `effect/`                                                                                                                                                                                                                                                                                                      | The platform tokens (`platform.ts`)                                                                                         |
-| `subscriptions/`                                                                                                                                                                                                                                                                                               | Harness subscription usage (`Subscriptions`, served by `vibest subscriptions`)                                              |
-| `bus.ts`, `reactor.ts`, `inbox.ts`, `batch.ts`, `harness.ts`, `models.ts`, `agents.ts`, `runtimes.ts`, `caller.ts`, `launch.ts`, `replies.ts`, `system-prompt.ts`, `integration.ts`, `guard.ts`, `git.ts`, `worktree.ts`, `repository-url.ts`, `processes.ts`, `identity.ts`, `paths.ts`, `drain.ts`, `app.ts` | One-file domains                                                                                                            |
+| Where                                                                    | Holds                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `database/`                                                              | Pure domain-agnostic storage engine: `database.ts` (`Database.Service` + `0o600` POSIX hardening), `schema.sql.ts`, `rows.ts`, `ledger.ts`, `migration.ts` + `migration/`                                                     |
+| `project.ts` + `project/`                                                | Projects: `ProjectStore` (`sql.ts`, `store.ts`), `projector.ts`, `create.ts`, `clone.ts`, `activity.ts`, `identity.ts`, `repository-url.ts`                                                                                   |
+| `session.ts` + `session/`                                                | Sessions: `SessionStore` (`sql.ts`, `sql-reads.ts`, `sql-edges.ts`, `store.ts`), `projector.ts`, spawn, placement, executions, delivery, exits, archive, restart, entry, reconcile, locks, live state, replies, system-prompt |
+| `inbox.ts` + `inbox/`                                                    | Inbox: `InboxStore` (`sql.ts`, `store.ts`), `service.ts`                                                                                                                                                                      |
+| `remote.ts` + `remote/`                                                  | Remotes: `RemoteStore` (`sql.ts`, `store.ts`), `projector.ts`                                                                                                                                                                 |
+| `worktree.ts` + `worktree/`                                              | Worktrees: `git.ts`, `list.ts`, `service.ts`                                                                                                                                                                                  |
+| `agent.ts` + `agent/`                                                    | Agents: `registry.ts`, `launch.ts`, `guard.ts`                                                                                                                                                                                |
+| `harness.ts` + `harness/`                                                | Harnesses: `registry.ts`, `models.ts`, `integration.ts`, `subscriptions.ts`                                                                                                                                                   |
+| `runtime.ts` + `runtime/`                                                | Runtimes: `registry.ts`, `processes.ts`, `concurrency.ts`, `drain.ts`, `batch.ts`                                                                                                                                             |
+| `plugin.ts` + `plugin/`                                                  | The plugin host: sources, supervisor, registry, hooks, host                                                                                                                                                                   |
+| `effect/`                                                                | The platform tokens (`platform.ts`)                                                                                                                                                                                           |
+| `app.ts`, `bus.ts`, `reactor.ts`, `caller.ts`, `identity.ts`, `paths.ts` | Top-level engine modules                                                                                                                                                                                                      |
 
 ## 3. Core domain
 
@@ -433,7 +438,7 @@ How these modules keep the rules:
   event only wakes a check, a check woken by a bound event checks only that process, and an exit a check records passes
   the process its session snapshot read. An entry session's exit goes the same way, through the check, which ends its
   process only on the runtime's current state or the harness-reported pid and, in the same transaction, drops the
-  messages queued for that session (`Db.session.endExited`), never ones queued after a newer process started; the
+  messages queued for that session (`SessionStore`), never ones queued after a newer process started; the
   check leaves an entry session alone while it moves. The event or the check is handled later, and by then `vibest`
   typed in the same pane may have started the entry session again, whose new process must keep running. A late exit bound to a
   process an in-place restart or move just started there only wakes that check, which finds the new harness running. An execution counts
@@ -689,8 +694,8 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
   refused before any writable open (`SchemaMismatch`), leaving it untouched. Pending migrations run in order when it
   opens (schema.md, Opening and migrations).
 - The check runs on a read-only connection, which sees committed WAL frames and does not checkpoint, so a refused
-  database and its WAL keep their bytes (the WAL index, `-shm`, may still change). WAL mode stays off until `Db`
-  accepts the file. A missing database is created mode 0600, and each open forces 0600 on the database and any
+  database and its WAL keep their bytes (the WAL index, `-shm`, may still change). WAL mode stays off until `Database.Service`
+  accepts the file. A missing database is created mode 0600, and each accepted open forces 0600 on the database and any
   existing `-wal` / `-shm` (SQLite copies the database's mode onto those it creates later). Closing the last
   connection may delete `-wal` / `-shm` (SQLite's default, as on Linux) or keep them (Apple's system SQLite), and two
   first opens of a missing file at once fail with `SQLITE_CANTOPEN`. A writable transaction

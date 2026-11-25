@@ -4,11 +4,12 @@ import { NoSuchProject } from "@vibest/schema/project"
 import { type WorktreeList, type WorktreeRepository, type WorktreeSession } from "@vibest/schema/worktree"
 import { Effect, FileSystem, Path } from "effect"
 
-import { Db } from "./database/db.ts"
+import { ALLOCATION_LEAF } from "../paths.ts"
+import { listProjectRepositories } from "../project/create.ts"
+import { locateProject } from "../project/identity.ts"
+import { ProjectStore } from "../project/store.ts"
+import { SessionStore } from "../session/store.ts"
 import { Git } from "./git.ts"
-import { ALLOCATION_LEAF } from "./paths.ts"
-import { listProjectRepositories } from "./project/create.ts"
-import { locateProject } from "./project/identity.ts"
 
 const real = (file: string) =>
   Effect.flatMap(FileSystem.FileSystem, (fs) => fs.realPath(file).pipe(Effect.orElseSucceed(() => file)))
@@ -95,12 +96,13 @@ const byPath = <A extends { readonly path: string }>(rows: Array<A>) =>
 const byId = <A extends { readonly id: string }>(rows: Array<A>) => rows.sort((a, b) => a.id.localeCompare(b.id))
 
 export const list = Effect.fn("Worktree.list")(function* (project: string | undefined) {
-  const db = yield* Db.Service
+  const projectStore = yield* ProjectStore.Service
+  const sessionStore = yield* SessionStore.Service
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const layout = yield* Layout
 
-  const recorded = (yield* db.project.watchProjects()).flatMap((row) =>
+  const recorded = (yield* projectStore.watchProjects()).flatMap((row) =>
     row.directory === null ? [] : [{ id: row.id, directory: row.directory }],
   )
 
@@ -133,12 +135,12 @@ export const list = Effect.fn("Worktree.list")(function* (project: string | unde
   const owners = new Map<string, string>()
 
   for (const row of chosen) {
-    for (const repository of yield* db.project.projectRemote(row.id)) owners.set(yield* real(repository.path), row.id)
+    for (const repository of yield* projectStore.projectRemote(row.id)) owners.set(yield* real(repository.path), row.id)
   }
 
   const sessionsAt = new Map<string, Array<WorktreeSession & { readonly projectId: string }>>()
 
-  for (const row of yield* db.session.worktreeSessions()) {
+  for (const row of yield* sessionStore.worktreeSessions()) {
     const at = yield* real(row.directory)
 
     const session = {

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { detailOf, noticeEnvelope, sessionEnvelope } from "@vibest/core/replies"
+import { detailOf, noticeEnvelope, sessionEnvelope } from "@vibest/core/session/replies"
 import type { Sender } from "@vibest/schema/event"
 
 const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"

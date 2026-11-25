@@ -1,10 +1,10 @@
 import { withHeaders } from "@vibest/client/client"
-import { Db } from "@vibest/core/database/db"
-import { Git } from "@vibest/core/git"
 import { Identity } from "@vibest/core/identity"
 import { Project } from "@vibest/core/project"
 import { createProject } from "@vibest/core/project/create"
 import { moveProjectHere, resolveProject } from "@vibest/core/project/identity"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Git } from "@vibest/core/worktree/git"
 import { VibestApi } from "@vibest/protocol/api"
 import { Forbidden } from "@vibest/protocol/errors"
 import { Caller } from "@vibest/protocol/middleware"
@@ -20,7 +20,7 @@ import * as CallerChecks from "./caller.ts"
 export const ProjectHandler = HttpApiBuilder.group(VibestApi, "server.project", (handlers) =>
   Effect.gen(function* () {
     const { scope, cliOnly, userOnly, atProject } = yield* CallerChecks.Service
-    const db = yield* Db.Service
+    const projectStore = yield* ProjectStore.Service
     const self = yield* Identity.Service
     const machines = yield* Machines.Service
     const project = yield* Project.Service
@@ -72,7 +72,7 @@ export const ProjectHandler = HttpApiBuilder.group(VibestApi, "server.project", 
           if (target === undefined)
             return yield* new Forbidden({ method: "project.open", message: "project.open needs directory" })
 
-          const opened = yield* resolveProject(db, yield* atProject(target))
+          const opened = yield* resolveProject(projectStore, yield* atProject(target))
 
           return { projectId: opened.id, directory: opened.directory }
         }),
@@ -80,7 +80,10 @@ export const ProjectHandler = HttpApiBuilder.group(VibestApi, "server.project", 
       .handle("project.move", ({ payload: { from } }) =>
         Effect.gen(function* () {
           const c = yield* cliOnly("project.move")
-          const moved = yield* withProjectPlatform(moveProjectHere(db, yield* atProject(c.repositoryRoot), from))
+
+          const moved = yield* withProjectPlatform(
+            moveProjectHere(projectStore, yield* atProject(c.repositoryRoot), from),
+          )
 
           return {
             projectId: moved.id,

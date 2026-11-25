@@ -20,13 +20,11 @@ import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import { type SessionRow, terminalOf, exitedAt } from "./database/db-rows.ts"
-import { Db, type SessionFilter } from "./database/db.ts"
+import { type SessionRow, terminalOf, exitedAt } from "./database/rows.ts"
 import { PlatformNode } from "./effect/platform.ts"
-import { Git, type GitState } from "./git.ts"
 import { raisesSeen } from "./project/activity.ts"
 import { projectRoot, workspaceGit } from "./project/create.ts"
-import { Runtimes, RuntimeError } from "./runtimes.ts"
+import { Runtimes, RuntimeError } from "./runtime/registry.ts"
 import { Archive } from "./session/archive.ts"
 import { Delivery, unreachable } from "./session/delivery.ts"
 import { SessionLive } from "./session/live.ts"
@@ -37,7 +35,9 @@ import { Reconcile } from "./session/reconcile.ts"
 import { type Outdated, Restart } from "./session/restart.ts"
 import type { SendRefused } from "./session/sends.ts"
 import { type LinkRefused, Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
+import { SessionStore, type SessionFilter } from "./session/store.ts"
 import { gitState, mainCheckout } from "./worktree.ts"
+import { Git, type GitState } from "./worktree/git.ts"
 
 export * as Session from "./session.ts"
 
@@ -63,7 +63,7 @@ const LIST_CONCURRENCY = 8
 
 const SESSION_DEPS = [
   Archive.node,
-  Db.node,
+  SessionStore.node,
   Delivery.node,
   Git.node,
   Placement.node,
@@ -159,7 +159,7 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("vibest/Sessions") {}
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const runtimes = yield* Runtimes.Service
   const sessionLive = yield* SessionLive.Service
   const locks = yield* SessionLocks.Service
@@ -176,10 +176,10 @@ export const make = Effect.gen(function* () {
   const seenLocked = yield* KeyedMutex.make<string>()
 
   const seen = Effect.fn("Session.seen")(function* (id: string, finished: number) {
-    const identity = yield* db.session.sessionIdentity(id)
+    const identity = yield* sessionStore.sessionIdentity(id)
 
     if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
-    const at = yield* db.session.getSession(id)
+    const at = yield* sessionStore.getSession(id)
     const terminal = at === undefined ? null : terminalOf(at)
 
     if (terminal === null) return
@@ -200,7 +200,7 @@ export const make = Effect.gen(function* () {
   })
 
   const getRow = (id: string) =>
-    db.session
+    sessionStore
       .getSession(id)
       .pipe(
         Effect.flatMap((session) =>
@@ -286,7 +286,7 @@ export const make = Effect.gen(function* () {
   const get = Effect.fn("Session.get")((id: string) => getRow(id).pipe(Effect.flatMap(view)))
 
   const list = Effect.fn("Session.list")((filter: SessionFilter = {}) =>
-    db.session
+    sessionStore
       .listSessions(filter)
       .pipe(
         Effect.flatMap((rows) =>

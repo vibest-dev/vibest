@@ -11,16 +11,16 @@ import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { nodeUnixHttpClient } from "@vibest/client/unix-http.node"
 import { App } from "@vibest/core/app"
-import { SQL_NAMES } from "@vibest/core/database/db"
-import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/db-schema"
+import { PRIVATE_FILE, SQL_NAMES } from "@vibest/core/database/database"
 import { checkLedger, migrations } from "@vibest/core/database/migration"
-import * as Projectors from "@vibest/core/database/projectors"
+import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/schema.sql"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Identity, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { Builtins, builtinsNode, PluginLoader, pluginLoaderNode } from "@vibest/core/plugin"
-import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/processes"
-import { Runtimes } from "@vibest/core/runtimes"
-import { UserPlatform } from "@vibest/core/system-prompt"
+import { Projectors } from "@vibest/core/reactor"
+import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/runtime/processes"
+import { Runtimes } from "@vibest/core/runtime/registry"
+import { UserPlatform } from "@vibest/core/session/system-prompt"
 import * as HerdrBun from "@vibest/herdr-sdk/bun"
 import * as VibestPlugin from "@vibest/plugin"
 import { pre } from "@vibest/plugin-builtins"
@@ -120,12 +120,12 @@ const platform = Layer.mergeAll(
 const sqliteLayer = (filename: string, readonly: boolean) =>
   SqliteClient.layer({ filename, readonly, disableWAL: true, ...SQL_NAMES })
 
-const PRIVATE_FILE = 0o600
-
 const privateDatabase = (filename: string) =>
   Effect.tryPromise({
     try: async () => {
-      await (await fsPromises.open(filename, "a", PRIVATE_FILE)).close()
+      if (process.platform === "win32") return
+
+      if (!fs.existsSync(filename)) fs.closeSync(fs.openSync(filename, "a", PRIVATE_FILE))
       await fsPromises.chmod(filename, PRIVATE_FILE)
 
       for (const suffix of ["-wal", "-shm"]) {
@@ -170,9 +170,9 @@ export const sqlite = (filename: string, known?: ReadonlySet<string>) =>
     Effect.gen(function* () {
       if (filename !== ":memory:") {
         const existed = yield* Effect.promise(() => Bun.file(filename).exists())
-        yield* privateDatabase(filename)
 
         if (existed) yield* inspectFile(filename, known)
+        yield* privateDatabase(filename)
       }
 
       return sqliteLayer(filename, false)

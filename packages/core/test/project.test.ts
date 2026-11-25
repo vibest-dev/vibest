@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Project, type ProjectScope } from "@vibest/core/project"
-import { RepositoryUrl } from "@vibest/core/repository-url"
+import { RepositoryUrl } from "@vibest/core/project/repository-url"
 import { Layout } from "@vibest/schema/layout"
 import * as Platform from "@vibest/testkit/bun"
 import { tempDirectory } from "@vibest/testkit/directory"

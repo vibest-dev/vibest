@@ -1,6 +1,7 @@
-import { Db } from "@vibest/core/database/db"
-import { Git } from "@vibest/core/git"
-import { list } from "@vibest/core/worktree-list"
+import { ProjectStore } from "@vibest/core/project/store"
+import { SessionStore } from "@vibest/core/session/store"
+import { Git } from "@vibest/core/worktree/git"
+import { list } from "@vibest/core/worktree/list"
 import { VibestApi } from "@vibest/protocol/api"
 import { Forbidden } from "@vibest/protocol/errors"
 import { CALLER_HEADER } from "@vibest/protocol/protocol"
@@ -15,7 +16,8 @@ import { Remote } from "../machine/remote.ts"
 export const WorktreeHandler = HttpApiBuilder.group(VibestApi, "server.worktree", (handlers) =>
   Effect.gen(function* () {
     const remote = yield* Remote.Service
-    const db = yield* Db.Service
+    const projectStore = yield* ProjectStore.Service
+    const sessionStore = yield* SessionStore.Service
     const git = yield* Git.Service
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -23,7 +25,8 @@ export const WorktreeHandler = HttpApiBuilder.group(VibestApi, "server.worktree"
 
     const listed = (project: string | undefined) =>
       list(project).pipe(
-        Effect.provideService(Db.Service, db),
+        Effect.provideService(ProjectStore.Service, projectStore),
+        Effect.provideService(SessionStore.Service, sessionStore),
         Effect.provideService(Git.Service, git),
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),

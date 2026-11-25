@@ -12,12 +12,22 @@ import { type AgentStatus } from "@vibest/schema/session"
 import { SessionEvent } from "@vibest/schema/session-event"
 import { canonicalTarget, TerminalTarget } from "@vibest/schema/terminal"
 import { Effect, Schema } from "effect"
-import { SqlClient, type Statement } from "effect/sql"
+import type { SqlClient, Statement } from "effect/sql"
 
-import { Bus, SessionChanged } from "../bus.ts"
-import { SessionLive } from "../session/live.ts"
-import { archived, SessionRow, type ProcessStart, type Integration, type ExecutionEnd } from "./db-rows.ts"
-import { decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
+import { type Bus, SessionChanged } from "../bus.ts"
+import {
+  archived,
+  decodeRoutingJson,
+  isMessageStatus,
+  SessionRow,
+  type ExecutionEnd,
+  type Integration,
+  type ProcessStart,
+  type SessionBrief,
+  type SpawnedBefore,
+} from "../database/rows.ts"
+import { SessionLive } from "./live.ts"
+import { unwrapped } from "./replies.ts"
 
 export type Current = {
   readonly id: number
@@ -47,14 +57,120 @@ type ProcessColumns = {
   readonly endedAt: number | null
 }
 
-const encodeRouting = Schema.encodeSync(Routing)
+export type SessionColumns = {
+  readonly id: string
+  readonly project: string
+  readonly agent: string
+  readonly name: string
+  readonly createdAt: number
+  readonly endedAt: number | null
+  readonly activeAt: number | null
+  readonly pId: number | null
+  readonly harness: string | null
+  readonly provider: string | null
+  readonly model: string | null
+  readonly routing: string | null
+  readonly runtime: string | null
+  readonly terminal: string | null
+  readonly pid: number | null
+  readonly integrationVersion: string | null
+  readonly integrationProtocol: number | null
+  readonly harnessSessionId: string | null
+  readonly placedAt: number | null
+  readonly readyAt: number | null
+  readonly pEnded: number | null
+  readonly parent: string | null
+  readonly pEndReason: string | null
+  readonly oId: number | null
+  readonly oProcess: number | null
+  readonly oBooked: number | null
+  readonly oAt: number | null
+  readonly lId: number | null
+  readonly lProcess: number | null
+  readonly lOutcome: string | null
+  readonly lAt: number | null
+  readonly lEnded: number | null
+  readonly lReply: string | null
+  readonly lFailure: string | null
+  readonly lFailureKind: string | null
+}
 
-const decodeRoutingJson = Schema.decodeSync(Schema.fromJsonString(Routing))
+export type Live = {
+  readonly status: AgentStatus
+  readonly integration: Integration | undefined
+}
+
+const NOT_LIVE: Live = { status: "unknown", integration: undefined }
+
+const encodeRouting = Schema.encodeSync(Routing)
 
 const decodeTerminalJson = Schema.decodeSync(Schema.fromJsonString(TerminalTarget))
 
+const decodeUnknownJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))
+
+export const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
+
 const routingJson = (routing: Routing | undefined) =>
   routing === undefined ? null : JSON.stringify(encodeRouting(routing))
+
+const integrationOf = (row: Pick<SessionColumns, "integrationVersion" | "integrationProtocol">) =>
+  row.integrationVersion === null || row.integrationProtocol === null
+    ? undefined
+    : { version: row.integrationVersion, protocol: row.integrationProtocol }
+
+const processOf = (row: SessionColumns, integration: Integration | undefined) =>
+  row.pId === null
+    ? null
+    : {
+        id: row.pId,
+        harness: row.harness ?? "",
+        provider: row.provider,
+        model: row.model,
+        routing: row.routing === null ? null : decodeUnknownJson(row.routing),
+        runtime: row.runtime ?? "",
+        terminal: row.terminal === null ? null : decodeUnknownJson(row.terminal),
+        pid: row.pid,
+        harnessSessionId: row.harnessSessionId,
+        placedAt: row.placedAt,
+        readyAt: row.readyAt,
+        endedAt: row.pEnded,
+        endReason: row.pEndReason,
+        integration: integration ?? null,
+      }
+
+const openExecutionOf = (row: SessionColumns) =>
+  row.oId === null ? null : { id: row.oId, process: row.oProcess, bookedAt: row.oBooked ?? 0, startedAt: row.oAt }
+
+const lastExecutionOf = (row: SessionColumns) =>
+  row.lId === null
+    ? null
+    : {
+        id: row.lId,
+        process: row.lProcess,
+        outcome: row.lOutcome ?? "",
+        startedAt: row.lAt,
+        endedAt: row.lEnded,
+        reply: row.lReply,
+        failure:
+          row.lFailure === null
+            ? null
+            : { message: row.lFailure, ...(row.lFailureKind !== null && { kind: row.lFailureKind }) },
+      }
+
+export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => ({
+  id: row.id,
+  projectId: row.project,
+  agent: row.agent,
+  name: row.name,
+  status: live.status,
+  createdAt: row.createdAt,
+  lastActive: row.activeAt ?? row.createdAt,
+  endedAt: row.endedAt,
+  parentId: row.parent,
+  process: processOf(row, live.integration ?? integrationOf(row)),
+  openExecution: openExecutionOf(row),
+  lastExecution: lastExecutionOf(row),
+})
 
 const currentOf = (row: ProcessColumns): Current => {
   const terminal = row.terminal === null ? null : decodeTerminalJson(row.terminal)
@@ -84,20 +200,195 @@ const currentOf = (row: ProcessColumns): Current => {
 const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, terminal, pid, harness_session_id,
   integration_version, integration_protocol, ready_at, ended_at`
 
-export const statements = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient
-  const bus = yield* Bus.Service
-  const sessionLive = yield* SessionLive.Service
+export const openExecution = (sql: SqlClient.SqlClient, sessionId: string) =>
+  sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${sessionId} AND owner = 1`.pipe(
+    Effect.map((rows) => rows[0]?.id),
+  )
+
+export const startedAt = (sql: SqlClient.SqlClient, id: string, execution: number) =>
+  sql<{ at: number | null }>`SELECT started_at AS at FROM execution
+    WHERE session_id = ${id} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]?.at ?? null))
+
+export const currentProcessId = (sql: SqlClient.SqlClient, sessionId: string) =>
+  sql<{ id: number | null }>`SELECT process_id AS id FROM session WHERE id = ${sessionId}`.pipe(
+    Effect.map((rows) => rows[0]?.id ?? undefined),
+  )
+
+export const nextExecutionId = (sql: SqlClient.SqlClient, sessionId: string) =>
+  sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM execution WHERE session_id = ${sessionId}`.pipe(
+    Effect.map((rows) => rows[0]?.id ?? 1),
+  )
+
+export const allocateExecution = (
+  sql: SqlClient.SqlClient,
+  publish: Bus.Interface["publish"],
+  sessionId: string,
+  at: number,
+  typed?: string,
+) =>
+  Effect.gen(function* () {
+    const executionId = yield* nextExecutionId(sql, sessionId)
+    const process = yield* currentProcessId(sql, sessionId)
+    yield* publish(
+      SessionEvent.ExecutionAllocated,
+      {
+        sessionId,
+        executionId,
+        ...(process !== undefined && { processId: process }),
+        ...(typed !== undefined && typed !== "" && { typed }),
+      },
+      { at },
+    )
+
+    return executionId
+  })
+
+export const observable = (sql: SqlClient.SqlClient, id: string) =>
+  sql<{ ok: number }>`SELECT 1 AS ok FROM session s WHERE s.id = ${id} AND s.ended_at IS NULL`.pipe(
+    Effect.map((rows) => rows.length > 0),
+  )
+
+export const isLiveSession = (sql: SqlClient.SqlClient, id: string) =>
+  sql`SELECT 1 FROM session WHERE id = ${id} AND ended_at IS NULL`.pipe(Effect.map((rows) => rows.length > 0))
+
+export const fromOldProcess = (sql: SqlClient.SqlClient, id: string, process: number | undefined) =>
+  Effect.map(currentProcessId(sql, id), (current) => process !== undefined && process !== current)
+
+export const creatorOf = (sql: SqlClient.SqlClient, id: string): Effect.Effect<Creator> =>
+  sql<{ parent: string | null; remote: string | null; session: string | null }>`SELECT
+      parent_session_id AS parent, origin_remote AS remote, origin_session AS session
+    FROM session WHERE id = ${id}`.pipe(
+    Effect.map(([row]): Creator => {
+      if (row === undefined) return undefined
+
+      if (row.remote !== null && row.session !== null) return { remote: row.remote, session: row.session }
+
+      if (row.parent !== null) return { local: row.parent }
+
+      return undefined
+    }),
+    Effect.orDie,
+  )
+
+export const nearestAlive = (sql: SqlClient.SqlClient, id: string): Effect.Effect<Creator> =>
+  Effect.gen(function* () {
+    let current = id
+
+    for (;;) {
+      const creator = yield* creatorOf(sql, current)
+
+      if (creator === undefined || "remote" in creator) return creator
+
+      if ((yield* sql`SELECT 1 FROM session WHERE id = ${creator.local} AND ended_at IS NULL`).length > 0)
+        return creator
+      current = creator.local
+    }
+  }).pipe(Effect.orDie)
+
+export const sessionSql = (
+  sql: SqlClient.SqlClient,
+  bus: Bus.Interface,
+  sessionLive: SessionLive.Interface,
+  moving: ReadonlySet<string>,
+) => {
   const { publish } = bus
   const afterCommitLive = (effect: Effect.Effect<void>) => bus.afterCommit(() => Effect.runSync(effect))
-  const reads = ledgerReads(sql)
-  const moving = new Set<string>()
 
   const remember = (row: Pick<SessionRow, "id" | "status" | "endedAt">) =>
     archived(row) ? sessionLive.ended(row.id) : sessionLive.setStatus(row.id, row.status)
 
   const running = sql`p_ended IS NULL`
-  const selectRaw = reads.sessionRows
+
+  const selectRaw = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
+    sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.agent, s.name,
+        s.created_at, s.ended_at, s.active_at, s.parent_session_id AS parent,
+        p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
+        p.integration_version, p.integration_protocol, p.harness_session_id, p.placed_at, p.ready_at,
+        p.ended_at AS p_ended, p.end_reason AS p_end_reason,
+        o.id AS o_id, o.process_id AS o_process, o.booked_at AS o_booked, o.started_at AS o_at,
+        l.id AS l_id, l.process_id AS l_process, l.outcome AS l_outcome, l.started_at AS l_at,
+        l.ended_at AS l_ended, l.reply AS l_reply, l.failure AS l_failure, l.failure_kind AS l_failure_kind
+      FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id
+        LEFT JOIN execution o ON o.session_id = s.id AND o.owner = 1
+        LEFT JOIN execution l ON l.session_id = s.id AND l.id = (SELECT id FROM execution
+          WHERE session_id = s.id AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1)
+      ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
+    ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
+
+  const briefs = (ids: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      if (ids.length === 0) return new Map<string, SessionBrief>()
+
+      const rows = yield* sql<{
+        id: string
+        task: string | null
+        executionId: number | null
+        outcome: string | null
+        endedAt: number | null
+        reply: string | null
+        owner: number | null
+      }>`SELECT s.id,
+          (SELECT i.content FROM inbox i WHERE i.recipient_session_id = s.id AND i.id = s.message_id) AS task,
+          t.id AS execution_id, t.outcome, t.ended_at, t.reply, t.owner AS owner
+        FROM session s LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
+        WHERE ${sql.in("s.id", ids)}`
+
+      const found = new Map<string, SessionBrief>()
+
+      for (const row of rows) {
+        const raw =
+          row.executionId === null
+            ? undefined
+            : row.owner === 1 && row.outcome === null
+              ? "working"
+              : (row.outcome ?? undefined)
+
+        const status = raw !== undefined && isMessageStatus(raw) ? raw : undefined
+        found.set(row.id, {
+          task: row.task === null ? null : unwrapped(row.task),
+          latest:
+            status === undefined
+              ? null
+              : { status, summary: row.reply?.trim().split("\n")[0] ?? "", endedAt: row.endedAt ?? null },
+        })
+      }
+
+      return found
+    })
+
+  const hadTerminal = (id: string) =>
+    sql`SELECT 1 FROM process WHERE session_id = ${id} AND placed_at IS NOT NULL LIMIT 1`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
+
+  const spawnedBy = (project: string, request: string) =>
+    sql<{
+      id: string
+      harness: string | null
+      provider: string | null
+      model: string | null
+      runtime: string | null
+      routing: string | null
+    }>`SELECT s.id, p.harness, p.provider, p.model, p.runtime, p.routing FROM session s
+        JOIN inbox i ON i.recipient_session_id = s.id AND i.id = s.message_id
+        LEFT JOIN process p ON p.session_id = s.id AND p.id = (SELECT min(id) FROM process WHERE session_id = s.id)
+      WHERE i.request_id = ${request} AND s.project_id = ${project}
+      ORDER BY s.created_at, s.id LIMIT 1`.pipe(
+      Effect.map((rows): SpawnedBefore | undefined => {
+        const found = rows[0]
+
+        if (found === undefined) return undefined
+
+        return {
+          id: found.id,
+          harness: found.harness ?? "",
+          provider: found.provider ?? undefined,
+          model: found.model ?? undefined,
+          runtime: found.runtime ?? "",
+          routing: found.routing === null ? undefined : decodeRoutingJson(found.routing),
+        }
+      }),
+    )
 
   const selectSessions = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
     selectRaw(where, filter).pipe(
@@ -135,28 +426,13 @@ export const statements = Effect.gen(function* () {
       Effect.flatMap((rows) => (rows[0] === undefined ? Effect.succeed(undefined) : findSession(rows[0].id))),
     )
 
-  const openExecution = (sessionId: string) =>
-    sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${sessionId} AND owner = 1`.pipe(
-      Effect.map((rows) => rows[0]?.id),
-    )
-
   const workingExecutions = sql<{
     n: number
   }>`SELECT count(*) AS n FROM execution e JOIN session s ON s.id = e.session_id
       WHERE e.owner = 1 AND s.ended_at IS NULL`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
 
-  const currentProcessId = (sessionId: string) =>
-    sql<{ id: number | null }>`SELECT process_id AS id FROM session WHERE id = ${sessionId}`.pipe(
-      Effect.map((rows) => rows[0]?.id ?? undefined),
-    )
-
   const nextProcessId = (sessionId: string) =>
     sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM process WHERE session_id = ${sessionId}`.pipe(
-      Effect.map((rows) => rows[0]?.id ?? 1),
-    )
-
-  const nextExecutionId = (sessionId: string) =>
-    sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM execution WHERE session_id = ${sessionId}`.pipe(
       Effect.map((rows) => rows[0]?.id ?? 1),
     )
 
@@ -165,34 +441,12 @@ export const statements = Effect.gen(function* () {
         outcome, started_at AS started, booked_at AS booked, process_id AS process FROM execution
       WHERE session_id = ${sessionId} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]))
 
-  const allocateExecution = (sessionId: string, at: number, typed?: string) =>
-    Effect.gen(function* () {
-      const executionId = yield* nextExecutionId(sessionId)
-      const process = yield* currentProcessId(sessionId)
-      yield* publish(
-        SessionEvent.ExecutionAllocated,
-        {
-          sessionId,
-          executionId,
-          ...(process !== undefined && { processId: process }),
-          ...(typed !== undefined && typed !== "" && { typed }),
-        },
-        { at },
-      )
-
-      return executionId
-    })
-
-  const startedAt = (id: string, execution: number) =>
-    sql<{ at: number | null }>`SELECT started_at AS at FROM execution
-      WHERE session_id = ${id} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]?.at ?? null))
-
   const accept = (id: string, execution: number) =>
     Effect.gen(function* () {
-      if ((yield* openExecution(id)) !== execution) return false
+      if ((yield* openExecution(sql, id)) !== execution) return false
 
-      if ((yield* startedAt(id, execution)) !== null) return true
-      const process = yield* currentProcessId(id)
+      if ((yield* startedAt(sql, id, execution)) !== null) return true
+      const process = yield* currentProcessId(sql, id)
       yield* publish(SessionEvent.ExecutionStarted, {
         sessionId: id,
         executionId: execution,
@@ -219,18 +473,10 @@ export const statements = Effect.gen(function* () {
       return true
     })
 
-  const observable = (id: string) =>
-    sql<{ ok: number }>`SELECT 1 AS ok FROM session s WHERE s.id = ${id} AND s.ended_at IS NULL`.pipe(
-      Effect.map((rows) => rows.length > 0),
-    )
-
   const isRoot = (id: string) =>
     sql`SELECT 1 FROM session WHERE id = ${id} AND parent_session_id IS NULL AND origin_remote IS NULL`.pipe(
       Effect.map((rows) => rows.length > 0),
     )
-
-  const fromOldProcess = (id: string, process: number | undefined) =>
-    Effect.map(currentProcessId(id), (current) => process !== undefined && process !== current)
 
   const endProcess = (id: string, reason: ProcessEndReason, at?: number, process?: number, by?: Sender) =>
     Effect.gen(function* () {
@@ -240,7 +486,7 @@ export const statements = Effect.gen(function* () {
         return false
 
       if (reason === "launch_failed") {
-        const execution = yield* openExecution(id)
+        const execution = yield* openExecution(sql, id)
         const open = execution === undefined ? undefined : yield* executionOutcome(id, execution)
 
         if (execution !== undefined && open?.process === current.id && open.started === null)
@@ -568,37 +814,6 @@ export const statements = Effect.gen(function* () {
 
   const unusedId = newId(sessionPrefixTaken)
 
-  const creatorOf = (id: string): Effect.Effect<Creator> =>
-    sql<{ parent: string | null; remote: string | null; session: string | null }>`SELECT
-        parent_session_id AS parent, origin_remote AS remote, origin_session AS session
-      FROM session WHERE id = ${id}`.pipe(
-      Effect.map(([row]): Creator => {
-        if (row === undefined) return undefined
-
-        if (row.remote !== null && row.session !== null) return { remote: row.remote, session: row.session }
-
-        if (row.parent !== null) return { local: row.parent }
-
-        return undefined
-      }),
-      Effect.orDie,
-    )
-
-  const nearestAlive = (id: string): Effect.Effect<Creator> =>
-    Effect.gen(function* () {
-      let current = id
-
-      for (;;) {
-        const creator = yield* creatorOf(current)
-
-        if (creator === undefined || "remote" in creator) return creator
-
-        if ((yield* sql`SELECT 1 FROM session WHERE id = ${creator.local} AND ended_at IS NULL`).length > 0)
-          return creator
-        current = creator.local
-      }
-    }).pipe(Effect.orDie)
-
   const fromCurrentHarness = (sessionId: string, current: number, reporter?: number, pid?: number) =>
     Effect.gen(function* () {
       const processes = yield* sql<{
@@ -645,28 +860,23 @@ export const statements = Effect.gen(function* () {
     )
 
   return {
-    reads,
+    briefs,
+    hadTerminal,
+    spawnedBy,
     afterCommitLive,
-    moving,
     running,
     selectRaw,
     selectSessions,
     findSession,
     currentProcess,
-    currentProcessId,
     latestRoot,
-    openExecution,
     workingExecutions,
-    allocateExecution,
     noteInput,
-    startedAt,
     releaseExecution,
     finishExecution,
     recordObservedEnd,
     accept,
-    observable,
     isRoot,
-    fromOldProcess,
     endProcess,
     placeProcess,
     startProcess,
@@ -681,12 +891,10 @@ export const statements = Effect.gen(function* () {
     lastSessionAt,
     lastProjectTerminal,
     unusedId,
-    creatorOf,
-    nearestAlive,
     fromCurrentHarness,
     canResumeConversation,
     latestReply,
   }
-})
+}
 
-export type Statements = Effect.Success<typeof statements>
+export type SessionSql = ReturnType<typeof sessionSql>

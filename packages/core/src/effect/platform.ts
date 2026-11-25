@@ -6,7 +6,7 @@ import { FetchHttpClient, HttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import type { DatabaseOpenFailed, SchemaMismatch } from "../database/db-schema.ts"
+import type { DatabaseOpenFailed, SchemaMismatch } from "../database/schema.sql.ts"
 
 export * as PlatformNode from "./platform.ts"
 
