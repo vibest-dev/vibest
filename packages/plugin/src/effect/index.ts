@@ -12,4 +12,4 @@ export type { EventDomain } from "./event.ts"
 
 export type { Hooks, Registration, Transform } from "./registration.ts"
 
-export type { Launch } from "./launch.ts"
+export type { Launch } from "./runtime.ts"

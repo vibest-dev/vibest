@@ -226,4 +226,34 @@ describe.concurrent("Session", () => {
     }),
     { interruptIgnored: true },
   )
+
+  test(
+    "sessions of the same project share one VIBEST_SCRATCHPAD_DIR that exists on disk and survives archive",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const a = yield* idleSession(repo)
+      const b = yield* idleSession(repo)
+      const rowA = (yield* a.db.session.getSession(a.id))!
+      const rowB = (yield* b.db.session.getSession(b.id))!
+      assert.strictEqual(rowA.projectId, rowB.projectId)
+
+      const opens = yield* herdr.callsTo("open")
+      const openA = opens.find((call) => call.env?.VIBEST_SESSION_ID === a.id)
+      const openB = opens.find((call) => call.env?.VIBEST_SESSION_ID === b.id)
+      const scratchA = openA?.env?.VIBEST_SCRATCHPAD_DIR
+      const scratchB = openB?.env?.VIBEST_SCRATCHPAD_DIR
+      assert.isDefined(scratchA)
+      assert.strictEqual(scratchA, scratchB)
+      assert.isTrue(scratchA!.endsWith(`/${rowA.projectId}/scratchpad`))
+      assert.isTrue(yield* fs.exists(scratchA!))
+
+      const handoff = `${scratchA}/handoff.md`
+      yield* fs.writeFileString(handoff, "shared notes")
+      yield* a.sessions.archive(a.id)
+      assert.isTrue(yield* fs.exists(handoff))
+      assert.strictEqual(yield* fs.readFileString(handoff), "shared notes")
+    }),
+  )
 })

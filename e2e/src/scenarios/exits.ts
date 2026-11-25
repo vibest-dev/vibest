@@ -1,13 +1,9 @@
 import fs from "node:fs/promises"
-import http from "node:http"
 import path from "node:path"
 
-import type { Schema } from "effect"
-
-import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask, heldModel, piDir } from "../fake-model.ts"
-import { expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { expect, herdr, row, SESSIONS, Skip, until, vibestd, type World } from "../world.ts"
 import { curl, dropHerdrSession, project } from "./inbox.ts"
 
 export const piProject = async (w: World, name: string) => {
@@ -167,45 +163,6 @@ const killedMidExecution = async (
     throw e
   }
 }
-
-const postJson = (
-  socket: string,
-  urlPath: string,
-  body: Schema.JsonObject,
-  headers: Readonly<Record<string, string>>,
-) =>
-  new Promise<unknown>((resolve, reject) => {
-    const payload = JSON.stringify(body)
-
-    const req = http.request(
-      {
-        socketPath: socket,
-        method: "POST",
-        path: urlPath,
-        headers: {
-          "content-type": "application/json",
-          "content-length": String(Buffer.byteLength(payload)),
-          ...headers,
-        },
-      },
-      (res) => {
-        let buf = ""
-        res.on("data", (chunk: Buffer) => {
-          buf += chunk.toString()
-        })
-        res.on("end", () => {
-          const parsed = buf.trim() === "" ? undefined : (JSON.parse(buf) as unknown)
-
-          if ((res.statusCode ?? 0) >= 400) reject(new Error(`${urlPath} (${res.statusCode}): ${buf}`))
-          else resolve(parsed)
-        })
-      },
-    )
-
-    req.on("error", reject)
-    req.write(payload)
-    req.end()
-  })
 
 const nothingMoreComesWithin = (ms: number) => Bun.sleep(ms)
 
@@ -633,17 +590,16 @@ const checks: ReadonlyArray<Check> = [
         await until("idle", () => p.idle(sub), 60_000)
         const message = ask("again")
 
-        const send = () =>
-          postJson(
-            path.join(w.vibestHome, "vibest.sock"),
-            `/api/session/${sub}/send`,
-            { message, request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" },
-            {
-              "vibest-protocol": String(PROTOCOL),
-              "vibest-caller": "cli",
-              "vibest-repository": p.repo,
-            },
-          )
+        const send = async () => {
+          const reply = await vibestd(w, p.repo, "POST", `/api/session/${sub}/send`, {
+            message,
+            request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d",
+          })
+
+          if ("error" in reply) throw new Error(`/api/session/${sub}/send: ${JSON.stringify(reply.error)}`)
+
+          return reply.result
+        }
 
         const first = await send()
         const second = await send()

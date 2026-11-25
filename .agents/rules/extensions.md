@@ -14,6 +14,7 @@ on) or a reaction (`event.subscribe` with `session.list`, `session.get`, `sessio
 5. If removing an extension would make an accepted command silently do nothing, it is engine and belongs in core, not
    in a plugin.
 6. Core never awaits a plugin reaction while holding a session lock.
-7. The plugin API stays small: a new context method, hook or fact for plugins comes only with a real use.
+7. The plugin API stays small: a new context method, hook or event for plugins (`PublicEvents` in
+   `@vibest/schema/durable-event-manifest`) comes only with a real use.
 
-Status: decided (owner, 2026-11-18).
+Status: in force.

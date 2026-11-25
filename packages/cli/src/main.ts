@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { commands } from "@vibest/builtins"
 import * as Logging from "@vibest/client/logging"
-import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { EmbeddedHarnesses, Layout, VibestCommand } from "@vibest/schema/layout"
 import { Effect } from "effect"
 
 import * as Platform from "#platform"
@@ -11,6 +11,7 @@ import { userOnly } from "./caller.ts"
 import * as Cli from "./cli.ts"
 import { clients } from "./client.ts"
 import { Commands } from "./commands/commands.ts"
+import { materializeEmbedded } from "./embedded-assets.ts"
 import { Runtime } from "./framework/runtime.ts"
 import { Host } from "./host.ts"
 import { updater } from "./update-check.ts"
@@ -70,6 +71,8 @@ const Handlers = Runtime.handlers(Commands, {
   },
 })
 
+const embeddedHarnesses = (home: string) => materializeEmbedded(home)?.harnesses
+
 const replacements = [...Platform.replacements, Platform.app({ version: VERSION }), Platform.updateCheck(updater)]
 
 Runtime.run(Commands, Handlers, {
@@ -77,6 +80,7 @@ Runtime.run(Commands, Handlers, {
   extra: { after: "update", commands: commands(userOnly, clients) },
 }).pipe(
   Cli.printFailure,
+  Effect.provideService(EmbeddedHarnesses, embeddedHarnesses),
   Effect.provide(Layout.layer),
   Effect.provide(Logging.layer),
   Effect.provideService(VibestCommand, Platform.selfCommand),

@@ -1,9 +1,9 @@
 import { Claim, cliHeaders, connect, type VibestClient, readPing, withHeaders } from "@vibest/client/client"
-import { compareVersions, UpdateError } from "@vibest/client/release"
+import { compareVersions, installMethod, UpdateError } from "@vibest/client/release"
 import type { Ping } from "@vibest/protocol/schemas"
 import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
-import { Layout, shellQuote } from "@vibest/schema/layout"
+import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import {
   Cause,
@@ -25,19 +25,31 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { askYesNo, interactive } from "./ask.ts"
 import { withVibest } from "./client.ts"
+import { detectPlatformTarget } from "./platform-target.ts"
 import { type ReplaceFailed, replaceDaemon, versionOf } from "./replace.ts"
 import { VERSION } from "./version.ts"
 
 export type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }
 
+export const resolveInstallMethod = Effect.gen(function* () {
+  const self = yield* VibestCommand
+  const fs = yield* FileSystem.FileSystem
+
+  const real = self.length === 1 ? yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!)) : undefined
+
+  return { self, real, method: installMethod(self, real) }
+})
+
 export const ownerOf = (real: string) => {
   if (real.includes("/.bun/install/global/node_modules/")) return { kind: "bun" } as const
+
+  if (real.includes("/.pnpm/") || real.includes("/pnpm/global/")) return { kind: "pnpm" } as const
   const npm = /^(.+)\/lib\/node_modules\/@vibest\//.exec(real)
 
   return npm ? ({ kind: "npm", prefix: npm[1]! } as const) : undefined
 }
 
-export const upgradeCommand = (real: string, version: string, platform = `${process.platform}-${process.arch}`) => {
+export const upgradeCommand = (real: string, version: string, platform = detectPlatformTarget()) => {
   return Match.value(ownerOf(real)).pipe(
     Match.when({ kind: "bun" }, () => [
       "bun",
@@ -46,6 +58,7 @@ export const upgradeCommand = (real: string, version: string, platform = `${proc
       `@vibest/cli@${version}`,
       `@vibest/cli-${platform}@${version}`,
     ]),
+    Match.when({ kind: "pnpm" }, () => ["pnpm", "add", "-g", `@vibest/cli@${version}`]),
     Match.when({ kind: "npm" }, (owner) => [
       `${owner.prefix}/bin/npm`,
       "install",
@@ -58,17 +71,26 @@ export const upgradeCommand = (real: string, version: string, platform = `${proc
   )
 }
 
-export const stageCommand = (
-  real: string,
-  dir: string,
-  version: string,
-  platform = `${process.platform}-${process.arch}`,
-) => {
-  const owner = ownerOf(real)
-
-  return owner?.kind === "bun"
-    ? ["bun", "add", "--cwd", dir, `@vibest/cli@${version}`, `@vibest/cli-${platform}@${version}`]
-    : [owner?.kind === "npm" ? `${owner.prefix}/bin/npm` : "npm", "install", "--prefix", dir, `@vibest/cli@${version}`]
+export const stageCommand = (real: string, dir: string, version: string, platform = detectPlatformTarget()) => {
+  return Match.value(ownerOf(real)).pipe(
+    Match.when({ kind: "bun" }, () => [
+      "bun",
+      "add",
+      "--cwd",
+      dir,
+      `@vibest/cli@${version}`,
+      `@vibest/cli-${platform}@${version}`,
+    ]),
+    Match.when({ kind: "pnpm" }, () => ["pnpm", "add", "--dir", dir, `@vibest/cli@${version}`]),
+    Match.when({ kind: "npm" }, (owner) => [
+      `${owner.prefix}/bin/npm`,
+      "install",
+      "--prefix",
+      dir,
+      `@vibest/cli@${version}`,
+    ]),
+    Match.orElse(() => ["npm", "install", "--prefix", dir, `@vibest/cli@${version}`]),
+  )
 }
 
 export const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`
@@ -131,6 +153,7 @@ export const progressLine = Effect.gen(function* () {
 export const removeCommand = (link: string, real: string) => {
   return Match.value(ownerOf(real)).pipe(
     Match.when({ kind: "bun" }, () => "bun remove -g @vibest/cli"),
+    Match.when({ kind: "pnpm" }, () => "pnpm remove -g @vibest/cli"),
     Match.when(
       { kind: "npm" },
       (owner) =>

@@ -12,10 +12,10 @@ From a checkout:
 herdr plugin link /absolute/path/to/packages/cli/herdr-plugin
 ```
 
-From a curl install, the directory is unpacked next to `bin/` and `harnesses/` and is not linked:
+From a curl or npm install, `vibestd` extracts the embedded plugin and maintains a stable symlink at `~/.vibest/herdr-plugin` (it is not linked automatically):
 
 ```sh
-herdr plugin link ~/.local/share/vibest/versions/<version>/herdr-plugin
+herdr plugin link ~/.vibest/herdr-plugin
 ```
 
 `vibest` must be on the herdr server's `PATH`. `VIBEST_BIN` overrides the executable. Undo with `herdr plugin unlink vibest`.

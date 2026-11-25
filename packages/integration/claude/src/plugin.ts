@@ -106,10 +106,6 @@ const isFields = (value: Json | undefined): value is { readonly [key: string]: J
 const member = (body: Json | undefined, name: string) => (isFields(body) ? body[name] : undefined)
 
 const errorOf = (body: Json | undefined) => {
-  const mismatch = member(body, "mismatch")
-  const mismatchMessage = member(mismatch, "message")
-
-  if (Predicate.isString(mismatchMessage)) return mismatchMessage
   const message = member(body, "message")
 
   if (Predicate.isString(message)) return message

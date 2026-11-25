@@ -47,7 +47,7 @@ const allowed = {
   "integration/agy": ["@vibest/schema"],
   "effect-herdr-sdk": [],
   "effect-herdr-core-sdk": [],
-  "tools/verify": [],
+  "tools/verify": ["@vibest/cli"],
 }
 
 const handoff = {

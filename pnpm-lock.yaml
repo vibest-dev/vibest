@@ -227,6 +227,9 @@ importers:
 
   e2e:
     dependencies:
+      '@vibest/cli':
+        specifier: workspace:*
+        version: link:../packages/cli
       effect:
         specifier: 4.1.5
         version: 4.1.5
@@ -305,17 +308,6 @@ importers:
       effect-herdr-sdk:
         specifier: workspace:*
         version: link:../effect-herdr-sdk
-    optionalDependencies:
-      '@vibest/cli-darwin-arm64':
-        specifier: workspace:*
-        version: link:../cli-darwin-arm64
-      '@vibest/cli-linux-x64':
-        specifier: workspace:*
-        version: link:../cli-linux-x64
-
-  packages/cli-darwin-arm64: {}
-
-  packages/cli-linux-x64: {}
 
   packages/client:
     dependencies:
@@ -641,6 +633,9 @@ importers:
       '@types/node':
         specifier: 26.6.5
         version: 26.6.5
+      '@vibest/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
       effect:
         specifier: 4.1.5
         version: 4.1.5

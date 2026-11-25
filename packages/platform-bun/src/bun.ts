@@ -27,7 +27,7 @@ import * as VibestPlugin from "@vibest/plugin"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
 import * as VibestPluginHost from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
-import { Layout } from "@vibest/schema/layout"
+import { Layout, UserUid } from "@vibest/schema/layout"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import { Load } from "@vibest/server/machine/load"
 import { Machines } from "@vibest/server/machine/machines"
@@ -35,7 +35,19 @@ import * as Server from "@vibest/server/server"
 import * as Ui from "@vibest/server/ui"
 import { UpdateCheck } from "@vibest/server/update-check"
 import * as effect from "effect"
-import { Cause, Duration, Effect, Layer, Predicate, Schedule, Schema, type Scope, Stdio, Stream } from "effect"
+import {
+  Cause,
+  Duration,
+  Effect,
+  type FileSystem,
+  Layer,
+  Predicate,
+  Schedule,
+  Schema,
+  type Scope,
+  Stdio,
+  Stream,
+} from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
 import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, type HttpClient } from "effect/http"
@@ -100,6 +112,7 @@ const platform = Layer.mergeAll(
   unrefStdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector.Service, (endpoint) => BunSocket.makeNet({ path: endpoint })),
+  Layer.succeed(UserUid, process.getuid?.()),
   Layer.succeed(HttpConnector.Service, nodeUnixHttpClient),
   user,
 )
@@ -287,10 +300,25 @@ const processes: Processes.ProcessPlatform["Service"] = {
   uid: process.getuid?.(),
 }
 
-const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
+const LIBC_SPEC = {
   dup2: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-})
+} as const
+
+const LIBC_CANDIDATES =
+  process.platform === "darwin"
+    ? ["libc.dylib"]
+    : ["libc.so.6", "libc.musl-x86_64.so.1", "libc.musl-aarch64.so.1", "libc.so"]
+
+const openLibc = () => {
+  for (const name of LIBC_CANDIDATES) {
+    try {
+      return dlopen(name, LIBC_SPEC).symbols
+    } catch {}
+  }
+
+  throw new Error(`could not open libc (tried ${LIBC_CANDIDATES.join(", ")})`)
+}
 
 const LOCK_EX_NB = 2 | 4
 
@@ -300,7 +328,9 @@ export const captureDaemonLog = (file: string) =>
     const fd = fs.openSync(file, "a")
 
     try {
-      if (libc.symbols.dup2(fd, 1) === -1 || libc.symbols.dup2(fd, 2) === -1) throw new Error(`dup2 ${file} failed`)
+      const libc = openLibc()
+
+      if (libc.dup2(fd, 1) === -1 || libc.dup2(fd, 2) === -1) throw new Error(`dup2 ${file} failed`)
     } finally {
       fs.closeSync(fd)
     }
@@ -331,7 +361,7 @@ export const lock: Host["lock"] = (file) =>
         const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600)
 
         try {
-          if (libc.symbols.flock(fd, LOCK_EX_NB) === 0) {
+          if (openLibc().flock(fd, LOCK_EX_NB) === 0) {
             fs.fchmodSync(fd, 0o600)
 
             return fd
@@ -510,13 +540,13 @@ export const replacements: LayerNode.Replacements = [
 export const app = (info: App.Interface) => App.node.replace(Layer.succeed(App.Service, info))
 
 export const updateCheck = (
-  construct: Effect.Effect<UpdateCheck.Interface, never, Scope.Scope | HttpClient.HttpClient>,
+  construct: Effect.Effect<UpdateCheck.Interface, never, Scope.Scope | HttpClient.HttpClient | FileSystem.FileSystem>,
 ) =>
   UpdateCheck.node.replace(
     LayerNode.make({
       service: UpdateCheck.Service,
       layer: Layer.effect(UpdateCheck.Service, construct),
-      deps: [PlatformNode.httpClient],
+      deps: [PlatformNode.httpClient, PlatformNode.fileSystem],
     }),
   )
 

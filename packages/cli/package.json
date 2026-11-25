@@ -9,12 +9,10 @@
     "directory": "packages/cli"
   },
   "bin": {
-    "vibest": "./bin/vibest.cjs"
+    "vibest": "./bin/vibest"
   },
   "files": [
     "bin",
-    "harnesses",
-    "herdr-plugin",
     "LICENSE"
   ],
   "type": "module",
@@ -34,10 +32,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "bun scripts/build.ts && bun scripts/build-harnesses.ts",
-    "build:darwin-arm64": "bun scripts/build.ts ../../packages/cli-darwin-arm64/bin/vibest bun-darwin-arm64",
-    "build:linux-x64": "bun scripts/build.ts ../../packages/cli-linux-x64/bin/vibest bun-linux-x64",
-    "prepack": "bun scripts/build-harnesses.ts",
+    "build": "bun scripts/build.ts",
+    "pack:npm": "bun scripts/pack.ts",
     "typecheck": "tsrs --noEmit --fast",
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/cli"
   },
@@ -57,9 +53,5 @@
     "@vibest/server": "workspace:*",
     "effect": "catalog:",
     "effect-herdr-sdk": "workspace:*"
-  },
-  "optionalDependencies": {
-    "@vibest/cli-darwin-arm64": "workspace:*",
-    "@vibest/cli-linux-x64": "workspace:*"
   }
 }

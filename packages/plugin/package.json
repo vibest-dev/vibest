@@ -25,6 +25,7 @@
     "access": "public"
   },
   "scripts": {
+    "pack:npm": "bun scripts/pack.ts",
     "typecheck": "tsrs --noEmit --fast",
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/plugin/"
   },

@@ -3,8 +3,6 @@ dist/
 packages/cli/test/.tmp/
 packages/core/test/.tmp*/
 packages/cli/.*.bun-build
-packages/cli-darwin-arm64/bin/
-packages/cli-linux-x64/bin/
 .turbo/
 packages/cli/.cache/
 packages/integration/claude/.cache/

@@ -116,18 +116,22 @@ export const claude: Harness.HarnessDefinition = {
   promptArgs: ["--"],
   ready: "integration",
   checkProvider: noProvider("claude"),
-  launchArgs: (i) => [
-    ...(i.sessionId === null ? [] : [i.resume ? "--resume" : "--session-id", i.sessionId]),
-    "--append-system-prompt-file",
-    i.systemPromptFile,
-    "--settings",
-    JSON.stringify({ permissions: { additionalDirectories: [i.projectDir] } }),
-    "--allowedTools",
-    ["Bash", ...projectDirRules(i.projectDir)].join(","),
-    "--plugin-dir",
-    i.pluginDir,
-    ...opt("--model", i.model),
-  ],
+  launchArgs: (i) => {
+    const dirs = [i.projectDir, ...(i.scratchpadDir ? [i.scratchpadDir] : [])]
+
+    return [
+      ...(i.sessionId === null ? [] : [i.resume ? "--resume" : "--session-id", i.sessionId]),
+      "--append-system-prompt-file",
+      i.systemPromptFile,
+      "--settings",
+      JSON.stringify({ permissions: { additionalDirectories: dirs } }),
+      "--allowedTools",
+      ["Bash", ...dirs.flatMap(projectDirRules)].join(","),
+      "--plugin-dir",
+      i.pluginDir,
+      ...opt("--model", i.model),
+    ]
+  },
   models: {
     args: () => [
       "-p",

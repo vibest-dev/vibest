@@ -250,7 +250,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I2",
     title:
-      "vibest finds its plugins: npm's launcher passes them, the bare binary looks beside its bin/; with none it refuses each harness, and says why",
+      "vibest finds its embedded plugins standalone without VIBEST_HARNESSES or sibling harnesses/; an explicit missing VIBEST_HARNESSES refuses each harness and says why",
     run: async (w) => {
       const beside = await w.vibest(["doctor"], { env: { VIBEST_HARNESSES: undefined }, timeoutMs: 120_000 })
 
@@ -263,10 +263,17 @@ const checks: ReadonlyArray<Check> = [
       const home = path.join(w.root, "solo-home")
       await fs.mkdir(home)
 
-      const r = await w.run(w.repository, [path.join(solo, "vibest"), "doctor"], {
+      const standalone = await w.run(w.repository, [path.join(solo, "vibest"), "doctor"], {
         env: { VIBEST_HARNESSES: undefined, VIBEST_HOME: home },
         timeoutMs: 120_000,
       })
+
+      for (const h of ["pi", "claude"])
+        expect(!new RegExp(`^  . ${h} .*plugin`, "m").test(standalone.stdout), `${h}:\n${standalone.stdout}`)
+      expect(
+        await Bun.file(path.join(home, "herdr-plugin", "herdr-plugin.toml")).exists(),
+        `missing ${path.join(home, "herdr-plugin", "herdr-plugin.toml")}`,
+      )
 
       const pid = JSON.parse(await fs.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "{}")) as {
         pid?: number
@@ -278,15 +285,29 @@ const checks: ReadonlyArray<Check> = [
         } catch {}
       }
 
-      const resolvedSolo = await fs.realpath(path.join(w.root, "solo"))
+      const missing = path.join(w.root, "nonexistent-harnesses")
+      const badHome = path.join(w.root, "bad-home")
+      await fs.mkdir(badHome)
+
+      const refused = await w.run(w.repository, [path.join(solo, "vibest"), "doctor"], {
+        env: { VIBEST_HARNESSES: missing, VIBEST_HOME: badHome },
+        timeoutMs: 120_000,
+      })
+
+      const badPid = JSON.parse(await fs.readFile(path.join(badHome, "vibestd.pid"), "utf8").catch(() => "{}")) as {
+        pid?: number
+      }
+
+      if (badPid.pid) {
+        try {
+          process.kill(badPid.pid, "SIGTERM")
+        } catch {}
+      }
 
       for (const h of ["pi", "claude"])
         expect(
-          new RegExp(
-            `^  ✗ ${h} +vibest's ${h} plugin is missing: ${path.join(resolvedSolo, "harnesses", h)}$`,
-            "m",
-          ).test(r.stdout),
-          `${h}:\n${r.stdout}`,
+          new RegExp(`^  ✗ ${h} +vibest's ${h} plugin is missing: ${path.join(missing, h)}$`, "m").test(refused.stdout),
+          `${h}:\n${refused.stdout}`,
         )
     },
   },
