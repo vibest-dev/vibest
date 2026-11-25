@@ -22,6 +22,7 @@ import { migration as sessionEdges } from "./migration/20261124000000_session_ed
 import { migration as remoteAndCrossMachineEdges } from "./migration/20261124020000_remote_and_cross_machine_edges.ts"
 import { migration as dropProjectEntry } from "./migration/20261124030000_drop_project_entry.ts"
 import { migration as structuredTerminalTargets } from "./migration/20261124040000_structured_terminal_targets.ts"
+import { migration as cleanEventCatalog } from "./migration/20261124050000_clean_event_catalog.ts"
 
 export type Migration = {
   readonly id: string
@@ -37,6 +38,7 @@ export const migrations: ReadonlyArray<Migration> = [
   remoteAndCrossMachineEdges,
   dropProjectEntry,
   structuredTerminalTargets,
+  cleanEventCatalog,
 ]
 
 const createTable = (sql: SqlClient.SqlClient) =>

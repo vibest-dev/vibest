@@ -433,8 +433,8 @@ const checks: ReadonlyArray<Check> = [
 
         const outbox = () =>
           s!.bDb<{ queued: number; acked: number }>(
-            `SELECT count(*) FILTER (WHERE type = 'outbox.queued') AS queued,
-              count(*) FILTER (WHERE type = 'outbox.acked') AS acked FROM event`,
+            `SELECT count(*) FILTER (WHERE type = 'remote.outbox.queued') AS queued,
+              count(*) FILTER (WHERE type = 'remote.outbox.acked') AS acked FROM event`,
           )
 
         await until("B's outbox items all acked", () => {
@@ -527,8 +527,8 @@ const checks: ReadonlyArray<Check> = [
           120_000,
         )
         await Bun.sleep(3_000)
-        const queued = s.bDb<{ n: number }>("SELECT count(*) AS n FROM event WHERE type = 'outbox.queued'")?.n
-        expect(queued === 0, `${queued} outbox.queued facts on B`)
+        const queued = s.bDb<{ n: number }>("SELECT count(*) AS n FROM event WHERE type = 'remote.outbox.queued'")?.n
+        expect(queued === 0, `${queued} remote.outbox.queued facts on B`)
         expect(s.notices(address, "quietone") === 0, "A got a notice for an execution end")
         const got = JSON.parse(await s.okA(["result", address])) as { reply?: { text?: string | null } | null }
         expect(got.reply?.text?.includes("done-quietone") === true, `result on A: ${JSON.stringify(got)}`)

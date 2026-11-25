@@ -93,7 +93,7 @@ const oldLedger = Effect.gen(function* () {
   yield* Effect.void.pipe(Effect.provide(database(file)))
   yield* Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* sql`DELETE FROM migration WHERE id IN (${MIGRATION}, '20261122000000_execution_lifecycle', '20261124030000_drop_project_entry', '20261124040000_structured_terminal_targets')`
+    yield* sql`DELETE FROM migration WHERE id >= ${MIGRATION}`
     yield* sql`UPDATE meta SET value = '5' WHERE key = 'catalog'`
 
     for (const [aggregate, seq, type, data] of facts)
@@ -133,29 +133,31 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
 
       const events = yield* read<{ seq: number; type: string; data: string }>(
         file,
-        (sql) => sql`SELECT seq, type, data FROM event WHERE aggregate = ${B} AND type LIKE 'inbox.%' ORDER BY seq`,
+        (sql) =>
+          sql`SELECT seq, type, data FROM event WHERE aggregate = ${B} AND type LIKE 'session.inbox.%' ORDER BY seq`,
       )
 
       assert.deepStrictEqual(
         events.map((row) => [row.seq, row.type, JSON.parse(row.data)]),
         [
-          [2, "inbox.enqueued", { sender: agent, content: "review", requestId: "run-1" }],
-          [4, "inbox.unresolved", { history: "unconfirmed", messageId: 2, execution: 3 }],
-          [5, "inbox.enqueued", { sender: agent, content: "later", senderExecutionId: 2, requestId: "s-1" }],
-          [6, "inbox.delivery_started", { messageId: 5 }],
-          [7, "inbox.enqueued", { sender: agent, content: "no execution" }],
-          [8, "inbox.unresolved", { history: "delivered_without_execution", messageId: 7 }],
-          [9, "inbox.enqueued", { sender: agent, content: "broke" }],
-          [10, "inbox.unresolved", { history: "failed_unspecified", messageId: 9 }],
-          [11, "inbox.enqueued", { sender: agent, content: "waiting" }],
-          [12, "inbox.dropped", { messageId: 11, reason: "unrecorded" }],
+          [2, "session.inbox.enqueued", { sender: agent, content: "review", requestId: "run-1" }],
+          [4, "session.inbox.dropped", { messageId: 2, reason: "unconfirmed" }],
+          [5, "session.inbox.enqueued", { sender: agent, content: "later", senderExecutionId: 2, requestId: "s-1" }],
+          [6, "session.inbox.delivering", { messageId: 5 }],
+          [7, "session.inbox.enqueued", { sender: agent, content: "no execution" }],
+          [8, "session.inbox.dropped", { messageId: 7, reason: "delivered_without_execution" }],
+          [9, "session.inbox.enqueued", { sender: agent, content: "broke" }],
+          [10, "session.inbox.failed", { messageId: 9, reason: "unrecorded" }],
+          [11, "session.inbox.enqueued", { sender: agent, content: "waiting" }],
+          [12, "session.inbox.dropped", { messageId: 11, reason: "unrecorded" }],
           [
             13,
-            "inbox.unresolved",
-            { history: "route", sender: agent, content: "routed", transferId: "item-1", requestId: "route-1" },
+            "session.inbox.enqueued",
+            { sender: agent, content: "routed", transferId: "item-1", requestId: "route-1" },
           ],
-          [15, "inbox.enqueued", { sender: agent, content: "booked" }],
-          [16, "inbox.unresolved", { history: "unconfirmed", messageId: 15, execution: 99 }],
+          [14, "session.inbox.dropped", { messageId: 13, reason: "route" }],
+          [15, "session.inbox.enqueued", { sender: agent, content: "booked" }],
+          [16, "session.inbox.dropped", { messageId: 15, reason: "unconfirmed" }],
         ],
       )
       assert.deepStrictEqual(
@@ -168,7 +170,7 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
         [
           {
             id: 2,
-            status: "unresolved",
+            status: "dropped",
             request: "run-1",
             transferId: null,
             senderExecutionId: null,
@@ -184,7 +186,7 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
           },
           {
             id: 7,
-            status: "unresolved",
+            status: "dropped",
             request: null,
             transferId: null,
             senderExecutionId: null,
@@ -192,7 +194,7 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
           },
           {
             id: 9,
-            status: "unresolved",
+            status: "failed",
             request: null,
             transferId: null,
             senderExecutionId: null,
@@ -208,7 +210,7 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
           },
           {
             id: 13,
-            status: "unresolved",
+            status: "dropped",
             request: "route-1",
             transferId: "item-1",
             senderExecutionId: null,
@@ -216,7 +218,7 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
           },
           {
             id: 15,
-            status: "unresolved",
+            status: "dropped",
             request: null,
             transferId: null,
             senderExecutionId: null,
@@ -228,16 +230,12 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
         { id: B, messageId: 2 },
       ])
       assert.deepStrictEqual(
-        yield* read(file, (sql) => sql`SELECT seq, type FROM event WHERE aggregate = ${R} AND seq = 5`),
-        [{ seq: 5, type: "inbox.unresolved" }],
-      )
-      assert.deepStrictEqual(
         yield* read(file, (sql) => sql`SELECT id, status FROM inbox WHERE recipient_session_id = ${R}`),
-        [{ id: 3, status: "pending" }],
+        [{ id: 2, status: "pending" }],
       )
       assert.deepStrictEqual(
         yield* read(file, (sql) => sql`SELECT max(seq) AS seq FROM event WHERE aggregate = ${R}`),
-        [{ seq: 5 }],
+        [{ seq: 2 }],
       )
 
       const next = yield* Effect.gen(function* () {
@@ -255,7 +253,7 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
         ),
       )
 
-      assert.strictEqual(next?.id, 6)
+      assert.strictEqual(next?.id, 3)
       assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${E}`), [
         { messageId: null },
       ])
@@ -264,14 +262,14 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
           file,
           (sql) => sql`SELECT id, status, recipient_execution_id FROM inbox WHERE recipient_session_id = ${E}`,
         ),
-        [{ id: 5, status: "unresolved", recipientExecutionId: null }],
+        [{ id: 5, status: "dropped", recipientExecutionId: null }],
       )
       assert.deepStrictEqual(
         yield* read(
           file,
           (sql) => sql`SELECT status, recipient_execution_id FROM inbox WHERE recipient_session_id = ${C}`,
         ),
-        [{ status: "unresolved", recipientExecutionId: null }],
+        [{ status: "dropped", recipientExecutionId: null }],
       )
       assert.deepStrictEqual(yield* read(file, (sql) => sql`SELECT message_id FROM session WHERE id = ${C}`), [
         { messageId: 2 },
@@ -281,7 +279,7 @@ describe("ledger migration 20261121000000_inbox_v1", () => {
       ])
       assert.deepStrictEqual(
         yield* read(file, (sql) => sql`SELECT status FROM inbox WHERE recipient_session_id = ${L}`),
-        [{ status: "unresolved" }],
+        [{ status: "dropped" }],
       )
 
       const retry = yield* Effect.gen(function* () {

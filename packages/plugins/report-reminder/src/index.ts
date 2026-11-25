@@ -28,9 +28,9 @@ export default Plugin.define({
       })
 
     return Effect.gen(function* () {
-      yield* ctx.event.subscribe({ types: ["execution.succeeded"] }).pipe(
+      yield* ctx.event.subscribe({ types: ["session.execution.succeeded"] }).pipe(
         Stream.runForEach((fact) =>
-          fact.type !== "execution.succeeded" || fact.sessionId === undefined
+          fact.type !== "session.execution.succeeded" || fact.sessionId === undefined
             ? Effect.void
             : ended(fact.sessionId, fact.data.executionId),
         ),

@@ -36,7 +36,7 @@ describe("ledger migration 20261124030000_drop_project_entry", () => {
 
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* sql`DELETE FROM migration WHERE id = ${MIGRATION}`
+          yield* sql`DELETE FROM migration WHERE id >= ${MIGRATION}`
           yield* sql`UPDATE meta SET value = '12' WHERE key = 'catalog'`
 
           for (const [aggregate, seq, type, data] of oldFacts)
@@ -64,7 +64,7 @@ describe("ledger migration 20261124030000_drop_project_entry", () => {
         `
 
           const endedRows = yield* sql<{ aggregate: string; data: string }>`
-          SELECT aggregate, data FROM event WHERE type = 'session.ended'
+          SELECT aggregate, data FROM event WHERE type = 'session.archived'
         `
 
           return { projectEvents, endedRows }
@@ -75,7 +75,7 @@ describe("ledger migration 20261124030000_drop_project_entry", () => {
           { seq: 2, type: "project.moved" },
         ])
 
-        assert.deepStrictEqual(endedRows, [{ aggregate: S1, data: JSON.stringify({ reason: "archived" }) }])
+        assert.deepStrictEqual(endedRows, [{ aggregate: S1, data: JSON.stringify({}) }])
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

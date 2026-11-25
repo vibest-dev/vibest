@@ -49,7 +49,7 @@ export const SessionCreated = fact("session.created", "session", {
 
 export const SessionRenamed = fact("session.renamed", "session", { name: Text })
 export const SessionDirectoryChanged = fact("session.directory_changed", "session", { directory: Text })
-export const SessionEnded = fact("session.ended", "session", { reason: Schema.Literal("archived") })
+export const SessionArchived = fact("session.archived", "session", {})
 export const SessionLinked = fact("session.linked", "session", { to: Text, remote: optional(Text) })
 export const SessionUnlinked = fact("session.unlinked", "session", { to: Text, remote: optional(Text) })
 
@@ -64,10 +64,11 @@ export const ProcessStarted = fact("process.started", "session", {
   pid: optional(Pid),
 })
 
-export const ProcessPlaced = fact("process.placed", "session", {
+export const ProcessUpdated = fact("process.updated", "session", {
   process: Seq,
-  terminal: TerminalTarget,
+  terminal: optional(TerminalTarget),
   pid: optional(Pid),
+  conversation: optional(Text),
 })
 
 export const ProcessReady = fact("process.ready", "session", {
@@ -75,9 +76,6 @@ export const ProcessReady = fact("process.ready", "session", {
   pid: optional(Pid),
   integration: optional(Schema.Struct({ version: Text, protocol: Schema.Int })),
 })
-
-export const ProcessPid = fact("process.pid", "session", { process: Seq, pid: Pid })
-export const ProcessConversation = fact("process.conversation", "session", { process: Seq, conversation: Text })
 
 export const AgentFrom = Schema.Struct({
   session: Schema.String,
@@ -137,61 +135,47 @@ export const ExecutionFailure = Schema.Struct({
 
 export type ExecutionFailure = typeof ExecutionFailure.Type
 
-export const ExecutionAllocated = fact("execution.allocated", "session", {
+export const ExecutionAllocated = fact("session.execution.allocated", "session", {
   executionId: Seq,
   processId: optional(Seq),
   typed: optional(Text),
 })
 
-export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
-
-export const ExecutionStarted = fact("execution.started", "session", {
+export const ExecutionStarted = fact("session.execution.started", "session", {
   executionId: Seq,
   processId: optional(Seq),
 })
 
-export const ExecutionSucceeded = fact("execution.succeeded", "session", {
+export const ExecutionSucceeded = fact("session.execution.succeeded", "session", {
   executionId: Seq,
   reply: optional(Schema.String),
 })
 
-export const ExecutionFailed = fact("execution.failed", "session", {
+export const ExecutionFailed = fact("session.execution.failed", "session", {
   executionId: Seq,
   failure: ExecutionFailure,
   reply: optional(Schema.String),
 })
 
-export const ExecutionInterrupted = fact("execution.interrupted", "session", {
+export const ExecutionInterrupted = fact("session.execution.interrupted", "session", {
   executionId: Seq,
   reason: optional(Text),
   reply: optional(Schema.String),
 })
 
-export const ExecutionUnresolved = fact("execution.unresolved", "session", {
+export const ExecutionUnresolved = fact("session.execution.unresolved", "session", {
   executionId: Seq,
   observation: ExecutionObservation,
   failure: optional(ExecutionFailure),
   reply: optional(Schema.String),
 })
 
-export const ExecutionInput = fact("execution.input", "session", {
+export const ExecutionInput = fact("session.execution.input", "session", {
   executionId: Seq,
   typed: Text,
 })
 
-export const InboxHistory = Schema.Literals([
-  "route",
-  "delivered_without_execution",
-  "failed_unspecified",
-  "unconfirmed",
-  "released",
-])
-
-export type InboxHistory = typeof InboxHistory.Type
-
-export const UnrecordedDrop = "unrecorded"
-
-export const InboxEnqueued = fact("inbox.enqueued", "session", {
+export const InboxEnqueued = fact("session.inbox.enqueued", "session", {
   sender: Sender,
   content: Schema.String,
   senderExecutionId: optional(Seq),
@@ -200,36 +184,24 @@ export const InboxEnqueued = fact("inbox.enqueued", "session", {
   aboutSessionId: optional(Text),
 })
 
-export const InboxDeliveryStarted = fact("inbox.delivery_started", "session", {
+export const InboxDelivering = fact("session.inbox.delivering", "session", {
   messageId: Seq,
   execution: optional(Seq),
 })
 
-export const InboxDelivered = fact("inbox.delivered", "session", {
+export const InboxDelivered = fact("session.inbox.delivered", "session", {
   messageId: Seq,
   recipientExecutionId: Seq,
 })
 
-export const InboxDeliveryFailed = fact("inbox.delivery_failed", "session", {
+export const InboxFailed = fact("session.inbox.failed", "session", {
   messageId: Seq,
   reason: Text,
 })
 
-export const InboxDropped = fact("inbox.dropped", "session", {
+export const InboxDropped = fact("session.inbox.dropped", "session", {
   messageId: Seq,
   reason: Text,
-})
-
-export const InboxUnresolved = fact("inbox.unresolved", "session", {
-  history: InboxHistory,
-  messageId: optional(Seq),
-  execution: optional(Seq),
-  sender: optional(Sender),
-  content: optional(Schema.String),
-  senderExecutionId: optional(Seq),
-  requestId: optional(Text),
-  transferId: optional(Text),
-  aboutSessionId: optional(Text),
 })
 
 export const MachineAdded = fact("machine.added", "ledger", { name: Text, target: Text, remote: Text })
@@ -238,7 +210,7 @@ export const MachineRemoved = fact("machine.removed", "ledger", { name: Text })
 
 export const RemoteSeen = fact("remote.seen", "ledger", { id: Text, name: Text })
 
-export const OutboxQueued = fact("outbox.queued", "ledger", {
+export const OutboxQueued = fact("remote.outbox.queued", "ledger", {
   id: Text,
   remote: Text,
   session: Text,
@@ -249,26 +221,22 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   execution: optional(Seq),
 })
 
-export const OutboxAcked = fact("outbox.acked", "ledger", { remote: Text, ids: Schema.NonEmptyArray(Text) })
+export const OutboxAcked = fact("remote.outbox.acked", "ledger", { remote: Text, ids: Schema.NonEmptyArray(Text) })
 
-export const Catalog = {
+export const PublicCatalog = {
   [ProjectCreated.type]: ProjectCreated,
   [ProjectMoved.type]: ProjectMoved,
   [ProjectRepositoriesChanged.type]: ProjectRepositoriesChanged,
   [SessionCreated.type]: SessionCreated,
   [SessionRenamed.type]: SessionRenamed,
   [SessionDirectoryChanged.type]: SessionDirectoryChanged,
-  [SessionEnded.type]: SessionEnded,
+  [SessionArchived.type]: SessionArchived,
   [SessionLinked.type]: SessionLinked,
   [SessionUnlinked.type]: SessionUnlinked,
   [ProcessStarted.type]: ProcessStarted,
-  [ProcessPlaced.type]: ProcessPlaced,
   [ProcessReady.type]: ProcessReady,
-  [ProcessPid.type]: ProcessPid,
-  [ProcessConversation.type]: ProcessConversation,
   [ProcessEnded.type]: ProcessEnded,
   [ExecutionAllocated.type]: ExecutionAllocated,
-  [ExecutionAccepted.type]: ExecutionAccepted,
   [ExecutionStarted.type]: ExecutionStarted,
   [ExecutionSucceeded.type]: ExecutionSucceeded,
   [ExecutionFailed.type]: ExecutionFailed,
@@ -276,14 +244,18 @@ export const Catalog = {
   [ExecutionUnresolved.type]: ExecutionUnresolved,
   [ExecutionInput.type]: ExecutionInput,
   [InboxEnqueued.type]: InboxEnqueued,
-  [InboxDeliveryStarted.type]: InboxDeliveryStarted,
   [InboxDelivered.type]: InboxDelivered,
-  [InboxDeliveryFailed.type]: InboxDeliveryFailed,
+  [InboxFailed.type]: InboxFailed,
   [InboxDropped.type]: InboxDropped,
-  [InboxUnresolved.type]: InboxUnresolved,
   [MachineAdded.type]: MachineAdded,
-  [MachineConnected.type]: MachineConnected,
   [MachineRemoved.type]: MachineRemoved,
+} as const
+
+export const Catalog = {
+  ...PublicCatalog,
+  [ProcessUpdated.type]: ProcessUpdated,
+  [InboxDelivering.type]: InboxDelivering,
+  [MachineConnected.type]: MachineConnected,
   [RemoteSeen.type]: RemoteSeen,
   [OutboxQueued.type]: OutboxQueued,
   [OutboxAcked.type]: OutboxAcked,
@@ -295,7 +267,7 @@ type Defined = (typeof Catalog)[keyof typeof Catalog]
 
 export type FactType = Defined["type"]
 
-export const CATALOG_VERSION = 15
+export const CATALOG_VERSION = 16
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {
@@ -310,6 +282,14 @@ export type Fact = {
 }[FactType]
 
 export type FactOf<T extends FactType> = Extract<Fact, { readonly type: T }>
+
+type PublicDefined = (typeof PublicCatalog)[keyof typeof PublicCatalog]
+
+export type PublicFactType = PublicDefined["type"]
+
+export type PublicFact = Extract<Fact, { readonly type: PublicFactType }>
+
+export type PublicFactOf<T extends PublicFactType> = Extract<PublicFact, { readonly type: T }>
 
 export interface Row {
   readonly aggregate: string

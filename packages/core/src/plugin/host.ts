@@ -1,5 +1,5 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
-import { Catalog, type FactOf, type FactType } from "@vibest/schema/event"
+import { PublicCatalog, type PublicFactOf, type PublicFactType } from "@vibest/schema/event"
 import { Effect, Predicate, type Scope, Stream } from "effect"
 
 import { Agents } from "../agents.ts"
@@ -20,11 +20,11 @@ type SessionRegistrations = {
   ) => Effect.Effect<VibestPlugin.Registration, never, Scope.Scope>
 }
 
-const factsFor =
+export const factsFor =
   (bus: Bus.Interface, plugin: string): VibestPlugin.EventDomain["subscribe"] =>
-  <T extends FactType>(input?: { readonly types?: ReadonlyArray<T> }) => {
+  <T extends PublicFactType>(input?: { readonly types?: ReadonlyArray<T> }) => {
     const asked: ReadonlyArray<T> = input?.types ?? []
-    const known = new Set(asked.filter((type) => Object.hasOwn(Catalog, type)))
+    const known = new Set(asked.filter((type) => Object.hasOwn(PublicCatalog, type)))
     const unknown = asked.filter((type) => !known.has(type))
 
     const warned =
@@ -34,11 +34,11 @@ const factsFor =
 
     if (asked.length > 0 && known.size === 0) return Stream.unwrap(Effect.as(warned, Stream.never))
 
-    const definitions: ReadonlyArray<{ readonly type: FactType }> =
-      known.size === 0 ? Object.values(Catalog) : [...known].map((type) => ({ type }))
+    const definitions: ReadonlyArray<{ readonly type: PublicFactType }> =
+      known.size === 0 ? Object.values(PublicCatalog) : [...known].map((type) => ({ type }))
 
     const wanted: ReadonlySet<string> = new Set(definitions.map((definition) => definition.type))
-    const isWanted = (event: Bus.BusEvent): event is FactOf<T> => wanted.has(event.type)
+    const isWanted = (event: Bus.BusEvent): event is PublicFactOf<T> => wanted.has(event.type)
 
     return Stream.unwrap(
       Effect.andThen(

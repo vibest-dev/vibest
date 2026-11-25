@@ -18,7 +18,7 @@ export const ExecutionState = Schema.Literals([
 
 export type ExecutionState = typeof ExecutionState.Type
 
-export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped", "unresolved"])
+export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped"])
 
 export type InboxStatus = typeof InboxStatus.Type
 

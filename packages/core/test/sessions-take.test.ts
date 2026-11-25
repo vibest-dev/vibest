@@ -56,7 +56,7 @@ const acceptedFacts = (session: string) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>
     sql<{
       n: number
-    }>`SELECT COUNT(*) AS n FROM event WHERE type = 'execution.started' AND aggregate LIKE ${`%${session}%`}`.pipe(
+    }>`SELECT COUNT(*) AS n FROM event WHERE type = 'session.execution.started' AND aggregate LIKE ${`%${session}%`}`.pipe(
       Effect.orDie,
       Effect.map((rows) => rows[0]!.n),
     ),

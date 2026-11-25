@@ -308,7 +308,14 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       ),
 
       noteRemote: Effect.fn("Db.remote.noteRemote")((row: { readonly id: string; readonly name: string }) =>
-        tx(publish(RemoteSeen, { data: { id: row.id, name: row.name } })).pipe(Effect.asVoid, Effect.orDie),
+        tx(
+          Effect.gen(function* () {
+            const rows = yield* sql<{ name: string }>`SELECT name FROM remote WHERE id = ${row.id}`
+
+            if (rows[0]?.name === row.name) return
+            yield* publish(RemoteSeen, { data: { id: row.id, name: row.name } })
+          }),
+        ).pipe(Effect.orDie),
       ),
 
       senderOf: Effect.fn("Db.remote.senderOf")((sessionId: string) => remote.senderOf(sessionId).pipe(Effect.orDie)),

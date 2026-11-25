@@ -349,10 +349,10 @@ export const make = Effect.gen(function* () {
             : yield* awaitEvent(
                 Effect.map(settled, (done) => (done ? Option.some(true) : Option.none())),
                 (event) =>
-                  (event.type === "execution.interrupted" ||
-                    event.type === "execution.succeeded" ||
-                    event.type === "execution.failed" ||
-                    event.type === "execution.unresolved") &&
+                  (event.type === "session.execution.interrupted" ||
+                    event.type === "session.execution.succeeded" ||
+                    event.type === "session.execution.failed" ||
+                    event.type === "session.execution.unresolved") &&
                   event.sessionId === id
                     ? Effect.map(settled, (done) => (done ? Option.some(true) : Option.none()))
                     : Effect.succeed(Option.none()),

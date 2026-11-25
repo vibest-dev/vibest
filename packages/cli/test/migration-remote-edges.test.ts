@@ -33,7 +33,7 @@ describe("ledger migration 20261124020000_remote_and_cross_machine_edges", () =>
         const [ledgerRow] = yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`
         const ledger = ledgerRow!.value
 
-        yield* sql`DELETE FROM migration WHERE id = ${MIGRATION}`
+        yield* sql`DELETE FROM migration WHERE id >= ${MIGRATION}`
         yield* sql`UPDATE meta SET value = '12' WHERE key = 'catalog'`
 
         const legacyFacts = [

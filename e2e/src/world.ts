@@ -821,14 +821,14 @@ export const expectFacts = (w: World, sessionId: string, expected: ReadonlyArray
 
 export const expectReplied = async (w: World, sub: string) => {
   expectFacts(w, sub, [
-    "inbox.enqueued",
+    "session.inbox.enqueued",
     "session.created",
     "process.started",
-    "execution.allocated",
-    "inbox.delivery_started",
-    "process.placed",
-    "execution.started",
-    "execution.succeeded",
+    "session.execution.allocated",
+    "session.inbox.delivering",
+    "process.updated",
+    "session.execution.started",
+    "session.execution.succeeded",
   ])
 
   const task = row<{ status: string; execution: number | null }>(

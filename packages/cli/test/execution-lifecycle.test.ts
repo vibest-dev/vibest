@@ -96,7 +96,7 @@ const oldLedger = Effect.gen(function* () {
   yield* Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [ledger] = yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`
-    yield* sql`DELETE FROM migration WHERE id IN ('20261121000000_inbox_v1', ${MIGRATION})`
+    yield* sql`DELETE FROM migration WHERE id >= '20261121000000_inbox_v1'`
     yield* sql`UPDATE meta SET value = '5' WHERE key = 'catalog'`
 
     for (const [aggregate, seq, type, data] of oldFacts(ledger!.value))
@@ -162,7 +162,7 @@ describe("execution lifecycle", () => {
         "lost",
       )
       assert.strictEqual(
-        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'execution.interrupted'`)[0]?.n,
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'session.execution.interrupted'`)[0]?.n,
         0,
       )
     }).pipe(Effect.provide(memoryDb())),
@@ -187,12 +187,12 @@ describe("execution lifecycle", () => {
         const bus = yield* Bus.Service
         yield* bus.transaction(
           Effect.gen(function* () {
-            yield* bus.publish(Catalog["execution.allocated"], {
+            yield* bus.publish(Catalog["session.execution.allocated"], {
               sessionId: S,
               at: 40,
               data: { executionId: successor },
             })
-            yield* bus.publish(Catalog["execution.started"], {
+            yield* bus.publish(Catalog["session.execution.started"], {
               sessionId: S,
               at: 41,
               data: { executionId: successor },
@@ -226,7 +226,7 @@ describe("execution lifecycle", () => {
         assert.strictEqual(
           (yield* sql<{
             n: number
-          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'execution.succeeded'`)[0]?.n,
+          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'session.execution.succeeded'`)[0]?.n,
           2,
         )
       }).pipe(Effect.provide(memoryDb())),
@@ -243,14 +243,14 @@ describe("execution lifecycle", () => {
       assert.strictEqual(
         (yield* sql<{
           n: number
-        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'execution.succeeded'`)[0]?.n,
+        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'session.execution.succeeded'`)[0]?.n,
         1,
       )
 
       const again = (yield* db.session.startExecution(S, 8)).execution
       const bus = yield* Bus.Service
       yield* bus.transaction(
-        bus.publish(Catalog["outbox.queued"], {
+        bus.publish(Catalog["remote.outbox.queued"], {
           at: 9,
           data: {
             id: "66666666-6666-4666-8666-666666666661",
@@ -264,7 +264,7 @@ describe("execution lifecycle", () => {
       )
       assert.strictEqual(yield* db.inbox.sentIn(S, again), 1)
       yield* bus.transaction(
-        bus.publish(Catalog["outbox.queued"], {
+        bus.publish(Catalog["remote.outbox.queued"], {
           at: 10,
           data: {
             id: "66666666-6666-4666-8666-666666666662",
@@ -304,7 +304,7 @@ describe("execution lifecycle", () => {
       assert.strictEqual(
         (yield* sql<{
           n: number
-        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'execution.succeeded'`)[0]?.n,
+        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'session.execution.succeeded'`)[0]?.n,
         0,
       )
       assert.deepStrictEqual(
@@ -347,7 +347,7 @@ describe("execution lifecycle", () => {
         assert.strictEqual(
           (yield* sql<{
             n: number
-          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'execution.succeeded'`)[0]?.n,
+          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'session.execution.succeeded'`)[0]?.n,
           0,
         )
 
@@ -413,7 +413,7 @@ describe("execution lifecycle", () => {
       }).pipe(Effect.provide(memoryDb())),
   )
 
-  it.effect("a trailing accepted fact keeps its sequence through migration and the next append", () =>
+  it.effect("a trailing accepted fact is dropped by clean_event_catalog and the next append continues densely", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path
       const file = path.join(yield* tempDirectory("vibest-execution-accepted-"), "vibest.db")
@@ -421,7 +421,7 @@ describe("execution lifecycle", () => {
       const accepted = 5
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        yield* sql`DELETE FROM migration WHERE id IN ('20261121000000_inbox_v1', ${MIGRATION})`
+        yield* sql`DELETE FROM migration WHERE id >= '20261121000000_inbox_v1'`
         yield* sql`UPDATE meta SET value = '5' WHERE key = 'catalog'`
 
         const facts = [
@@ -441,15 +441,15 @@ describe("execution lifecycle", () => {
         const sql = yield* SqlClient.SqlClient
         const bus = yield* Bus.Service
 
-        const [row] = yield* sql<{ seq: number; data: string }>`SELECT seq, data FROM event
+        const acceptedRows = yield* sql<{ seq: number }>`SELECT seq FROM event
           WHERE aggregate = ${S} AND type = 'execution.accepted'`
 
-        assert.deepStrictEqual(row, { seq: accepted, data: JSON.stringify({ execution: 3 }) })
+        assert.deepStrictEqual(acceptedRows, [])
         yield* bus.transaction(
           bus.publish(Catalog["session.renamed"], { sessionId: S, at: 9, data: { name: "later" } }),
         )
         const [next] = yield* sql<{ seq: number }>`SELECT max(seq) AS seq FROM event WHERE aggregate = ${S}`
-        assert.strictEqual(next?.seq, accepted + 1)
+        assert.strictEqual(next?.seq, 4)
       }).pipe(
         Effect.provide(
           Db.layer.pipe(
@@ -509,19 +509,18 @@ describe("execution lifecycle", () => {
         assert.strictEqual(sent[0]?.sent, 2)
 
         const names = yield* read<{ type: string }>(
-          "SELECT type FROM event WHERE type LIKE 'execution.%' ORDER BY position",
+          "SELECT type FROM event WHERE type LIKE 'session.execution.%' ORDER BY position",
         )
 
         assert.deepStrictEqual(
           names.map((row) => row.type),
           [
-            "execution.allocated",
-            "execution.accepted",
-            "execution.succeeded",
-            "execution.allocated",
-            "execution.unresolved",
-            "execution.allocated",
-            "execution.unresolved",
+            "session.execution.allocated",
+            "session.execution.succeeded",
+            "session.execution.allocated",
+            "session.execution.unresolved",
+            "session.execution.allocated",
+            "session.execution.unresolved",
           ],
         )
 

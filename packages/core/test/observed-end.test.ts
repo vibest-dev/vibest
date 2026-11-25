@@ -28,10 +28,10 @@ const ends = (id: string) =>
   eventsOf(id).pipe(
     Effect.map((rows) =>
       rows.flatMap((row) =>
-        row.type === "execution.succeeded" ||
-        row.type === "execution.failed" ||
-        row.type === "execution.interrupted" ||
-        row.type === "execution.unresolved"
+        row.type === "session.execution.succeeded" ||
+        row.type === "session.execution.failed" ||
+        row.type === "session.execution.interrupted" ||
+        row.type === "session.execution.unresolved"
           ? [row.data]
           : [],
       ),

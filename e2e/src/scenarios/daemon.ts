@@ -283,7 +283,9 @@ const checks: ReadonlyArray<Check> = [
           () =>
             lines().filter(
               (f) =>
-                f.type === "execution.succeeded" || f.type === "execution.failed" || f.type === "execution.interrupted",
+                f.type === "session.execution.succeeded" ||
+                f.type === "session.execution.failed" ||
+                f.type === "session.execution.interrupted",
             ).length >= 2,
           60_000,
         )

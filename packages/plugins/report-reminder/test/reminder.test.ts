@@ -12,7 +12,7 @@ const succeeded = (execution: number) => ({
   seq: execution + 1,
   at: 0,
   sessionId: S,
-  type: "execution.succeeded" as const,
+  type: "session.execution.succeeded" as const,
   data: { executionId: execution },
 })
 
@@ -21,7 +21,7 @@ const failed = (execution: number) => ({
   seq: execution + 1,
   at: 0,
   sessionId: S,
-  type: "execution.failed" as const,
+  type: "session.execution.failed" as const,
   data: { executionId: execution, failure: { message: "failed" } },
 })
 

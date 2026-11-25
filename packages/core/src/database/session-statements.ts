@@ -9,13 +9,12 @@ import {
   ExecutionUnresolved,
   type ExecutionFailure,
   type ExecutionObservation,
-  ProcessConversation,
   ProcessEnded,
   type ProcessEndReason,
   type Sender,
-  ProcessPlaced,
   ProcessStarted,
-  SessionEnded,
+  ProcessUpdated,
+  SessionArchived,
   SessionRenamed,
 } from "@vibest/schema/event"
 import { newId, sessionLabel } from "@vibest/schema/id"
@@ -273,7 +272,7 @@ export const statements = Effect.gen(function* () {
       const live = yield* liveProcess(id)
 
       if (live === undefined || live.terminal !== null) return undefined
-      yield* publish(ProcessPlaced, {
+      yield* publish(ProcessUpdated, {
         sessionId: id,
         ...(at !== undefined && { at }),
         data: { process: live.id, terminal, ...(pid !== undefined && { pid }) },
@@ -291,7 +290,7 @@ export const statements = Effect.gen(function* () {
         yield* placeProcess(id, start.terminal, start.pid, at)
 
         if (start.resume && start.resume !== live.harnessSessionId)
-          yield* publish(ProcessConversation, {
+          yield* publish(ProcessUpdated, {
             sessionId: id,
             ...stamp,
             data: { process: live.id, conversation: start.resume },
@@ -329,7 +328,7 @@ export const statements = Effect.gen(function* () {
 
       if (live !== undefined && live.terminal === null && sameChoice(live, start)) {
         if (start.resume && start.resume !== live.harnessSessionId)
-          yield* publish(ProcessConversation, { sessionId: id, data: { process: live.id, conversation: start.resume } })
+          yield* publish(ProcessUpdated, { sessionId: id, data: { process: live.id, conversation: start.resume } })
 
         return live.id
       }
@@ -357,7 +356,7 @@ export const statements = Effect.gen(function* () {
       const [row] = yield* sql<{ endedAt: number | null }>`SELECT ended_at FROM session WHERE id = ${id}`
 
       if (row === undefined || row.endedAt !== null) return false
-      yield* publish(SessionEnded, { sessionId: id, data: { reason: "archived" } })
+      yield* publish(SessionArchived, { sessionId: id, data: {} })
       yield* afterCommitLive(sessionLive.ended(id))
 
       return true
@@ -370,7 +369,7 @@ export const statements = Effect.gen(function* () {
       if (current === undefined || current.harnessSessionId === conversation) return false
 
       if (process !== undefined && process !== current.id) return false
-      yield* publish(ProcessConversation, { sessionId: id, data: { process: current.id, conversation } })
+      yield* publish(ProcessUpdated, { sessionId: id, data: { process: current.id, conversation } })
 
       return true
     })
