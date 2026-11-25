@@ -1,5 +1,7 @@
 {
   "layout:vibest": {
-    "ctrl-tab": "vibest-projects.recent"
+    "ctrl-tab": "vibest-projects.recent",
+    "cmd-w": "vibest-projects.close-tab",
+    "cmd-shift-w": "vibest-projects.close-pane"
   }
 }

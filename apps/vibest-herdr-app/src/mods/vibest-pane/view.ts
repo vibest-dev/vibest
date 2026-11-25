@@ -3,6 +3,7 @@ import { type Color, div, type Element, image, svg } from "gpui-kit"
 import { type PaneInfo, run } from "herdr"
 
 import { CONTENT, HEADER_X } from "../../shared/metrics.ts"
+import { isProjectTab } from "../../shared/project-space.ts"
 import { SMALL, TEXT } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import { paneName, shortFolder } from "./header.ts"
@@ -73,6 +74,6 @@ export const paneHeader = (t: Theme, p: PaneInfo, home: string): Element => {
         .child(button(t, `ph-r-${pane}`, "split-right", "pane.split", { direction: "right", pane }))
         .child(button(t, `ph-d-${pane}`, "split-down", "pane.split", { direction: "down", pane }))
         .child(button(t, `ph-z-${pane}`, p.zoomed ? "unzoom" : "zoom", "pane.zoom", { pane }))
-        .child(button(t, `ph-x-${pane}`, "close", "pane.close", { pane })),
+        .when(!isProjectTab(p.tab), (row) => row.child(button(t, `ph-x-${pane}`, "close", "pane.close", { pane }))),
     )
 }

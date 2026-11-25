@@ -30,6 +30,8 @@ export default class Agents extends View {
   render(): Element {
     const state = this.feed.state
 
-    return agentsView(themeColors(), shownGroup(projectGroups(state), selectedProject()), state, this.now)
+    const groups = projectGroups(state)
+
+    return agentsView(themeColors(), shownGroup(groups, selectedProject(groups)), state, this.now)
   }
 }

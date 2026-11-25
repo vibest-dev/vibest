@@ -12,9 +12,6 @@ const BAR = 32
 const PANE_HEADER = 24
 const BARS = ["topbar", "sidebar-header"]
 export const LEFT_GUTTER = "left-gutter"
-export const MAIN = "main"
-const CHAT = "chat"
-const TABS = "terminals"
 
 export interface Metrics {
   readonly bar: number
@@ -57,28 +54,7 @@ interface MutableLayoutNode {
   children?: readonly LayoutNode[]
 }
 
-export interface Chats {
-  readonly shown: string | null
-  readonly kept: readonly string[]
-}
-
-const chatId = (terminal: string): string => `${CHAT}-${terminal.replaceAll(/[^0-9a-z]/gi, "-")}`
-
-export const mainChild = (chat: string | null): string => (chat ? chatId(chat) : TABS)
-
-const chatBlocks = (main: LayoutNode, kept: readonly string[]): LayoutNode[] => {
-  const children = main.children ?? []
-  const template = children.find((c) => c.id === CHAT)
-
-  if (!template) return [...children]
-
-  return [
-    ...children.filter((c) => !c.id?.startsWith(`${CHAT}-`)),
-    ...kept.map((terminal) => ({ ...template, id: chatId(terminal), content: { terminal } })),
-  ]
-}
-
-const resize = (node: LayoutNode, m: Metrics, sidebarHidden: boolean, chats: Chats): LayoutNode => {
+const resize = (node: LayoutNode, m: Metrics, sidebarHidden: boolean): LayoutNode => {
   const pane = node.content?.pane
   const next: MutableLayoutNode = { ...node }
 
@@ -94,29 +70,18 @@ const resize = (node: LayoutNode, m: Metrics, sidebarHidden: boolean, chats: Cha
     next.hidden = !sidebarHidden
   }
 
-  if (node.id === MAIN) {
-    next.active = mainChild(chats.shown)
-    next.children = chatBlocks(node, chats.kept)
-
-    return next
-  }
-
   if (node.children) {
-    next.children = node.children.map((c) => resize(c, m, sidebarHidden, chats))
+    next.children = node.children.map((c) => resize(c, m, sidebarHidden))
   }
 
   return next
 }
 
-export const fitLayout = (
-  layout: LayoutNode | null | undefined,
-  m: Metrics,
-  chats: Chats = { shown: null, kept: [] },
-): LayoutNode | null => {
+export const fitLayout = (layout: LayoutNode | null | undefined, m: Metrics): LayoutNode | null => {
   if (!layout?.children) return null
 
   const next = {
-    ...resize(layout, m, Boolean(findNode(layout, "sidebar")?.hidden), chats),
+    ...resize(layout, m, Boolean(findNode(layout, "sidebar")?.hidden)),
     traffic_lights: m.lights,
     terminal_padding: [CONTENT, CONTENT],
   }

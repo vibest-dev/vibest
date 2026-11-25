@@ -1,13 +1,19 @@
 import { type AsyncContext, type Context, type Element, View } from "gpui-kit"
-import { checking, nextCommand } from "herdr"
+import { checking, focused, nextCommand, run } from "herdr"
 
 import { projectGroups } from "../../shared/project-groups.ts"
-import { followProject, openProject, previousProject, restoreChat, selectedProject } from "../../shared/session-ui.ts"
+import { isProjectTab } from "../../shared/project-space.ts"
+import { followProjects, openProject, previousProject, selectedProject } from "../../shared/session-ui.ts"
 import { themeColors } from "../../shared/theme-colors.ts"
 import { VibestFeed } from "../../shared/vibest-source.ts"
 import { type ProjectsUi, ProjectsView } from "./view.ts"
 
 const CLOCK_MS = 30_000
+
+const CLOSE = new Map([
+  ["close-tab", "tab.close"],
+  ["close-pane", "pane.close"],
+])
 
 export default class Projects extends View implements ProjectsUi {
   hovered: string | null
@@ -23,10 +29,9 @@ export default class Projects extends View implements ProjectsUi {
     if (checking()) return
 
     this.feed.start(cx)
-    restoreChat()
 
     cx.spawn(async (task) => {
-      for (;;) if ((await nextCommand()) === "recent") this.openRecent(task)
+      for (;;) this.command(await nextCommand(), task)
     })
 
     cx.timer.every(CLOCK_MS, (ticked) => {
@@ -35,11 +40,19 @@ export default class Projects extends View implements ProjectsUi {
     })
   }
 
+  command(name: string, cx: Context): void {
+    if (name === "recent") return this.openRecent(cx)
+
+    const close = CLOSE.get(name)
+
+    if (close && !isProjectTab(focused()?.tab)) run(close)
+  }
+
   openRecent(cx: Context): void {
     const g = projectGroups(this.feed.state).find((group) => group.key === previousProject())
     const first = g?.members[0]
 
-    if (g && first) openProject(g.key, first, cx)
+    if (g && first) openProject(g.key, g.label, first, cx)
   }
 
   hover(id: string) {
@@ -55,9 +68,9 @@ export default class Projects extends View implements ProjectsUi {
     const state = this.feed.state
     const groups = projectGroups(state)
 
-    this.selected = selectedProject()
+    this.selected = selectedProject(groups)
 
-    if (!checking()) followProject(groups)
+    if (!checking()) followProjects(groups)
 
     return new ProjectsView(themeColors(), this).render(groups, state.note)
   }

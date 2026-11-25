@@ -7,7 +7,7 @@
 import { v_flex, h_flex, ScrollHandle } from "gpui-base"
 import { View, div, svg } from "gpui-kit"
 import {
-  spaces,
+  spaces as allSpaces,
   machines,
   panes,
   run,
@@ -22,8 +22,11 @@ import {
   layout,
 } from "herdr"
 
-import { showSpace } from "../../shared/session-ui.ts"
+import { isProjectSpace } from "../../shared/project-space.ts"
 import { SMALL, TEXT } from "../../shared/text-size.ts"
+
+// Project main conversations live in their own space; the Projects list shows them, not this one.
+const spaces = () => allSpaces().filter((s) => !isProjectSpace(s.id))
 
 function find(node, id) {
   if (node?.id === id) return node
@@ -757,7 +760,7 @@ export default class Spaces extends View {
         if (from !== null && over === w.id && from !== w.id) {
           const index = spaces().findIndex((s) => s.id === w.id)
           if (index !== -1) run("space.move", { id: from, index: index + 1 })
-        } else if (from === w.id) showSpace(w.id)
+        } else if (from === w.id) run("space.select", { id: w.id })
         cx.notify()
       })
       .on_mouse_down("right", () => this.menu(w))
@@ -800,7 +803,7 @@ export default class Spaces extends View {
         .items_center()
         .when(w.active, (el) => el.bg(t.selected))
         .when(!w.active, (el) => el.hover((s) => s.bg(t.hover)))
-        .on_click(() => showSpace(w.id))
+        .on_click(() => run("space.select", { id: w.id }))
         .child(
           div()
             .text_color(w.active ? t.foreground : t.muted)

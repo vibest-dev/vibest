@@ -63,7 +63,7 @@ export class ProjectsView {
     const main = m.main
 
     return this.row(`machine-${m.machine}-${m.project.id}`, ROW, MACHINE_INDENT, false, (cx) =>
-      openProject(g.key, m, cx),
+      openProject(g.key, g.label, m, cx),
     )
       .child(
         svg(icon(m.machine === LOCAL ? "monitor" : "server"))
@@ -81,7 +81,7 @@ export class ProjectsView {
     const main = first?.main ?? null
 
     const head = this.row(`group-${g.key}`, ROW, 0, this.ui.selected === g.key, (cx) => {
-      if (first) openProject(g.key, first, cx)
+      if (first) openProject(g.key, g.label, first, cx)
     })
       .child(
         h_flex()

@@ -2,6 +2,7 @@ import type { PaneInfo, SpaceInfo } from "herdr"
 
 import { findNode, type LayoutNode } from "../../shared/layout-tree.ts"
 import { projectName } from "../../shared/project-name.ts"
+import { isProjectSpace } from "../../shared/project-space.ts"
 import { threadTitle } from "../../shared/thread-title.ts"
 
 export const RIGHT_PANEL = "right-panel"
@@ -27,14 +28,15 @@ export const topbarState = (
   const panel = findNode(root, RIGHT_PANEL)
   const space = spaces.find((s) => s.active)
   const tab = space?.tabs.find((c) => c.active)
+  const inProject = Boolean(space && isProjectSpace(space.id))
 
   return {
     breadcrumb: space
       ? {
-          project: projectName(space.name),
+          project: inProject && tab ? tab.name : projectName(space.name),
           thread: tab
             ? threadTitle(
-                tab,
+                inProject ? { ...tab, named: false } : tab,
                 panes.filter((p) => p.tab === tab.id),
               )
             : "",
