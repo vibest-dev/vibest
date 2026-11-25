@@ -127,7 +127,7 @@ const launchMain = (m: MachineMember, cx: Context): void => {
 }
 
 const showChat = (terminal: string | null): void => {
-  if (terminal) setShared(KEPT, [terminal, ...keptChats().filter((t) => t !== terminal)].slice(0, RECENT_KEEP))
+  if (terminal && !keptChats().includes(terminal)) setShared(KEPT, [...keptChats(), terminal].slice(-RECENT_KEEP))
 
   setShared(CHAT, terminal)
   applyLayout()
