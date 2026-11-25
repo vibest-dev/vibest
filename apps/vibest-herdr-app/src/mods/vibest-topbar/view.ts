@@ -54,8 +54,11 @@ const breadcrumbView = (t: Theme, crumb: Breadcrumb): Element =>
     .items_center()
     .child(svg(icon("folder")).size(16).flex_none().text_color(t.muted))
     .child(div().flex_none().max_w(160).truncate().text_color(t.muted).child(crumb.project))
-    .child(div().flex_none().text_color(t.dim).child("/"))
-    .child(div().min_w(0).truncate().text_color(t.foreground).child(crumb.thread))
+    .when(crumb.thread !== "", (el) =>
+      el
+        .child(div().flex_none().text_color(t.dim).child("/"))
+        .child(div().min_w(0).truncate().text_color(t.foreground).child(crumb.thread)),
+    )
     .when(crumb.branch !== null && crumb.branch !== "", (el) => el.child(branchChip(t, crumb.branch)))
 
 export const topbarView = (t: Theme, state: TopbarState, win: TopbarWindow): Element =>

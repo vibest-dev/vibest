@@ -6,7 +6,7 @@ import type { MachineMember, ProjectGroup } from "./project-groups.ts"
 import { isProjectTab, local, PROJECT_SPACE, TAB_PREFIX } from "./project-space.ts"
 import { SMALL } from "./text-size.ts"
 import type { Theme } from "./theme-colors.ts"
-import { LOCAL, type VibestSession } from "./vibest-model.ts"
+import type { VibestSession } from "./vibest-model.ts"
 import { launch } from "./vibest-source.ts"
 
 export const relativeTime = (at: number | null, now: number): string => {
@@ -68,7 +68,7 @@ const focusedProjectId = (): string | null => {
 }
 
 export const selectedProject = (groups: readonly ProjectGroup[]): string | null => {
-  const id = focusedProjectId()
+  const id = startRequest()?.projectId ?? focusedProjectId()
   const terminal = focused()?.terminal ?? null
 
   return (
@@ -96,19 +96,32 @@ const recentProjects = (): string[] => {
 
 export const previousProject = (): string | null => recentProjects()[1] ?? null
 
-const launching = new Set<string>()
+const START = "vibest.start"
+const MAIN = "main"
 
-const launchMain = (m: MachineMember, cx: Context): void => {
-  if (m.machine !== LOCAL || launching.has(m.project.id)) return
-
-  launching.add(m.project.id)
-  cx.spawn(async (): Promise<void> => {
-    await launch({ projectId: m.project.id, sessionId: m.main?.id, runtime: "hc", focus: false }).catch(
-      (): undefined => undefined,
-    )
-    launching.delete(m.project.id)
-  })
+export interface StartRequest {
+  readonly projectId: string
+  readonly machine: string
+  readonly label: string
 }
+
+export const startRequest = (): StartRequest | null => {
+  const value = shared(START)
+
+  return value instanceof Object && "projectId" in value && "machine" in value && "label" in value
+    ? { projectId: String(value.projectId), machine: String(value.machine), label: String(value.label) }
+    : null
+}
+
+const showStart = (request: StartRequest | null): void => {
+  setShared(START, request)
+  run("layout.select", { stack: MAIN, child: request ? "start" : "terminals" })
+}
+
+export const showTabs = (): void => showStart(null)
+
+export const startMain = (request: StartRequest, harness: string): Promise<void> =>
+  launch({ projectId: request.projectId, sessionId: undefined, harness, runtime: "hc", focus: false })
 
 const paneOf = (terminal: string): PaneInfo | undefined => panes().find((p) => p.terminal === terminal)
 
@@ -134,21 +147,31 @@ const focusWhenShown = (terminal: string, label: string, cx: Context, tries = FO
   if (tries > 0) cx.timer.after(FOCUS_MS, (next) => focusWhenShown(terminal, label, next, tries - 1))
 }
 
+const showMain = (terminal: string, label: string, m: MachineMember, cx: Context): void => {
+  showStart(null)
+  adopt(terminal, m)
+  focusWhenShown(terminal, label, cx)
+}
+
 export const openProject = (key: string, label: string, m: MachineMember, cx: Context): void => {
   const terminal = m.main?.terminal ?? null
 
   setShared(RECENT, [key, ...recentProjects().filter((k) => k !== key)].slice(0, RECENT_KEEP))
 
-  if (terminal === null) return launchMain(m, cx)
-
-  adopt(terminal, m)
-  focusWhenShown(terminal, label, cx)
+  if (terminal) showMain(terminal, label, m, cx)
+  else showStart({ projectId: m.project.id, machine: m.machine, label })
 }
 
-export const followProjects = (groups: readonly ProjectGroup[]): void => {
+export const followProjects = (groups: readonly ProjectGroup[], cx: Context): void => {
   const tabs = new Set(panes().map((p) => local(p.tab)))
+  const start = startRequest()
 
   for (const m of groups.flatMap((g) => g.members)) {
-    if (m.main?.terminal && tabs.has(projectTab(m))) adopt(m.main.terminal, m)
+    const terminal = m.main?.terminal
+
+    if (!terminal) continue
+
+    if (start?.projectId === m.project.id && start.machine === m.machine) showMain(terminal, start.label, m, cx)
+    else if (tabs.has(projectTab(m))) adopt(terminal, m)
   }
 }

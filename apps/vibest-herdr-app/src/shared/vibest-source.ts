@@ -39,6 +39,7 @@ const connect = async (): Promise<WebSocketSocket | null> => {
 interface LaunchParams {
   readonly projectId: string
   readonly sessionId: string | undefined
+  readonly harness: string
   readonly runtime: string
   readonly focus: boolean
 }
@@ -46,11 +47,36 @@ interface LaunchParams {
 export const launch = async (params: LaunchParams): Promise<void> => {
   const socket = await connect()
 
-  if (!socket) return
+  if (!socket) throw new Error("vibestd is not running")
 
   await socket.write(JSON.stringify({ jsonrpc: "2.0", id: "launch", method: "Launch", params }))
-  await socket.read()
+
+  const reply = await socket.read()
+
   socket.close()
+
+  const error = reply instanceof Uint8Array ? undefined : JSON.parse(reply).error
+
+  if (error) throw new Error(error.message ?? "vibestd could not start it")
+}
+
+export interface HarnessChoice {
+  readonly harness: string
+  readonly problem: string | null
+}
+
+export const harnesses = async (): Promise<HarnessChoice[]> => {
+  const socket = await connect()
+
+  if (!socket) return []
+
+  await socket.write(JSON.stringify({ jsonrpc: "2.0", id: "harnesses", method: "Harnesses.List", params: {} }))
+
+  const reply = await socket.read()
+
+  socket.close()
+
+  return reply instanceof Uint8Array ? [] : (JSON.parse(reply).result ?? [])
 }
 
 export class VibestFeed {

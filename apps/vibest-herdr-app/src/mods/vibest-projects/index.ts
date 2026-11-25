@@ -20,11 +20,13 @@ export default class Projects extends View implements ProjectsUi {
   selected: string | null
   now: number
   feed: VibestFeed
+  cx: AsyncContext
 
   init(_props: Record<string, never>, cx: AsyncContext): void {
     this.hovered = null
     this.now = Date.now()
     this.feed = new VibestFeed()
+    this.cx = cx
 
     if (checking()) return
 
@@ -70,7 +72,7 @@ export default class Projects extends View implements ProjectsUi {
 
     this.selected = selectedProject(groups)
 
-    if (!checking()) followProjects(groups)
+    if (!checking()) followProjects(groups, this.cx)
 
     return new ProjectsView(themeColors(), this).render(groups, state.note)
   }
