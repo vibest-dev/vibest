@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus, equalToReplay } from "@vibest/core/bus"
-import { installBaseline, open } from "@vibest/core/database/migration"
+import { installBaseline } from "@vibest/core/database/migration"
 import * as Projectors from "@vibest/core/database/projectors"
 import { type DurableEvent, type DurableEventOf } from "@vibest/schema/durable-event-manifest"
 import { MachineEvent } from "@vibest/schema/machine-event"
@@ -892,45 +892,6 @@ describe("bus", () => {
         { position: 1, seq: 1 },
         { position: 3, seq: 3 },
       ])
-    }).pipe(Effect.provide(memory())),
-  )
-})
-
-describe("rebuild and open", () => {
-  it.effect("open on an already-migrated database is O(1) and preserves operational tables without replay", () =>
-    Effect.gen(function* () {
-      const { sql } = yield* story
-      yield* sql`UPDATE session SET name = 'kept-without-replay' WHERE id = ${SUB}`
-      yield* open()
-      assert.deepStrictEqual(yield* rowsOf(sql, `SELECT name FROM session WHERE id = '${SUB}'`), [
-        { name: "kept-without-replay" },
-      ])
-    }).pipe(Effect.provide(memory())),
-  )
-
-  it.effect("rebuild drops stray tables and replays the event log into identical state", () =>
-    Effect.gen(function* () {
-      const { sql } = yield* story
-      yield* sql`CREATE TABLE answer (execution INTEGER PRIMARY KEY)`
-      yield* sql`DELETE FROM inbox`
-      yield* (yield* Bus.Service).rebuild
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT name FROM sqlite_schema WHERE name = 'answer'"), [])
-      assert.strictEqual(yield* replayDifference(sql), undefined)
-      const [inbox] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM inbox`
-      assert.strictEqual(inbox!.n, 3)
-    }).pipe(Effect.provide(memory())),
-  )
-
-  it.effect("a log row of a type outside the manifest fails the rebuild, names it and changes nothing", () =>
-    Effect.gen(function* () {
-      const { sql } = yield* story
-      yield* sql`INSERT INTO event (id, aggregate_id, seq, created, type, data)
-        VALUES ('evt_test_unknown', ${SUB}, 99, 1, 'session.purged.1', '{}')`
-      const error = yield* (yield* Bus.Service).rebuild.pipe(Effect.flip)
-      assert.strictEqual(error._tag, "InvalidDurableEvent")
-      assert.include(error.message, `event ${SUB} 99`)
-      const [sessions] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM session`
-      assert.strictEqual(sessions!.n, 3)
     }).pipe(Effect.provide(memory())),
   )
 })

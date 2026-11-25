@@ -135,7 +135,6 @@ const inspectFile = (filename: string, known: ReadonlySet<string> = new Set(migr
             applicationId: e.applicationId,
             ...(e.detail !== undefined && { detail: e.detail }),
             ...(e.older !== undefined && { older: e.older }),
-            ...(e.preV2 !== undefined && { preV2: e.preV2 }),
             ...(e.unknownMigration !== undefined && { unknownMigration: e.unknownMigration }),
             file: filename,
           })

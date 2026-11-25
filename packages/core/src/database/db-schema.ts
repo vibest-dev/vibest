@@ -45,7 +45,6 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
   applicationId: Schema.Number,
   detail: Schema.optional(Schema.String),
   older: Schema.optional(Schema.Boolean),
-  preV2: Schema.optional(Schema.Boolean),
   unknownMigration: Schema.optional(Schema.String),
   file: Schema.optional(Schema.String),
 }) {
@@ -56,7 +55,7 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
       return `${file} was migrated by a newer vibest (migration ${this.unknownMigration}): run vibest update`
     const aside = `To start empty, with vibestd stopped, move it aside with its -wal and -shm files: for f in ${["", "-wal", "-shm"].map((suffix) => shellQuote(file + suffix)).join(" ")}; do [ -e "$f" ] && mv "$f" "$f.old"; done (the sessions, results and queued messages it holds are lost; agents still running keep running, but vibest no longer knows them)`
 
-    if (this.preV2 || this.older)
+    if (this.older)
       return `${file} is from an older vibest (its tables are the shape from before this release). ${aside}`
     const id = `0x${(this.applicationId >>> 0).toString(16)}`
     const extra = this.detail === undefined ? "" : `, ${this.detail}`
@@ -87,7 +86,7 @@ export const inspectSchema = (knownMigrations: ReadonlySet<string> = new Set()) 
       return yield* new SchemaMismatch({ version: userVersion, applicationId, older: true })
 
     if (has("table", "meta") || !has("table", "event_sequence") || !has("table", "kv"))
-      return yield* new SchemaMismatch({ version: userVersion, applicationId, preV2: true })
+      return yield* new SchemaMismatch({ version: userVersion, applicationId, older: true })
 
     const absent = objectsOf([...LOG_SCHEMA, ...PROJECTION_SCHEMA]).find((object) => !has(object.type, object.name))
 

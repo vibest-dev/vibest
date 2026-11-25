@@ -769,6 +769,26 @@ describe("vibest.sock", () => {
   )
 
   test(
+    "Get succeeds with reply.endedAt === null after an unresolved execution",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const repo = yield* makeRepository
+      const raw = yield* client
+      const cli = asCli(raw, repo)
+      const spawner = yield* asEntry(raw, repo)
+      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      yield* until(
+        db.session.getSession(id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.openExecution !== null,
+      )
+      yield* db.session.endExecution(id, { outcome: "lost" }, undefined)
+      const got = yield* cli.Get({ id })
+      assert.strictEqual(got.reply?.status, "lost")
+      assert.strictEqual(got.reply?.endedAt, null)
+    }),
+  )
+
+  test(
     "a legacy Ping fails closed; a different package version does not",
     Effect.gen(function* () {
       const repo = yield* makeRepository

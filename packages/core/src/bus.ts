@@ -4,7 +4,7 @@ import {
   decodeRow,
   type DurableEvent,
   type DurableEventOf,
-  encodeData,
+  encodeJson,
   isDurableEventOf,
   type StoredRow,
 } from "@vibest/schema/durable-event-manifest"
@@ -205,7 +205,7 @@ const dropProjection = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const objects = yield* sql<{ type: string; name: string }>`SELECT type, name FROM sqlite_schema
       WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'
-        AND name NOT IN ('event', 'event_sequence', 'kv', ${MIGRATION_TABLE})
+        AND tbl_name NOT IN ('event', 'event_sequence', 'kv', ${MIGRATION_TABLE})
       ORDER BY type = 'index'`
 
     for (const object of objects)
@@ -213,8 +213,10 @@ const dropProjection = (sql: SqlClient.SqlClient) =>
   })
 
 const aggregateIdOf = (definition: AnyDurableDefinition, data: Event.Data<AnyBusDefinition>) => {
-  if (Predicate.isObject(data)) {
-    const value = Object.entries(data).find(([key]) => key === definition.durable.aggregate)?.[1]
+  const field = definition.durable.aggregate
+
+  if (Predicate.hasProperty(data, field)) {
+    const value = data[field]
 
     if (Predicate.isString(value) && value.length > 0) return Effect.succeed(value)
   }
@@ -412,7 +414,7 @@ const make = Effect.gen(function* () {
           return yield* Effect.die(new Error("publish not from the transaction fiber"))
         const aggregateId = yield* aggregateIdOf(definition, data)
         const created = options?.at ?? (yield* Clock.currentTimeMillis)
-        const encoded = yield* encodeData(definition, data).pipe(Effect.orDie)
+        const encoded = yield* encodeJson(definition, data).pipe(Effect.orDie)
         const versioned = Event.versionedType(definition.type, definition.durable.version)
         const event = yield* writeDurable(aggregateId, created, versioned, encoded).pipe(Effect.orDie)
         buffer.events.push(event)
@@ -555,6 +557,7 @@ export const equalToReplay = (stored: SqlClient.SqlClient) =>
     const scratch = yield* SqlClient.SqlClient
     const bus = yield* Service
     const tables = Object.entries(PROJECTION_TABLES)
+    yield* scratch.unsafe("PRAGMA foreign_keys = ON")
 
     const storedTables = yield* stored.withTransaction(
       Effect.gen(function* () {

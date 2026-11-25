@@ -283,6 +283,31 @@ describe("Db", () => {
       }).pipe(Effect.provide(Platform.services)),
   )
 
+  it.effect("import-check succeeds on an empty database and runs pending ALTER TABLE migrations on a copy", () =>
+    Effect.gen(function* () {
+      const dir = yield* tempDirectory("vibest-check-empty-and-ddl-")
+      const emptyFile = yield* fileAt(dir, "empty.db")
+      assert.isTrue(Exit.isSuccess(yield* checkOn(emptyFile, [])))
+
+      const file = yield* fileAt(dir, "ddl.db")
+      yield* Effect.void.pipe(Effect.provide(database(file)))
+
+      const addColumn: Migration = {
+        id: "20270101000000_add_session_note",
+        up: (tx) => tx.unsafe("ALTER TABLE session ADD COLUMN note TEXT"),
+      }
+
+      assert.isTrue(Exit.isSuccess(yield* checkOn(file, [addColumn])))
+
+      const columns = yield* Effect.flatMap(
+        SqlClient.SqlClient,
+        (sql) => sql<{ name: string }>`SELECT name FROM pragma_table_info('session')`,
+      ).pipe(Effect.provide(Platform.sqlite(file)))
+
+      assert.isFalse(columns.some((col) => col.name === "note"))
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
   it.effect("an incomplete file is rejected and left byte-identical", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

@@ -637,7 +637,7 @@ export const statements = Effect.gen(function* () {
       status: typeof ExecutionOutcome.Type
       text: string | null
       failure: string | null
-      endedAt: number
+      endedAt: number | null
     }>`SELECT id AS execution, outcome AS status, reply AS text, failure, ended_at FROM execution
       WHERE session_id = ${sessionId} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(
       Effect.map((rows) => rows[0]),

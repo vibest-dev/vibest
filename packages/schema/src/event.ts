@@ -185,13 +185,16 @@ export const latest = (definitions: ReadonlyArray<Definition>): ReadonlyMap<stri
   return readonlyMap(map)
 }
 
-export const durableMap = <const Definitions extends ReadonlyArray<Definition>>(
-  definitions: Definitions,
-): ReadonlyMap<string, DurableDefinition> => {
-  const map = new Map<string, DurableDefinition>()
+const isDurable = <D extends Definition>(definition: D): definition is Extract<D, DurableDefinition> =>
+  definition.durability === "durable"
+
+export const durableMap = <const D extends Definition>(
+  definitions: ReadonlyArray<D>,
+): ReadonlyMap<string, Extract<D, DurableDefinition>> => {
+  const map = new Map<string, Extract<D, DurableDefinition>>()
 
   for (const definition of definitions) {
-    if (definition.durability !== "durable") continue
+    if (!isDurable(definition)) continue
     const key = versionedType(definition.type, definition.durable.version)
 
     if (map.has(key)) throw new Error(`Duplicate durable event definition for ${key}`)

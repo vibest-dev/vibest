@@ -69,7 +69,13 @@ const exitsAtDeadline = async <A>(w: World, pid: number, stop: () => Promise<A>)
   )
 }
 
-type Printed = { aggregate: string; seq: number; at: number; type: string; data: unknown }
+type Printed = {
+  id: string
+  type: string
+  created: number
+  durable: { aggregateId: string; seq: number; version: number }
+  data: unknown
+}
 
 const printed = (stdout: string) =>
   stdout
@@ -221,33 +227,38 @@ const checks: ReadonlyArray<Check> = [
         const recorded = factsOf(w, sub)
         expect(
           own.map((f) => f.type).join() === recorded.join() &&
-            own.every((f, i) => f.aggregate === sub && f.seq === i + 1),
-          `events --session printed ${own.map((f) => `${f.seq} ${f.type}`).join(", ")}, not ${recorded.join(", ")}`,
+            own.every((f, i) => f.durable.aggregateId === sub && f.durable.seq === i + 1),
+          `events --session printed ${own.map((f) => `${f.durable.seq} ${f.type}`).join(", ")}, not ${recorded.join(", ")}`,
         )
         const all = printed((await events()).stdout)
         const rising = new Map<string, number>()
 
         for (const f of all) {
-          expect(f.seq > (rising.get(f.aggregate) ?? 0), `${f.aggregate} seq ${f.seq} did not rise in the whole log`)
-          rising.set(f.aggregate, f.seq)
+          expect(
+            f.durable.seq > (rising.get(f.durable.aggregateId) ?? 0),
+            `${f.durable.aggregateId} seq ${f.durable.seq} did not rise in the whole log`,
+          )
+          rising.set(f.durable.aggregateId, f.durable.seq)
         }
 
         expect(
-          own.every((f) => all.some((a) => a.aggregate === sub && a.seq === f.seq && a.type === f.type)),
+          own.every((f) =>
+            all.some((a) => a.durable.aggregateId === sub && a.durable.seq === f.durable.seq && a.type === f.type),
+          ),
           "the whole log lacks facts of the session",
         )
 
         const cut = Math.max(1, Math.floor(own.length / 2))
         const rest = printed((await events("--session", sub, "--after", String(cut))).stdout)
         expect(
-          rest.map((f) => f.seq).join() ===
+          rest.map((f) => f.durable.seq).join() ===
             own
               .slice(cut)
-              .map((f) => f.seq)
+              .map((f) => f.durable.seq)
               .join(),
-          `--after ${cut} printed seqs ${rest.map((f) => f.seq).join(", ")}, not ${own
+          `--after ${cut} printed seqs ${rest.map((f) => f.durable.seq).join(", ")}, not ${own
             .slice(cut)
-            .map((f) => f.seq)
+            .map((f) => f.durable.seq)
             .join(", ")}`,
         )
         const orphan = await events("--after", "1")
@@ -290,7 +301,7 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         const followed = lines()
-        const seqs = followed.map((f) => f.seq)
+        const seqs = followed.map((f) => f.durable.seq)
         expect(
           new Set(seqs).size === seqs.length && seqs.every((seq, i) => seq === cut + i + 1),
           `follow printed seqs ${seqs.join(", ")}`,

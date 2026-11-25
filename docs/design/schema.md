@@ -9,17 +9,17 @@ modules `project-event.ts`, `session-event.ts`, `process-event.ts`, `machine-eve
 (`packages/core/src/database/db.ts` and its domain modules) answers its callers from the read model and changes nothing but by
 appending facts.
 
-- `event`: the log. Each row is one durable fact of one aggregate: `id` (UUIDv4 event id), `aggregate_id` (derived from
-  the fact's payload via `def.aggregate(data)`), `seq` (monotonically allocated per `aggregate_id` via `event_sequence`),
-  `created` (epoch ms), `type` (versioned string `name.version`, e.g. `session.created.1`), and `data`, the fact's fields
-  as JSON, written once. `position` is the file's local order of all rows; only the bus reads it (to replay, to copy the
-  log, and as the order `Events` reads the whole log in), and no fact or read-model row stores it (oxlint rule
-  `vibest/event-reads`).
+- `event`: the log. Each row is one durable fact of one aggregate: `id` (`evt_<12-hex-ms><16-hex-rand>` from `Event.createId`),
+  `aggregate_id` (read from the payload field named by `durable.aggregate`), `seq` (monotonically allocated per
+  `aggregate_id` via `event_sequence`), `created` (epoch ms), `type` (versioned string `name.version`, e.g.
+  `session.created.1`), and `data`, the fact's fields as JSON, written once. `position` is the file's local order of all
+  rows; only the bus reads it (to replay, to copy the log, and as the order `Events` reads the whole log in), and no fact
+  or read-model row stores it (oxlint rule `vibest/event-reads`).
 - `event_sequence`: per-aggregate sequence counter (`aggregate_id`, `seq`) used to allocate `event.seq`.
 - Aggregates: a `session` (`sessionId`: every `session.*` and `process.*` fact, including `session.execution.*` and
   `session.inbox.*`), a `project` (`projectId`: `project.*`), a `machine` (`name`: `machine.*`), and a `remote`
-  (`remoteId`: `remote.*`, including `remote.outbox.*`). Which aggregate a type belongs to is defined by its `aggregate`
-  function on `Event.durable`.
+  (`remoteId`: `remote.*`, including `remote.outbox.*`). Which aggregate field a type uses is defined by
+  `durable: { aggregate: "<field>", version: 1 }` on `Event.durable`.
 - `kv`: key-value metadata table (holds `ledger`, a UUID created when the file is initialized).
 - `migration`: the ids of the incremental schema migrations applied to this file.
 - The read model, one purpose per table: `project`, `project_repository`, `session`, `session_edge`, `process` (one harness
@@ -95,21 +95,22 @@ non-empty line and clipped to 150 characters.
 ```sql
 PRAGMA application_id = 1986617957;  -- 0x76696265, "vibe"
 
+CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
+CREATE TABLE migration (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL) STRICT;
+CREATE TABLE event_sequence (aggregate_id TEXT PRIMARY KEY, seq INTEGER NOT NULL) STRICT;
 CREATE TABLE event (                                  -- the log; append-only
   position     INTEGER PRIMARY KEY AUTOINCREMENT,     -- this file's order; never reused, read only by the bus
-  id           TEXT    NOT NULL UNIQUE,               -- UUIDv4 event id
-  aggregate_id TEXT    NOT NULL,                      -- derived by Event.durable.aggregate(data)
+  id           TEXT    NOT NULL UNIQUE,               -- evt_<12-hex-ms><16-hex-rand> from Event.createId
+  aggregate_id TEXT    NOT NULL REFERENCES event_sequence(aggregate_id) ON DELETE CASCADE,
   seq          INTEGER NOT NULL,                      -- 1, 2, … within the aggregate
   created      INTEGER NOT NULL,                      -- epoch milliseconds
   type         TEXT    NOT NULL,                      -- versioned type: "<name>.<version>" (e.g. "session.created.1")
   data         TEXT    NOT NULL,                      -- the fact's fields, by its definition
   UNIQUE (aggregate_id, seq)
 ) STRICT;
+CREATE INDEX event_aggregate_type_seq ON event (aggregate_id, type, seq);
 CREATE TRIGGER event_no_update BEFORE UPDATE ON event
   BEGIN SELECT RAISE(ABORT, 'event is append-only'); END;
-CREATE TABLE event_sequence (aggregate_id TEXT PRIMARY KEY, seq INTEGER NOT NULL) STRICT;
-CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
-CREATE TABLE migration (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL) STRICT;
 
 CREATE TABLE project (
   id               TEXT PRIMARY KEY CHECK (length(id) = 36),  -- UUIDv4, never changed
@@ -258,8 +259,8 @@ domain modules (`project-event.ts`, `session-event.ts`, `process-event.ts`, `mac
 `packages/schema/src/durable-event-manifest.ts` (22 public domain types in `PublicEvents` for plugin subscriptions, plus
 9 internal process/bookkeeping/transport types: `process.started`, `process.updated`, `process.ready`, `process.ended`,
 `session.inbox.delivering`, `machine.connected`, `remote.seen`, `remote.outbox.queued`, `remote.outbox.acked`). Each
-durable definition carries `version` (stored as `versionedType = "<name>.<version>"`), a `schema`, and an `aggregate(data)`
-function returning its `aggregate_id`. `Bus.publish` derives `aggregate_id` from `def.aggregate(data)` — every entity id
+durable definition carries `durable: { aggregate: "<field>", version: 1 }` (stored as `versionedType = "<name>.<version>"`)
+and a `schema`. `Bus.publish` reads `aggregate_id` from `data[def.durable.aggregate]` — every entity id
 (`projectId`, `sessionId`, `processId`, `messageId`, `remoteId`) is explicit inside `data`. A key marked optional is absent,
 never null, and a string key that is present is never empty. Encoding and decoding refuse keys a definition does not have,
 and encoding fails when its JSON does not decode back. `Routing` and `TraceEntry` (with `Change`) from
@@ -332,8 +333,8 @@ execution they decided about is still open, so an end the harness reported first
 
 Changing event definitions or tables: durable events are versioned (`"<name>.<version>"`). Adding an optional field keeps
 the schema backward-compatible. Adding a table, column, or index uses an incremental migration in
-`packages/core/src/database/migration/`. `packages/schema/test/event-rows.json` holds fixed sample rows that must keep
-decoding and re-encoding to the same bytes: add rows to it whenever a new event type or field is introduced.
+`packages/core/src/database/migration/`. `packages/schema/test/event.test.ts` covers event encoding, decoding, and
+manifest round-trips.
 
 ## The Db service
 
@@ -373,7 +374,7 @@ decoding and re-encoding to the same bytes: add rows to it whenever a new event 
    non-empty file with an older pre-v2 layout (missing `kv`, `event_sequence`, or `event.aggregate_id`), or one missing
    objects it needs is refused (`SchemaMismatch`) without changing its bytes; the message gives the way out, moving it
    aside with its `-wal` and `-shm` files while vibestd is stopped. A file whose `migration` table records an id unknown
-   to this vibest is refused with "was written by a newer vibest …: run vibest update".
+   to this vibest is refused with "was migrated by a newer vibest (migration …): run vibest update".
 2. An empty file gets the current schema in one write transaction that checks again under the write lock (so of two
    empty opens at once one installs and the other sees it), with every built-in migration marked applied and a fresh
    `kv.ledger` UUID.

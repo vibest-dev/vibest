@@ -192,7 +192,7 @@ export const SessionReply = Schema.Struct({
   status: ExecutionOutcome,
   text: Schema.NullOr(Schema.String),
   failure: Schema.NullOr(Schema.String),
-  endedAt: Schema.Number,
+  endedAt: Schema.NullOr(Schema.Number),
 })
 
 export const SessionStatusInfo = Schema.Struct({

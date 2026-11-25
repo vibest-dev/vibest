@@ -59,18 +59,13 @@ export interface StoredRow {
 
 const strict = { onExcessProperty: "error" } as const
 
+export const encodeJson = <T>(definition: AnyDurableDefinition, data: T): Effect.Effect<string, Schema.SchemaError> =>
+  Schema.encodeUnknownEffect(definition.data)(data, strict).pipe(Effect.map((encoded) => JSON.stringify(encoded)))
+
 export const encodeData = <T>(definition: AnyDurableDefinition, data: T): Effect.Effect<string, Schema.SchemaError> =>
-  Schema.encodeUnknownEffect(definition.data)(data, strict).pipe(
-    Effect.map((encoded) => JSON.stringify(encoded)),
+  encodeJson(definition, data).pipe(
     Effect.tap((json) => Schema.decodeUnknownEffect(definition.data)(JSON.parse(json), strict)),
   )
-
-const durableByVersionedType: ReadonlyMap<string, AnyDurableDefinition> = new Map(
-  AllDurableDefinitions.map((definition) => [
-    Event.versionedType(definition.type, definition.durable.version),
-    definition,
-  ]),
-)
 
 export const decodeRow = (row: StoredRow): Effect.Effect<DurableEvent, InvalidDurableEvent> => {
   const where = `event ${row.aggregateId} ${row.seq}`
@@ -83,7 +78,7 @@ export const decodeRow = (row: StoredRow): Effect.Effect<DurableEvent, InvalidDu
       message: `${where}: ${message}`,
     })
 
-  const definition = durableByVersionedType.get(row.type)
+  const definition = DurableEvents.get(row.type)
 
   if (definition === undefined) return Effect.fail(refuse(`${row.type} is not in the durable event manifest`))
 

@@ -1,6 +1,7 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
 import {
   isPublicEventType,
+  type PublicDurableEvent,
   type PublicEventOf,
   PublicEvents,
   type PublicEventType,
@@ -25,11 +26,13 @@ type SessionRegistrations = {
   ) => Effect.Effect<VibestPlugin.Registration, never, Scope.Scope>
 }
 
-export const factsFor =
-  (bus: Bus.Interface, plugin: string): VibestPlugin.EventDomain["subscribe"] =>
-  <T extends PublicEventType>(input?: { readonly types?: ReadonlyArray<T> }) => {
-    const asked: ReadonlyArray<T> = input?.types ?? []
-    const known = new Set<T>(asked.filter((type) => isPublicEventType(type)))
+export const factsFor = (bus: Bus.Interface, plugin: string): VibestPlugin.EventDomain["subscribe"] => {
+  function subscribe<T extends PublicEventType = PublicEventType>(input?: {
+    readonly types?: ReadonlyArray<T>
+  }): Stream.Stream<PublicEventOf<T>>
+  function subscribe(input?: { readonly types?: ReadonlyArray<PublicEventType> }): Stream.Stream<PublicDurableEvent> {
+    const asked = input?.types ?? []
+    const known = new Set(asked.filter((type) => isPublicEventType(type)))
     const unknown = asked.filter((type) => !known.has(type))
 
     const warned =
@@ -47,12 +50,11 @@ export const factsFor =
         ),
       )
 
-    return Stream.unwrap(
-      Effect.map(bus.subscribe(PublicEvents), (subscription) =>
-        Stream.fromSubscription(subscription).pipe(Stream.filter((_event): _event is PublicEventOf<T> => true)),
-      ),
-    )
+    return Stream.unwrap(Effect.map(bus.subscribe(PublicEvents), Stream.fromSubscription))
   }
+
+  return subscribe
+}
 
 const sessionsFor = (
   summaries: Summaries.Interface,
