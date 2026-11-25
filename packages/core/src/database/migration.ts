@@ -1,5 +1,5 @@
 import { randomId } from "@vibest/schema/id"
-import { Clock, Effect, String as Str } from "effect"
+import { Clock, Effect, Exit, String as Str } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
 import { Bus, checkReplay } from "../bus.ts"
@@ -27,8 +27,27 @@ export const installBaseline = Effect.gen(function* () {
   yield* sql`INSERT INTO kv (key, value) VALUES ('ledger', ${randomId()})`
 })
 
+const withImmediateTransaction = <A, E, R>(sql: SqlClient.SqlClient, effect: Effect.Effect<A, E, R>) =>
+  Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      yield* sql.unsafe("BEGIN IMMEDIATE")
+      const exit = yield* Effect.exit(restore(effect))
+
+      if (Exit.isSuccess(exit)) {
+        yield* sql.unsafe("COMMIT")
+
+        return exit.value
+      }
+
+      yield* sql.unsafe("ROLLBACK").pipe(Effect.ignore)
+
+      return yield* exit
+    }),
+  )
+
 const bootstrap = (sql: SqlClient.SqlClient, input: ReadonlyArray<Migration>) =>
-  sql.withTransaction(
+  withImmediateTransaction(
+    sql,
     Effect.gen(function* () {
       if ((yield* objectCount) > 0) return
       yield* installBaseline
@@ -69,7 +88,8 @@ export const open = (input: ReadonlyArray<Migration> = migrations) =>
       return
     }
 
-    yield* sql.withTransaction(
+    yield* withImmediateTransaction(
+      sql,
       Effect.gen(function* () {
         const pending = yield* pendingIn(sql, input)
 

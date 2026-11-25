@@ -45,6 +45,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    yield* sql.unsafe("PRAGMA busy_timeout = 5000")
     yield* open()
     yield* sql.unsafe("PRAGMA foreign_keys = ON")
     yield* sql.unsafe("PRAGMA journal_mode = WAL")
