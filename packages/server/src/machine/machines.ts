@@ -73,7 +73,7 @@ const EXIT_WAIT = Duration.seconds(1)
 export const REPAIR_PAUSE = Duration.seconds(30)
 
 const cannotShow = (name: string, kind: string) =>
-  `${name}'s ${kind} agents cannot be shown here; vibest peek ${name}/<id> reads them`
+  `${name}'s ${kind} agents cannot be shown here; vibest peek <id> --machine ${name} reads them`
 
 const shownKind = (here: ReadonlyArray<{ readonly id: string; readonly name?: string }>, kind: string) =>
   here.find((runtime) => runtime.id === kind)?.name ?? kind
@@ -424,8 +424,8 @@ const make = Effect.gen(function* () {
   const receive = (row: MachineRow, link: Link, item: OutboxItem) =>
     Effect.gen(function* () {
       const name = (yield* db.remote.nameForRemote(row.remoteId)) ?? row.name
-      const address = `${name}/${shortId(item.session)}`
-      const content = `${item.content}${item.cut ? `… (full text: vibest result ${address})` : ""}`
+      const sender = shortId(item.session)
+      const content = `${item.content}${item.cut ? `… (full text: vibest result ${sender} --machine ${name})` : ""}`
       const from = { machine: name, ...(item.from ?? { session: item.session }) }
       const sep = item.recipient.indexOf(":")
 
@@ -479,7 +479,7 @@ const make = Effect.gen(function* () {
         id: item.id,
         recipient: item.recipient,
         kind: item.kind,
-        sender: address,
+        sender,
         from,
         content,
       })

@@ -12,6 +12,11 @@ const id = Argument.String("id").pipe(
   Argument.withDescription("A session id, or a unique prefix of at least 8 characters"),
 )
 
+const sessionMachine = Flag.String("machine").pipe(
+  Flag.withDescription("Target a session on another machine (vibest machine ls)"),
+  Flag.optional,
+)
+
 const sessionFlag = Flag.String("session").pipe(
   Flag.withDescription(
     "The runtime's session to use, instead of the one this terminal is in. Bare vibest refuses it inside a runtime's terminal",
@@ -135,7 +140,7 @@ const run = Spec.make("run", {
     ),
     machine: Flag.String("machine").pipe(
       Flag.withDescription(
-        "Run it on another machine (vibest machine ls), in that machine's checkout of this repository at this commit. Its address is <machine>/<id>. Results come to this project's entry session, or stay for vibest result <machine>/<id> when there is none",
+        "Run it on another machine (vibest machine ls), in that machine's checkout of this repository at this commit. Results come to this project's session, or stay for vibest result <id> --machine <machine> when there is none",
       ),
       Flag.optional,
     ),
@@ -178,7 +183,7 @@ const run = Spec.make("run", {
 const send = Spec.make("send", {
   description:
     "Queue a message for a session and print at once. It is delivered when the session is idle, and does not interrupt a running execution. For a resumable session started with vibest run, sending after its pane closes or its harness exits reopens the conversation in a new pane",
-  params: { id, message: text("message") },
+  params: { id, machine: sessionMachine, message: text("message") },
 })
 
 const status = Spec.make("status", {
@@ -189,18 +194,18 @@ const status = Spec.make("status", {
 const result = Spec.make("result", {
   description:
     "A session, as JSON. For an id that exists the object is always returned; reply is null until the first result. Test reply, not the object",
-  params: { id },
+  params: { id, machine: sessionMachine },
 })
 
 const interrupt = Spec.make("interrupt", {
   description:
     "Stop a session's running execution. The session stays, and that execution sends no reply. Not the entry session: end that one in its terminal",
-  params: { id },
+  params: { id, machine: sessionMachine },
 })
 
 const stop = Spec.make("stop", {
   description: "End the session process and keep the session; the next vibest send resumes it",
-  params: { id },
+  params: { id, machine: sessionMachine },
 })
 
 const peek = Spec.make("peek", {
@@ -208,6 +213,7 @@ const peek = Spec.make("peek", {
     "Print the last lines of a session's terminal, as plain text, read now. Look here when a result says the execution ended without a reply or did not start. Not the entry session",
   params: {
     id,
+    machine: sessionMachine,
     lines: Flag.Int("lines").pipe(
       Flag.withAlias("n"),
       Flag.withDescription("How many of the last lines to print, at most 500. Default 30"),
@@ -221,6 +227,7 @@ const archive = Spec.make("archive", {
     "End a session for good. Closes its terminal and removes a clean worktree. Keeps the record, its messages, replies and branch. Not the entry session: end that one in its terminal",
   params: {
     id,
+    machine: sessionMachine,
     keepWorktree: Flag.Boolean("keep-worktree").pipe(
       Flag.withDescription("End the session and keep its worktree"),
       Flag.withDefault(false),
@@ -245,9 +252,14 @@ const linkParams = {
     Argument.withDescription("Session ids, or unique prefixes of at least 8 characters"),
     Argument.atLeast(1),
   ),
+  machine: sessionMachine,
   to: Flag.String("to").pipe(
     Flag.withDescription("Link or unlink directed edges from the positional sessions to each --to session"),
     Flag.atLeast(0),
+  ),
+  toMachine: Flag.String("to-machine").pipe(
+    Flag.withDescription("With --to: target --to sessions on another machine"),
+    Flag.optional,
   ),
   chain: Flag.Boolean("chain").pipe(
     Flag.withDescription("Link or unlink directed edges in sequence: id1 -> id2 -> id3"),
@@ -501,9 +513,7 @@ const machine = Spec.make("machine", {
     Spec.make("add", {
       description: "Connect to a machine's vibestd over ssh and keep it",
       params: {
-        name: Argument.String("name").pipe(
-          Argument.withDescription("The name --machine and addresses <name>/<id> use"),
-        ),
+        name: Argument.String("name").pipe(Argument.withDescription("The name --machine uses")),
         target: Argument.String("target").pipe(
           Argument.withDescription("An ssh target: user@host, user@host:port, or a Host from the ssh config"),
         ),

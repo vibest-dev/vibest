@@ -5,7 +5,7 @@ import * as Projectors from "@vibest/core/database/projectors"
 import { tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { database } from "@vibest/platform-bun/test/lib/unit-helpers"
 import { Runtime } from "@vibest/plugin/effect"
-import { SessionReply } from "@vibest/protocol/rpc"
+import { EdgeDirected, EdgeMutual, SessionReply } from "@vibest/protocol/rpc"
 import { ArchiveOutcome } from "@vibest/schema/archive"
 import { canonicalTarget, formatTerminalTarget, Terminal, TerminalTarget } from "@vibest/schema/terminal"
 import { Effect, Layer, Option, Path, Schema, Stream } from "effect"
@@ -13,7 +13,7 @@ import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
-import { parseSessionRef } from "../src/session-ref.ts"
+import { edgeSpecOf } from "../src/commands/handlers/session/spec.ts"
 
 const P = "11111111-1111-4111-8111-111111111111"
 const S_HC = "22222222-2222-4222-8222-222222222221"
@@ -123,11 +123,58 @@ describe("structured terminal and session schemas", () => {
     assert.strictEqual(canonicalTarget({ z: "1", a: "2" }), '{"a":"2","z":"1"}')
   })
 
-  it("parseSessionRef handles local, remote, and trailing-slash refs", () => {
-    assert.deepStrictEqual(parseSessionRef("abcd1234"), { id: "abcd1234" })
-    assert.deepStrictEqual(parseSessionRef("mac-mini/abcd1234"), { id: "abcd1234", machine: "mac-mini" })
-    assert.deepStrictEqual(parseSessionRef("mac-mini/"), { id: "mac-mini/" })
-  })
+  it.effect(
+    "edgeSpecOf builds SessionRef endpoints from --machine and --to-machine and rejects --to-machine without --to",
+    () =>
+      Effect.gen(function* () {
+        const mutual = yield* edgeSpecOf({
+          ids: ["abcd1234", "ef012345"],
+          machine: Option.some("mac-mini"),
+          to: [],
+          toMachine: Option.none(),
+          chain: false,
+        })
+
+        assert.deepStrictEqual(
+          mutual,
+          EdgeMutual.make({
+            ids: [
+              { id: "abcd1234", machine: "mac-mini" },
+              { id: "ef012345", machine: "mac-mini" },
+            ],
+          }),
+        )
+
+        const directed = yield* edgeSpecOf({
+          ids: ["abcd1234"],
+          machine: Option.none(),
+          to: ["ef012345"],
+          toMachine: Option.some("cloudide"),
+          chain: false,
+        })
+
+        assert.deepStrictEqual(
+          directed,
+          EdgeDirected.make({
+            from: [{ id: "abcd1234" }],
+            to: [{ id: "ef012345", machine: "cloudide" }],
+          }),
+        )
+
+        const invalid = yield* Effect.flip(
+          edgeSpecOf({
+            ids: ["abcd1234"],
+            machine: Option.none(),
+            to: [],
+            toMachine: Option.some("cloudide"),
+            chain: false,
+          }),
+        )
+
+        assert.strictEqual(invalid._tag, "EmptyInput")
+        assert.include(invalid.message, "--to-machine needs --to")
+      }),
+  )
 
   it("TerminalTarget rejects empty objects and formatTerminalTarget formats single and multi-key targets cleanly", () => {
     assert.isTrue(Option.isNone(Schema.decodeUnknownOption(TerminalTarget)({})))

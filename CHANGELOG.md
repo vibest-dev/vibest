@@ -7,6 +7,8 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Short session IDs in agent envelopes/prompts and explicit `--machine` CLI flag instead of `<machine>/<id>`** (CLI users, agents, scripts): `<machine>/<id>` slash-concatenated session strings (`parseSessionRef` and `formatSessionRef`) are removed everywhere; passing `cloudide/756c38b6` as `<id>` is rejected as an invalid session ID. Target a session on another machine with `--machine <machine>` on `vibest send`, `result`, `peek`, `interrupt`, `stop`, `archive`, and `session link`/`unlink` (`--to-machine` for `--to`). `<vibest-agent-message>` envelopes now carry an 8-character `<session-id>` (plus a separate `<machine>` tag when from another machine) and system-prompt session facts display 8-character short IDs; `AmbiguousSession` returns matching full IDs and instructs callers to retry with more characters of the session ID.
+
 - **Harness definitions declare `delivery`** (plugin authors): the optional `inbox?: "subscribe" | "poll"` is replaced
   by a required `delivery: "typed" | "pull"`. `pull`: the harness's own integration fetches its inbox (how is its own
   business); `typed`: vibestd types each message into its terminal through the runtime. A definition without it no

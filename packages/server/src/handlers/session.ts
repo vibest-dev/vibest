@@ -12,10 +12,15 @@ import { resolveLiveTarget } from "@vibest/core/session/spawn"
 import { Starts } from "@vibest/core/session/starts"
 import { Caller, type CallerIdentity, type EdgeSpec, Forbidden, type WatchEvent } from "@vibest/protocol/rpc"
 import type { AgentFrom, AgentSender } from "@vibest/schema/event"
-import { MachineFailed, UnknownMachine } from "@vibest/schema/machine"
+import {
+  MachineFailed,
+  type MachineIncompatible,
+  type MachineUnavailable,
+  UnknownMachine,
+} from "@vibest/schema/machine"
 import { AmbiguousSession, NoCallingSession, RuntimeUnreachable } from "@vibest/schema/session"
-import { canonicalTarget, formatSessionRef, type SessionRef } from "@vibest/schema/terminal"
-import { Effect, Predicate, Stream } from "effect"
+import { canonicalTarget, type SessionRef } from "@vibest/schema/terminal"
+import { Effect, Option, Predicate, Stream } from "effect"
 
 import { integrationOf, processOf, reader } from "../gates.ts"
 import * as Listing from "../listing.ts"
@@ -31,7 +36,7 @@ type ResolvedEndpoint =
   | { readonly local: true; readonly id: string; readonly remoteId: string }
   | { readonly local: false; readonly machine: string; readonly id: string; readonly remoteId: string }
 
-const endpointKey = (ep: ResolvedEndpoint) => (ep.local ? ep.id : `${ep.machine}/${ep.id}`)
+const endpointKey = (ep: ResolvedEndpoint) => (ep.local ? ep.id : `${ep.machine}\0${ep.id}`)
 
 const endpointRef = (ep: ResolvedEndpoint): SessionRef =>
   ep.local ? { id: ep.id } : { id: ep.id, machine: ep.machine }
@@ -129,15 +134,27 @@ export const make = Effect.gen(function* () {
 
       if (Predicate.isTagged(c, "Ui")) {
         const refs = Predicate.isTagged(spec, "Directed") ? [...spec.from, ...spec.to] : spec.ids
-        const ref = refs.find((r) => r.machine === undefined) ?? refs[0]
 
-        if (ref === undefined) return yield* new Forbidden({ method, message: `${method} needs at least one session` })
-        const id = yield* db.session.resolveSession(ref.id)
-        const identity = yield* db.session.sessionIdentity(id)
+        if (refs.length === 0) return yield* new Forbidden({ method, message: `${method} needs at least one session` })
 
-        if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
+        const candidates = [
+          ...refs.filter((r) => r.machine === undefined),
+          ...refs.filter((r) => r.machine !== undefined),
+        ]
 
-        return identity.projectId
+        for (const candidate of candidates) {
+          const resolved = yield* Effect.option(db.session.resolveSession(candidate.id))
+
+          if (Option.isSome(resolved)) {
+            const identity = yield* db.session.sessionIdentity(resolved.value)
+
+            if (identity !== undefined) return identity.projectId
+          }
+        }
+
+        const first = candidates[0]!
+
+        return yield* new NoSuchSession({ id: first.id, message: `no session ${first.id}` })
       }
 
       const project = yield* scope(method).pipe(
@@ -147,22 +164,62 @@ export const make = Effect.gen(function* () {
       return project.id
     })
 
-  const resolveEndpoint = (method: string, projectId: string, ref: SessionRef) =>
+  const resolveRemoteUnqualified = (projectId: string, prefix: string, notFound: NoSuchSession) =>
+    Effect.gen(function* () {
+      if (!SESSION_PREFIX.test(prefix)) return yield* notFound
+      const machines = yield* db.remote.machines
+
+      if (machines.length === 0) return yield* notFound
+
+      const hits = (yield* Effect.forEach(
+        machines,
+        (m) =>
+          remoteService.liveSessions(m.name, projectId).pipe(
+            Effect.map((rows) =>
+              rows
+                .filter((s) => s.id.startsWith(prefix))
+                .map((s): ResolvedEndpoint => ({ local: false, machine: m.name, id: s.id, remoteId: m.remoteId })),
+            ),
+            Effect.orElseSucceed((): ReadonlyArray<ResolvedEndpoint> => []),
+          ),
+        { concurrency: "unbounded" },
+      )).flat()
+
+      if (hits.length === 0) return yield* notFound
+
+      if (hits.length > 1)
+        return yield* new AmbiguousSession({
+          prefix,
+          matches: hits.map((hit) => hit.id),
+        })
+
+      return hits[0]!
+    })
+
+  const resolveEndpoint = (
+    method: string,
+    projectId: string,
+    ref: SessionRef,
+  ): Effect.Effect<
+    ResolvedEndpoint,
+    Forbidden | NoSuchSession | AmbiguousSession | UnknownMachine | MachineUnavailable | MachineIncompatible
+  > =>
     Effect.gen(function* () {
       if (ref.machine === undefined) {
-        const id = yield* resolveLiveTarget(
+        return yield* resolveLiveTarget(
           db,
           projectId,
         )(ref.id).pipe(
+          Effect.map((id): ResolvedEndpoint => ({ local: true, id, remoteId: selfIdentity.id })),
           Effect.catchTag("LinkRefused", (e) => Effect.fail(new Forbidden({ method, message: e.message }))),
+          Effect.catchTag("NoSuchSession", (e) =>
+            e.message.includes("was archived") ? Effect.fail(e) : resolveRemoteUnqualified(projectId, ref.id, e),
+          ),
         )
-
-        return { local: true as const, id, remoteId: selfIdentity.id }
       }
 
-      const shown = formatSessionRef(ref)
-
-      if (!SESSION_PREFIX.test(ref.id)) return yield* new NoSuchSession({ id: shown, message: `no session ${shown}` })
+      if (!SESSION_PREFIX.test(ref.id))
+        return yield* new NoSuchSession({ id: ref.id, message: `no session ${ref.id} on ${ref.machine}` })
       const machineRow = yield* db.remote.machineNamed(ref.machine)
 
       if (machineRow === undefined)
@@ -174,12 +231,13 @@ export const make = Effect.gen(function* () {
       const liveRemote = yield* remoteService.liveSessions(ref.machine, projectId)
       const matches = liveRemote.filter((s) => s.id.startsWith(ref.id))
 
-      if (matches.length === 0) return yield* new NoSuchSession({ id: shown, message: `no session ${shown}` })
+      if (matches.length === 0)
+        return yield* new NoSuchSession({ id: ref.id, message: `no session ${ref.id} on ${ref.machine}` })
 
       if (matches.length > 1)
         return yield* new AmbiguousSession({
           prefix: ref.id,
-          matches: matches.map((s) => `${ref.machine}/${s.id}`),
+          matches: matches.map((s) => s.id),
         })
 
       return { local: false as const, machine: ref.machine, id: matches[0]!.id, remoteId: machineRow.remoteId }
@@ -286,14 +344,14 @@ export const make = Effect.gen(function* () {
             message: "--project names a project of another machine; give --machine too",
           })
 
-        const anyRemoteLink = [...(input.from ?? []), ...(input.to ?? []), ...(input.with ?? [])].some(
-          (ref) => ref.machine !== undefined,
-        )
+        const hasExplicitLinks =
+          (input.from?.length ?? 0) > 0 || (input.to?.length ?? 0) > 0 || (input.with?.length ?? 0) > 0
 
         const resolve = (ref: SessionRef) => resolveEndpoint("Spawn", project.id, ref)
-        const fromEndpoints = anyRemoteLink ? yield* Effect.forEach(input.from ?? [], resolve) : []
-        const toEndpoints = anyRemoteLink ? yield* Effect.forEach(input.to ?? [], resolve) : []
-        const withEndpoints = anyRemoteLink ? yield* Effect.forEach(input.with ?? [], resolve) : []
+        const fromEndpoints = hasExplicitLinks ? yield* Effect.forEach(input.from ?? [], resolve) : []
+        const toEndpoints = hasExplicitLinks ? yield* Effect.forEach(input.to ?? [], resolve) : []
+        const withEndpoints = hasExplicitLinks ? yield* Effect.forEach(input.with ?? [], resolve) : []
+        const anyRemoteLink = [...fromEndpoints, ...toEndpoints, ...withEndpoints].some((ep) => !ep.local)
 
         const spawned = yield* sessions
           .spawn({
@@ -312,11 +370,12 @@ export const make = Effect.gen(function* () {
             parentSessionId: c.sessionId,
             request: input.request,
             files: input.files,
-            ...(!anyRemoteLink && {
-              from: input.from?.map((ref) => ref.id),
-              to: input.to?.map((ref) => ref.id),
-              with: input.with?.map((ref) => ref.id),
-            }),
+            ...(hasExplicitLinks &&
+              !anyRemoteLink && {
+                from: fromEndpoints.map((ep) => ep.id),
+                to: toEndpoints.map((ep) => ep.id),
+                with: withEndpoints.map((ep) => ep.id),
+              }),
           })
           .pipe(
             Effect.catchTag("LinkRefused", (e) => Effect.fail(new Forbidden({ method: "Spawn", message: e.message }))),

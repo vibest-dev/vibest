@@ -258,7 +258,7 @@ machine, and vibest never installs, prepares or reaches another machine through 
   runtime on A needs to reach B's terminals, sent in `Remote.Hello`), `locate(remote, sessions)` (§3), and the machine hooks
   `connect` and `remove`, with which a runtime plugin keeps its own record of B (an hc machine, a saved herdr
   machine) in step with vibest's machine list. Without them B's rows read "cannot be shown here", and
-  `vibest peek <name>/<id>` reads B's terminal through B's vibestd.
+  `vibest peek <id> --machine <name>` reads B's terminal through B's vibestd.
 
 ## 7. Running an Agent on another machine
 
@@ -270,8 +270,7 @@ machine, and vibest never installs, prepares or reaches another machine through 
   `session.start.before` hooks. B finds its checkout of the project by repository identity, needs the `HEAD` commit
   there ("push first"), and makes the worktree as for a local agent; work comes back by the agent pushing its branch.
   herdr opens an agent another machine started in its default session `default` (`open`'s `remote`).
-- B reports the agent's results to A's entry session through B's outbox; `vibest result|send|interrupt|archive|peek
-  <name>/<id>` are forwarded to B. A call to a machine that is not connected fails at once; nothing is queued.
+- B reports the agent's results to A's session through B's outbox; `vibest result|send|interrupt|stop|archive|peek <id> --machine <name>` are forwarded to B. A call to a machine that is not connected fails at once; nothing is queued.
 - `session.start.before` on A lists only this machine in `machines[]`, with its runtimes and their `status()`; a hook
   that returns another `machine` does not move the start there. Core checks after the chain that the chosen runtime is
   online here, else refuses with the runtime's reason.

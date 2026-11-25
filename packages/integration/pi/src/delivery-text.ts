@@ -14,11 +14,11 @@ const agentHead = (sender: Extract<Detail["sender"], { readonly type: "agent" }>
   const id = sender.session.slice(0, 8)
 
   if (sender.agent !== undefined)
-    return `Message from @${titled(sender.agent)} · ${sender.title ?? ""} (${sender.machine === undefined ? id : `${sender.machine}/${id}`})`
+    return `Message from @${titled(sender.agent)} · ${sender.title ?? ""} (${sender.machine === undefined ? id : `${id} on ${sender.machine}`})`
 
   return sender.machine === undefined
     ? `Message from @${titled(id)}`
-    : `Message from @${titled(sender.machine)} · (${sender.machine}/${id})`
+    : `Message from @${titled(sender.machine)} · (${id} on ${sender.machine})`
 }
 
 const head = (sender: Detail["sender"]) => {

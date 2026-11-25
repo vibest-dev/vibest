@@ -28,16 +28,31 @@ describe("systemPrompt: the definition body first, then facts that name the chan
     assert.notInclude(prompt, "To send it your report")
   })
 
-  it("a session another session started sends its report with vibest send, and says who inherits it when that one ends", () => {
-    const prompt = facts({ creator: { id: "c1", label: "agent lead" } })
-    assert.include(prompt, "You were started by c1 (agent lead)")
-    assert.include(prompt, "vibest send c1 --")
+  it("a session another session started sends its report with vibest send using 8-char short ids, and says who inherits it when that one ends", () => {
+    const prompt = facts({
+      id: "756c38b6-101c-4da9-b8ba-b63399edb05a",
+      creator: { id: "c1234567-89ab-4cde-8f01-234567890abc", label: "agent lead" },
+      linkedTo: [
+        { id: "d1234567-89ab-4cde-8f01-234567890abc", label: "agent reviewer" },
+        { id: "f1234567-89ab-4cde-8f01-234567890abc", label: "on cloudide" },
+      ],
+    })
+
+    assert.include(prompt, "You are session 756c38b6.")
+    assert.notInclude(prompt, "756c38b6-101c")
+    assert.include(prompt, "You were started by c1234567 (agent lead)")
+    assert.include(prompt, "vibest send c1234567 --")
+    assert.notInclude(prompt, "c1234567-89ab")
+    assert.include(prompt, "d1234567 (agent reviewer), f1234567 (on cloudide).")
+    assert.notInclude(prompt, "d1234567-89ab")
     assert.include(prompt, "nearest session above it that is still running")
     assert.include(prompt, "a worktree that only you use")
   })
 
-  it("a worktree shared with an earlier session says so", () => {
-    assert.include(facts({ sharer: "e1" }), "shared with session e1")
+  it("a worktree shared with an earlier session says so with its 8-char short id", () => {
+    const prompt = facts({ sharer: "e1234567-89ab-4cde-8f01-234567890abc" })
+    assert.include(prompt, "shared with session e1234567")
+    assert.notInclude(prompt, "e1234567-89ab")
   })
 
   it("every session is told what the two envelopes and the unwrapped text mean", () => {

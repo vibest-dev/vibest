@@ -112,7 +112,7 @@ Only the user. Another machine's vibestd is reached over ssh.
 | `vibest machine rm <name>`           | Forget the machine and stop the connection. Agents there keep running; adding it again delivers their results. |
 | `vibest connect`                     | What the other machine's vibestd runs over ssh. Not for direct use.                                            |
 
-`vibest run --machine` starts a session there. `send`, `result`, `peek`, `interrupt` and `archive` take `<machine>/<id>`. `ls` takes no id; its list includes sessions on other machines.
+`vibest run --machine` starts a session there. `send`, `result`, `peek`, `interrupt`, `stop` and `archive` take `--machine <machine>` (never `<machine>/<id>`); `session link` and `session unlink` take `--machine` and `--to-machine` (or resolve an unambiguous 8+ char prefix across connected machines). `ls` takes no id; its list includes sessions on other machines.
 
 ### Maintenance
 

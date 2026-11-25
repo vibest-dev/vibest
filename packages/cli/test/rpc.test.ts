@@ -115,7 +115,10 @@ describe("vibest.sock", () => {
       assert.strictEqual(ambiguous._tag, "AmbiguousSession")
       assert.include(ambiguous.message, id)
       assert.include(ambiguous.message, twinWithSameFirst8)
-      assert.strictEqual((yield* c.Get({ id: id.slice(0, 12) })).id, id)
+      assert.include(ambiguous.message, "retry with more characters of the session id")
+      assert.strictEqual((yield* c.Get({ id: id.slice(0, 13) })).id, id)
+      const slashRef = yield* Effect.flip(c.Get({ id: `mb/${id.slice(0, 8)}` }))
+      assert.strictEqual(slashRef._tag, "NoSuchSession")
     }),
   )
 
@@ -432,7 +435,7 @@ describe("vibest.sock", () => {
       const sent = yield* db.inbox.latestInbox(launch.sessionId, "send")
       assert.match(
         sent!.message,
-        /^<vibest-agent-message>\n<session-id>[a-f0-9-]{36}<\/session-id>\n<message>\nhalf way\n<\/message>\n<\/vibest-agent-message>$/,
+        /^<vibest-agent-message>\n<session-id>[a-f0-9]{8}<\/session-id>\n<message>\nhalf way\n<\/message>\n<\/vibest-agent-message>$/,
       )
       assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
       assert.deepStrictEqual(yield* c.Send({ id: launch.sessionId, message: "from the user" }), {

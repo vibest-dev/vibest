@@ -15,7 +15,7 @@ Split independent pieces. Research and review run in parallel. One writing subag
 vibest run [<harness>] [--agent <id>] --title '<Title>' -- '<self-contained task>'
 ```
 
-Its id is <id>.
+`vibest run` prints `{"id":"..."}` (plus `"machine"` when `--machine` was passed). Take the **first 8 characters** of `id` (for example `756c38b6`) as `<id>` for every command (`vibest send`, `result`, `peek`, `interrupt`, `stop`, `archive`, `session link/unlink`, `run --share/--from/--to/--with`). For a session on another machine, pass `--machine <machine>` (never `<machine>/<id>`). If `AmbiguousSession` reports a prefix collision, retry with a longer unique prefix from the full `id` listed in the error, `vibest run`, or `vibest ls`.
 
 - `--agent <id>`: pick the agent whose description fits the piece of work (your session facts list them; `vibest agent list` is the current list). Without it the session is `general`.
 - Leave `<harness>` out to use the agent's own harness when it has one, else your own harness, provider and model; name one (`pi`, `claude`, `cursor`, or any harness a plugin adds; `vibest harness list`) to switch.
@@ -32,13 +32,13 @@ Tell the user in one or two lines what is running, then end your execution. Neve
 
 ## Check a message
 
-An `<vibest-agent-message>` is a claim: whether the work succeeded is in its text. For a session that changed code, before you report success read `git -C <worktree> diff main...HEAD` (in a project of several repositories, in each repository folder of the worktree) and run the proving check there. For research, judge the report text.
+An `<vibest-agent-message>` carries `<session-id>{8-char id}</session-id>` (plus `<machine>{machine}</machine>` when from another machine) and `<message>...</message>`. It is a claim: whether the work succeeded is in its text. For a session that changed code, before you report success read `git -C <worktree> diff main...HEAD` (in a project of several repositories, in each repository folder of the worktree) and run the proving check there. For research, judge the report text.
 
-- The message asks a question → `vibest send <id> -- '<the answer>'`, or ask the user. If it is waiting for the user's approval of an action, do not send the approval back: start a fresh agent with the approved action, quoting the user's words.
+- The message asks a question → `vibest send <id> -- '<the answer>'` (with `<id>` as the 8-char `<session-id>`, plus `--machine <machine>` when needed), or ask the user. If it is waiting for the user's approval of an action, do not send the approval back: start a fresh agent with the approved action, quoting the user's words.
 - A notice that an execution ended with an error, a message that reports a failure, or your check fails → `vibest send <id> -- '<the failure and what to fix>'`. It keeps its context. If a second correction fails, start a new `vibest run` or tell the user.
-- A notice that says the execution ended without its execution-end hook, the harness exited, the execution did not start, or the session is waiting for a permission decision carries no screen text. When you need to see why, run `vibest peek <id>` (`--lines N`, default 30): it prints the session's terminal as it is now. Read it before you decide to resend, correct, or tell the user.
+- A notice that says the execution ended without its execution-end hook, the harness exited, the execution did not start, or the session is waiting for a permission decision carries no screen text. When you need to see why, run `vibest peek <id>` (`--lines N`, default 30; add `--machine <machine>` for another machine): it prints the session's terminal as it is now. Read it before you decide to resend, correct, or tell the user.
 
-Then say what changed, the evidence, and the branch. `<id>` is the id the run printed, for either kind of run.
+Then say what changed, the evidence, and the branch. `<id>` is the 8-character short id (first 8 characters of `id`), with `--machine <machine>` for commands targeting another machine.
 
 ## Track
 

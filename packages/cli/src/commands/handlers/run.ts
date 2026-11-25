@@ -5,7 +5,6 @@ import { caller, callerEnvOf, json } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { EmptyInput, input, readAttachments } from "../../input.ts"
 import { requested } from "../../requested.ts"
-import { parseSessionRef } from "../../session-ref.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.run, (o) =>
@@ -58,9 +57,9 @@ export default Runtime.handler(Commands.commands.run, (o) =>
           callerEnv: callerEnvOf(),
           ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
           ...(files.length !== 0 && { files }),
-          ...(o.from.length !== 0 && { from: o.from.map(parseSessionRef) }),
-          ...(o.to.length !== 0 && { to: o.to.map(parseSessionRef) }),
-          ...(o.with.length !== 0 && { with: o.with.map(parseSessionRef) }),
+          ...(o.from.length !== 0 && { from: o.from.map((id) => ({ id })) }),
+          ...(o.to.length !== 0 && { to: o.to.map((id) => ({ id })) }),
+          ...(o.with.length !== 0 && { with: o.with.map((id) => ({ id })) }),
         })
       }),
     )

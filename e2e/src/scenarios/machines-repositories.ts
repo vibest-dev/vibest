@@ -179,23 +179,23 @@ const checks: ReadonlyArray<Check> = [
         await s.okA(["machine", "add", "mb", "b-host"])
         await s.refusedOnA("mtwo", "has several projects for", `${secondId} (`, "shop-two)", "pass --project")
 
-        const address = (
+        const id8 = (
           JSON.parse(
             await w.okViaEntry(["run", "--machine", "mb", "--project", "shop-two", "pi", "--", ask("mchosen")], {
               env: s.aEnv,
               asIs: true,
             }),
           ) as { id: string }
-        ).id.slice(0, "mb/".length + 8)
+        ).id.slice(0, 8)
 
-        await until("the message on A", () => s!.notices(address, "mchosen") === 1, 120_000)
-        const got = JSON.parse(await s.okA(["result", address])) as { worktree: string }
+        await until("the message on A", () => s!.notices(id8, "mchosen") === 1, 120_000)
+        const got = JSON.parse(await s.okA(["result", id8, "--machine", "mb"])) as { worktree: string }
         const common = await git(w, got.worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
         expect(
           common === path.join(await fs.realpath(second), ".git"),
           `the session on B runs in ${got.worktree} of ${common}`,
         )
-        await s.okA(["archive", address])
+        await s.okA(["archive", id8, "--machine", "mb"])
       } finally {
         await s?.stop()
       }

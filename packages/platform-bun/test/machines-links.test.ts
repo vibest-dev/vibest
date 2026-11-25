@@ -6,8 +6,8 @@ import { RpcClient } from "effect/rpc"
 
 import * as Platform from "#platform"
 
-import { until } from "./lib/fakes.ts"
-import { inboxOf, outboxRows, repoStack, twoMachines } from "./lib/machines-fakes.ts"
+import { FakeRuntime, until } from "./lib/fakes.ts"
+import { inboxOf, outboxRows, peerSession, repoStack, twoMachines } from "./lib/machines-fakes.ts"
 
 const asSession =
   (sessionId: string, projectId: string, repositoryRoot: string) =>
@@ -254,5 +254,97 @@ describe("cross-machine directed session graph", () => {
       const pending = yield* until(b.run(outboxRows), (rows) => rows.length === 1)
       assert.lengthOf(pending, 1)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "unqualified remote prefix resolution works in Session.Link and Spawn --with, surfaces remote linkedTargets, and completes AmbiguousSession on 13-char prefix",
+    () =>
+      Effect.gen(function* () {
+        const { a, b, asEntry } = yield* twoMachines()
+
+        const r1Id = "756c38b6-101c-4da9-b8ba-b63399edb05a"
+        const r2Id = "756c38b6-202d-4da9-b8ba-b63399edb05b"
+        const bRuntime = yield* b.run(FakeRuntime)
+
+        for (const id of [r1Id, r2Id]) {
+          const pane = `p-${id.slice(9, 13)}`
+          yield* bRuntime.seedAgent(pane)
+          yield* b.db.session.insertSession(
+            {
+              ...peerSession,
+              id,
+              name: "remote-worker",
+              createdAt: 1,
+              lastActive: 1,
+            },
+            b.project,
+            { cwd: b.directory, origin: { remote: a.id, project: a.project } },
+          )
+          yield* b.db.session.startProcess(id, {
+            harness: "pi",
+            runtime: "herdr",
+            terminal: { id: pane },
+          })
+        }
+
+        const local = yield* asEntry(a.raw.Spawn({ agent: "general", prompt: "local", callerEnv: {} }))
+        const asLocal = asSession(local.id, a.project, a.directory)
+
+        const ambigLink = yield* Effect.flip(
+          asEntry(
+            a.raw["Session.Link"]({
+              spec: EdgeDirected.make({ from: [{ id: local.id.slice(0, 8) }], to: [{ id: "756c38b6" }] }),
+            }),
+          ),
+        )
+
+        assert.strictEqual(ambigLink._tag, "AmbiguousSession")
+
+        if (Predicate.isTagged(ambigLink, "AmbiguousSession")) {
+          assert.deepStrictEqual([...ambigLink.matches].sort(), [r1Id, r2Id].sort())
+          assert.include(ambigLink.message, "retry with more characters of the session id")
+        }
+
+        const linked1 = yield* asEntry(
+          a.raw["Session.Link"]({
+            spec: EdgeDirected.make({ from: [{ id: local.id.slice(0, 8) }], to: [{ id: "756c38b6-101c" }] }),
+          }),
+        )
+
+        assert.deepStrictEqual(linked1.edges, [{ from: { id: local.id }, to: { id: r1Id, machine: "mb" } }])
+
+        const targets = yield* a.db.session.linkedTargets(local.id)
+        assert.deepInclude(targets, { id: r1Id, label: "on mb" })
+
+        yield* asEntry(
+          a.raw["Session.Link"]({
+            spec: EdgeDirected.make({ from: [{ id: local.id.slice(0, 8) }], to: [{ id: "756c38b6-202d" }] }),
+          }),
+        )
+
+        const ambigSend = yield* Effect.flip(asLocal(a.raw.Send({ id: "756c38b6", message: "ambig" })))
+        assert.strictEqual(ambigSend._tag, "AmbiguousSession")
+
+        if (Predicate.isTagged(ambigSend, "AmbiguousSession")) {
+          assert.deepStrictEqual([...ambigSend.matches].sort(), [r1Id, r2Id].sort())
+        }
+
+        const sent = yield* asLocal(a.raw.Send({ id: "756c38b6-101c", message: "resolved-13-chars" }))
+        assert.strictEqual(sent.id, r1Id)
+        yield* until(b.run(inboxOf(r1Id)), (rows) => rows.some((r) => r.content.includes("resolved-13-chars")))
+
+        const localWithRemote = yield* asEntry(
+          a.raw.Spawn({
+            agent: "general",
+            prompt: "spawned with unqualified remote",
+            with: [{ id: "756c38b6-202d" }],
+            callerEnv: {},
+          }),
+        )
+
+        const asSpawned = asSession(localWithRemote.id, a.project, a.directory)
+        yield* asSpawned(a.raw.Send({ id: "756c38b6-202d", message: "from spawned --with" }))
+        yield* until(b.run(inboxOf(r2Id)), (rows) => rows.some((r) => r.content.includes("from spawned --with")))
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

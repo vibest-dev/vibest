@@ -222,7 +222,7 @@ describe("sends from sessions", () => {
             agents: [],
           })
 
-          assert.include(prompt, `send ${A} --`)
+          assert.include(prompt, `send ${A.slice(0, 8)} --`)
           assert.include(prompt, "nearest session above it that is still running")
         }),
       ),
@@ -296,7 +296,7 @@ describe("sends from sessions", () => {
           id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
           recipient: ended,
           kind: "send" as const,
-          sender: "mb/cccccccc",
+          sender: "cccccccc",
           from: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", agent: "general", title: "Far away", machine: "mc" },
           content: "report",
         }
@@ -306,13 +306,8 @@ describe("sends from sessions", () => {
         assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE recipient_session_id = ${ended}`, [])
         const out = yield* db.remote.outboxOf(remote)
         assert.lengthOf(out, 1)
-        assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })
+        assert.deepInclude(out[0]!, { kind: "send", content: "report", reportTo, sessionId: ended, from: item.from })
         assert.strictEqual(out[0]!.id, item.id, "the forward reuses the incoming transfer id")
-        assert.deepInclude(
-          out[0]!,
-          { sessionId: ended, from: null },
-          "the relay wrote the new message, so it is the sender",
-        )
       }).pipe(memory),
   )
 })

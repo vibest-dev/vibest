@@ -184,7 +184,7 @@ as the single-repository request an older B takes; the folder is read at each ru
 so a repository cloned beside a running project is sent). A repository without a remote is refused on A, naming it. A B whose Ping
 does not have the `remoteSpawnRepositories` capability is refused on A for a multi-repository project ("<B> runs a
 vibest that does not take a project of several repositories; run vibest update on <B>"), never downgraded to one
-repository; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Remote.Spawn` forwarded for the user.
+repository; `Spawn` answers `{ id, machine }`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Remote.Spawn` forwarded for the user.
 `--env`, `--share`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
@@ -192,11 +192,9 @@ path), which means nothing on B. A sends a runtime kind instead. With `--runtime
 runtime of the caller's terminal when the caller runs in one, else the runtime of A's entry session. B starts the session
 in that runtime and fails with `NoRuntime` (`<B>: the runtime "x" is not
 loaded; loaded: …`) when it does not have it. With none of the three, B's own hooks choose, as for a local run.
-An address `<name>/<id>` is resolved once, at the entry of each method, into a local id or a machine and an id; a
-bare id is always local and nothing is searched across machines. `vibest result|send|interrupt|archive|peek
-<name>/<id>` forward `Get`, `Send`, `Interrupt`, `Archive` and `Peek` with `vibest-remote-project` set to the caller's
+A `SessionRef` (`{ id, machine? }`, CLI `--machine <name>`) routes at the entry of each method: without `machine` it runs locally (except `Session.Link`, `Session.Unlink` and `Spawn` link flags, which fall back to live sessions across connected machines when a prefix is not local, and `Send`, which checks linked remote edges first); `vibest result|send|interrupt|stop|archive|peek <id> --machine <name>` forward `Get`, `Send`, `Interrupt`, `Stop`, `Archive` and `Peek` with `vibest-remote-project` set to the caller's
 project and `vibest-remote-by` set to the calling session, or `user`. `List` (and `vibest ls`) answers `{ sessions, machines }`, as `hc ls` does: `sessions` has the local rows and
-each connected machine's rows (ids `<name>/<id>`, `machine` set), asked of all machines at once; `machines` lists every
+each connected machine's rows (plain `id`, `machine` set), asked of all machines at once; `machines` lists every
 added machine, connected or not, with `state`, `since` and, when it is not connected, `reason`; a connected
 machine whose `List` fails is shown `unreachable` with that failure as its `reason`. The code is
 `server/src/machine/remote.ts` (forwarding, the merged List, the remote Spawn) and `server/src/machine/machines.ts` (add, dial, the
@@ -216,7 +214,7 @@ row already carrying that id (found: only acknowledged); otherwise a `session.in
 id, from the remote agent session with its machine (a `notice` is from `"vibest"`), routed to the recipient while it
 has not ended, else to the project's entry session, pending when that one is present, else dropped without being
 handed to an agent. A forward to another machine reuses the same id on the outbox and writes no local delivery. A `notice` has content
-`<name>/<id8>: <text>`; a `send` is a `send` row whose content is an `<vibest-agent-message>` naming `<name>/<id8>` (a pointer to `vibest result` follows the text when the item was cut). Then `Remote.Ack`. A pipe that drops
+`<id8> (on <name>): <text>`; a `send` is a `send` row whose content is an `<vibest-agent-message>` carrying `<session-id><id8></session-id>` and `<machine><name></machine>` (a pointer to `vibest result <id8> --machine <name>` follows the text when the item was cut). Then `Remote.Ack`. A pipe that drops
 between the commit and the ack sends the item again at the next connect, and `peer_item` finds it wherever the first
 copy was routed. The outbox stream failing (the 10 s ping timeout of a held pipe, for one) counts as the connection going
 down.
@@ -256,15 +254,14 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
   runs before `Remote.Spawn` only when A's runtime of the forwarded kind has `locate`.
 - **The address.** A remote row's `address` becomes A's view: found, `{machine: "local", id: <the terminal id A's
   runtime takes>}` (hc: `mb/t7@<A's socket>`); not found, `{machine: <name>, id: ""}` and `view` says why (the
-  runtime's note, a failed repair, or `<name>'s <kind> agents cannot be shown here; vibest peek <name>/<id> reads
+  runtime's note, a failed repair, or `<name>'s <kind> agents cannot be shown here; vibest peek <id> --machine <name> reads
   them` when A has no runtime of that kind with `locate`). `vibest peek` prints `terminal here: <address>` or `not
   shown here: <view>` on stderr. `Machine.Add` also answers that core note for each kind of B's that A cannot show.
 - **`machine ls`** gives per machine the runtimes of its last Hello (`runtimes`, `runtimesAt`), each with `here:
   {visible, as?, note?}` from `ensure`, the last hook notes per plugin with their time (`notes`), and `load`
   (`Machine.Load`) or `loadError` when it could not be read.
 - **Stepping in.** Keys typed into the terminal on A go through the runtime's own link (A's hc core, B's hc core) to
-  the harness on B. B records the typed execution as any local one, and what the session sends to A's entry session reaches it once as the
-  `<name>/<id8>: …` notice through B's outbox.
+  the harness on B. B records the typed execution as any local one, and what the session sends to A's session reaches it once as an `<vibest-agent-message>` carrying `<session-id><id8></session-id>` and `<machine><name></machine>` through B's outbox.
 
 The hc plugin (`runtime-herdr-core/src/machines.ts`) finds its mirror row by the link's core id under any name:
 `connect` adds `{target, name, session}` (never `install`) when there is none, counts `already_added` as done, and

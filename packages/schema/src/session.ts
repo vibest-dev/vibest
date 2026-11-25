@@ -22,14 +22,7 @@ export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered"
 
 export type InboxStatus = typeof InboxStatus.Type
 
-export {
-  canonicalTarget,
-  formatSessionRef,
-  formatTerminalTarget,
-  SessionRef,
-  Terminal,
-  TerminalTarget,
-} from "./terminal.ts"
+export { canonicalTarget, formatTerminalTarget, SessionRef, Terminal, TerminalTarget } from "./terminal.ts"
 
 export const RuntimeLocation = Schema.Union([
   Schema.Struct({ socketPath: Schema.String }),
@@ -103,7 +96,7 @@ export class AmbiguousSession extends Schema.TaggedError<AmbiguousSession>()("Am
   matches: Schema.Array(Schema.String),
 }) {
   override get message() {
-    return `${this.prefix} matches ${this.matches.join(", ")}; give more characters of the session id`
+    return `${this.prefix} matches ${this.matches.join(", ")}; retry with more characters of the session id`
   }
 }
 
