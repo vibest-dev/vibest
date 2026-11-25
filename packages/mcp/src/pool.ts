@@ -402,6 +402,9 @@ export const make = Effect.fn("McpPool.make")(function* (options?: { readonly ba
       get tools() {
         return live().tools
       },
+      get toolsMeta() {
+        return live().toolsMeta
+      },
       get prompts() {
         return live().prompts
       },
@@ -409,7 +412,7 @@ export const make = Effect.fn("McpPool.make")(function* (options?: { readonly ba
         const selected = yield* input.select
         state.selected = selected
 
-        if (!unpoolable.has(selected.key) && (yield* join(selected))) return
+        if (input.config.pool !== false && !unpoolable.has(selected.key) && (yield* join(selected))) return
         state.own = legacy.has(selected.key) ? older : configured
         yield* state.own.start
       }),
@@ -420,6 +423,7 @@ export const make = Effect.fn("McpPool.make")(function* (options?: { readonly ba
         yield* input.events.changed("resources")
         yield* input.events.changed("prompts")
       }),
+      refreshTools: () => live().refreshTools(),
       recovering: (client, request) =>
         state.shared ? state.shared.recovering(client, request) : (state.own ?? configured).recovering(client, request),
       catalog: (client) => live().catalog(client),

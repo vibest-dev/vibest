@@ -1,7 +1,5 @@
-import { Schema } from "effect"
-
 import { Event } from "./event.ts"
-import { EventMessage, ServerName, Status } from "./mcp.ts"
+import { ServerName, Status } from "./mcp.ts"
 
 export * as McpEvent from "./mcp-event.ts"
 
@@ -24,14 +22,5 @@ export const ResourcesChanged = Event.ephemeral({
   type: "mcp.resources.changed",
   schema: {
     server: ServerName,
-  },
-})
-
-export const EventReceived = Event.ephemeral({
-  type: "mcp.event.received",
-  schema: {
-    server: ServerName,
-    eventName: Schema.String,
-    message: EventMessage,
   },
 })

@@ -5,6 +5,8 @@ import path from "node:path"
 
 import type { Mcp } from "@vibest/schema/mcp"
 
+import { writeAtomicFile } from "./fs-util.ts"
+
 export * as McpSkillSync from "./skill-sync.ts"
 
 export const DEFAULT_MAX_OUTPUT_BYTES = 32 * 1024
@@ -114,9 +116,7 @@ export const syncSkillsToDirectory = (input: {
       tools: item.tools,
     })
 
-    const tmpPath = `${skillPath}.${process.pid}.${Date.now()}.tmp`
-    fs.writeFileSync(tmpPath, markdown, "utf8")
-    fs.renameSync(tmpPath, skillPath)
+    writeAtomicFile(skillPath, markdown)
     synced.push({ server: item.server, skillPath, toolCount: item.tools.length })
   }
 

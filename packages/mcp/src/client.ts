@@ -123,6 +123,15 @@ export interface Tool {
   readonly annotations?: Schema.JsonObject | undefined
 }
 
+export interface ToolListMeta {
+  readonly cacheScope?: "public" | "private" | undefined
+  readonly ttlMs?: number | undefined
+}
+
+export interface ToolListResult extends ToolListMeta {
+  readonly tools: ReadonlyArray<Tool>
+}
+
 export interface Events {
   readonly list: () => Effect.Effect<ReadonlyArray<Mcp.EventType>, Error>
   readonly stream: (input: {
@@ -138,7 +147,7 @@ export interface Connection {
   readonly protocolVersion: string | undefined
   readonly title: string | undefined
   readonly instructions: string | undefined
-  readonly tools: () => Effect.Effect<ReadonlyArray<Tool>, Error>
+  readonly tools: () => Effect.Effect<ToolListResult, Error>
   readonly prompts: () => Effect.Effect<ReadonlyArray<Prompt>, Error>
   readonly resources: () => Effect.Effect<ReadonlyArray<Resource>, Error>
   readonly resourceTemplates: () => Effect.Effect<ReadonlyArray<ResourceTemplateType>, Error>
@@ -189,8 +198,8 @@ interface SessionState {
   reported: boolean
 }
 
-const toError = (error: Error | string | number | boolean | null | undefined): Error =>
-  error instanceof Error ? error : new Error(String(error))
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Effect.tryPromise catch boundary
+const toError = (error: unknown): Error => (error instanceof Error ? error : new Error(String(error)))
 
 const describe = (error: Error | string | number | boolean | null | undefined): string => {
   if (!(error instanceof Error)) return String(error)
@@ -415,7 +424,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
 
     yield* Effect.tryPromise({
       try: (signal) => client.connect(transport, { timeout: timeout?.startup ?? DEFAULT_STARTUP_TIMEOUT, signal }),
-      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+      catch: toError,
     }).pipe(Effect.onError(() => Effect.promise(() => transport.close()).pipe(Effect.ignore)))
 
     return client
@@ -529,7 +538,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
         if (transport?.sessionId !== undefined && !session.reported) {
           yield* Effect.tryPromise({
             try: () => transport.terminateSession(),
-            catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+            catch: toError,
           }).pipe(
             Effect.timeoutOrElse({
               duration: TERMINATE_TIMEOUT,
@@ -544,14 +553,13 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
     )
 
     const catalog = { timeout: timeout?.catalog ?? DEFAULT_CATALOG_TIMEOUT }
-    const listed = new Map<string, Tool>()
     const execution = timeout?.execution ?? DEFAULT_EXECUTION_TIMEOUT
     const idleTimeout = options.eventStreamIdleTimeout ?? EVENT_STREAM_IDLE
 
     const request = <A>(what: string, run: (signal: AbortSignal) => Promise<A>) =>
       Effect.tryPromise({
         try: run,
-        catch: (error) => failure(error instanceof Error ? error : new Error(String(error))),
+        catch: (error) => failure(toError(error)),
       }).pipe(Effect.tapError((error) => Effect.logWarning(`failed to ${what}`, { server, error: error.message })))
 
     const list = <A>(what: string, run: (signal: AbortSignal) => Promise<A>) =>
@@ -559,7 +567,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
         what,
         Effect.tryPromise({
           try: run,
-          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+          catch: toError,
         }),
       ).pipe(
         Effect.mapError(failure),
@@ -628,7 +636,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
                     catch: (error) =>
                       error instanceof ProtocolError && EVENT_STREAM_REJECTED.has(error.code)
                         ? new EventStreamRejectedError({ server, code: error.code, message: error.message })
-                        : failure(error instanceof Error ? error : new Error(String(error))),
+                        : failure(toError(error)),
                   }).pipe(
                     Effect.matchEffect({
                       onFailure: (error) => Queue.fail(queue, error),
@@ -650,7 +658,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
           ? list("list MCP tools", (signal) =>
               client.listTools(undefined, { ...catalog, cacheMode: "bypass", signal }),
             ).pipe(
-              Effect.map((result) => {
+              Effect.map((result): ToolListResult => {
                 const tools: Array<Tool> = []
 
                 for (const rawTool of result.tools) {
@@ -681,14 +689,19 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
                   })
                 }
 
-                listed.clear()
+                const rawCacheScope = Predicate.hasProperty(result, "cacheScope") ? result.cacheScope : undefined
+                const cacheScope = rawCacheScope === "public" || rawCacheScope === "private" ? rawCacheScope : undefined
+                const rawTtlMs = Predicate.hasProperty(result, "ttlMs") ? result.ttlMs : undefined
+                const ttlMs = Predicate.isNumber(rawTtlMs) ? rawTtlMs : undefined
 
-                for (const tool of tools) listed.set(tool.name, tool)
-
-                return tools
+                return {
+                  tools,
+                  ...(cacheScope !== undefined && { cacheScope }),
+                  ...(ttlMs !== undefined && { ttlMs }),
+                }
               }),
             )
-          : Effect.succeed([]),
+          : Effect.succeed({ tools: [] }),
       prompts: () =>
         advertised("prompts")
           ? list("list MCP prompts", (signal) => client.listPrompts(undefined, { ...catalog, signal })).pipe(
@@ -732,7 +745,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
                 onprogress: () => {},
               },
             ),
-          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+          catch: toError,
         })
 
         return call.pipe(

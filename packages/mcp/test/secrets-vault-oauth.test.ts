@@ -5,12 +5,15 @@ import type { AddressInfo } from "node:net"
 import os from "node:os"
 import path from "node:path"
 
+import { BunServices } from "@effect/platform-bun"
 import type { Mcp } from "@vibest/schema/mcp"
-import { Deferred, Effect, Exit, Fiber } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Predicate } from "effect"
 import { describe, expect, it } from "vitest"
 
+import { OAuthFlowError } from "../src/errors.ts"
 import { McpOAuth } from "../src/oauth.ts"
 import { McpSecrets } from "../src/secrets.ts"
+import { McpRuntime } from "../src/service.ts"
 import { McpVault } from "../src/vault.ts"
 
 const withTempDirAsync = async <A>(fn: (dir: string) => Promise<A>): Promise<A> => {
@@ -94,25 +97,6 @@ describe("McpVault AES-256-GCM AAD, single-flight refresh, and logout generation
       )
 
       expect(Exit.isFailure(swappedExit)).toBe(true)
-
-      const fakeHome = path.join(root, "fake-home")
-      fs.mkdirSync(path.join(fakeHome, ".claude"), { recursive: true })
-      fs.writeFileSync(
-        path.join(fakeHome, ".claude", ".credentials.json"),
-        JSON.stringify({
-          mcpOAuth: {
-            hostEntry: { serverUrl: "https://imported.example.com/mcp", accessToken: "imported-tok", clientId: "cid" },
-          },
-        }),
-        "utf8",
-      )
-
-      const imported = await Effect.runPromise(
-        vault.importFromHost("imported", "https://imported.example.com/mcp", fakeHome),
-      )
-
-      expect(imported?.tokens?.accessToken).toBe("imported-tok")
-      expect(imported?.clientInfo?.clientId).toBe("cid")
     })
   })
 
@@ -351,5 +335,67 @@ describe("McpOAuth PKCE 2-step headless flow, origin-locked headers, and 403 ins
     })
 
     expect(McpOAuth.extractInsufficientScope(stepUpRes)).toBe("admin:write")
+  })
+
+  it("returns typed OAuthFlowError on malformed URLs and resolves !command secrets before HTTP requests", async () => {
+    await withTempDirAsync(async (vibestHome) => {
+      const vault = McpVault.make({ vibestHome })
+      const manager = McpOAuth.makeAuthManager({ vault, enableLoopback: false })
+
+      const badUrlExit = await Effect.runPromiseExit(
+        manager.authStart("bad", { type: "remote", url: "not-a-valid-url" }),
+      )
+
+      expect(Exit.isFailure(badUrlExit)).toBe(true)
+
+      if (Exit.isFailure(badUrlExit)) {
+        const failure = Cause.findErrorOption(badUrlExit.cause)
+        expect(Option.isSome(failure)).toBe(true)
+
+        if (Option.isSome(failure)) {
+          expect(failure.value).toBeInstanceOf(OAuthFlowError)
+        }
+      }
+
+      const seenHeaders: Array<{ readonly auth: string | undefined; readonly apiKey: string | undefined }> = []
+
+      const mcpServer = http.createServer((req, res) => {
+        seenHeaders.push({
+          auth: Predicate.isString(req.headers.authorization) ? req.headers.authorization : undefined,
+          apiKey: Predicate.isString(req.headers["x-api-key"]) ? req.headers["x-api-key"] : undefined,
+        })
+
+        res.writeHead(401).end("unauthorized")
+      })
+
+      await new Promise<void>((resolve) => mcpServer.listen(0, "127.0.0.1", resolve))
+      const port = (mcpServer.address() as AddressInfo).port
+
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const rt = yield* McpRuntime.make({ vibestHome })
+
+              yield* rt.add("remote-secret", {
+                type: "remote",
+                url: `http://127.0.0.1:${port}/mcp`,
+                bearerToken: "!printf resolved-bearer-123",
+                headers: { "X-Api-Key": "!printf resolved-key-456" },
+                protocol: "legacy",
+              })
+
+              yield* rt.connect("remote-secret")
+            }),
+          ).pipe(Effect.provide(BunServices.layer)),
+        )
+
+        expect(seenHeaders.length).toBeGreaterThan(0)
+        expect(seenHeaders[0]?.auth).toBe("Bearer resolved-bearer-123")
+        expect(seenHeaders[0]?.apiKey).toBe("resolved-key-456")
+      } finally {
+        mcpServer.close()
+      }
+    })
   })
 })

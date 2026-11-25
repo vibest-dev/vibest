@@ -5,6 +5,7 @@ import path from "node:path"
 import { Mcp } from "@vibest/schema/mcp"
 import { Option, Schema } from "effect"
 
+import { writeAtomicFile } from "./fs-util.ts"
 import { McpSecrets } from "./secrets.ts"
 
 export * as McpMetadataCache from "./metadata-cache.ts"
@@ -15,7 +16,7 @@ export const CachedServerEntry = Schema.Struct({
   fingerprint: Schema.String,
   cachedAt: Schema.Number,
   ttlMs: Schema.optional(Schema.Number),
-  cacheScope: Schema.optional(Schema.Literals(["shared", "private"])),
+  cacheScope: Schema.optional(Schema.Literals(["public", "shared", "private"])),
   title: Schema.optional(Schema.String),
   instructions: Schema.optional(Schema.String),
   tools: Schema.Array(Mcp.ToolInfo),
@@ -64,7 +65,7 @@ export const computeFingerprint = (input: FingerprintInput): string => {
 
 export const isPersistable = (
   config: Mcp.ServerConfig,
-  options?: { readonly cacheScope?: "shared" | "private" | undefined; readonly ttlMs?: number | undefined },
+  options?: { readonly cacheScope?: "public" | "shared" | "private" | undefined; readonly ttlMs?: number | undefined },
 ): boolean => {
   if (options?.cacheScope === "private") return false
 
@@ -114,19 +115,30 @@ export const make = (vibestHome: string): MetadataCacheStore => {
 
   const writeDisk = (servers: Readonly<Record<string, CachedServerEntry>>): void => {
     try {
-      fs.mkdirSync(path.dirname(cachePath), { recursive: true })
-      const tmp = `${cachePath}.${process.pid}.${Date.now()}.tmp`
-      fs.writeFileSync(tmp, JSON.stringify({ version: CACHE_VERSION, servers }, null, 2), "utf8")
-      fs.renameSync(tmp, cachePath)
+      writeAtomicFile(cachePath, JSON.stringify({ version: CACHE_VERSION, servers }, null, 2))
     } catch {
       return
     }
   }
 
+  const removeFromDisk = (server: string): void => {
+    const disk = readDisk()
+
+    if (!(server in disk)) return
+    const next = { ...disk }
+    delete next[server]
+    writeDisk(next)
+  }
+
   const get = (server: string, fingerprint: string, now = Date.now(), maxAgeMs = 0): CachedServerEntry | undefined => {
     const inMem = memory.get(server)
 
-    if (inMem && isEntryValid(inMem, fingerprint, now, maxAgeMs)) return inMem
+    if (inMem !== undefined) {
+      if (isEntryValid(inMem, fingerprint, now, maxAgeMs)) return inMem
+
+      if (inMem.cacheScope === "private" || inMem.ttlMs === 0) return undefined
+    }
+
     const disk = readDisk()[server]
 
     if (!disk) return undefined
@@ -142,19 +154,19 @@ export const make = (vibestHome: string): MetadataCacheStore => {
   const set = (server: string, config: Mcp.ServerConfig, entry: CachedServerEntry): void => {
     memory.set(server, entry)
 
-    if (!isPersistable(config, { cacheScope: entry.cacheScope, ttlMs: entry.ttlMs })) return
+    if (!isPersistable(config, { cacheScope: entry.cacheScope, ttlMs: entry.ttlMs })) {
+      removeFromDisk(server)
+
+      return
+    }
+
     const disk = readDisk()
     writeDisk({ ...disk, [server]: entry })
   }
 
   const invalidate = (server: string): void => {
     memory.delete(server)
-    const disk = readDisk()
-
-    if (!(server in disk)) return
-    const next = { ...disk }
-    delete next[server]
-    writeDisk(next)
+    removeFromDisk(server)
   }
 
   return { get, set, invalidate }

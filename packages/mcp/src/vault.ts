@@ -1,10 +1,8 @@
-import childProcess from "node:child_process"
 import crypto from "node:crypto"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 
-import { Clock, Context, Effect, Layer, Option, Schema, Semaphore } from "effect"
+import { Context, Effect, Layer, Option, Schema, Semaphore } from "effect"
 
 import { VaultError } from "./errors.ts"
 
@@ -13,7 +11,6 @@ export * as McpVault from "./vault.ts"
 const VAULT_FILE = "mcp-credentials.enc"
 const VAULT_KEY_FILE = "mcp-vault.key"
 const VAULT_KEY_ENV = "VIBEST_MCP_VAULT_KEY"
-const KEYCHAIN_SERVICE = "vibest.mcp.oauth"
 const ENVELOPE_VERSION = 1
 const AAD_PREFIX = "vibest.mcp.vault.v1"
 
@@ -215,38 +212,6 @@ const decryptEntry = (key: Buffer, serverUrl: string, record: EncryptedRecord): 
   return decoded.value
 }
 
-const keychainRead = (account: string): string | undefined => {
-  if (process.platform !== "darwin") return undefined
-
-  const result = childProcess.spawnSync(
-    "security",
-    ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"],
-    { encoding: "utf8", timeout: 5_000 },
-  )
-
-  return result.status === 0 ? result.stdout.trim() : undefined
-}
-
-const keychainWrite = (account: string, payload: string): boolean => {
-  if (process.platform !== "darwin") return false
-
-  const result = childProcess.spawnSync(
-    "security",
-    ["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", account, "-w", payload],
-    { encoding: "utf8", timeout: 5_000 },
-  )
-
-  return result.status === 0
-}
-
-const keychainRemove = (account: string): void => {
-  if (process.platform !== "darwin") return
-  childProcess.spawnSync("security", ["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account], {
-    encoding: "utf8",
-    timeout: 5_000,
-  })
-}
-
 export interface RefreshOptions<E> {
   readonly presentedAccess: string | undefined
   readonly shouldRefresh?: (current: CredentialEntry) => boolean
@@ -264,45 +229,21 @@ export interface Interface {
     serverUrl: string,
     options: RefreshOptions<E>,
   ) => Effect.Effect<CredentialEntry | undefined, VaultError | E>
-  readonly importFromHost: (
-    server: string,
-    serverUrl: string,
-    homeDir?: string,
-  ) => Effect.Effect<CredentialEntry | undefined, VaultError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vibest/McpVault") {}
 
 export interface VaultOptions {
   readonly vibestHome: string
-  readonly backend?: "encrypted-file" | "macos-keychain"
-  readonly vaultKeyBase64?: string
+  readonly vaultKeyBase64?: string | undefined
 }
 
-const HostCredentialsSchema = Schema.Struct({
-  mcpOAuth: Schema.optional(
-    Schema.Record(
-      Schema.String,
-      Schema.Struct({
-        serverUrl: Schema.optional(Schema.String),
-        accessToken: Schema.optional(Schema.String),
-        refreshToken: Schema.optional(Schema.String),
-        expiresAt: Schema.optional(Schema.Number),
-        scope: Schema.optional(Schema.String),
-        clientId: Schema.optional(Schema.String),
-      }),
-    ),
-  ),
-})
-
-const decodeHostCredentials = Schema.decodeUnknownOption(HostCredentialsSchema)
-
 export const make = (options: VaultOptions): Interface => {
-  const backend = options.backend ?? "encrypted-file"
   const vaultPath = path.join(options.vibestHome, VAULT_FILE)
   const cache = new Map<string, CredentialEntry | undefined>()
   const generations = new Map<string, number>()
   const refreshMutexes = new Map<string, Semaphore.Semaphore>()
+  const storeLock = Semaphore.makeUnsafe(1)
 
   const getMutex = (key: string): Semaphore.Semaphore => {
     const existing = refreshMutexes.get(key)
@@ -361,33 +302,6 @@ export const make = (options: VaultOptions): Interface => {
       return cached ? structuredClone(cached) : undefined
     }
 
-    if (backend === "macos-keychain") {
-      const raw = yield* Effect.sync(() => keychainRead(key))
-
-      if (raw === undefined) {
-        cache.set(key, undefined)
-
-        return undefined
-      }
-
-      const decoded = yield* Effect.try({
-        try: () => decodeCredentialEntry(JSON.parse(raw)),
-        catch: (error) =>
-          new VaultError({
-            operation: "read",
-            message: error instanceof Error ? error.message : String(error),
-          }),
-      })
-
-      if (Option.isNone(decoded)) {
-        return yield* new VaultError({ operation: "read", message: "Keychain entry has invalid schema" })
-      }
-
-      cache.set(key, decoded.value)
-
-      return structuredClone(decoded.value)
-    }
-
     const encryptionKey = yield* resolveVaultKey(options.vibestHome, options.vaultKeyBase64)
     const store = yield* readStoreFile()
     const record = store[key]
@@ -419,23 +333,15 @@ export const make = (options: VaultOptions): Interface => {
   ): Effect.fn.Return<void, VaultError> {
     const key = entryKey(server, serverUrl)
 
-    if (backend === "macos-keychain") {
-      const ok = yield* Effect.sync(() => keychainWrite(key, JSON.stringify(entry)))
-
-      if (!ok) {
-        return yield* new VaultError({ operation: "write", message: "macOS keychain write failed" })
-      }
-
-      cache.set(key, structuredClone(entry))
-
-      return
-    }
-
-    const encryptionKey = yield* resolveVaultKey(options.vibestHome, options.vaultKeyBase64)
-    const store = yield* readStoreFile()
-    const encrypted = encryptEntry(encryptionKey, serverUrl, entry)
-    yield* writeStoreFile({ ...store, [key]: encrypted })
-    cache.set(key, structuredClone(entry))
+    yield* storeLock.withPermit(
+      Effect.gen(function* () {
+        const encryptionKey = yield* resolveVaultKey(options.vibestHome, options.vaultKeyBase64)
+        const store = yield* readStoreFile()
+        const encrypted = encryptEntry(encryptionKey, serverUrl, entry)
+        yield* writeStoreFile({ ...store, [key]: encrypted })
+        cache.set(key, structuredClone(entry))
+      }),
+    )
   })
 
   const remove = Effect.fn("McpVault.remove")(function* (
@@ -446,18 +352,16 @@ export const make = (options: VaultOptions): Interface => {
     generations.set(key, (generations.get(key) ?? 0) + 1)
     cache.set(key, undefined)
 
-    if (backend === "macos-keychain") {
-      yield* Effect.sync(() => keychainRemove(key))
+    yield* storeLock.withPermit(
+      Effect.gen(function* () {
+        const store = yield* readStoreFile()
 
-      return
-    }
-
-    const store = yield* readStoreFile()
-
-    if (!(key in store)) return
-    const next = { ...store }
-    delete next[key]
-    yield* writeStoreFile(next)
+        if (!(key in store)) return
+        const next = { ...store }
+        delete next[key]
+        yield* writeStoreFile(next)
+      }),
+    )
   })
 
   const generation = (server: string, serverUrl: string): Effect.Effect<number> =>
@@ -512,56 +416,7 @@ export const make = (options: VaultOptions): Interface => {
     )
   }
 
-  const importFromHost = Effect.fn("McpVault.importFromHost")(function* (
-    server: string,
-    serverUrl: string,
-    homeDir?: string,
-  ): Effect.fn.Return<CredentialEntry | undefined, VaultError> {
-    const targetUrl = canonicalServerUrl(serverUrl)
-    const baseHome = homeDir ?? os.homedir()
-    const candidateFiles = [path.join(baseHome, ".claude", ".credentials.json")]
-    const now = yield* Clock.currentTimeMillis
-
-    for (const file of candidateFiles) {
-      if (!fs.existsSync(file)) continue
-      let parsed: Option.Option<typeof HostCredentialsSchema.Type> = Option.none()
-
-      try {
-        parsed = decodeHostCredentials(JSON.parse(fs.readFileSync(file, "utf8")))
-      } catch {
-        continue
-      }
-
-      if (Option.isNone(parsed) || !parsed.value.mcpOAuth) continue
-
-      for (const candidate of Object.values(parsed.value.mcpOAuth)) {
-        if (!candidate.serverUrl || !candidate.accessToken) continue
-
-        if (canonicalServerUrl(candidate.serverUrl) !== targetUrl) continue
-
-        const entry: CredentialEntry = {
-          id: crypto.randomUUID(),
-          serverUrl: targetUrl,
-          tokens: {
-            accessToken: candidate.accessToken,
-            ...(candidate.refreshToken !== undefined && { refreshToken: candidate.refreshToken }),
-            ...(candidate.expiresAt !== undefined && { expiresAt: candidate.expiresAt }),
-            ...(candidate.scope !== undefined && { scope: candidate.scope }),
-          },
-          ...(candidate.clientId !== undefined && { clientInfo: { clientId: candidate.clientId } }),
-          updatedAt: now,
-        }
-
-        yield* set(server, serverUrl, entry)
-
-        return entry
-      }
-    }
-
-    return undefined
-  })
-
-  return { get, set, remove, generation, refresh, importFromHost }
+  return { get, set, remove, generation, refresh }
 }
 
 export const layer = (options: VaultOptions) => Layer.succeed(Service, make(options))

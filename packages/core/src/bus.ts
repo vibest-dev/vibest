@@ -106,7 +106,6 @@ export const EphemeralDefinitions = Event.inventory(
   McpEvent.StatusChanged,
   McpEvent.ToolsChanged,
   McpEvent.ResourcesChanged,
-  McpEvent.EventReceived,
 )
 
 export type AnyEphemeralDefinition = (typeof EphemeralDefinitions)[number]

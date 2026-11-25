@@ -60,7 +60,7 @@ describe("NpxResolver", () => {
       )
 
       expect(first.resolved).toBe(true)
-      expect(first.command).toBe(process.execPath)
+      expect(first.command).toBe("node")
       expect(first.args).toEqual([binFile, "--port", "8080"])
       expect(fs.existsSync(path.join(vibestHome, "cache", "npx-bin-cache.json"))).toBe(true)
 
@@ -150,6 +150,16 @@ describe("McpMetadataCache", () => {
       const changedFp = McpMetadataCache.computeFingerprint({ config: remoteConfig, credentialId: "cred-2" })
       expect(changedFp).not.toBe(remoteFp)
       expect(freshStore.get("shared-remote", changedFp)).toBeUndefined()
+
+      store.set("shared-remote", remoteConfig, {
+        fingerprint: remoteFp,
+        cachedAt: Date.now(),
+        ttlMs: 0,
+        tools: [{ ...sampleTool, name: "ephemeral_tool" }],
+      })
+
+      expect(store.get("shared-remote", remoteFp)).toBeUndefined()
+      expect(McpMetadataCache.make(vibestHome).get("shared-remote", remoteFp)).toBeUndefined()
     })
   })
 })

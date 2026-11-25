@@ -5,6 +5,8 @@ import path from "node:path"
 import { Clock, Duration, Effect, Match, Option, Predicate, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
+import { writeAtomicFile } from "./fs-util.ts"
+
 export * as NpxResolver from "./npx-resolver.ts"
 
 const CACHE_VERSION = 2
@@ -435,12 +437,9 @@ const loadCache = (vibestHome: string): NpxCache | undefined => {
 const saveCacheEntry = (vibestHome: string, key: string, entry: NpxCacheEntry): void => {
   try {
     const file = cacheFilePath(vibestHome)
-    fs.mkdirSync(path.dirname(file), { recursive: true })
     const existing = loadCache(vibestHome)
     const entries = { ...existing?.entries, [key]: entry }
-    const tmpFile = `${file}.${process.pid}.${Date.now()}.tmp`
-    fs.writeFileSync(tmpFile, JSON.stringify({ version: CACHE_VERSION, entries }, null, 2), "utf8")
-    fs.renameSync(tmpFile, file)
+    writeAtomicFile(file, JSON.stringify({ version: CACHE_VERSION, entries }, null, 2))
   } catch {
     return
   }
@@ -450,35 +449,24 @@ const populateNpmCache = (
   packageSpec: string,
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"] | undefined,
 ): Effect.Effect<void> => {
-  if (spawner) {
-    return Effect.scoped(
-      spawner
-        .spawn(
-          ChildProcess.make("npm", ["exec", "--yes", "--package", packageSpec, "--", "node", "-e", "1"], {
-            stdin: "ignore",
-            stdout: "ignore",
-            stderr: "ignore",
-          }),
-        )
-        .pipe(
-          Effect.flatMap((handle) => handle.exitCode),
-          Effect.timeoutOption(FORCE_CACHE_TIMEOUT),
-          Effect.asVoid,
-          Effect.ignore,
-        ),
-    )
-  }
+  if (!spawner) return Effect.void
 
-  return Effect.sync(() => {
-    try {
-      childProcess.spawnSync("npm", ["exec", "--yes", "--package", packageSpec, "--", "node", "-e", "1"], {
-        stdio: "ignore",
-        timeout: Duration.toMillis(FORCE_CACHE_TIMEOUT),
-      })
-    } catch {
-      return
-    }
-  })
+  return Effect.scoped(
+    spawner
+      .spawn(
+        ChildProcess.make("npm", ["exec", "--yes", "--package", packageSpec, "--", "node", "-e", "1"], {
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore",
+        }),
+      )
+      .pipe(
+        Effect.flatMap((handle) => handle.exitCode),
+        Effect.timeoutOption(FORCE_CACHE_TIMEOUT),
+        Effect.asVoid,
+        Effect.ignore,
+      ),
+  )
 }
 
 export const resolve = Effect.fn("NpxResolver.resolve")(function* (
@@ -543,7 +531,7 @@ export const rewriteCommand = Effect.fn("NpxResolver.rewriteCommand")(function* 
 
   if (hit.isJs) {
     return {
-      command: process.execPath,
+      command: "node",
       args: [hit.binPath, ...hit.extraArgs],
       resolved: true,
     }

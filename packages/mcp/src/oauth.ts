@@ -1,5 +1,4 @@
 import crypto from "node:crypto"
-import http from "node:http"
 
 import {
   auth,
@@ -22,22 +21,15 @@ import {
 } from "@modelcontextprotocol/client"
 import { OAuthMetadataSchema, OpenIdProviderDiscoveryMetadataSchema } from "@modelcontextprotocol/core"
 import { Mcp } from "@vibest/schema/mcp"
-import { Clock, Duration, Effect, Option, Predicate, Schema } from "effect"
+import { Clock, Duration, Effect, Fiber, Schema } from "effect"
 
 import { OAuthFlowError } from "./errors.ts"
+import { startLoopbackListener } from "./oauth-callback.ts"
+import { McpSecrets } from "./secrets.ts"
 import { McpVault } from "./vault.ts"
 
 export * as McpOAuth from "./oauth.ts"
 
-const TokenResponseSchema = Schema.Struct({
-  access_token: Schema.String,
-  token_type: Schema.String,
-  refresh_token: Schema.optional(Schema.String),
-  expires_in: Schema.optional(Schema.Number),
-  scope: Schema.optional(Schema.String),
-})
-
-const decodeTokenResponse = Schema.decodeUnknownOption(TokenResponseSchema)
 const decodeServerName = Schema.decodeUnknownSync(Mcp.ServerName)
 
 const REFRESH_AHEAD_MS = Duration.toMillis(Duration.seconds(30))
@@ -56,6 +48,27 @@ class RefreshRejected extends Schema.TaggedError<RefreshRejected>()("McpOAuth.Re
 class IssuerChanged extends Schema.TaggedError<IssuerChanged>()("McpOAuth.IssuerChanged", {
   message: Schema.String,
 }) {}
+
+const parseUrl = (raw: string, server: string, label: string): Effect.Effect<URL, OAuthFlowError> =>
+  Effect.try({
+    try: () => new URL(raw),
+    catch: () => new OAuthFlowError({ server, message: `Invalid ${label} URL: ${raw}` }),
+  })
+
+const resolveRemoteSecrets = (
+  server: string,
+  config: Mcp.RemoteServerConfig,
+): Effect.Effect<Mcp.RemoteServerConfig, OAuthFlowError> =>
+  McpSecrets.resolveServerConfig(server, config).pipe(
+    Effect.flatMap((resolved) =>
+      resolved.type === "remote"
+        ? Effect.succeed(resolved)
+        : Effect.fail(new OAuthFlowError({ server, message: "Expected remote MCP server config" })),
+    ),
+    Effect.mapError((error) =>
+      error instanceof OAuthFlowError ? error : new OAuthFlowError({ server, message: error.message }),
+    ),
+  )
 
 export const selectResource = (serverUrl: string, resource: string | undefined): URL => {
   const identity = new URL(serverUrl)
@@ -96,7 +109,6 @@ export const createScopedFetch = (options: {
 
   return (input, init) => {
     const targetUrl = input instanceof URL ? input : new URL(input)
-
     const headers = new Headers(init?.headers)
 
     if (options.customHeaders && targetUrl.origin === allowedOrigin) {
@@ -165,101 +177,112 @@ const toVaultEntry = (input: {
 })
 
 const exchangeRefresh = (input: {
+  readonly server: string
   readonly config: Mcp.RemoteServerConfig
   readonly fetchFn: FetchLike
   readonly current: McpVault.CredentialEntry
   readonly resourceMetadataUrl: URL | undefined
   readonly now: number
 }): Effect.Effect<McpVault.CredentialEntry, RefreshRejected | IssuerChanged | Error> =>
-  Effect.tryPromise({
-    try: async (signal) => {
-      const fetchFn: FetchLike = async (url, init) => {
-        const response = await input.fetchFn(url, { ...init, signal })
+  Effect.gen(function* () {
+    const resolvedConfig = yield* resolveRemoteSecrets(input.server, input.config).pipe(
+      Effect.mapError((error) => new Error(error.message)),
+    )
 
-        if (init?.method === "POST" && (response.status === 408 || response.status === 429 || response.status >= 500)) {
-          throw new Error(`HTTP ${response.status}`)
+    return yield* Effect.tryPromise({
+      try: async (signal) => {
+        const fetchFn: FetchLike = async (url, init) => {
+          const response = await input.fetchFn(url, { ...init, signal })
+
+          if (
+            init?.method === "POST" &&
+            (response.status === 408 || response.status === 429 || response.status >= 500)
+          ) {
+            throw new Error(`HTTP ${response.status}`)
+          }
+
+          return response
         }
 
-        return response
-      }
+        const oauth = resolvedConfig.oauth || undefined
 
-      const oauth = input.config.oauth || undefined
-
-      const client: StoredOAuthClientInformation | undefined = oauth?.clientId
-        ? {
-            client_id: oauth.clientId,
-            ...(oauth.clientSecret !== undefined && { client_secret: oauth.clientSecret }),
-          }
-        : input.current.clientInfo
+        const client: StoredOAuthClientInformation | undefined = oauth?.clientId
           ? {
-              client_id: input.current.clientInfo.clientId,
-              ...(input.current.clientInfo.clientSecret !== undefined && {
-                client_secret: input.current.clientInfo.clientSecret,
-              }),
+              client_id: oauth.clientId,
+              ...(oauth.clientSecret !== undefined && { client_secret: oauth.clientSecret }),
             }
-          : undefined
+          : input.current.clientInfo
+            ? {
+                client_id: input.current.clientInfo.clientId,
+                ...(input.current.clientInfo.clientSecret !== undefined && {
+                  client_secret: input.current.clientInfo.clientSecret,
+                }),
+              }
+            : undefined
 
-      if (!client) throw new RefreshRejected({ message: "no OAuth client information" })
-      const refreshToken = input.current.tokens?.refreshToken
+        if (!client) throw new RefreshRejected({ message: "no OAuth client information" })
+        const refreshToken = input.current.tokens?.refreshToken
 
-      if (!refreshToken) throw new RefreshRejected({ message: "no refresh token available" })
-      const saved = input.current.discovery
-      const configured = await configuredDiscovery(input.config, fetchFn)
+        if (!refreshToken) throw new RefreshRejected({ message: "no refresh token available" })
+        const saved = input.current.discovery
+        const configured = await configuredDiscovery(resolvedConfig, fetchFn)
 
-      const server =
-        configured ??
-        (saved
-          ? {
-              authorizationServerUrl: saved.authorizationServer,
-              authorizationServerMetadata: await discoverAuthorizationServerMetadata(saved.authorizationServer, {
+        const server =
+          configured ??
+          (saved
+            ? {
+                authorizationServerUrl: saved.authorizationServer,
+                authorizationServerMetadata: await discoverAuthorizationServerMetadata(saved.authorizationServer, {
+                  fetchFn,
+                }),
+                resourceMetadata: undefined,
+              }
+            : await discoverOAuthServerInfo(resolvedConfig.url, {
+                ...(input.resourceMetadataUrl !== undefined && { resourceMetadataUrl: input.resourceMetadataUrl }),
                 fetchFn,
-              }),
-              resourceMetadata: undefined,
-            }
-          : await discoverOAuthServerInfo(input.config.url, {
-              ...(input.resourceMetadataUrl !== undefined && { resourceMetadataUrl: input.resourceMetadataUrl }),
-              fetchFn,
-            }))
+              }))
 
-      const foundIssuer = server.authorizationServerMetadata?.issuer ?? server.authorizationServerUrl
-      const savedIssuer = input.current.tokens?.issuer
+        const foundIssuer = server.authorizationServerMetadata?.issuer ?? server.authorizationServerUrl
+        const savedIssuer = input.current.tokens?.issuer
 
-      if (
-        !oauth?.skipIssuerValidation &&
-        savedIssuer !== undefined &&
-        foundIssuer.replace(/\/$/, "") !== savedIssuer.replace(/\/$/, "")
-      ) {
-        throw new IssuerChanged({ message: `issued by ${savedIssuer}, but discovery names ${foundIssuer}` })
-      }
+        if (
+          !oauth?.skipIssuerValidation &&
+          savedIssuer !== undefined &&
+          foundIssuer.replace(/\/$/, "") !== savedIssuer.replace(/\/$/, "")
+        ) {
+          throw new IssuerChanged({ message: `issued by ${savedIssuer}, but discovery names ${foundIssuer}` })
+        }
 
-      const resource = saved?.resource ?? selectResource(input.config.url, server.resourceMetadata?.resource).toString()
+        const resource =
+          saved?.resource ?? selectResource(resolvedConfig.url, server.resourceMetadata?.resource).toString()
 
-      const tokens = await refreshAuthorization(server.authorizationServerUrl, {
-        ...(server.authorizationServerMetadata !== undefined && { metadata: server.authorizationServerMetadata }),
-        clientInformation: client,
-        refreshToken,
-        resource,
-        fetchFn,
-      })
+        const tokens = await refreshAuthorization(server.authorizationServerUrl, {
+          ...(server.authorizationServerMetadata !== undefined && { metadata: server.authorizationServerMetadata }),
+          clientInformation: client,
+          refreshToken,
+          resource,
+          fetchFn,
+        })
 
-      return toVaultEntry({
-        serverUrl: input.config.url,
-        tokens: { refresh_token: refreshToken, ...tokens },
-        clientInfo: client,
-        issuer: foundIssuer,
-        discovery: configured ? undefined : { authorizationServer: server.authorizationServerUrl, resource },
-        now: input.now,
-      })
-    },
-    catch: (error) => {
-      if (error instanceof RefreshRejected || error instanceof IssuerChanged) return error
+        return toVaultEntry({
+          serverUrl: resolvedConfig.url,
+          tokens: { refresh_token: refreshToken, ...tokens },
+          clientInfo: client,
+          issuer: foundIssuer,
+          discovery: configured ? undefined : { authorizationServer: server.authorizationServerUrl, resource },
+          now: input.now,
+        })
+      },
+      catch: (error) => {
+        if (error instanceof RefreshRejected || error instanceof IssuerChanged) return error
 
-      if (error instanceof OAuthError && PERMANENT_REJECTIONS.has(error.code)) {
-        return new RefreshRejected({ message: error.message })
-      }
+        if (error instanceof OAuthError && PERMANENT_REJECTIONS.has(error.code)) {
+          return new RefreshRejected({ message: error.message })
+        }
 
-      return error instanceof Error ? error : new Error(String(error))
-    },
+        return error instanceof Error ? error : new Error(String(error))
+      },
+    })
   })
 
 interface PresentedTokenState {
@@ -273,10 +296,10 @@ export const connectProvider = (input: {
   readonly fetchFn: FetchLike
 }): AuthProvider => {
   if (input.config.bearerToken !== undefined) {
-    const token = input.config.bearerToken
+    const rawBearer = input.config.bearerToken
 
     return {
-      token: async () => token,
+      token: async () => Effect.runPromise(McpSecrets.resolveValue(rawBearer, `${input.server}.bearerToken`)),
     }
   }
 
@@ -317,6 +340,7 @@ export const connectProvider = (input: {
                 now + REFRESH_AHEAD_MS >= cur.tokens.expiresAt,
               perform: (cur) =>
                 exchangeRefresh({
+                  server: input.server,
                   config: input.config,
                   fetchFn: input.fetchFn,
                   current: cur,
@@ -348,6 +372,7 @@ export const connectProvider = (input: {
             presentedAccess: rejected,
             perform: (cur) =>
               exchangeRefresh({
+                server: input.server,
                 config: input.config,
                 fetchFn: input.fetchFn,
                 current: cur,
@@ -377,78 +402,6 @@ export const connectProvider = (input: {
   }
 }
 
-export const clientCredentialsGrant = Effect.fn("McpOAuth.clientCredentialsGrant")(function* (input: {
-  readonly server: string
-  readonly config: Mcp.RemoteServerConfig
-  readonly vault: McpVault.Interface
-  readonly fetchFn: FetchLike
-}): Effect.fn.Return<McpVault.CredentialEntry, OAuthFlowError> {
-  const oauth = input.config.oauth || undefined
-
-  if (!oauth?.clientId || !oauth.clientSecret) {
-    return yield* new OAuthFlowError({
-      server: input.server,
-      message: "client_credentials grant requires oauth.clientId and oauth.clientSecret",
-    })
-  }
-
-  const now = yield* Clock.currentTimeMillis
-
-  const entry = yield* Effect.tryPromise({
-    try: async () => {
-      const discovery =
-        (await configuredDiscovery(input.config, input.fetchFn)) ??
-        (await discoverOAuthServerInfo(input.config.url, { fetchFn: input.fetchFn }))
-
-      const tokenEndpoint = discovery.authorizationServerMetadata?.token_endpoint
-
-      if (!tokenEndpoint) throw new Error("Authorization server metadata missing token_endpoint")
-      const resource = selectResource(input.config.url, discovery.resourceMetadata?.resource).toString()
-
-      const body = new URLSearchParams({
-        grant_type: "client_credentials",
-        client_id: oauth.clientId!,
-        client_secret: oauth.clientSecret!,
-        resource,
-      })
-
-      if (oauth.scope) body.set("scope", oauth.scope)
-
-      const response = await input.fetchFn(tokenEndpoint, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
-        body,
-      })
-
-      if (!response.ok) throw new Error(`Token endpoint returned HTTP ${response.status}`)
-      const decodedPayload = decodeTokenResponse(await response.json())
-
-      if (Option.isNone(decodedPayload)) throw new Error("Token response missing access_token")
-      const payload = decodedPayload.value
-
-      return toVaultEntry({
-        serverUrl: input.config.url,
-        tokens: payload,
-        clientInfo: { client_id: oauth.clientId!, client_secret: oauth.clientSecret },
-        issuer: discovery.authorizationServerMetadata?.issuer ?? discovery.authorizationServerUrl,
-        discovery: { authorizationServer: discovery.authorizationServerUrl, resource },
-        now,
-      })
-    },
-    catch: (error) =>
-      new OAuthFlowError({
-        server: input.server,
-        message: error instanceof Error ? error.message : String(error),
-      }),
-  })
-
-  yield* input.vault
-    .set(input.server, input.config.url, entry)
-    .pipe(Effect.mapError((error) => new OAuthFlowError({ server: input.server, message: error.message })))
-
-  return entry
-})
-
 interface PendingFlow {
   readonly server: string
   readonly config: Mcp.RemoteServerConfig
@@ -459,8 +412,17 @@ interface PendingFlow {
   readonly fetchFn: FetchLike
   readonly scope: string | undefined
   readonly closeServer: () => void
+  readonly expiryFiber: Fiber.Fiber<void> | undefined
   readonly getTokens: () => StoredOAuthTokens | undefined
   readonly getClient: () => StoredOAuthClientInformation | undefined
+}
+
+interface FlowStoreState {
+  tokens: StoredOAuthTokens | undefined
+  client: StoredOAuthClientInformation | undefined
+  verifier: string | undefined
+  discovery: OAuthDiscoveryState | undefined
+  authorizationUrl: URL | undefined
 }
 
 export interface AuthManager {
@@ -487,18 +449,23 @@ export interface AuthManager {
 
 export const makeAuthManager = (options: {
   readonly vault: McpVault.Interface
-  readonly baseFetch?: FetchLike
-  readonly enableLoopback?: boolean
+  readonly baseFetch?: FetchLike | undefined
+  readonly enableLoopback?: boolean | undefined
+  readonly pendingFlowTtlMs?: number | undefined
 }): AuthManager => {
   const pending = new Map<string, PendingFlow>()
+  const flowTtlMs = options.pendingFlowTtlMs ?? PENDING_FLOW_TTL_MS
 
-  const cleanupFlow = (server: string) => {
-    const existing = pending.get(server)
+  const cleanupFlow = (server: string): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      const existing = pending.get(server)
 
-    if (!existing) return
-    pending.delete(server)
-    existing.closeServer()
-  }
+      if (!existing) return Effect.void
+      pending.delete(server)
+      existing.closeServer()
+
+      return existing.expiryFiber ? Fiber.interrupt(existing.expiryFiber) : Effect.void
+    })
 
   const finishExchange = Effect.fn("McpOAuth.finishExchange")(function* (
     flow: PendingFlow,
@@ -550,7 +517,7 @@ export const makeAuthManager = (options: {
       .set(flow.server, flow.config.url, entry)
       .pipe(Effect.mapError((error) => new OAuthFlowError({ server: flow.server, message: error.message })))
 
-    cleanupFlow(flow.server)
+    yield* cleanupFlow(flow.server)
 
     return {
       server: decodeServerName(flow.server),
@@ -560,25 +527,22 @@ export const makeAuthManager = (options: {
     }
   })
 
-  interface FlowStoreState {
-    tokens: StoredOAuthTokens | undefined
-    client: StoredOAuthClientInformation | undefined
-    verifier: string | undefined
-    discovery: OAuthDiscoveryState | undefined
-    authorizationUrl: URL | undefined
-  }
-
   const authStart = Effect.fn("McpOAuth.authStart")(function* (
     server: string,
-    config: Mcp.RemoteServerConfig,
+    rawConfig: Mcp.RemoteServerConfig,
   ): Effect.fn.Return<Mcp.AuthStartResult, OAuthFlowError> {
-    cleanupFlow(server)
+    yield* cleanupFlow(server)
 
-    if (config.oauth === false) {
+    if (rawConfig.oauth === false) {
       return yield* new OAuthFlowError({ server, message: "OAuth is disabled for this server" })
     }
 
+    yield* parseUrl(rawConfig.url, server, "server")
+    const config = yield* resolveRemoteSecrets(server, rawConfig)
     const oauth = config.oauth || undefined
+
+    const redirectParsed =
+      oauth?.redirectUri !== undefined ? yield* parseUrl(oauth.redirectUri, server, "redirect") : undefined
 
     const fetchFn = createScopedFetch({
       serverUrl: config.url,
@@ -588,7 +552,7 @@ export const makeAuthManager = (options: {
 
     const state = crypto.randomBytes(32).toString("base64url")
     const now = yield* Clock.currentTimeMillis
-    const expiresAt = now + PENDING_FLOW_TTL_MS
+    const expiresAt = now + flowTtlMs
 
     const storeState: FlowStoreState = {
       tokens: undefined,
@@ -607,91 +571,26 @@ export const makeAuthManager = (options: {
       }
     }
 
-    const redirectParsed = oauth?.redirectUri ? new URL(oauth.redirectUri) : undefined
     const redirectPath = redirectParsed?.pathname ?? "/callback"
-    let callbackPort: number | undefined
-    let httpServer: http.Server | undefined
 
-    if (options.enableLoopback !== false) {
-      const listener = yield* Effect.tryPromise({
-        try: () =>
-          new Promise<{ readonly server: http.Server; readonly port: number }>((resolve, reject) => {
-            const srv = http.createServer((req, res) => {
-              const reqUrl = new URL(req.url ?? "/", "http://127.0.0.1")
+    const loopback =
+      options.enableLoopback !== false
+        ? yield* startLoopbackListener({
+            redirectPath,
+            requestedPort: oauth?.callbackPort ?? (Number(redirectParsed?.port) || 0),
+            expectedState: state,
+            onCallback: (code, iss) => {
+              const active = pending.get(server)
 
-              if (reqUrl.pathname !== redirectPath) {
-                res.writeHead(404).end("Not found")
+              if (!active) return Effect.fail({ message: "OAuth flow expired or already completed" })
 
-                return
-              }
-
-              const flow = pending.get(server)
-
-              if (!flow) {
-                res.writeHead(410).end("OAuth flow expired or already completed")
-
-                return
-              }
-
-              const errorParam = reqUrl.searchParams.get("error_description") ?? reqUrl.searchParams.get("error")
-
-              if (errorParam) {
-                res.writeHead(400).end(`OAuth error: ${errorParam}`)
-
-                return
-              }
-
-              const returnedState = reqUrl.searchParams.get("state")
-              const code = reqUrl.searchParams.get("code")
-
-              if (returnedState !== flow.state || !code) {
-                res.writeHead(400).end("Invalid OAuth state or missing code")
-
-                return
-              }
-
-              Effect.runPromise(
-                finishExchange(flow, code, reqUrl.searchParams.get("iss") ?? undefined).pipe(
-                  Effect.match({
-                    onFailure: (error) => {
-                      res.writeHead(400, { "content-type": "text/plain" }).end(`Authorization failed: ${error.message}`)
-                    },
-                    onSuccess: () => {
-                      res
-                        .writeHead(200, { "content-type": "text/plain" })
-                        .end("Authorization complete. You may close this tab.")
-                    },
-                  }),
-                ),
-              )
-            })
-
-            srv.once("error", reject)
-            const requestedPort = oauth?.callbackPort ?? (Number(redirectParsed?.port) || 0)
-            srv.listen(requestedPort, "127.0.0.1", () => {
-              const addr = srv.address()
-
-              if (addr && !Predicate.isString(addr)) {
-                resolve({ server: srv, port: addr.port })
-              } else {
-                reject(new Error("Failed to bind loopback callback server"))
-              }
-            })
-          }),
-        catch: () => undefined,
-      }).pipe(Effect.orElseSucceed(() => undefined))
-
-      if (listener) {
-        httpServer = listener.server
-        callbackPort = listener.port
-      }
-    }
+              return finishExchange(active, code, iss).pipe(Effect.asVoid)
+            },
+          })
+        : undefined
 
     const closeServer = () => {
-      if (httpServer) {
-        httpServer.close()
-        httpServer = undefined
-      }
+      loopback?.close()
     }
 
     const challenge = yield* Effect.tryPromise({
@@ -743,7 +642,7 @@ export const makeAuthManager = (options: {
 
     const redirectUrl =
       oauth?.redirectUri ??
-      (callbackPort !== undefined ? `http://127.0.0.1:${callbackPort}${redirectPath}` : "http://127.0.0.1:0/callback")
+      (loopback !== undefined ? `http://127.0.0.1:${loopback.port}${redirectPath}` : "http://127.0.0.1:0/callback")
 
     const staticClient = oauth?.clientId
       ? {
@@ -827,6 +726,21 @@ export const makeAuthManager = (options: {
       })
     }
 
+    const expiryFiber = yield* Effect.forkDetach(
+      Effect.sleep(Duration.millis(flowTtlMs)).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            const current = pending.get(server)
+
+            if (current && current.state === state) {
+              pending.delete(server)
+              current.closeServer()
+            }
+          }),
+        ),
+      ),
+    )
+
     const flow: PendingFlow = {
       server,
       config,
@@ -837,6 +751,7 @@ export const makeAuthManager = (options: {
       fetchFn,
       scope: effectiveScope,
       closeServer,
+      expiryFiber,
       getTokens: () => storeState.tokens,
       getClient: () => staticClient ?? storeState.client,
     }
@@ -848,7 +763,7 @@ export const makeAuthManager = (options: {
       authorizationUrl: storeState.authorizationUrl.toString(),
       state,
       expiresAt,
-      ...(callbackPort !== undefined && { callbackUrl: redirectUrl }),
+      ...(loopback !== undefined && { callbackUrl: redirectUrl }),
     }
   })
 
@@ -866,7 +781,7 @@ export const makeAuthManager = (options: {
     const now = yield* Clock.currentTimeMillis
 
     if (now > flow.expiresAt) {
-      cleanupFlow(server)
+      yield* cleanupFlow(server)
 
       return yield* new OAuthFlowError({ server, message: `OAuth flow for server "${server}" has expired` })
     }
@@ -877,11 +792,11 @@ export const makeAuthManager = (options: {
     const trimmed = redirectUrlOrCode.trim()
 
     if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-      const parsed = new URL(trimmed)
+      const parsed = yield* parseUrl(trimmed, server, "callback")
       const errorParam = parsed.searchParams.get("error_description") ?? parsed.searchParams.get("error")
 
       if (errorParam) {
-        cleanupFlow(server)
+        yield* cleanupFlow(server)
 
         return yield* new OAuthFlowError({ server, message: `Authorization error: ${errorParam}` })
       }
@@ -912,6 +827,7 @@ export const makeAuthManager = (options: {
     expiresAt?: number,
     scope?: string,
   ): Effect.fn.Return<Mcp.AuthCompleteResult, OAuthFlowError> {
+    yield* parseUrl(config.url, server, "server")
     const now = yield* Clock.currentTimeMillis
 
     const entry: McpVault.CredentialEntry = {
@@ -942,17 +858,14 @@ export const makeAuthManager = (options: {
     server: string,
     config: Mcp.RemoteServerConfig,
   ): Effect.fn.Return<void, OAuthFlowError> {
-    cleanupFlow(server)
+    yield* cleanupFlow(server)
+    yield* parseUrl(config.url, server, "server")
     yield* options.vault
       .remove(server, config.url)
       .pipe(Effect.mapError((error) => new OAuthFlowError({ server, message: error.message })))
   })
 
-  const closeAll = Effect.sync(() => {
-    for (const server of Array.from(pending.keys())) {
-      cleanupFlow(server)
-    }
-  })
+  const closeAll = Effect.forEach(Array.from(pending.keys()), cleanupFlow, { discard: true })
 
   return { authStart, authComplete, setToken, logout, closeAll }
 }

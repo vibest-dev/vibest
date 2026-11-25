@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest"
 
 import { McpClient } from "../src/client.ts"
 import { McpPool } from "../src/pool.ts"
+import { McpRuntime } from "../src/service.ts"
 
 const FAKE_STDIO_SERVER = `
 import readline from "node:readline"
@@ -280,6 +281,212 @@ describe("McpStdio, McpPool scale-to-zero, and SEP-3415 events", () => {
       expect(outcome.aliveWhilePinned).toBe(true)
       expect(outcome.slotsAfterEviction).toBe(0)
       expect(outcome.aliveAfterEviction).toBe(false)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("respects pool:false with distinct private PIDs and evicts McpRuntime ephemeral calls after idleTimeoutMs", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-mcp-b3-"))
+    const script = path.join(dir, "server.mjs")
+    fs.writeFileSync(script, FAKE_STDIO_SERVER, "utf8")
+
+    try {
+      const unpooledConfig: Mcp.LocalServerConfig = {
+        type: "local",
+        command: [process.execPath, script],
+        cwd: dir,
+        protocol: "2026-07-28",
+        pool: false,
+      }
+
+      const unpooled = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const scope = yield* Effect.scope
+            const run = yield* FiberSet.makeRuntime<never, void, never>()
+            const pool = yield* McpPool.make()
+            const key = McpPool.poolKey({ config: unpooledConfig, cwd: dir, mcpEvents: true })
+            const readyA = yield* Deferred.make<void, Error>()
+            const readyB = yield* Deferred.make<void, Error>()
+
+            const makeConn = (ready: Deferred.Deferred<void, Error>) =>
+              pool.connection({
+                name: "unpooled-demo",
+                config: unpooledConfig,
+                directory: dir,
+                mcpEvents: true,
+                authProvider: Effect.succeed(undefined),
+                select: Effect.succeed({ key, authProvider: Effect.succeed(undefined) }),
+                scope,
+                lock: (e) => e,
+                callbacks: (e) => {
+                  run(e)
+                },
+                fork: (e) => {
+                  run(e)
+                },
+                events: {
+                  connecting: Effect.void,
+                  connected: Deferred.succeed(ready, undefined).pipe(Effect.asVoid),
+                  failed: (failure) => Deferred.fail(ready, new Error(failure.error)).pipe(Effect.asVoid),
+                  settled: Effect.void,
+                  closed: () => Effect.void,
+                  changed: () => Effect.void,
+                },
+              })
+
+            const a = makeConn(readyA)
+            const b = makeConn(readyB)
+            yield* a.start
+            yield* b.start
+            yield* Deferred.await(readyA)
+            yield* Deferred.await(readyB)
+
+            const pidARes = yield* a.client!.callTool({ name: "pid" })
+            const pidBRes = yield* b.client!.callTool({ name: "pid" })
+            const slots = yield* pool.activeSlotCount
+            yield* a.stop
+            yield* b.stop
+
+            return {
+              pidA: pidARes.content[0]?.type === "text" ? Number(pidARes.content[0].text) : 0,
+              pidB: pidBRes.content[0]?.type === "text" ? Number(pidBRes.content[0].text) : 0,
+              slots,
+            }
+          }),
+        ).pipe(Effect.provide(BunServices.layer)),
+      )
+
+      expect(unpooled.pidA).toBeGreaterThan(0)
+      expect(unpooled.pidB).toBeGreaterThan(0)
+      expect(unpooled.pidA).not.toBe(unpooled.pidB)
+      expect(unpooled.slots).toBe(0)
+
+      const vibestHome = path.join(dir, "vibest-home")
+
+      const ephemeral = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const rt = yield* McpRuntime.make({ vibestHome })
+
+            yield* rt.add("idle-srv", {
+              type: "local",
+              command: [process.execPath, script],
+              cwd: dir,
+              protocol: "2026-07-28",
+              pool: true,
+              idleTimeoutMs: 100,
+            })
+
+            const res = yield* rt.call({ server: "idle-srv", tool: "pid", directory: dir })
+            const pid = res.content[0]?.type === "text" ? Number(res.content[0].text) : 0
+            yield* Effect.sleep("350 millis")
+
+            return { pid, aliveAfterIdle: isPidAlive(pid) }
+          }),
+        ).pipe(Effect.provide(BunServices.layer)),
+      )
+
+      expect(ephemeral.pid).toBeGreaterThan(0)
+      expect(ephemeral.aliveAfterIdle).toBe(false)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("never persists private/ttlMs:0 tools/list to disk and refreshes connection + cache on -32602", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-mcp-b2b4-"))
+    const script = path.join(dir, "priv-server.mjs")
+
+    fs.writeFileSync(
+      script,
+      `
+import readline from "node:readline"
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity })
+const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\\n")
+let listCount = 0
+let callCount = 0
+rl.on("line", (line) => {
+  if (!line.trim()) return
+  const msg = JSON.parse(line)
+  if (msg.method === "server/discover") {
+    send({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: {
+        supportedVersions: ["2026-07-28"],
+        capabilities: { tools: {} },
+        serverInfo: { name: "priv", version: "1.0.0" },
+      },
+    })
+    return
+  }
+  if (msg.method === "tools/list") {
+    listCount++
+    const name = listCount === 1 ? "secret_tool" : "refreshed_tool"
+    send({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: {
+        resultType: "complete",
+        cacheScope: "private",
+        ttlMs: 0,
+        tools: [{ name, description: "tool", inputSchema: { type: "object", properties: {} } }],
+      },
+    })
+    return
+  }
+  if (msg.method === "tools/call") {
+    callCount++
+    if (callCount === 1) {
+      send({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params -32602" } })
+      return
+    }
+    send({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: { resultType: "complete", content: [{ type: "text", text: "ok-after-refresh" }] },
+    })
+  }
+})
+`,
+      "utf8",
+    )
+
+    try {
+      const vibestHome = path.join(dir, "vibest-home")
+
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const rt = yield* McpRuntime.make({ vibestHome })
+
+            yield* rt.add("priv-srv", {
+              type: "local",
+              command: [process.execPath, script],
+              cwd: dir,
+              protocol: "2026-07-28",
+            })
+
+            yield* rt.connect("priv-srv", dir)
+            const cachePath = path.join(vibestHome, "cache", "mcp-metadata-cache.json")
+            const diskContent = fs.existsSync(cachePath) ? fs.readFileSync(cachePath, "utf8") : ""
+            const callRes = yield* rt.call({ server: "priv-srv", tool: "refreshed_tool", directory: dir })
+            const afterTools = yield* rt.tools("priv-srv", dir)
+
+            return {
+              hasSecretOnDisk: diskContent.includes("secret_tool"),
+              callText: callRes.content[0]?.type === "text" ? callRes.content[0].text : "",
+              toolNames: afterTools.map((t) => t.name),
+            }
+          }),
+        ).pipe(Effect.provide(BunServices.layer)),
+      )
+
+      expect(result.hasSecretOnDisk).toBe(false)
+      expect(result.callText).toBe("ok-after-refresh")
+      expect(result.toolNames).toEqual(["refreshed_tool"])
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

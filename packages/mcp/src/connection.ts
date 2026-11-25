@@ -52,9 +52,11 @@ export interface Catalog {
 export interface Connection {
   readonly client: McpClient.Connection | undefined
   readonly tools: ReadonlyArray<McpClient.Tool> | undefined
+  readonly toolsMeta: McpClient.ToolListMeta | undefined
   readonly prompts: ReadonlyArray<McpClient.Prompt> | undefined
   readonly start: Effect.Effect<void>
   readonly stop: Effect.Effect<void>
+  readonly refreshTools: () => Effect.Effect<void, Error>
   readonly recovering: <A, E extends Error>(
     client: McpClient.Connection,
     run: (client: McpClient.Connection) => Effect.Effect<A, E>,
@@ -66,6 +68,7 @@ interface ConnectionState {
   scope: Scope.Closeable | undefined
   client: McpClient.Connection | undefined
   tools: ReadonlyArray<McpClient.Tool> | undefined
+  toolsMeta: McpClient.ToolListMeta | undefined
   prompts: ReadonlyArray<McpClient.Prompt> | undefined
 }
 
@@ -74,6 +77,7 @@ export const make = (input: Input): Connection => {
     scope: undefined,
     client: undefined,
     tools: undefined,
+    toolsMeta: undefined,
     prompts: undefined,
   }
 
@@ -84,10 +88,14 @@ export const make = (input: Input): Connection => {
         Effect.suspend(() => (state.client === client ? effect : Effect.void)).pipe(input.lock, Effect.ignore),
       )
 
-  const refreshTools = (client: McpClient.Connection) =>
+  const refreshToolsFor = (client: McpClient.Connection) =>
     client.tools().pipe(
-      Effect.map((tools) => {
-        state.tools = tools
+      Effect.map((listed) => {
+        state.tools = listed.tools
+        state.toolsMeta = {
+          ...(listed.cacheScope !== undefined && { cacheScope: listed.cacheScope }),
+          ...(listed.ttlMs !== undefined && { ttlMs: listed.ttlMs }),
+        }
       }),
     )
 
@@ -106,6 +114,7 @@ export const make = (input: Input): Connection => {
     state.scope = undefined
     state.client = undefined
     state.tools = undefined
+    state.toolsMeta = undefined
     state.prompts = undefined
     yield* Scope.close(scope, Exit.void)
     yield* input.events.changed("tools")
@@ -136,7 +145,7 @@ export const make = (input: Input): Connection => {
     const live = whenLive(client)
     client.onClose((reason) => live(input.events.closed(reason)))
     client.onSessionExpired(() => input.fork(recover(client)))
-    client.onToolsChanged(() => live(refreshTools(client).pipe(Effect.andThen(input.events.changed("tools")))))
+    client.onToolsChanged(() => live(refreshToolsFor(client).pipe(Effect.andThen(input.events.changed("tools")))))
     client.onPromptsChanged(() => live(refreshPrompts(client)))
     client.onResourcesChanged(() => live(input.events.changed("resources")))
   }
@@ -174,12 +183,15 @@ export const make = (input: Input): Connection => {
           (
             client,
           ): Effect.Effect<
-            { readonly client: McpClient.Connection; readonly tools?: ReadonlyArray<McpClient.Tool> },
+            {
+              readonly client: McpClient.Connection
+              readonly listed?: McpClient.ToolListResult
+            },
             Error
           > =>
             input.shared && !client.modern
               ? Effect.succeed({ client })
-              : client.tools().pipe(Effect.map((tools) => ({ client, tools }))),
+              : client.tools().pipe(Effect.map((listed) => ({ client, listed }))),
         ),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, input.spawner),
         Scope.provide(scope),
@@ -190,7 +202,7 @@ export const make = (input: Input): Connection => {
         Effect.exit,
       )
 
-      if (Exit.isSuccess(result) && !result.value.tools) {
+      if (Exit.isSuccess(result) && !result.value.listed) {
         yield* Scope.close(scope, Exit.void)
         state.scope = undefined
 
@@ -199,7 +211,13 @@ export const make = (input: Input): Connection => {
 
       if (Exit.isSuccess(result)) {
         state.client = result.value.client
-        state.tools = result.value.tools
+        state.tools = result.value.listed?.tools
+        state.toolsMeta = result.value.listed
+          ? {
+              ...(result.value.listed.cacheScope !== undefined && { cacheScope: result.value.listed.cacheScope }),
+              ...(result.value.listed.ttlMs !== undefined && { ttlMs: result.value.listed.ttlMs }),
+            }
+          : undefined
         state.prompts = []
         watch(result.value.client)
         yield* input.events.connected
@@ -232,11 +250,22 @@ export const make = (input: Input): Connection => {
     get tools() {
       return state.tools
     },
+    get toolsMeta() {
+      return state.toolsMeta
+    },
     get prompts() {
       return state.prompts
     },
     start,
     stop,
+    refreshTools: () =>
+      Effect.suspend(() => {
+        const client = state.client
+
+        if (!client) return Effect.void
+
+        return refreshToolsFor(client)
+      }),
     recovering,
     catalog: (client) =>
       recovering(client, (c) =>
