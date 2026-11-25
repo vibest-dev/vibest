@@ -6,11 +6,11 @@ import { LayerNode } from "@vibest/util/layer-node"
 import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Predicate, Ref, Semaphore } from "effect"
 
 import { Harness } from "../harness.ts"
-import { Harnesses } from "../harnesses.ts"
 import type { HarnessDefinition, SubscriptionsDomain } from "../plugin/domains.ts"
 import { logFailure } from "../reactor.ts"
+import { Harnesses } from "./registry.ts"
 
-export * as Subscriptions from "./service.ts"
+export * as Subscriptions from "./subscriptions.ts"
 
 const MINUTE = "1 minute"
 const CLI_TIMEOUT = "10 seconds"

@@ -3,7 +3,7 @@ import { shortId } from "@vibest/schema/id"
 import type { Detail, HarnessId } from "@vibest/schema/session"
 import { Option, Schema } from "effect"
 
-import type { HarnessDefinition } from "./plugin/domains.ts"
+import type { HarnessDefinition } from "../plugin/domains.ts"
 
 const decodeJsonObject = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))
 

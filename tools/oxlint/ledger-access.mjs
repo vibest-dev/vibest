@@ -36,7 +36,13 @@ const approvedOperations = (file, operations) => {
 
 const eventTable = /\b(FROM|JOIN) event\b/
 const position = /\bposition\b/
-const ledgerFiles = ["/packages/core/src/bus.ts", "/packages/core/src/database/db-schema.ts"]
+
+const ledgerFiles = [
+  "/packages/core/src/bus.ts",
+  "/packages/core/src/database/schema.sql.ts",
+  "/packages/core/src/database/ledger.ts",
+]
+
 const migrationFolder = "/packages/core/src/database/migration/"
 
 const eventReads = {
@@ -71,13 +77,14 @@ const writers = [
   "/packages/core/src/project/projector.ts",
   "/packages/core/src/session/projector.ts",
   "/packages/core/src/remote/projector.ts",
-  "/packages/core/src/database/db-schema.ts",
+  "/packages/core/src/database/schema.sql.ts",
+  "/packages/core/src/database/ledger.ts",
   "/packages/core/src/import/",
   "/packages/core/src/database/migration",
 ]
 
 const openingWrite = {
-  file: "/packages/core/src/database/db.ts",
+  file: "/packages/core/src/database/database.ts",
   count: 1,
   accepts: (text) => text.trim() === "UPDATE kv SET value = value WHERE key = ''",
 }
@@ -164,9 +171,48 @@ const noBackgroundLoop = {
   },
 }
 
+const sqlQueryText = /\b(SELECT|PRAGMA)\s+/
+
+const sqlAllowed = (file) =>
+  file.includes("/packages/core/src/database/") ||
+  file.includes("/packages/core/src/import/") ||
+  file.endsWith("/packages/core/src/bus.ts") ||
+  file.endsWith("/packages/core/src/effect/platform.ts") ||
+  /\/packages\/core\/src\/[^/]+\/(?:sql[^/]*|store|projector)\.ts$/.test(file)
+
+const sqlBoundaryMessage =
+  "SQL and SqlClient belong only in database/**, */sql*.ts, */store.ts, */projector.ts, bus.ts, and import/**."
+
+const sqlBoundary = {
+  create(context) {
+    const file = normalized(context)
+
+    if (!isSource(file) || !file.includes("/packages/core/src/") || sqlAllowed(file)) return {}
+
+    const checkText = (node, text) => {
+      if (Predicate.isString(text) && sqlQueryText.test(text)) context.report({ node, message: sqlBoundaryMessage })
+    }
+
+    return {
+      ImportDeclaration(node) {
+        const source = node.source?.value
+
+        if (Predicate.isString(source) && (source === "effect/sql" || source.startsWith("effect/sql/")))
+          context.report({ node, message: sqlBoundaryMessage })
+      },
+      TaggedTemplateExpression(node) {
+        if (isSqlBuilder(node.tag)) context.report({ node, message: sqlBoundaryMessage })
+      },
+      Literal: (node) => checkText(node, node.value),
+      TemplateElement: (node) => checkText(node, node.value.cooked),
+    }
+  },
+}
+
 export const ledgerAccessRules = {
   "event-reads": eventReads,
   "no-payload-sql": noPayloadSql,
   "projector-writes": projectorWrites,
   "no-background-loop": noBackgroundLoop,
+  "sql-boundary": sqlBoundary,
 }

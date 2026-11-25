@@ -1,5 +1,5 @@
-import { Git, GitError, type GitState } from "@vibest/core/git"
-import { parseRemote } from "@vibest/core/repository-url"
+import { parseRemote } from "@vibest/core/project/repository-url"
+import { Git, GitError, type GitState } from "@vibest/core/worktree/git"
 import { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, PlatformError, Stream } from "effect"
 

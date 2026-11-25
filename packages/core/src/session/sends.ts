@@ -3,9 +3,11 @@ import { AmbiguousSession, NoSuchSession } from "@vibest/schema/session"
 import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, FileSystem, Layer, Schema } from "effect"
 
-import { archived } from "../database/db-rows.ts"
-import { Db } from "../database/db.ts"
+import { archived } from "../database/rows.ts"
 import { PlatformNode } from "../effect/platform.ts"
+import { InboxStore } from "../inbox/store.ts"
+import { RemoteStore } from "../remote/store.ts"
+import { SessionStore } from "./store.ts"
 
 export * as Sends from "./sends.ts"
 
@@ -14,11 +16,13 @@ export class SendRefused extends Schema.TaggedError<SendRefused>()("SendRefused"
 }) {}
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
+  const inboxStore = yield* InboxStore.Service
+  const remoteStore = yield* RemoteStore.Service
   const fs = yield* FileSystem.FileSystem
 
   const getRow = (id: string) =>
-    db.session
+    sessionStore
       .getSession(id)
       .pipe(
         Effect.flatMap((session) =>
@@ -34,15 +38,15 @@ export const make = Effect.gen(function* () {
   ) {
     const session = yield* getRow(id)
 
-    if (request !== undefined && (yield* db.inbox.queuedFrom(sender, request))) return
-    const directory = yield* db.session.sessionDirectory(id)
+    if (request !== undefined && (yield* inboxStore.queuedFrom(sender, request))) return
+    const directory = yield* sessionStore.sessionDirectory(id)
 
     if (
       archived(session) ||
       (directory !== undefined && directory !== "" && !(yield* fs.exists(directory).pipe(Effect.orDie)))
     )
       return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-    const row = yield* db.inbox.insertSend(id, message, sender, request)
+    const row = yield* inboxStore.insertSend(id, message, sender, request)
 
     if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
   })
@@ -53,7 +57,7 @@ export const make = Effect.gen(function* () {
     message: string,
     request?: string,
   ) {
-    const toRemote = yield* db.remote.sendToLinkedRemote(sender.sessionId, input, message, request)
+    const toRemote = yield* remoteStore.sendToLinkedRemote(sender.sessionId, input, message, request)
 
     if (toRemote === "unknown")
       return yield* new NoSuchSession({
@@ -65,24 +69,24 @@ export const make = Effect.gen(function* () {
       return yield* new AmbiguousSession({ prefix: input, matches: toRemote.ambiguous })
 
     if (toRemote !== undefined && "sent" in toRemote) return { id: toRemote.sent }
-    const id = yield* db.session.resolveSession(input)
+    const id = yield* sessionStore.resolveSession(input)
 
     if (id === sender.sessionId)
       return yield* new SendRefused({ message: `${id} is you; a session does not send to itself` })
-    const target = yield* db.session.sessionIdentity(id)
+    const target = yield* sessionStore.sessionIdentity(id)
 
     if (target?.projectId !== sender.projectId)
       return yield* new SendRefused({
         message: `${id} belongs to another project; a message goes only to an agent of your own project`,
       })
-    const creator = (yield* db.session.creatorOf(sender.sessionId)) ?? undefined
+    const creator = (yield* sessionStore.creatorOf(sender.sessionId)) ?? undefined
     const mine = creator !== undefined && "local" in creator ? creator.local : undefined
 
-    if (!(yield* db.inbox.maySend(sender.sessionId, id)))
+    if (!(yield* inboxStore.maySend(sender.sessionId, id)))
       return yield* new SendRefused({
         message: `${id} is not linked from this session; link them with vibest session link${mine === undefined || mine === id ? "" : ` (you may send to ${mine})`}`,
       })
-    const session = yield* db.session.getSession(id)
+    const session = yield* sessionStore.getSession(id)
     const stopped = !session || archived(session)
     const from = { type: "agent" as const, session: sender.sessionId }
 
@@ -93,7 +97,7 @@ export const make = Effect.gen(function* () {
       return { id }
     }
 
-    const heir = yield* db.session.nearestAlive(sender.sessionId)
+    const heir = yield* sessionStore.nearestAlive(sender.sessionId)
 
     if (heir === undefined)
       return yield* new NoSuchSession({
@@ -102,7 +106,7 @@ export const make = Effect.gen(function* () {
       })
 
     if ("remote" in heir) {
-      if (!(yield* db.remote.sendToRemote(sender.sessionId, heir.remote, heir.session, message, request)))
+      if (!(yield* remoteStore.sendToRemote(sender.sessionId, heir.remote, heir.session, message, request)))
         return yield* new NoSuchSession({
           id,
           message: `${id} has ended and the session above it is on another machine that vibestd does not know; nothing was sent`,
@@ -117,10 +121,10 @@ export const make = Effect.gen(function* () {
   })
 
   const relay = Effect.fn("Sends.relay")(function* (to: string, message: string, sender: Sender, request?: string) {
-    const target = yield* db.session.sessionIdentity(to)
+    const target = yield* sessionStore.sessionIdentity(to)
 
     if (target === undefined) return yield* new NoSuchSession({ id: to, message: `no session ${to}` })
-    const session = yield* db.session.getSession(to)
+    const session = yield* sessionStore.getSession(to)
 
     if (session !== undefined && !archived(session)) {
       yield* send(to, message, sender, request)
@@ -128,7 +132,7 @@ export const make = Effect.gen(function* () {
       return { id: to }
     }
 
-    const heir = yield* db.session.nearestAlive(to)
+    const heir = yield* sessionStore.nearestAlive(to)
 
     if (heir === undefined)
       return yield* new NoSuchSession({ id: to, message: `${to} has ended and no session above it is running` })
@@ -154,5 +158,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Db.node, PlatformNode.fileSystem],
+  deps: [SessionStore.node, InboxStore.node, RemoteStore.node, PlatformNode.fileSystem],
 })

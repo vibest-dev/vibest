@@ -4,8 +4,8 @@ import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, Semaphore, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { PlatformNode } from "./effect/platform.ts"
-import { parseRemote, projectRemotes, rankedRemotes } from "./repository-url.ts"
+import { PlatformNode } from "../effect/platform.ts"
+import { parseRemote, projectRemotes, rankedRemotes } from "../project/repository-url.ts"
 
 export * as Git from "./git.ts"
 

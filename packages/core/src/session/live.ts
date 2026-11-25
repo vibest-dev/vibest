@@ -2,7 +2,7 @@ import type { AgentStatus } from "@vibest/schema/session"
 import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Deferred, Effect, HashMap, Layer, Option, Ref, SynchronizedRef } from "effect"
 
-import type { Integration } from "../database/db-rows.ts"
+import type { Integration } from "../database/rows.ts"
 
 export * as SessionLive from "./live.ts"
 

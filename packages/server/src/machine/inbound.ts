@@ -1,12 +1,13 @@
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import { archived } from "@vibest/core/database/db-rows"
-import type { OutboxRow } from "@vibest/core/database/remote"
-import { Git } from "@vibest/core/git"
+import { archived } from "@vibest/core/database/rows"
 import { Identity } from "@vibest/core/identity"
 import { safeRepositoryDirectory, sameWorktreeBucket } from "@vibest/core/paths"
-import { repositoryIdentity } from "@vibest/core/repository-url"
+import { repositoryIdentity } from "@vibest/core/project/repository-url"
+import type { OutboxRow } from "@vibest/core/remote/sql"
+import { RemoteStore } from "@vibest/core/remote/store"
 import { defaultSessionName, Session } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
+import { Git } from "@vibest/core/worktree/git"
 import type { RemoteSpawnPayload } from "@vibest/protocol/payloads"
 import {
   NoCommit,
@@ -32,7 +33,7 @@ type Wanted = {
   readonly commit: string
 }
 
-type Checkout = Effect.Success<Db.Interface["remote"]["projectCheckouts"]>[number] & {
+type Checkout = Effect.Success<RemoteStore.Interface["projectCheckouts"]>[number] & {
   readonly remote: string | undefined
 }
 
@@ -69,7 +70,8 @@ const outboxItem = (row: OutboxRow): OutboxItem => {
 }
 
 const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
+  const remoteStore = yield* RemoteStore.Service
   const bus = yield* Bus.Service
   const sessions = yield* Session.Service
   const self = yield* Identity.Service
@@ -77,8 +79,8 @@ const make = Effect.gen(function* () {
 
   const resolveLiveLocal = (ref: string) =>
     Effect.gen(function* () {
-      const id = yield* db.session.resolveSession(ref)
-      const row = yield* db.session.getSession(id)
+      const id = yield* sessionStore.resolveSession(ref)
+      const row = yield* sessionStore.getSession(id)
 
       if (row === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
 
@@ -120,7 +122,7 @@ const make = Effect.gen(function* () {
         return yield* new NoProject({ message: `${self.name} refuses the folder names ${folders.join(", ")}` })
 
       const rows: ReadonlyArray<Checkout> = yield* Effect.forEach(
-        yield* db.remote.projectCheckouts,
+        yield* remoteStore.projectCheckouts,
         (row) => Effect.map(git.remoteUrl(row.path), (remoteUrl) => ({ ...row, remote: remoteUrl })),
         { concurrency: 8 },
       )
@@ -296,7 +298,7 @@ const make = Effect.gen(function* () {
           let cursor = 0
 
           const pages = Stream.paginate(undefined, () =>
-            db.remote.outboxOf(remote, cursor, OUTBOX_PAGE).pipe(
+            remoteStore.outboxOf(remote, cursor, OUTBOX_PAGE).pipe(
               Effect.map((rows) => {
                 cursor = rows.at(-1)?.seq ?? cursor
 
@@ -314,12 +316,12 @@ const make = Effect.gen(function* () {
         }),
       ),
 
-    ack: Effect.fn("Inbound.ack")((remote: string, ids: ReadonlyArray<string>) => db.remote.ackOutbox(remote, ids)),
+    ack: Effect.fn("Inbound.ack")((remote: string, ids: ReadonlyArray<string>) => remoteStore.ackOutbox(remote, ids)),
 
     link: Effect.fn("Inbound.link")(
       (edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>) =>
         resolveEdges(edges).pipe(
-          Effect.flatMap(db.session.linkSessions),
+          Effect.flatMap(sessionStore.linkSessions),
           Effect.map((linked) => ({ edges: linked })),
         ),
     ),
@@ -327,7 +329,7 @@ const make = Effect.gen(function* () {
     unlink: Effect.fn("Inbound.unlink")(
       (edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>) =>
         resolveEdges(edges).pipe(
-          Effect.flatMap(db.session.unlinkSessions),
+          Effect.flatMap(sessionStore.unlinkSessions),
           Effect.map((unlinked) => ({ edges: unlinked })),
         ),
     ),
@@ -343,5 +345,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Bus.node, Db.node, Git.node, Session.node, Identity.node],
+  deps: [Bus.node, SessionStore.node, RemoteStore.node, Git.node, Session.node, Identity.node],
 })

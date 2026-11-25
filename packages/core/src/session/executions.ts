@@ -5,9 +5,8 @@ import { LayerNode } from "@vibest/util/layer-node"
 import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, Ref, Schedule, Schema } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type BusEvent, TerminalExited } from "../bus.ts"
-import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
-import { Db } from "../database/db.ts"
-import { Harnesses } from "../harnesses.ts"
+import { type SessionRow, harnessIdOf } from "../database/rows.ts"
+import { Harnesses } from "../harness/registry.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import {
   agentState,
@@ -20,8 +19,9 @@ import {
   stateOf,
   type Terminal,
   type AgentSeen,
-} from "../runtimes.ts"
+} from "../runtime/registry.ts"
 import { SessionLive } from "./live.ts"
+import { SessionStore } from "./store.ts"
 
 export * as Executions from "./executions.ts"
 
@@ -61,13 +61,13 @@ const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
 const sameTerminal = (a: Terminal, b: Terminal) => canonicalTarget(a) === canonicalTarget(b)
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const harnesses = yield* Harnesses.Service
   const bus = yield* Bus.Service
   const { track } = yield* SessionLive.Service
 
   const reportedStatus = (id: string) =>
-    Effect.map(db.session.getSession(id), (session) => session?.status ?? "unknown")
+    Effect.map(sessionStore.getSession(id), (session) => session?.status ?? "unknown")
 
   const awaitReady = Effect.fn("Executions.awaitReady")(
     (h: Runtime, terminal: Terminal, adapter: HarnessDefinition, id: string) =>
@@ -78,7 +78,7 @@ export const make = Effect.gen(function* () {
 
         const look = Effect.gen(function* () {
           const seen = yield* sessionState(h, terminal, reportedStatus(id))
-          const ready = (yield* db.session.readyAt(id)) !== undefined || (!reports && seen === "idle")
+          const ready = (yield* sessionStore.readyAt(id)) !== undefined || (!reports && seen === "idle")
 
           return { seen, ready }
         })
@@ -172,23 +172,23 @@ export const make = Effect.gen(function* () {
     text: string,
     onHandover: Effect.Effect<void> = Effect.void,
   ) {
-    const kept = yield* db.session.openExecution(session.id)
+    const kept = yield* sessionStore.openExecution(session.id)
     const adapter = yield* harnesses.get(harnessIdOf(session))
     const state = yield* awaitReady(h, terminal, adapter, session.id)
-    const open = yield* db.session.openExecution(session.id)
+    const open = yield* sessionStore.openExecution(session.id)
 
     if (open !== undefined && open !== kept) return undefined
 
     const begun =
       open === undefined
-        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(session.id, at))
+        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => sessionStore.startExecution(session.id, at))
         : { execution: open, opened: true }
 
     if (!begun.opened) return undefined
     const execution = begun.execution
-    const already = yield* db.session.executionWasAccepted(session.id, execution)
+    const already = yield* sessionStore.executionWasAccepted(session.id, execution)
 
-    const standing = Effect.map(db.session.openExecution(session.id), (now) =>
+    const standing = Effect.map(sessionStore.openExecution(session.id), (now) =>
       now === execution ? ("mine" as const) : now === undefined ? ("closed" as const) : ("busy" as const),
     )
 
@@ -196,15 +196,15 @@ export const make = Effect.gen(function* () {
     const r = yield* track(session.id)
     yield* Ref.set(r.endedAt, undefined)
     yield* Ref.set(r.blockedNotified, false)
-    yield* db.session.setStatus(session.id, state)
+    yield* sessionStore.setStatus(session.id, state)
 
-    const missed = db.session.closeExecution(session.id, execution, "not_started")
+    const missed = sessionStore.closeExecution(session.id, execution, "not_started")
 
     const beforeText = (error: RuntimeError) =>
       Effect.gen(function* () {
         if (error.code === "unreachable") return yield* Effect.fail(error)
 
-        if (!(yield* db.session.executionTaken(session.id)) && (yield* standing) === "mine") yield* missed
+        if (!(yield* sessionStore.executionTaken(session.id)) && (yield* standing) === "mine") yield* missed
 
         return yield* new HandoffRejected({ message: error.message })
       })
@@ -238,13 +238,13 @@ export const make = Effect.gen(function* () {
       yield* sessionState(h, terminal, Effect.succeed(state)).pipe(Effect.orElseSucceed(() => state)),
     )
 
-    if (seen === "working" || seen === "blocked") yield* db.session.setStatus(session.id, seen)
+    if (seen === "working" || seen === "blocked") yield* sessionStore.setStatus(session.id, seen)
 
     return HANDOFF_UNPROVED
   }, Effect.scoped)
 
   const openFirst = Effect.fn("Executions.openFirst")(function* (id: string, onHandover: Effect.Effect<void>) {
-    const { execution } = yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.session.startExecution(id, at))
+    const { execution } = yield* Effect.flatMap(Clock.currentTimeMillis, (at) => sessionStore.startExecution(id, at))
     yield* onHandover
 
     return execution
@@ -268,24 +268,24 @@ export const make = Effect.gen(function* () {
           })
 
     const taken = Effect.gen(function* () {
-      if ((yield* db.session.openExecution(session.id)) !== execution) return true
+      if ((yield* sessionStore.openExecution(session.id)) !== execution) return true
 
-      if (yield* db.session.executionAccepted(session.id)) return true
+      if (yield* sessionStore.executionAccepted(session.id)) return true
       const state = stateOf(yield* sessionState(h, terminal, reportedStatus(session.id)))
 
       if (state !== "working") return false
-      yield* db.session.setStatus(session.id, state)
+      yield* sessionStore.setStatus(session.id, state)
 
       return true
     })
 
-    const process = (yield* db.session.getSession(session.id))?.process?.id
+    const process = (yield* sessionStore.getSession(session.id))?.process?.id
     const seenRunning = yield* Ref.make(false)
 
     const running = Effect.tap(alive(h, terminal), (up) => (up ? Ref.set(seenRunning, true) : Effect.void))
 
     const gone = Effect.gen(function* () {
-      const row = yield* db.session.getSession(session.id)
+      const row = yield* sessionStore.getSession(session.id)
 
       if (row?.process?.id !== process || (yield* running)) return Option.none<Pickup>()
       const started = (yield* Ref.get(seenRunning)) || (row?.process?.readyAt ?? null) !== null
@@ -296,7 +296,7 @@ export const make = Effect.gen(function* () {
     const exitedHere = (event: BusEvent) =>
       event.type === "terminal.exited" && event.data.runtime === h.id && sameTerminal(event.data.terminal, terminal)
 
-    const signalExit = Effect.flatMap(db.session.processesAt(h.id, terminal), (processes) =>
+    const signalExit = Effect.flatMap(sessionStore.processesAt(h.id, terminal), (processes) =>
       Effect.asVoid(bus.publish(TerminalExited, { runtime: h.id, terminal, processes })),
     )
 
@@ -320,9 +320,9 @@ export const make = Effect.gen(function* () {
 
     if (took !== undefined) return took
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
-    yield* db.session.closeExecution(session.id, execution, "not_started")
+    yield* sessionStore.closeExecution(session.id, execution, "not_started")
 
-    if (adapter.ready === "integration" && (yield* db.session.readyAt(session.id)) === undefined)
+    if (adapter.ready === "integration" && (yield* sessionStore.readyAt(session.id)) === undefined)
       return yield* new NotReady({
         id: session.id,
         message: `did not become ready in ${Duration.format(READY_TIMEOUT)} (${adapter.binary} may be signed out: sign in with ${adapter.binary}; or a startup dialog vibest could not answer: open ${adapter.binary} once in the repository and accept it)`,
@@ -345,5 +345,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Db.node, Harnesses.node, Bus.node, SessionLive.node],
+  deps: [SessionStore.node, Harnesses.node, Bus.node, SessionLive.node],
 })

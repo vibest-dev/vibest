@@ -4,9 +4,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { TuiAltScreen } from "@earendil-works/pi-tui"
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/database/db"
+import { InboxStore } from "@vibest/core/inbox/store"
 import { Project } from "@vibest/core/project"
-import { noticeEnvelope } from "@vibest/core/replies"
+import { noticeEnvelope } from "@vibest/core/session/replies"
+import { SessionStore } from "@vibest/core/session/store"
 import * as Platform from "@vibest/platform-bun/bun"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
@@ -218,15 +219,16 @@ describe("pi-vibest", () => {
     "Coordinator: while no vibestd answers it waits without starting one, then subscribes to the next vibestd",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const sessionStore = yield* SessionStore.Service
+        const inboxStore = yield* InboxStore.Service
         const layout = yield* Layout
         const fs = yield* FileSystem.FileSystem
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
         const row = idleRow("pi")
-        yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+        yield* sessionStore.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
 
-        const coord = yield* db.session.startRoot(
+        const coord = yield* sessionStore.startRoot(
           yield* projectOf("r"),
           "pi",
           false,
@@ -237,7 +239,7 @@ describe("pi-vibest", () => {
           { agent: "coordinator" },
         )
 
-        yield* db.inbox.insertNoticeTo(coord.sessionId, "survives the gap")
+        yield* inboxStore.insertNoticeTo(coord.sessionId, "survives the gap")
         const notes: Array<string> = []
 
         const s = yield* session({
@@ -283,11 +285,11 @@ describe("pi-vibest", () => {
     "Subagent: a ready report made while no vibestd answers reaches the next vibestd",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const sessionStore = yield* SessionStore.Service
         const layout = yield* Layout
         const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         const project = yield* projectOf("r")
-        yield* db.session.insertSession({ id, ...idleRow("pi") }, project)
+        yield* sessionStore.insertSession({ id, ...idleRow("pi") }, project)
 
         const s = yield* session({
           VIBEST_AGENT: "general",
@@ -298,11 +300,11 @@ describe("pi-vibest", () => {
 
         yield* s.emit("session_start", { reason: "startup" }, tuiStart)
         yield* TestClock.withLive(Effect.sleep("200 millis"))
-        assert.isUndefined(yield* db.session.readyAt(id))
+        assert.isUndefined(yield* sessionStore.readyAt(id))
         yield* Layer.build(
           Server.layer.pipe(Layer.provide(Platform.httpServer(layout.socket)), Layer.provide(Project.layer)),
         )
-        yield* untilVirtual(db.session.readyAt(id), (at) => at !== undefined)
+        yield* untilVirtual(sessionStore.readyAt(id), (at) => at !== undefined)
       }).pipe(Effect.scoped, Effect.provide(pulling())),
     15_000,
   )
@@ -311,14 +313,15 @@ describe("pi-vibest", () => {
     "Coordinator: a vibestd that stops ends the subscription on its side; the next vibestd's rows still arrive until the session shuts down, and none once vibestd sees the closed connection",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const sessionStore = yield* SessionStore.Service
+        const inboxStore = yield* InboxStore.Service
         const layout = yield* Layout
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
         const row = idleRow("claude")
-        yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+        yield* sessionStore.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
 
-        const coord = yield* db.session.startRoot(
+        const coord = yield* sessionStore.startRoot(
           yield* projectOf("r"),
           "pi",
           false,
@@ -350,7 +353,7 @@ describe("pi-vibest", () => {
           { reason: "startup" },
           { ...tuiStart, ui: { notify: (message: string) => notes.push(message) } },
         )
-        const report = (message: string) => db.inbox.insertNoticeTo(coord.sessionId, message)
+        const report = (message: string) => inboxStore.insertNoticeTo(coord.sessionId, message)
         const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
         yield* report("first")
         yield* until(contents, (c) => c.length === 1)
@@ -368,7 +371,7 @@ describe("pi-vibest", () => {
         yield* TestClock.withLive(Effect.sleep("3 seconds"))
         assert.deepStrictEqual(yield* contents, [noticeEnvelope("first"), noticeEnvelope("second")])
         assert.deepStrictEqual(
-          (yield* entryPending(db, yield* projectOf("r"))).map((r) => r.message),
+          (yield* entryPending(sessionStore, inboxStore, yield* projectOf("r"))).map((r) => r.message),
           [noticeEnvelope("after shutdown")],
         )
       }).pipe(Effect.scoped, Effect.provide(pulling())),
@@ -451,13 +454,14 @@ describe("pi-vibest", () => {
     "Coordinator: no MCP server, its tool rules allow vibest, and inbox rows arrive as hidden custom messages, never through agent.prompt",
     Effect.gen(function* () {
       const runtime = yield* FakeRuntime
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
+      const inboxStore = yield* InboxStore.Service
       yield* runtime.addPane("w1:p7", "ws", "/")
       const row = idleRow("pi")
-      yield* db.session.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-      yield* db.session.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
+      yield* sessionStore.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
+      yield* sessionStore.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
 
-      const coord = yield* db.session.startRoot(
+      const coord = yield* sessionStore.startRoot(
         yield* projectOf("r"),
         "pi",
         true,
@@ -468,7 +472,7 @@ describe("pi-vibest", () => {
         { agent: "coordinator" },
       )
 
-      yield* db.inbox.insertNoticeTo(coord.sessionId, "<agent-result>one</agent-result>")
+      yield* inboxStore.insertNoticeTo(coord.sessionId, "<agent-result>one</agent-result>")
 
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
@@ -507,14 +511,14 @@ describe("pi-vibest", () => {
       yield* s.emit("session_start", { reason: "startup" }, { mode: "rpc" })
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.deepStrictEqual(s.messages, [])
-      assert.strictEqual((yield* db.inbox.pendingInbox(coord.sessionId)).length, 1)
+      assert.strictEqual((yield* inboxStore.pendingInbox(coord.sessionId)).length, 1)
       yield* s.emit("session_start", { reason: "startup" }, tuiStart)
       yield* until(
         Effect.sync(() => s.messages.length),
         (n) => n === 1,
       )
       yield* finishExecution(s, executionOf(s.messages[0]!.message))
-      yield* db.inbox.insertNoticeTo(coord.sessionId, "<vibest-agent-message>two</vibest-agent-message>")
+      yield* inboxStore.insertNoticeTo(coord.sessionId, "<vibest-agent-message>two</vibest-agent-message>")
       yield* until(
         Effect.sync(() => s.messages.length),
         (n) => n === 2,
@@ -531,19 +535,19 @@ describe("pi-vibest", () => {
         ],
       )
       assert.notStrictEqual(executionOf(s.messages[0]!.message), executionOf(s.messages[1]!.message))
-      assert.deepStrictEqual(yield* entryPending(db, yield* projectOf("r")), [])
+      assert.deepStrictEqual(yield* entryPending(sessionStore, inboxStore, yield* projectOf("r")), [])
     }),
   )
 
   test(
     "an input event records what the user typed, in any session; an extension delivery does not",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const sql = yield* SqlClient.SqlClient
       const row = idleRow("pi")
-      yield* db.session.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
+      yield* sessionStore.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
 
-      const coord = yield* db.session.startRoot(
+      const coord = yield* sessionStore.startRoot(
         yield* projectOf("r"),
         "pi",
         true,
@@ -596,14 +600,14 @@ describe("pi-vibest", () => {
   test(
     "VIBEST_EXECUTION binds the first turn once and is cleared after settle or replaced by inbox pull",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const sql = yield* SqlClient.SqlClient
       const project = yield* projectOf("r")
       const id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
-      yield* db.session.insertSession({ id, ...idleRow("pi") }, project)
-      const first = (yield* db.session.startExecution(id, 1)).execution
-      const processId = (yield* db.session.currentProcessId(id))!
-      yield* db.session.patchLive(id, { ready: 1 })
+      yield* sessionStore.insertSession({ id, ...idleRow("pi") }, project)
+      const first = (yield* sessionStore.startExecution(id, 1)).execution
+      const processId = (yield* sessionStore.currentProcessId(id))!
+      yield* sessionStore.patchLive(id, { ready: 1 })
 
       const s = yield* session({
         VIBEST_AGENT: "general",
@@ -657,9 +661,9 @@ describe("pi-vibest", () => {
         (rows) => rows[0]?.outcome === "completed" && rows[0]?.reply === "follow-up reply",
       )
 
-      const lost = (yield* db.session.startExecution(id, 2)).execution
-      yield* db.session.closeExecution(id, lost, "lost", { failure: { message: "gone" } })
-      const second = (yield* db.session.startExecution(id, 3)).execution
+      const lost = (yield* sessionStore.startExecution(id, 2)).execution
+      yield* sessionStore.closeExecution(id, lost, "lost", { failure: { message: "gone" } })
+      const second = (yield* sessionStore.startExecution(id, 3)).execution
       yield* s.emit(
         "agent_end",
         { messages: [{ role: "assistant", content: [{ type: "text", text: "second turn" }] }] },
@@ -675,12 +679,12 @@ describe("pi-vibest", () => {
       )
 
       const id2 = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
-      yield* db.session.insertSession({ id: id2, ...idleRow("pi") }, project)
-      const initial = (yield* db.session.startExecution(id2, 1)).execution
-      yield* db.session.closeExecution(id2, initial, "lost", { failure: { message: "gone" } })
-      const pulled = (yield* db.session.startExecution(id2, 2)).execution
-      const process2 = (yield* db.session.currentProcessId(id2))!
-      yield* db.session.patchLive(id2, { ready: 1 })
+      yield* sessionStore.insertSession({ id: id2, ...idleRow("pi") }, project)
+      const initial = (yield* sessionStore.startExecution(id2, 1)).execution
+      yield* sessionStore.closeExecution(id2, initial, "lost", { failure: { message: "gone" } })
+      const pulled = (yield* sessionStore.startExecution(id2, 2)).execution
+      const process2 = (yield* sessionStore.currentProcessId(id2))!
+      yield* sessionStore.patchLive(id2, { ready: 1 })
 
       const s2 = yield* session({
         VIBEST_AGENT: "general",
@@ -720,7 +724,7 @@ describe("pi-vibest", () => {
   test(
     "Coordinator: a TUI startup execution reports its session id once; /new, /resume and /fork report before the next execution",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const c = yield* cli
 
       const launched = yield* c["server.session"]["session.claim"]({
@@ -756,7 +760,7 @@ describe("pi-vibest", () => {
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
       yield* until(saved, (id) => id === s1)
       yield* TestClock.withLive(Effect.sleep("300 millis"))
-      yield* db.session.noteConversation(launched.sessionId, "other")
+      yield* sessionStore.noteConversation(launched.sessionId, "other")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(yield* saved, "other")
@@ -778,7 +782,7 @@ describe("pi-vibest", () => {
         })).harnessSessionId,
         "s-fork",
       )
-      yield* db.session.noteConversation(launched.sessionId, "kept")
+      yield* sessionStore.noteConversation(launched.sessionId, "kept")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
 

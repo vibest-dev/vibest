@@ -23,6 +23,7 @@
     "vibest/no-payload-sql": "error",
     "vibest/projector-writes": "error",
     "vibest/no-background-loop": "error",
+    "vibest/sql-boundary": "error",
     "vibest/no-module-let": "error",
     "vibest/no-src-tests": "error",
     "vibest/package-imports": "error",

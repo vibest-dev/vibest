@@ -1,9 +1,10 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
-import { harnessIdOf, exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
-import { Integration } from "@vibest/core/integration"
+import { harnessIdOf, exitedAt, executionStateOf } from "@vibest/core/database/rows"
+import { Integration } from "@vibest/core/harness/integration"
+import { Subscriptions } from "@vibest/core/harness/subscriptions"
+import { InboxStore } from "@vibest/core/inbox/store"
 import { Session } from "@vibest/core/session"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { SessionStore } from "@vibest/core/session/store"
 import { FakeRuntime } from "@vibest/testkit/fake-runtime"
 import { until, writeEnd } from "@vibest/testkit/observe"
 import { makeRepository } from "@vibest/testkit/session"
@@ -17,14 +18,15 @@ describe.concurrent("Session", () => {
     "a usage limit when the first terminal opens fails the launch naming the limit and starts nothing else",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
+      const inboxStore = yield* InboxStore.Service
       const opening = yield* herdr.hold("open")
       const { id } = yield* (yield* Session.Service).spawn(yield* spawnInput(yield* makeRepository))
       yield* opening.reached
       yield* opening.release("rate_limit: usage limit reached")
-      yield* until(db.session.getSession(id), (row) => row !== undefined && exitedAt(row) !== null)
+      yield* until(sessionStore.getSession(id), (row) => row !== undefined && exitedAt(row) !== null)
       assert.include(
-        (yield* db.inbox.latestInbox(id, "notice"))!.message,
+        (yield* inboxStore.latestInbox(id, "notice"))!.message,
         "failed to start pi: rate_limit: usage limit reached (no reset time reported)",
       )
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
@@ -45,7 +47,7 @@ describe.concurrent("Session", () => {
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
       const resetTime = Date.parse("2099-01-01T00:00:00.000Z")
-      const { id, row: started, sessions, db } = yield* spawnWorking(yield* makeRepository, "cursor")
+      const { id, row: started, sessions, sessionStore } = yield* spawnWorking(yield* makeRepository, "cursor")
       const pane = (yield* herdr.agent(id))!.terminal
       yield* (yield* Subscriptions.Service).report({
         harness: "cursor",
@@ -57,7 +59,7 @@ describe.concurrent("Session", () => {
         JSON.stringify({ hook_event_name: "afterAgentResponse", text: "", error: "rate_limit" }),
       )
       yield* sessions.check(id)
-      const row = (yield* db.session.getSession(id))!
+      const row = (yield* sessionStore.getSession(id))!
       assert.strictEqual(harnessIdOf(row), "cursor")
       assert.strictEqual(executionStateOf(row), "failed")
       assert.isNull(exitedAt(row))
@@ -98,7 +100,8 @@ describe.concurrent("Session", () => {
       const fail = (
         id: string,
         sessions: typeof aborted.sessions,
-        db: typeof aborted.db,
+        sessionStore: typeof aborted.sessionStore,
+        inboxStore: typeof aborted.inboxStore,
         error: string,
         details?: string,
       ) =>
@@ -106,22 +109,29 @@ describe.concurrent("Session", () => {
           yield* writeEnd(id, "pi", details === undefined ? { error } : { error, error_details: details })
           yield* herdr.endExecution(id)
           yield* sessions.check(id)
-          const row = (yield* db.session.getSession(id))!
+          const row = (yield* sessionStore.getSession(id))!
           assert.strictEqual(harnessIdOf(row), "pi")
           assert.strictEqual(executionStateOf(row), "failed")
-          const result = yield* db.inbox.latestInbox(id, "notice")
+          const result = yield* inboxStore.latestInbox(id, "notice")
           assert.include(result!.message, error)
           assert.notInclude(result!.message, "usage limit:")
         })
 
-      yield* fail(aborted.id, aborted.sessions, aborted.db, "aborted")
-      yield* fail(missing.id, missing.sessions, missing.db, "model_not_found", "usage limit")
+      yield* fail(aborted.id, aborted.sessions, aborted.sessionStore, aborted.inboxStore, "aborted")
+      yield* fail(
+        missing.id,
+        missing.sessions,
+        missing.sessionStore,
+        missing.inboxStore,
+        "model_not_found",
+        "usage limit",
+      )
       yield* herdr.endExecution(lost.id)
       yield* lost.sessions.check(lost.id)
-      assert.strictEqual(executionStateOf((yield* lost.db.session.getSession(lost.id))!), "open")
+      assert.strictEqual(executionStateOf((yield* lost.sessionStore.getSession(lost.id))!), "open")
       yield* TestClock.adjust("11 seconds")
       yield* lost.sessions.check(lost.id)
-      const row = (yield* lost.db.session.getSession(lost.id))!
+      const row = (yield* lost.sessionStore.getSession(lost.id))!
       assert.strictEqual(harnessIdOf(row), "pi")
       assert.strictEqual(executionStateOf(row), "lost")
       assert.deepStrictEqual(

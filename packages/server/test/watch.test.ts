@@ -4,8 +4,9 @@ import http from "node:http"
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Bus, ProjectChanged, SessionChanged } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
 import { Project } from "@vibest/core/project"
+import { ProjectStore } from "@vibest/core/project/store"
+import { SessionStore } from "@vibest/core/session/store"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { EdgeDirected, type WatchEvent } from "@vibest/protocol/schemas"
 import { Layout } from "@vibest/schema/layout"
@@ -38,14 +39,14 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Pr
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 
 const withEntry = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const project = yield* projectOf(repo)
   yield* herdr.addPane("w1:p8", "ws", repo)
   yield* herdr.seedAgent("w1:p8")
 
-  const started = yield* db.session.startRoot(
+  const started = yield* sessionStore.startRoot(
     project,
     "pi",
     false,
@@ -140,7 +141,7 @@ describe("Watch", () => {
   test(
     "an exited-but-unarchived session stays in Watch with exitedAt set until it is archived",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const { repo, project, entryClient } = yield* withEntry
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
@@ -154,7 +155,7 @@ describe("Watch", () => {
           Predicate.isTagged(e, "Session") && e.session.id === id && e.session.startedAt !== null,
       )
 
-      yield* db.session.endProcess(id, "exited")
+      yield* sessionStore.endProcess(id, "exited")
 
       const exited = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
@@ -177,13 +178,13 @@ describe("Watch", () => {
   test(
     "a project move sends the sessions it moved again, with their new directories",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const projectStore = yield* ProjectStore.Service
       const { repo, project, entryId } = yield* withEntry
       const { next } = yield* watching(repo)
       yield* next(isSnapshot)
       const moved = `${yield* tempDirectory("vibest-moved-")}/repo`
       yield* Effect.promise(() => fs.cp(repo, moved, { recursive: true }))
-      yield* db.project.moveProject(project, moved, [])
+      yield* projectStore.moveProject(project, moved, [])
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
           Predicate.isTagged(e, "Session") && e.session.id === entryId && e.session.worktree === moved,
@@ -217,7 +218,7 @@ describe("Watch", () => {
     "an execution that ends unwatched is done, for the session and its project, until Session.Seen raises the mark to it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const { repo, project, entryClient } = yield* withEntry
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
@@ -235,7 +236,7 @@ describe("Watch", () => {
       yield* next((e): e is WatchEvent => isSession("working", 0)(e))
       const terminal = (yield* herdr.terminalOf(id))!
       yield* herdr.endExecution(id)
-      yield* db.session.setStatus(id, "idle")
+      yield* sessionStore.setStatus(id, "idle")
 
       const isProject = (activity: string) => (e: WatchEvent) =>
         Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === activity
@@ -303,15 +304,15 @@ describe("Watch", () => {
   test(
     "two watchers share one change: its session row is read once",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const { repo, entryId } = yield* withEntry
       const first = yield* watching(repo)
       const second = yield* watching(repo)
       yield* first.next(isSnapshot)
       yield* second.next(isSnapshot)
-      const briefs = db.session.sessionBriefs
+      const briefs = sessionStore.sessionBriefs
       let reads = 0
-      Object.assign(db.session, {
+      Object.assign(sessionStore, {
         sessionBriefs: (ids: Parameters<typeof briefs>[0]) => {
           reads++
 
@@ -322,11 +323,11 @@ describe("Watch", () => {
       const inStatus = (status: string) => (e: WatchEvent) =>
         Predicate.isTagged(e, "Session") && e.session.id === entryId && e.session.status === status
 
-      yield* db.session.setStatus(entryId, "working")
+      yield* sessionStore.setStatus(entryId, "working")
       yield* first.next((e): e is WatchEvent => inStatus("working")(e))
       yield* second.next((e): e is WatchEvent => inStatus("working")(e))
       reads = 0
-      yield* db.session.setStatus(entryId, "idle")
+      yield* sessionStore.setStatus(entryId, "idle")
       yield* first.next((e): e is WatchEvent => inStatus("idle")(e))
       yield* second.next((e): e is WatchEvent => inStatus("idle")(e))
       assert.strictEqual(reads, 1)
@@ -336,14 +337,14 @@ describe("Watch", () => {
   test(
     "a change that cannot be read ends the watchers it was for with an error; the feed serves later watchers",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const projectStore = yield* ProjectStore.Service
       const bus = yield* Bus.Service
       const { project } = yield* withEntry
       const feed = yield* WatchFeed.Service
       const before = yield* feed.subscribe
-      const read = db.project.watchProjects
+      const read = projectStore.watchProjects
       let failing = true
-      Object.assign(db.project, {
+      Object.assign(projectStore, {
         watchProjects: (id?: string) => (failing ? Effect.die("unreadable") : read(id)),
       })
       yield* bus.publish(ProjectChanged, { projectId: project })
@@ -376,7 +377,7 @@ describe("Watch", () => {
     Effect.gen(function* () {
       const { repo, project, entryId } = yield* withEntry
       const layout = yield* Layout
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const bus = yield* Bus.Service
 
       const res = yield* Effect.acquireRelease(
@@ -402,7 +403,7 @@ describe("Watch", () => {
         (response) => Effect.sync(() => response.destroy()),
       )
 
-      const read = db.session.sessionIdentity
+      const read = sessionStore.sessionIdentity
 
       const ids = Array.from(
         { length: WATCH_BACKLOG + 500 },
@@ -411,7 +412,7 @@ describe("Watch", () => {
 
       const idSet = new Set(ids)
 
-      Object.assign(db.session, {
+      Object.assign(sessionStore, {
         sessionIdentity: (id: string) => (idSet.has(id) ? Effect.succeed({ projectId: project }) : read(id)),
       })
 
@@ -432,7 +433,7 @@ describe("Watch", () => {
   test(
     "session.changed ticks reuse cached project repositories without re-probing git, while project.changed invalidates the cache",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const bus = yield* Bus.Service
       const fakeGit = yield* FakeGit
       const { repo, project, entryId } = yield* withEntry
@@ -461,12 +462,12 @@ describe("Watch", () => {
         },
       })
 
-      yield* db.session.setStatus(entryId, "working")
+      yield* sessionStore.setStatus(entryId, "working")
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
           Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === "working",
       )
-      yield* db.session.setStatus(entryId, "idle")
+      yield* sessionStore.setStatus(entryId, "idle")
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
           Predicate.isTagged(e, "Project") && e.project.id === project && e.project.activity === "idle",
@@ -606,7 +607,7 @@ describe("Watch", () => {
   test(
     "exited unarchived sessions report null terminal and are excluded from Snapshot project.activity",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const { repo, entryId, entryClient } = yield* withEntry
 
       const { id: childId } = yield* entryClient["server.session"]["session.spawn"]({
@@ -619,12 +620,12 @@ describe("Watch", () => {
       })
 
       yield* until(
-        db.session.getSession(childId),
+        sessionStore.getSession(childId),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
 
-      yield* db.session.endProcess(entryId, "exited")
-      yield* db.session.endProcess(childId, "exited")
+      yield* sessionStore.endProcess(entryId, "exited")
+      yield* sessionStore.endProcess(childId, "exited")
 
       const { next } = yield* watching(repo)
       const snapshot = yield* next(isSnapshot)

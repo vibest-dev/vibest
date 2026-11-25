@@ -6,9 +6,13 @@ import { assert, layer } from "@effect/vitest"
 import { accepts, cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
 import { withHeaders } from "@vibest/client/unix-http"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import * as Projectors from "@vibest/core/database/projectors"
+import { Database } from "@vibest/core/database/database"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Projectors } from "@vibest/core/reactor"
+import { RemoteStore } from "@vibest/core/remote/store"
 import { SessionLive } from "@vibest/core/session/live"
+import { SessionStore } from "@vibest/core/session/store"
 import { DaemonBusy, WrongInstance } from "@vibest/protocol/errors"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -307,7 +311,7 @@ layer(Platform.services)(
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
 
           const pending = yield* Effect.gen(function* () {
-            const db = yield* Db.Service
+            const db = { session: yield* SessionStore.Service, inbox: yield* InboxStore.Service }
             yield* db.session.insertSession(
               {
                 id: "b0050001-b005-4b00-8b00-b0050001b005",
@@ -333,7 +337,8 @@ layer(Platform.services)(
             return (yield* db.inbox.insertSend("b0050001-b005-4b00-8b00-b0050001b005", "queued"))!
           }).pipe(
             Effect.provide(
-              Db.layer.pipe(
+              Layer.mergeAll(ProjectStore.layer, SessionStore.layer, InboxStore.layer, RemoteStore.layer).pipe(
+                Layer.provideMerge(Database.layer),
                 Layer.provide(Projectors.layer),
                 Layer.provide(Bus.layer),
                 Layer.provide(SessionLive.layer),
@@ -372,11 +377,12 @@ layer(Platform.services)(
             assert.strictEqual((yield* Fiber.join(daemon).pipe(Effect.timeout("10 seconds"))).code, 0)
             assert.isFalse(yield* probe(layout.socket))
 
-            const rows = yield* Effect.flatMap(Db.Service, (db) =>
-              db.inbox.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005"),
+            const rows = yield* Effect.flatMap(InboxStore.Service, (inboxStore) =>
+              inboxStore.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005"),
             ).pipe(
               Effect.provide(
-                Db.layer.pipe(
+                Layer.mergeAll(ProjectStore.layer, SessionStore.layer, InboxStore.layer, RemoteStore.layer).pipe(
+                  Layer.provideMerge(Database.layer),
                   Layer.provide(Projectors.layer),
                   Layer.provide(Bus.layer),
                   Layer.provide(SessionLive.layer),

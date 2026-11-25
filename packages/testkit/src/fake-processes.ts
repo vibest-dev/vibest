@@ -1,4 +1,4 @@
-import { type Liveness, Processes } from "@vibest/core/processes"
+import { type Liveness, Processes } from "@vibest/core/runtime/processes"
 import { Context, Deferred, type Duration, Effect, HashMap, Layer, Option, Ref } from "effect"
 
 export class FakeProcesses extends Context.Service<

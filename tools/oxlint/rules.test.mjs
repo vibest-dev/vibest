@@ -109,7 +109,7 @@ export const cpus = os.cpus()
     },
   )
 
-  it.each(["event-reads", "no-payload-sql", "projector-writes", "no-background-loop"])(
+  it.each(["event-reads", "no-payload-sql", "projector-writes", "no-background-loop", "sql-boundary"])(
     "refuses disabling vibest/%s",
     (rule) => {
       expect(oxlintFindings(`// oxlint-disable-next-line vibest/${rule}\nexport const one = 1\n`)).toContain(
@@ -236,14 +236,14 @@ describe("ledger access rules", () => {
 
   it("event-reads: only the bus reads the event table and position", () => {
     const source = "export const q = `SELECT * FROM event`\nexport const p = { position: 1 }\n"
-    expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(event-reads)", "2 vibest(event-reads)"])
+    expect(oxlintFindings(source, core("session/store.ts"))).toEqual(["1 vibest(event-reads)", "2 vibest(event-reads)"])
     expect(oxlintFindings(source, core("bus.ts"))).toEqual([])
     expect(oxlintFindings(source, "packages/core/test/a.test.ts")).toEqual([])
   })
 
   it("no-payload-sql: json_extract only in the v1 import", () => {
     const source = `export const q = "SELECT json_extract(data, '$.a') FROM x"\n`
-    expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(no-payload-sql)"])
+    expect(oxlintFindings(source, core("session/store.ts"))).toEqual(["1 vibest(no-payload-sql)"])
     expect(oxlintFindings(source, core("import/v1.ts"))).toEqual([])
   })
 
@@ -258,15 +258,37 @@ describe("ledger access rules", () => {
     expect(oxlintFindings(source, core("session/projector.ts"))).toEqual([])
   })
 
-  it("projector-writes: db.ts may hold only its one opening write", () => {
+  it("projector-writes: database.ts may hold only its one opening write", () => {
     const opening = "export const a = `UPDATE kv SET value = value WHERE key = ''`\n"
-    expect(oxlintFindings(opening, core("database/db.ts"))).toEqual([])
-    expect(oxlintFindings(opening + opening.replace("const a", "const b"), core("database/db.ts"))).toEqual([
+    expect(oxlintFindings(opening, core("database/database.ts"))).toEqual([])
+    expect(oxlintFindings(opening + opening.replace("const a", "const b"), core("database/database.ts"))).toEqual([
       "2 vibest(projector-writes)",
     ])
-    expect(oxlintFindings(`export const a = "DELETE FROM kv"\n`, core("database/db.ts"))).toEqual([
+    expect(oxlintFindings(`export const a = "DELETE FROM kv"\n`, core("database/database.ts"))).toEqual([
       "1 vibest(projector-writes)",
     ])
+  })
+
+  it("sql-boundary: SQL and SqlClient only in database/**, */sql*.ts, */store.ts, */projector.ts, bus.ts, and import/**", () => {
+    const source = `import { SqlClient } from "effect/sql"\nexport const a = SqlClient\nexport const b = "SELECT id FROM session"\nexport const c = "PRAGMA foreign_keys = ON"\nexport const d = sql\`1\`\n`
+    expect(oxlintFindings(source, core("session/spawn.ts"))).toEqual([
+      "1 vibest(sql-boundary)",
+      "3 vibest(sql-boundary)",
+      "4 vibest(sql-boundary)",
+      "5 vibest(sql-boundary)",
+    ])
+    expect(oxlintFindings(source, core("session/sends.ts"))).toEqual([
+      "1 vibest(sql-boundary)",
+      "3 vibest(sql-boundary)",
+      "4 vibest(sql-boundary)",
+      "5 vibest(sql-boundary)",
+    ])
+    expect(oxlintFindings(source, core("session/sql.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("session/sql-reads.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("session/store.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("session/projector.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("database/database.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("bus.ts"))).toEqual([])
   })
 
   it("no-background-loop: unbounded loops in core and server only", () => {

@@ -15,13 +15,13 @@ import {
   executionStateOf,
   executionStartedAt,
   archived,
-} from "../database/db-rows.ts"
-import { Db } from "../database/db.ts"
-import { Harnesses } from "../harnesses.ts"
+} from "../database/rows.ts"
+import { Harnesses } from "../harness/registry.ts"
 import { Inbox } from "../inbox.ts"
-import { Processes } from "../processes.ts"
+import { InboxStore } from "../inbox/store.ts"
 import * as Reactor from "../reactor.ts"
-import { agentState, alive, paneTail, reportedWhenUnknown, Runtimes, stateOf } from "../runtimes.ts"
+import { Processes } from "../runtime/processes.ts"
+import { agentState, alive, paneTail, reportedWhenUnknown, Runtimes, stateOf } from "../runtime/registry.ts"
 import { Archive } from "./archive.ts"
 import { Delivery } from "./delivery.ts"
 import { CONFIRM_TIMEOUT, HOOK_GRACE } from "./executions.ts"
@@ -31,6 +31,7 @@ import { SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
 import { RunCoordinator } from "./run-coordinator.ts"
 import { Starts } from "./starts.ts"
+import { SessionStore } from "./store.ts"
 
 export * as Reconcile from "./reconcile.ts"
 
@@ -39,7 +40,8 @@ export { HOOK_GRACE }
 export const START_TIMEOUT = Duration.seconds(120)
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
+  const inboxStore = yield* InboxStore.Service
   const runtimes = yield* Runtimes.Service
   const harnesses = yield* Harnesses.Service
   const inbox = yield* Inbox.Service
@@ -62,7 +64,7 @@ export const make = Effect.gen(function* () {
   const forgetIfDone = (id: string) =>
     locks.withLock(id)(
       Effect.gen(function* () {
-        if (!sessionEnded(yield* db.session.getSession(id))) return
+        if (!sessionEnded(yield* sessionStore.getSession(id))) return
         yield* reactor.cancel(`grace:${id}`)
         yield* reactor.cancel(`miss:${id}`)
         yield* sessionLive.forget(id)
@@ -70,11 +72,11 @@ export const make = Effect.gen(function* () {
     )
 
   const check = Effect.fn("Reconcile.check")(function* (id: string, bound?: number) {
-    const session = yield* db.session.getSession(id)
+    const session = yield* sessionStore.getSession(id)
 
     if (!session || archived(session) || (bound !== undefined && session.process?.id !== bound)) return
 
-    if (yield* db.session.sessionMoving(session.id)) return
+    if (yield* sessionStore.sessionMoving(session.id)) return
     const open = executionStateOf(session) === "open"
 
     if (!open && exitedAt(session) !== null) return
@@ -85,7 +87,7 @@ export const make = Effect.gen(function* () {
     if (Option.isNone(routed)) return yield* live(session)
     const h = routed.value
     const terminal = terminalOf(session)?.target
-    const execution = open ? yield* db.session.openExecution(id) : undefined
+    const execution = open ? yield* sessionStore.openExecution(id) : undefined
     const r = yield* track(id)
 
     const maybe =
@@ -95,7 +97,7 @@ export const make = Effect.gen(function* () {
     const seen = maybe.value
     const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
 
-    if (state !== undefined && session.status !== state) yield* db.session.setStatus(session.id, state)
+    if (state !== undefined && session.status !== state) yield* sessionStore.setStatus(session.id, state)
 
     const exited =
       state === undefined &&
@@ -121,7 +123,7 @@ export const make = Effect.gen(function* () {
       const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
 
       if (sessionId !== null && sessionId !== (session.process?.harnessSessionId ?? null))
-        yield* db.session.noteConversation(id, sessionId)
+        yield* sessionStore.noteConversation(id, sessionId)
     }
 
     const s = stateOf(reportedWhenUnknown(state ?? "unknown", session.status)) ?? "unknown"
@@ -132,7 +134,7 @@ export const make = Effect.gen(function* () {
       return
     }
 
-    const worked = yield* db.session.executionTaken(id)
+    const worked = yield* sessionStore.executionTaken(id)
     const idle = s === "idle"
     const ended = idle && worked
     const now = yield* Clock.currentTimeMillis
@@ -144,14 +146,14 @@ export const make = Effect.gen(function* () {
       !worked &&
       execution !== undefined &&
       inbox.pulls(harnessIdOf(session)) &&
-      (yield* db.inbox.hasUnacceptedPulledBatch(id, execution))
+      (yield* inboxStore.hasUnacceptedPulledBatch(id, execution))
 
     const unstarted = !worked && ((idle && !awaitingReady) || pulledUnaccepted)
 
     if (unstarted && unconfirmed <= 0) {
       const closed =
         execution !== undefined &&
-        (yield* db.session.closeExecution(id, execution, "not_started", {
+        (yield* sessionStore.closeExecution(id, execution, "not_started", {
           notice: `${sessionLabel(session)} did not start the execution it was sent; it is idle and takes queued messages again (if it starts late, that reply is not collected)`,
         }))
 
@@ -163,7 +165,10 @@ export const make = Effect.gen(function* () {
     if (unstarted) yield* reactor.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
 
     if (s === "blocked") {
-      if (!(yield* Ref.getAndSet(r.blockedNotified, true)) && (yield* db.session.creatorOf(session.id)) !== undefined) {
+      if (
+        !(yield* Ref.getAndSet(r.blockedNotified, true)) &&
+        (yield* sessionStore.creatorOf(session.id)) !== undefined
+      ) {
         const since = new Date(yield* Clock.currentTimeMillis)
         const hhmm = [since.getHours(), since.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":")
         yield* notice(
@@ -186,7 +191,7 @@ export const make = Effect.gen(function* () {
     if (execution === undefined) return
     yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     const failure = `the harness stopped without its end hook (a usage limit?)`
-    yield* db.session.closeExecution(id, execution, "lost", {
+    yield* sessionStore.closeExecution(id, execution, "lost", {
       failure: { message: failure },
       notice: `${sessionLabel(session)} ended its execution with an error: ${failure}`,
     })
@@ -219,7 +224,7 @@ export const make = Effect.gen(function* () {
 
   const reconcile = (where: "all" | { readonly runtime: string }) =>
     Effect.gen(function* () {
-      const here = (yield* db.session.listSessions()).filter(
+      const here = (yield* sessionStore.listSessions()).filter(
         (row) => where === "all" || runtimeOf(row) === where.runtime,
       )
 
@@ -249,12 +254,12 @@ export const make = Effect.gen(function* () {
   yield* reactor.on([SessionEvent.InboxEnqueued], (event) =>
     Effect.gen(function* () {
       const id = event.data.sessionId
-      const session = yield* db.session.getSession(id)
+      const session = yield* sessionStore.getSession(id)
 
-      if (session === undefined || executionStateOf(session) !== "open" || (yield* db.session.executionTaken(id)))
+      if (session === undefined || executionStateOf(session) !== "open" || (yield* sessionStore.executionTaken(id)))
         return
 
-      if ((yield* db.inbox.pendingInbox(id)).length === 0) return
+      if ((yield* inboxStore.pendingInbox(id)).length === 0) return
 
       const left = Duration.toMillis(CONFIRM_TIMEOUT) - ((yield* Clock.currentTimeMillis) - executionStartedAt(session))
       yield* reactor.arm(`miss:${id}`, Duration.millis(Math.max(left, 0)), checkSession(id))
@@ -284,7 +289,8 @@ export const node = LayerNode.make({
   deps: [
     Archive.node,
     Bus.node,
-    Db.node,
+    SessionStore.node,
+    InboxStore.node,
     Delivery.node,
     Exits.node,
     Harnesses.node,

@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { withHeaders } from "@vibest/client/unix-http"
-import { type Db } from "@vibest/core/database/db"
 import { Identity } from "@vibest/core/identity"
-import { unwrapped } from "@vibest/core/replies"
+import { type InboxStore } from "@vibest/core/inbox/store"
+import { unwrapped } from "@vibest/core/session/replies"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import { PROMPT_MAX } from "@vibest/schema/machine"
@@ -25,7 +25,7 @@ import { TestClock } from "effect/testing"
 
 const peerB = repoStack()
 
-const finish = (db: Db.Interface, session: string, message: string) =>
+const finish = (db: { readonly inbox: InboxStore.Interface }, session: string, message: string) =>
   db.inbox.insertInbox({ sessionId: session, message })
 
 describe("vibest run --machine and remote sessions", () => {
@@ -377,21 +377,18 @@ describe("vibest run --machine and remote sessions", () => {
 
       const { net, a, b, entryId, asEntry } = yield* twoMachines({
         a: {
-          db: (db) => ({
-            ...db,
-            remote: {
-              ...db.remote,
-              receiveRemoteItem: (item) =>
-                db.remote
-                  .receiveRemoteItem(item)
-                  .pipe(
-                    Effect.tap(() =>
-                      cutOnce.done || cutOnce.net === undefined
-                        ? Effect.void
-                        : Effect.sync(() => (cutOnce.done = true)).pipe(Effect.andThen(cutOnce.net.cutAll("b-host"))),
-                    ),
+          remoteStore: (remoteStore) => ({
+            ...remoteStore,
+            receiveRemoteItem: (item) =>
+              remoteStore
+                .receiveRemoteItem(item)
+                .pipe(
+                  Effect.tap(() =>
+                    cutOnce.done || cutOnce.net === undefined
+                      ? Effect.void
+                      : Effect.sync(() => (cutOnce.done = true)).pipe(Effect.andThen(cutOnce.net.cutAll("b-host"))),
                   ),
-            },
+                ),
           }),
         },
       })

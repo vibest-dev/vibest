@@ -27,7 +27,7 @@ import {
 } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import { LOG_SCHEMA, MIGRATION_TABLE, PROJECTION_SCHEMA, PROJECTION_TABLES } from "./database/db-schema.ts"
+import { LOG_SCHEMA, MIGRATION_TABLE, PROJECTION_SCHEMA, PROJECTION_TABLES } from "./database/schema.sql.ts"
 import { PlatformNode } from "./effect/platform.ts"
 
 export * as Bus from "./bus.ts"

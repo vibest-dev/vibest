@@ -1,11 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Agents } from "@vibest/core/agents"
-import { Concurrency } from "@vibest/core/concurrency"
-import { Db } from "@vibest/core/database/db"
-import { harnessIdOf } from "@vibest/core/database/db-rows"
+import { Agents } from "@vibest/core/agent/registry"
+import { harnessIdOf } from "@vibest/core/database/rows"
 import { Builtins, makePlugins, PluginLoader, Plugins } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
 import { Session } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
 import { mainCheckout } from "@vibest/core/worktree"
 import { Plugin as PromisePlugin, ToolRefused as PromiseToolRefused } from "@vibest/plugin"
 import {
@@ -53,10 +53,10 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ models: HARNESS_MODELS, ...options }))))
 
 const sessionRowsAndRuntimeOpens = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const herdr = yield* FakeRuntime
 
-  return { rows: (yield* db.session.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
+  return { rows: (yield* sessionStore.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
 })
 
 describe("plugins: spawn hook", () => {
@@ -64,7 +64,7 @@ describe("plugins: spawn hook", () => {
     "P5/P8: the event has the resolved root; writes reach the row and the launch args",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const herdr = yield* FakeRuntime
       const nested = `${repo}/sub`
       yield* (yield* FileSystem.FileSystem).makeDirectory(nested)
@@ -76,7 +76,7 @@ describe("plugins: spawn hook", () => {
       assert.strictEqual(s.harness, "claude")
       assert.strictEqual(s.model, "claude-haiku-5-5")
       assert.deepStrictEqual(s.decidedBy, { harness: "route", model: "route" })
-      const row = (yield* db.session.getSession(s.id))!
+      const row = (yield* sessionStore.getSession(s.id))!
       assert.strictEqual(harnessIdOf(row), "claude")
       assert.strictEqual(row.process?.model ?? null, "claude-haiku-5-5")
       assert.deepStrictEqual(row.process?.routing?.decidedBy, {

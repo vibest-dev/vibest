@@ -1,6 +1,6 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
 import { Placement } from "@vibest/core/session/placement"
+import { SessionStore } from "@vibest/core/session/store"
 import { remoteHeaders } from "@vibest/protocol/protocol"
 import { EdgeChain, EdgeDirected, EdgeMutual } from "@vibest/protocol/schemas"
 import { authed, makeRepository } from "@vibest/testkit/fakes"
@@ -195,10 +195,10 @@ describe("Session graph links RPC", () => {
       assert.strictEqual(singleUnlink._tag, "Forbidden")
       assert.notInclude(singleUnlink.message, "to link")
 
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const placement = yield* Placement.Service
-      const rowA = (yield* db.session.getSession(a.id))!
-      const entryId = (yield* db.session.sessionParents([a.id])).get(a.id)!
+      const rowA = (yield* sessionStore.getSession(a.id))!
+      const entryId = (yield* sessionStore.sessionParents([a.id])).get(a.id)!
 
       const promptBefore = yield* placement.systemPromptOf(rowA)
       assert.include(promptBefore, `vibest send ${entryId.slice(0, 8)}`)
@@ -224,18 +224,18 @@ describe("Session graph links RPC", () => {
       const remoteCreatorId = "99999999-9999-4999-8999-999999999999"
       const remoteSessionId = "88888888-8888-4888-8888-888888888888"
 
-      yield* db.session.insertSession(draftSession(remoteSessionId), opened.projectId, {
+      yield* sessionStore.insertSession(draftSession(remoteSessionId), opened.projectId, {
         cwd: repo,
         task: "remote task",
         origin: { remote: "remote-1", project: "77777777-7777-4777-8777-777777777777", reportTo: remoteCreatorId },
       })
 
-      const remoteRow = (yield* db.session.getSession(remoteSessionId))!
+      const remoteRow = (yield* sessionStore.getSession(remoteSessionId))!
       const remotePrompt = yield* placement.systemPromptOf(remoteRow)
       assert.include(remotePrompt, `vibest send ${remoteCreatorId.slice(0, 8)}`)
       assert.notInclude(remotePrompt, "not linked to message it directly")
 
-      yield* db.session.unlinkSessions([{ from: remoteSessionId, to: remoteCreatorId, remote: "remote-1" }])
+      yield* sessionStore.unlinkSessions([{ from: remoteSessionId, to: remoteCreatorId, remote: "remote-1" }])
       const remotePromptUnlinked = yield* placement.systemPromptOf(remoteRow)
       assert.notInclude(remotePromptUnlinked, `vibest send ${remoteCreatorId.slice(0, 8)}`)
       assert.include(remotePromptUnlinked, "not linked to message it directly")

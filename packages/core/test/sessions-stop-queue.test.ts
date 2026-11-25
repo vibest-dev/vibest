@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest"
-import { Concurrency } from "@vibest/core/concurrency"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
 import { Starts } from "@vibest/core/session/starts"
 import { FakeRuntime } from "@vibest/testkit/fake-runtime"
 import { until } from "@vibest/testkit/observe"
@@ -16,7 +16,7 @@ for (const mode of ["direct", "plugin", "failed-close", "waiting"])
     mode,
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { id, sessions, db } = yield* idleSession(repo)
+      const { id, sessions, sessionStore } = yield* idleSession(repo)
       const concurrency = yield* Concurrency.Service
       yield* concurrency.configure([{ max: 2 }])
       const starts = yield* Starts.Service
@@ -41,7 +41,7 @@ for (const mode of ["direct", "plugin", "failed-close", "waiting"])
         yield* gate.release("failed")
         assert.equal((yield* Fiber.join(stop))._tag, "Failure")
         assert.deepStrictEqual(yield* starts.waiting, [b, c])
-        assert.isNull((yield* db.session.getSession(id))!.process!.endedAt)
+        assert.isNull((yield* sessionStore.getSession(id))!.process!.endedAt)
 
         return
       }
@@ -52,7 +52,7 @@ for (const mode of ["direct", "plugin", "failed-close", "waiting"])
         yield* (yield* PluginHost).load([idleStop])
       }
 
-      yield* until(db.session.getSession(b), (r) => !!r?.process?.placedAt || r?.process?.placedAt === 0)
+      yield* until(sessionStore.getSession(b), (r) => !!r?.process?.placedAt || r?.process?.placedAt === 0)
       assert.deepStrictEqual(yield* starts.waiting, [c])
       const sql = yield* SqlClient.SqlClient
       const count = yield* sql<{ n: number }>`SELECT count(*) AS n FROM process WHERE ended_at IS NULL`

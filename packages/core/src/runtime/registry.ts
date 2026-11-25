@@ -6,12 +6,12 @@ import { formatTerminalTarget, type TerminalTarget } from "@vibest/schema/termin
 import { LayerNode } from "@vibest/util/layer-node"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, PubSub, type Scope, Stream } from "effect"
 
-import { type BoundProcess, Bus, RuntimeReset, TerminalExited, TerminalSeen, TerminalState } from "./bus.ts"
-import { Db } from "./database/db.ts"
-import type { HostEnv as PluginHostEnv, RuntimesDomain } from "./plugin/domains.ts"
-import * as Registry from "./plugin/registry.ts"
+import { type BoundProcess, Bus, RuntimeReset, TerminalExited, TerminalSeen, TerminalState } from "../bus.ts"
+import type { HostEnv as PluginHostEnv, RuntimesDomain } from "../plugin/domains.ts"
+import * as Registry from "../plugin/registry.ts"
+import { SessionStore } from "../session/store.ts"
 
-export * as Runtimes from "./runtimes.ts"
+export * as Runtimes from "./registry.ts"
 
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 
@@ -60,9 +60,9 @@ export const terminalProcessesNode = LayerNode.make({
   service: TerminalProcesses,
   layer: Layer.effect(
     TerminalProcesses,
-    Effect.map(Db.Service, (db) => db.session.processesAt),
+    Effect.map(SessionStore.Service, (sessionStore) => sessionStore.processesAt),
   ),
-  deps: [Db.node],
+  deps: [SessionStore.node],
 })
 
 export class HostEnv extends Context.Service<HostEnv, PluginHostEnv>()("vibest/HostEnv") {}

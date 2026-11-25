@@ -1,4 +1,4 @@
-import { Runtimes } from "@vibest/core/runtimes"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { VibestApi } from "@vibest/protocol/api"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/http-api"

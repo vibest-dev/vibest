@@ -1,6 +1,6 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
 import { projectRoot } from "@vibest/core/project/create"
+import { SessionStore } from "@vibest/core/session/store"
 import { Plugin } from "@vibest/plugin/effect"
 import { FakeRuntime, makeRepository, until, projectOf } from "@vibest/testkit/fakes"
 import { test, client, asCli, asEntry } from "@vibest/testkit/rpc-helpers"
@@ -93,7 +93,7 @@ describe("vibest.sock", () => {
   test(
     "Archive names the resolved session when the runtime is unreachable, not the prefix typed",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
@@ -104,7 +104,7 @@ describe("vibest.sock", () => {
       })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
       yield* Ref.set(herdr.reachable, false)
@@ -121,12 +121,12 @@ describe("vibest.sock", () => {
   test(
     "archive archives a root session and leaves its checkout directory untouched",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const fs = yield* FileSystem.FileSystem
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
 
-      const started = yield* db.session.startRoot(
+      const started = yield* sessionStore.startRoot(
         projectId,
         "pi",
         false,
@@ -145,17 +145,17 @@ describe("vibest.sock", () => {
       assert.isNotNull(outcome)
       assert.strictEqual(outcome?.worktree, "kept")
       assert.isTrue(yield* fs.exists(repo))
-      assert.isNotNull((yield* db.session.getSession(started.sessionId))?.endedAt)
+      assert.isNotNull((yield* sessionStore.getSession(started.sessionId))?.endedAt)
     }),
   )
 
   test(
     "--new with a missing harness does not archive the current root session",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      yield* db.session.startRoot(
+      yield* sessionStore.startRoot(
         projectId,
         "pi",
         false,
@@ -165,7 +165,7 @@ describe("vibest.sock", () => {
         },
         { agent: "coordinator" },
       )
-      const before = (yield* db.session.latestRoot(projectId))!.id
+      const before = (yield* sessionStore.latestRoot(projectId))!.id
 
       const failed = yield* Effect.flip(
         asCli(yield* client, repo)["server.session"]["session.launch"]({
@@ -181,7 +181,7 @@ describe("vibest.sock", () => {
       )
 
       assert.ok(Predicate.isTagged(failed, "LaunchFailed") || Predicate.isTagged(failed, "SessionRefused"), failed._tag)
-      assert.strictEqual((yield* db.session.latestRoot(projectId))!.id, before)
+      assert.strictEqual((yield* sessionStore.latestRoot(projectId))!.id, before)
     }),
     { missingBinary: ["cursor"] },
   )
@@ -189,7 +189,7 @@ describe("vibest.sock", () => {
   test(
     "a root launch whose typing fails leaves no open execution: the next start runs its first input",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
@@ -213,7 +213,7 @@ describe("vibest.sock", () => {
       yield* held.release("failed")
       assert.strictEqual((yield* Fiber.join(failing))._tag, "LaunchFailed")
       yield* launch
-      const id = (yield* db.session.latestRoot(projectId))!.id
+      const id = (yield* sessionStore.latestRoot(projectId))!.id
 
       const executions = yield* sql<{ outcome: string | null }>`SELECT outcome FROM execution
         WHERE session_id = ${id} ORDER BY id`
@@ -260,7 +260,7 @@ describe("vibest.sock", () => {
   test(
     "Launch with an exited child sessionId opens in the child worktree with the child system prompt",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
@@ -273,14 +273,14 @@ describe("vibest.sock", () => {
       })
 
       yield* until(
-        db.session.getSession(childId),
+        sessionStore.getSession(childId),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
-      const childWorktree = yield* db.session.sessionDirectory(childId)
+      const childWorktree = yield* sessionStore.sessionDirectory(childId)
       assert.isDefined(childWorktree)
       assert.notStrictEqual(childWorktree, repo)
 
-      yield* db.session.endProcess(childId, "exited")
+      yield* sessionStore.endProcess(childId, "exited")
 
       const c = asCli(raw, repo)
       yield* c["server.session"]["session.launch"]({

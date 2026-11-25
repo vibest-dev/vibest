@@ -1,19 +1,30 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import * as Projectors from "@vibest/core/database/projectors"
+import { Database } from "@vibest/core/database/database"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Projectors } from "@vibest/core/reactor"
+import { RemoteStore } from "@vibest/core/remote/store"
 import { SessionLive } from "@vibest/core/session/live"
-import { systemPrompt } from "@vibest/core/system-prompt"
+import { SessionStore } from "@vibest/core/session/store"
+import { systemPrompt } from "@vibest/core/session/system-prompt"
 import { entryPending, projectOf } from "@vibest/testkit/fakes"
 import * as Platform from "@vibest/testkit/platform"
 import { place, session } from "@vibest/testkit/unit-helpers"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
-const memory = <A, E>(program: Effect.Effect<A, E, Db.Service | SqlClient.SqlClient>) =>
+const memory = <A, E>(
+  program: Effect.Effect<
+    A,
+    E,
+    ProjectStore.Service | SessionStore.Service | InboxStore.Service | RemoteStore.Service | SqlClient.SqlClient
+  >,
+) =>
   program.pipe(
     Effect.provide(
-      Db.layer.pipe(
+      Layer.mergeAll(ProjectStore.layer, SessionStore.layer, InboxStore.layer, RemoteStore.layer).pipe(
+        Layer.provideMerge(Database.layer),
         Layer.provide(Projectors.layer),
         Layer.provide(Bus.layer),
         Layer.provide(SessionLive.layer),
@@ -27,7 +38,12 @@ const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const X = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 
 const setup = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const db = {
+    session: yield* SessionStore.Service,
+    inbox: yield* InboxStore.Service,
+    remote: yield* RemoteStore.Service,
+  }
+
   const project = yield* projectOf("r")
   const entry = yield* db.session.startRoot(project, "pi", false, place, { agent: "coordinator" })
   yield* db.session.insertSession(session(A), project, { cwd: "/w", task: "a", parentSessionId: entry.sessionId })
@@ -111,7 +127,7 @@ describe("sends from sessions", () => {
         const { db, project, entryId } = yield* setup
         assert.isDefined(yield* db.inbox.insertSend(entryId, "hello", { type: "agent", session: A }))
         assert.deepStrictEqual(
-          (yield* entryPending(db, project)).map((r) => [r.sender, r.recipient]),
+          (yield* entryPending(db.session, db.inbox, project)).map((r) => [r.sender, r.recipient]),
           [[{ type: "agent", session: A, agent: session(A).agent, title: session(A).name }, entryId]],
         )
       }),

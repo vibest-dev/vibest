@@ -1,11 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, protocolHeaders } from "@vibest/client/client"
 import { withHeaders } from "@vibest/client/unix-http"
-import { Db } from "@vibest/core/database/db"
-import { executionStateOf } from "@vibest/core/database/db-rows"
-import { unwrapped } from "@vibest/core/replies"
+import { executionStateOf } from "@vibest/core/database/rows"
+import { InboxStore } from "@vibest/core/inbox/store"
 import { Session } from "@vibest/core/session"
 import { PRESENT_TIMEOUT } from "@vibest/core/session/entry"
+import { unwrapped } from "@vibest/core/session/replies"
+import { SessionStore } from "@vibest/core/session/store"
 import { ACCESS } from "@vibest/protocol/access"
 import { VibestApi } from "@vibest/protocol/api"
 import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
@@ -113,7 +114,7 @@ describe("vibest.sock", () => {
   test(
     "a session is named by its full id or a unique prefix of 8 or more characters; the answers name the full id",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
@@ -123,7 +124,7 @@ describe("vibest.sock", () => {
       })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
       assert.strictEqual(
@@ -146,13 +147,13 @@ describe("vibest.sock", () => {
       })
 
       assert.strictEqual(
-        yield* db.session.sessionDirectory(sharer.id),
-        yield* db.session.sessionDirectory(id),
+        yield* sessionStore.sessionDirectory(sharer.id),
+        yield* sessionStore.sessionDirectory(id),
         "--share takes a prefix",
       )
       const twinWithSameFirst8 = `${id.slice(0, 8)}-0000-4000-8000-000000000000`
-      const row = (yield* db.session.getSession(id))!
-      yield* db.session.insertSession(draftSession(twinWithSameFirst8), row.projectId)
+      const row = (yield* sessionStore.getSession(id))!
+      yield* sessionStore.insertSession(draftSession(twinWithSameFirst8), row.projectId)
 
       const ambiguous = yield* Effect.flip(
         c["server.session"]["session.get"]({ params: { id: id.slice(0, 8) }, query: {} }),
@@ -181,7 +182,7 @@ describe("vibest.sock", () => {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const sql = yield* SqlClient.SqlClient
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
@@ -203,17 +204,17 @@ describe("vibest.sock", () => {
         first,
       )
       assert.deepStrictEqual(
-        (yield* db.session.listSessions()).filter((w) => w.parentId !== null).map((w) => w.id),
+        (yield* sessionStore.listSessions()).filter((w) => w.parentId !== null).map((w) => w.id),
         [first.id],
       )
-      const worktree = (yield* db.session.sessionDirectory(first.id))!
+      const worktree = (yield* sessionStore.sessionDirectory(first.id))!
       assert.deepStrictEqual(
         yield* fs.readDirectory(path.dirname(worktree)),
         [path.basename(worktree)],
         "the repeat's reserved worktree directory went again",
       )
       yield* until(
-        db.session.getSession(first.id),
+        sessionStore.getSession(first.id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
 
@@ -258,7 +259,7 @@ describe("vibest.sock", () => {
     "a Cursor afterAgentResponse stop ends the execution with its text as execution.reply and as Get's reply",
     Effect.gen(function* () {
       const raw = yield* client
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
@@ -270,7 +271,7 @@ describe("vibest.sock", () => {
       })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
       yield* TestClock.adjust("2 seconds")
@@ -283,7 +284,7 @@ describe("vibest.sock", () => {
       )
       yield* herdr.endExecution(id)
       yield* until(
-        sessions.check(id).pipe(Effect.andThen(db.session.getSession(id))),
+        sessions.check(id).pipe(Effect.andThen(sessionStore.getSession(id))),
         (w) => (w ? executionStateOf(w) : undefined) === "completed",
       )
 
@@ -302,7 +303,7 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
@@ -318,11 +319,11 @@ describe("vibest.sock", () => {
       })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
       yield* until(
-        db.session.getSession(fit.id),
+        sessionStore.getSession(fit.id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
       const listed = new Map((yield* c["server.session"]["session.list"]({ query: {} })).sessions.map((w) => [w.id, w]))
@@ -357,7 +358,7 @@ describe("vibest.sock", () => {
   test(
     "Peek returns the runtime's terminal text and asks for at most 500 lines; an exited session has no terminal to read",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const raw = yield* client
@@ -369,7 +370,7 @@ describe("vibest.sock", () => {
       })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
       assert.deepStrictEqual(yield* c["server.session"]["session.peek"]({ params: { id }, query: {} }), {
@@ -377,7 +378,7 @@ describe("vibest.sock", () => {
       })
       yield* c["server.session"]["session.peek"]({ params: { id }, query: { lines: 100_000 } })
       assert.deepInclude((yield* herdr.callsTo("read")).at(-1), { lines: 500 })
-      yield* db.session.endProcess(id, "exited")
+      yield* sessionStore.endProcess(id, "exited")
       assert.strictEqual(
         failureTag(yield* Effect.exit(c["server.session"]["session.peek"]({ params: { id }, query: {} }))),
         "NoSuchSession",
@@ -428,7 +429,7 @@ describe("vibest.sock", () => {
   test(
     "every entry session launch names its own process, so a new conversation in the same entry session is told apart",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const c = asCli(yield* client, yield* makeRepository)
 
       const enter = (harness: "pi" | "claude") =>
@@ -437,10 +438,16 @@ describe("vibest.sock", () => {
         })
 
       const first = yield* enter("pi")
-      assert.strictEqual(first.command.env.VIBEST_PROCESS, String(yield* db.session.currentProcessId(first.sessionId)))
+      assert.strictEqual(
+        first.command.env.VIBEST_PROCESS,
+        String(yield* sessionStore.currentProcessId(first.sessionId)),
+      )
       const second = yield* enter("claude")
       assert.strictEqual(second.sessionId, first.sessionId)
-      assert.strictEqual(second.command.env.VIBEST_PROCESS, String(yield* db.session.currentProcessId(first.sessionId)))
+      assert.strictEqual(
+        second.command.env.VIBEST_PROCESS,
+        String(yield* sessionStore.currentProcessId(first.sessionId)),
+      )
       assert.notStrictEqual(second.command.env.VIBEST_PROCESS, first.command.env.VIBEST_PROCESS)
     }),
   )
@@ -448,7 +455,8 @@ describe("vibest.sock", () => {
   test(
     "a session sends only as itself; an unknown session is refused",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
+      const inboxStore = yield* InboxStore.Service
       const repo = yield* makeRepository
       const raw = yield* client
       const c = asCli(raw, repo)
@@ -459,7 +467,7 @@ describe("vibest.sock", () => {
       })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
       yield* (yield* FakeRuntime).seedAgent("test/p1")
@@ -490,7 +498,7 @@ describe("vibest.sock", () => {
         sessionHeaders({ sessionId: id, pluginVersion: "1.2.3" }),
       )
       assert.deepStrictEqual(
-        (yield* db.session.getSession(id))?.process?.integration,
+        (yield* sessionStore.getSession(id))?.process?.integration,
         { version: "1.2.3", protocol: PROTOCOL },
         "an integration's version is recorded even when its protocol is refused",
       )
@@ -503,7 +511,7 @@ describe("vibest.sock", () => {
         ),
         "ProtocolRejected",
       )
-      assert.deepStrictEqual((yield* db.session.getSession(id))?.process?.integration, {
+      assert.deepStrictEqual((yield* sessionStore.getSession(id))?.process?.integration, {
         version: "1.0.0",
         protocol: 1,
       })
@@ -532,7 +540,7 @@ describe("vibest.sock", () => {
         "a known session without its project id is refused, as over HTTP",
       )
 
-      const projectId = String((yield* db.session.sessionIdentity(id))!.projectId)
+      const projectId = String((yield* sessionStore.sessionIdentity(id))!.projectId)
 
       const as = (harness: string, harnessSessionId: string) =>
         authed(raw, sessionHeaders({ sessionId: id, projectId, harness, harnessSessionId }))
@@ -541,25 +549,25 @@ describe("vibest.sock", () => {
         params: { id: launch.sessionId },
         payload: { message: "one" },
       })
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "pi-1")
+      assert.strictEqual((yield* sessionStore.getSession(id))!.process?.harnessSessionId ?? null, "pi-1")
       yield* as("claude", "other")["server.session"]["session.send"]({
         params: { id: launch.sessionId },
         payload: { message: "two" },
       })
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "pi-1")
+      assert.strictEqual((yield* sessionStore.getSession(id))!.process?.harnessSessionId ?? null, "pi-1")
       yield* withHeaders(
         raw["server.hook"]["hook.executionEnd"]({ params: { harness: "pi" }, payload: "{}" }),
         sessionHeaders({ sessionId: id, projectId, harness: "pi", harnessSessionId: "pi-2" }),
       )
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.harnessSessionId ?? null, "pi-2")
+      assert.strictEqual((yield* sessionStore.getSession(id))!.process?.harnessSessionId ?? null, "pi-2")
       const w = yield* asSession(yield* client, id)
       yield* w["server.session"]["session.send"]({ params: { id: launch.sessionId }, payload: { message: "half way" } })
-      const sent = yield* db.inbox.latestInbox(launch.sessionId, "send")
+      const sent = yield* inboxStore.latestInbox(launch.sessionId, "send")
       assert.match(
         sent!.message,
         /^<vibest-agent-message>\n<session-id>[a-f0-9]{8}<\/session-id>\n<message>\nhalf way\n<\/message>\n<\/vibest-agent-message>$/,
       )
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
+      assert.strictEqual(executionStateOf((yield* sessionStore.getSession(id))!), "open")
       assert.deepStrictEqual(
         yield* c["server.session"]["session.send"]({
           params: { id: launch.sessionId },
@@ -567,7 +575,7 @@ describe("vibest.sock", () => {
         }),
         { id: launch.sessionId },
       )
-      const fromUser = yield* db.inbox.latestInbox(launch.sessionId, "send")
+      const fromUser = yield* inboxStore.latestInbox(launch.sessionId, "send")
       assert.deepInclude(fromUser, { message: "from the user", sender: { type: "user" } })
       yield* withHeaders(
         raw["server.hook"]["hook.ready"]({
@@ -611,13 +619,13 @@ describe("vibest.sock", () => {
         "s2",
         "a conversation reported by another harness than the session's is ignored",
       )
-      const worker = (yield* db.session.getSession(id))!
+      const worker = (yield* sessionStore.getSession(id))!
       yield* withHeaders(
         raw["server.hook"]["hook.ready"]({ payload: { conversation: { harness: "pi", id: "worker-report" } } }),
         sessionHeaders({ sessionId: id, projectId: worker.projectId, pluginVersion: "1.2.3" }),
       )
       assert.notStrictEqual(
-        (yield* db.session.getSession(id))!.process?.harnessSessionId ?? null,
+        (yield* sessionStore.getSession(id))!.process?.harnessSessionId ?? null,
         "worker-report",
         "a conversation reported by a session that is not its project's entry is ignored",
       )
@@ -627,7 +635,8 @@ describe("vibest.sock", () => {
   test(
     "an entry session manages only the sessions it spawned, and another project's reads them but does not list them; the command line (the user) manages any",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
+      const inboxStore = yield* InboxStore.Service
       const repo = yield* makeRepository
 
       const asEntry = (root: string, paneId: string) =>
@@ -654,7 +663,7 @@ describe("vibest.sock", () => {
       })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
 
@@ -700,13 +709,13 @@ describe("vibest.sock", () => {
         ),
         "NoSuchSession",
       )
-      assert.deepStrictEqual(yield* db.inbox.pendingInbox(id), [])
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
+      assert.deepStrictEqual(yield* inboxStore.pendingInbox(id), [])
+      assert.strictEqual(executionStateOf((yield* sessionStore.getSession(id))!), "open")
       yield* a["server.session"]["session.send"]({ params: { id }, payload: { message: "from its own entry session" } })
       const user = asCli(yield* client, repo)
       yield* user["server.session"]["session.send"]({ params: { id }, payload: { message: "from the user" } })
       assert.deepStrictEqual(
-        (yield* db.inbox.pendingInbox(id)).map((r) => unwrapped(r.message)),
+        (yield* inboxStore.pendingInbox(id)).map((r) => unwrapped(r.message)),
         ["from its own entry session", "from the user"],
       )
       assert.strictEqual(
@@ -720,7 +729,7 @@ describe("vibest.sock", () => {
   test(
     "every protected method: no protocol and a session are refused; notifications need protocol only",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const repo = yield* makeRepository
 
       const asEntry = (root: string, paneId: string) =>
@@ -746,7 +755,7 @@ describe("vibest.sock", () => {
       })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
 
@@ -844,7 +853,7 @@ describe("vibest.sock", () => {
             .some((access) => access === "agent" || access === "session" || access === "open"),
       ))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
-      const entryBefore = yield* db.session.latestRoot((yield* db.session.getSession(id))!.projectId)
+      const entryBefore = yield* sessionStore.latestRoot((yield* sessionStore.getSession(id))!.projectId)
 
       const entryCalls: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
         w["server.session"]["session.claim"]({
@@ -856,18 +865,21 @@ describe("vibest.sock", () => {
       ]
 
       for (const call of entryCalls) assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden")
-      assert.deepStrictEqual(yield* db.session.latestRoot((yield* db.session.getSession(id))!.projectId), entryBefore)
+      assert.deepStrictEqual(
+        yield* sessionStore.latestRoot((yield* sessionStore.getSession(id))!.projectId),
+        entryBefore,
+      )
 
       const child = yield* w["server.session"]["session.spawn"]({
         payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "from a session" },
       })
 
-      assert.deepStrictEqual(yield* db.session.creatorOf(child.id), { local: id })
+      assert.deepStrictEqual(yield* sessionStore.creatorOf(child.id), { local: id })
 
       yield* a["server.hook"]["hook.ready"]({ payload: {} })
       yield* w["server.hook"]["hook.ready"]({ payload: { pid: 4242 } })
-      assert.isDefined(yield* db.session.readyAt(id))
-      assert.strictEqual((yield* db.session.getSession(id))!.process?.pid, 4242)
+      assert.isDefined(yield* sessionStore.readyAt(id))
+      assert.strictEqual((yield* sessionStore.getSession(id))!.process?.pid, 4242)
 
       yield* withHeaders(bare["server.plugin"]["plugin.list"]({}), protocolHeaders())
       yield* withHeaders(bare["server.daemon"]["daemon.concurrency"]({}), protocolHeaders())
@@ -919,7 +931,8 @@ describe("vibest.sock", () => {
   test(
     "one socket does not keep a caller: sequential and concurrent requests stay on their own headers",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
+      const inboxStore = yield* InboxStore.Service
       const repo = yield* makeRepository
       const raw = yield* client
       const cli = asCli(raw, repo)
@@ -930,7 +943,7 @@ describe("vibest.sock", () => {
       })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
       const session = yield* asSession(raw, id)
@@ -946,7 +959,7 @@ describe("vibest.sock", () => {
       })).sessionId
 
       yield* session["server.session"]["session.send"]({ params: { id: entry }, payload: { message: "first" } })
-      assert.match((yield* db.inbox.latestInbox(entry, "send"))!.message, /first/)
+      assert.match((yield* inboxStore.latestInbox(entry, "send"))!.message, /first/)
       const listed = (yield* cli["server.session"]["session.list"]({ query: {} })).sessions
       assert.include(
         listed.map((w) => w.id),
@@ -969,7 +982,7 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(sent, { id: entry })
       assert.strictEqual(got.id, id)
       assert.strictEqual(failureTag(stranger), "NoSuchSession")
-      assert.match((yield* db.inbox.latestInbox(entry, "send"))!.message, /second/)
+      assert.match((yield* inboxStore.latestInbox(entry, "send"))!.message, /second/)
     }),
   )
 })

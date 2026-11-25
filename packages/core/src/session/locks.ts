@@ -3,7 +3,7 @@ import { KeyedMutex } from "@vibest/util/keyed-mutex"
 import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
 
-import { Drain } from "../drain.ts"
+import { Drain } from "../runtime/drain.ts"
 
 export * as SessionLocks from "./locks.ts"
 

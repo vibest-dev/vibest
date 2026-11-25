@@ -5,7 +5,7 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus, type Definition, type Projector } from "../bus.ts"
-import { senderColumns, senderKey } from "../database/db-rows.ts"
+import { senderColumns, senderKey } from "../database/rows.ts"
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {

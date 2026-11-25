@@ -1,11 +1,11 @@
 import http from "node:http"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
-import { pidOf } from "@vibest/core/database/db-rows"
+import { pidOf } from "@vibest/core/database/rows"
 import { Inbox } from "@vibest/core/inbox"
 import { Project } from "@vibest/core/project"
 import { Session } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
 import { sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout } from "@vibest/schema/layout"
@@ -98,13 +98,13 @@ const postUnix = (socketPath: string, path: string, headers: Record<string, stri
   )
 
 const project = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const herdr = yield* FakeRuntime
   const layout = yield* Layout
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
 
-  const entry = yield* db.session.startRoot(
+  const entry = yield* sessionStore.startRoot(
     key,
     "claude",
     false,
@@ -136,7 +136,7 @@ const project = Effect.gen(function* () {
     postUnix(layout.socket, path, sessionHeaders({ projectId: String(projectId), harness: "claude", ...who }), body)
 
   return {
-    db,
+    sessionStore,
     herdr,
     entryId: entry.sessionId,
     worker,
@@ -153,25 +153,25 @@ describe("vibestd's unified HTTP API", () => {
   test(
     "a late Ready from the process a restart replaced changes nothing; the restarted harness's Ready is taken",
     Effect.gen(function* () {
-      const { call, db, worker } = yield* project
-      yield* until(db.session.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
-      const first = (yield* db.session.currentProcessId(worker))!
+      const { call, worker, sessionStore } = yield* project
+      yield* until(sessionStore.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
+      const first = (yield* sessionStore.currentProcessId(worker))!
 
       const ready = (process: number, pid: number, pluginVersion = VERSION) =>
         call("/api/hook/ready", { sessionId: worker, process: String(process), pluginVersion }, JSON.stringify({ pid }))
 
       assert.deepStrictEqual((yield* ready(first, 111)).body, { process: first })
-      yield* db.session.restartProcess(worker)
-      const second = (yield* db.session.currentProcessId(worker))!
+      yield* sessionStore.restartProcess(worker)
+      const second = (yield* sessionStore.currentProcessId(worker))!
       assert.notStrictEqual(second, first)
       const late = yield* ready(first, 111)
       assert.strictEqual(late.status, 200)
       assert.deepStrictEqual(late.body, {})
-      assert.isUndefined(yield* db.session.readyAt(worker))
-      assert.isUndefined(pidOf((yield* db.session.getSession(worker))!))
+      assert.isUndefined(yield* sessionStore.readyAt(worker))
+      assert.isUndefined(pidOf((yield* sessionStore.getSession(worker))!))
       assert.deepStrictEqual((yield* ready(first, 222, "0.0.2-next")).body, { process: second })
-      assert.isNumber(yield* db.session.readyAt(worker))
-      assert.deepInclude((yield* db.session.getSession(worker))!.process, {
+      assert.isNumber(yield* sessionStore.readyAt(worker))
+      assert.deepInclude((yield* sessionStore.getSession(worker))!.process, {
         pid: 222,
         integration: { version: "0.0.2-next", protocol: PROTOCOL },
       })
@@ -181,33 +181,33 @@ describe("vibestd's unified HTTP API", () => {
   test(
     "Ready takes {} and a numeric pid; a malformed body or a wrong pid type is 400 InvalidRequestError and changes nothing",
     Effect.gen(function* () {
-      const { call, db, worker } = yield* project
-      yield* until(db.session.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
-      const process = (yield* db.session.currentProcessId(worker))!
+      const { call, worker, sessionStore } = yield* project
+      yield* until(sessionStore.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
+      const process = (yield* sessionStore.currentProcessId(worker))!
       const ready = (body: string) => call("/api/hook/ready", { sessionId: worker, process: String(process) }, body)
-      const pid = () => Effect.map(db.session.getSession(worker), (session) => pidOf(session!))
-      const readyAt = yield* db.session.readyAt(worker)
+      const pid = () => Effect.map(sessionStore.getSession(worker), (session) => pidOf(session!))
+      const readyAt = yield* sessionStore.readyAt(worker)
       const reportedPid = yield* pid()
 
       const badJson = yield* ready("{")
       assert.strictEqual(badJson.status, 400)
-      assert.strictEqual(yield* db.session.readyAt(worker), readyAt)
+      assert.strictEqual(yield* sessionStore.readyAt(worker), readyAt)
       assert.strictEqual(yield* pid(), reportedPid)
 
       const badPid = yield* ready(JSON.stringify({ pid: "x" }))
       assert.strictEqual(badPid.status, 400)
       assert.strictEqual((badPid.body as { _tag?: string })._tag, "InvalidRequestError")
-      assert.strictEqual(yield* db.session.readyAt(worker), readyAt)
+      assert.strictEqual(yield* sessionStore.readyAt(worker), readyAt)
       assert.strictEqual(yield* pid(), reportedPid)
 
       const empty = yield* ready("{}")
       assert.deepStrictEqual(empty, { status: 200, body: { process } })
-      assert.isNumber(yield* db.session.readyAt(worker))
+      assert.isNumber(yield* sessionStore.readyAt(worker))
       assert.strictEqual(yield* pid(), reportedPid)
 
       const numbered = yield* ready(JSON.stringify({ pid: 1 }))
       assert.deepStrictEqual(numbered, { status: 200, body: { process } })
-      assert.strictEqual(pidOf((yield* db.session.getSession(worker))!), 1)
+      assert.strictEqual(pidOf((yield* sessionStore.getSession(worker))!), 1)
     }),
   )
 

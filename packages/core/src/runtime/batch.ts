@@ -1,6 +1,6 @@
 import type { InboxRow } from "@vibest/schema/session"
 
-import { senderKey } from "./database/db-rows.ts"
+import { senderKey } from "../database/rows.ts"
 
 export const nextBatch = (pending: ReadonlyArray<InboxRow>) => {
   const first = pending[0] ? senderKey(pending[0].sender) : undefined

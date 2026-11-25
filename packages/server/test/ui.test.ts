@@ -2,9 +2,9 @@ import http from "node:http"
 
 import { BunHttpServer } from "@effect/platform-bun"
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
 import { PluginLoader } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
+import { SessionStore } from "@vibest/core/session/store"
 import {
   CWD_HEADER,
   PLUGIN_VERSION_HEADER,
@@ -200,7 +200,7 @@ describe("local UI HTTP+SSE server", () => {
   it.live("streams Watch Snapshot and live deltas over SSE", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const sessionStore = yield* SessionStore.Service
         const info = Option.getOrThrow(yield* Ui.Service)
 
         const sse = yield* openSse(info.port, "/api/watch", {
@@ -219,7 +219,7 @@ describe("local UI HTTP+SSE server", () => {
         })
 
         yield* until(
-          db.session.getSession(id),
+          sessionStore.getSession(id),
           (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
         )
 
@@ -264,7 +264,7 @@ describe("local UI HTTP+SSE server", () => {
   it.live("strips non-protocol headers and never mutates session integration state", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const db = yield* Db.Service
+        const sessionStore = yield* SessionStore.Service
         const info = Option.getOrThrow(yield* Ui.Service)
 
         const repo = yield* makeRepository
@@ -275,11 +275,11 @@ describe("local UI HTTP+SSE server", () => {
         })
 
         yield* until(
-          db.session.getSession(id),
+          sessionStore.getSession(id),
           (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
         )
 
-        const beforeIntegration = (yield* db.session.getSession(id))?.process?.integration
+        const beforeIntegration = (yield* sessionStore.getSession(id))?.process?.integration
 
         const sse = yield* openSse(info.port, "/api/watch", {
           [TOKEN_HEADER]: info.token,
@@ -292,7 +292,7 @@ describe("local UI HTTP+SSE server", () => {
         const first = yield* sse.nextEvent("spoof-snapshot")
         assert.isTrue(Predicate.isTagged(first, "Snapshot"))
 
-        const afterIntegration = (yield* db.session.getSession(id))?.process?.integration
+        const afterIntegration = (yield* sessionStore.getSession(id))?.process?.integration
         assert.deepStrictEqual(afterIntegration, beforeIntegration)
       }),
     ).pipe(Effect.provide(servedWithUi())),

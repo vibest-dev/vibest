@@ -7,8 +7,8 @@ import { Cache, Clock, Config, Context, Duration, Effect, Exit, FileSystem, Laye
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { PlatformNode } from "./effect/platform.ts"
-import { Harnesses, unprovided } from "./harnesses.ts"
-import { listModels, type Model } from "./models.ts"
+import { listModels, type Model } from "./harness/models.ts"
+import { Harnesses, unprovided } from "./harness/registry.ts"
 
 export * as Harness from "./harness.ts"
 

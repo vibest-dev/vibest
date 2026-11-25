@@ -1,4 +1,4 @@
-import { Agents } from "@vibest/core/agents"
+import { Agents } from "@vibest/core/agent/registry"
 import { Session } from "@vibest/core/session"
 import { VibestApi } from "@vibest/protocol/api"
 import { Forbidden } from "@vibest/protocol/errors"

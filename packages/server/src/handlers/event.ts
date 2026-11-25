@@ -1,5 +1,5 @@
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
+import { SessionStore } from "@vibest/core/session/store"
 import { VibestApi } from "@vibest/protocol/api"
 import { Forbidden } from "@vibest/protocol/errors"
 import { NoSuchSession } from "@vibest/schema/session"
@@ -11,7 +11,7 @@ import * as CallerChecks from "./caller.ts"
 export const EventHandler = HttpApiBuilder.group(VibestApi, "server.event", (handlers) =>
   Effect.gen(function* () {
     const { cliOnly } = yield* CallerChecks.Service
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
     const bus = yield* Bus.Service
 
     return handlers.handle("event.subscribe", ({ query: { session, after, follow } }) =>
@@ -27,7 +27,7 @@ export const EventHandler = HttpApiBuilder.group(VibestApi, "server.event", (han
         const id =
           session === undefined
             ? undefined
-            : yield* db.session
+            : yield* sessionStore
                 .resolveSession(session)
                 .pipe(
                   Effect.catchTag("AmbiguousSession", (e) =>
