@@ -121,8 +121,8 @@ const WRAPPER_VALUE_OPTIONS: ReadonlyMap<string, ReadonlyArray<string>> = new Ma
 const KEYWORDS = new Set(["!", "{", "if", "then", "elif", "else", "do", "while", "until"])
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"])
 const VARIABLE_SETTERS = new Set(["unset", "export", "declare", "typeset", "readonly", "local"])
-const SOCKET_TOOLS = new Set(["curl", "nc", "ncat", "socat", "wget"])
-const HOOK_SOCKET = /(?:^|[/:=])vibest-http\.sock$/
+const SOCKET_TOOLS = new Set(["curl", "nc", "ncat", "netcat", "socat", "wget"])
+const DAEMON_SOCKET = /(?:^|[/:=])vibest\.sock(?:$|,)/
 
 interface Program {
   readonly argv: ReadonlyArray<string>
@@ -199,8 +199,18 @@ const VIBEST_CLI_VAR = /^\$(?:VIBEST_CLI|\{VIBEST_CLI[^}]*\})$/
 
 const isVibestProgram = (word: string) => base(word) === "vibest" || VIBEST_CLI_VAR.test(word)
 
-const vibestArgs = (argv: ReadonlyArray<string>) =>
-  argv[0] !== undefined && isVibestProgram(argv[0]) ? argv.slice(1) : undefined
+const vibestArgs = (argv: ReadonlyArray<string>) => {
+  if (argv[0] === undefined || !isVibestProgram(argv[0])) return undefined
+  const args: Array<string> = []
+
+  for (const word of argv.slice(1)) {
+    const trimmed = word.trim()
+
+    if (trimmed !== "") args.push(trimmed)
+  }
+
+  return args
+}
 
 export const shellRefusal = (command: string): string | undefined => {
   for (const p of programsOf(command)) {
@@ -215,9 +225,9 @@ export const shellRefusal = (command: string): string | undefined => {
     if (
       p.argv[0] !== undefined &&
       SOCKET_TOOLS.has(base(p.argv[0])) &&
-      p.argv.slice(1).some((a) => HOOK_SOCKET.test(a))
+      p.argv.slice(1).some((a) => DAEMON_SOCKET.test(a))
     )
-      return "vibest-http.sock is the harness's hook socket, not for agent commands."
+      return "vibest.sock is the vibestd daemon socket, not for agent commands."
   }
 
   return undefined

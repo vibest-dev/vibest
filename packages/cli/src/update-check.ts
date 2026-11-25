@@ -1,5 +1,5 @@
 import { channelOf, installMethod, latestOf } from "@vibest/client/release"
-import { NOT_CHECKED } from "@vibest/protocol/rpc"
+import { NOT_CHECKED } from "@vibest/protocol/schemas"
 import { VibestCommand } from "@vibest/schema/layout"
 import { Clock, Config, Duration, Effect, Exit, Option, Ref, Schedule } from "effect"
 

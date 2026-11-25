@@ -1,9 +1,14 @@
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 
-import { json, toSessionRef, vibest } from "../../caller.ts"
+import { json, vibest } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.interrupt, (o) =>
-  vibest((client) => client.Interrupt(toSessionRef(o.id, o.machine))).pipe(Effect.flatMap(json)),
+  vibest((client) =>
+    client["server.session"]["session.interrupt"]({
+      params: { id: o.id },
+      query: Option.isSome(o.machine) ? { machine: o.machine.value } : {},
+    }),
+  ).pipe(Effect.flatMap(json)),
 )

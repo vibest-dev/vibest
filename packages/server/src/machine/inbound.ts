@@ -8,7 +8,7 @@ import { Identity } from "@vibest/core/identity"
 import { safeRepositoryDirectory, sameWorktreeBucket } from "@vibest/core/paths"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { defaultSessionName, Session } from "@vibest/core/session"
-import type { PayloadOf } from "@vibest/protocol/rpc"
+import type { RemoteSpawnPayload } from "@vibest/protocol/payloads"
 import {
   NoCommit,
   NoProject,
@@ -38,7 +38,7 @@ type Checkout = Effect.Success<Db.Interface["remote"]["projectCheckouts"]>[numbe
 
 type Paired = { readonly wanted: Wanted; readonly row: Checkout }
 
-const wantedOf = (input: PayloadOf<"Remote.Spawn">): ReadonlyArray<Wanted> =>
+const wantedOf = (input: RemoteSpawnPayload): ReadonlyArray<Wanted> =>
   input.repositories ??
   (input.repository === undefined || input.commit === undefined
     ? []
@@ -104,7 +104,7 @@ const make = Effect.gen(function* () {
       remote: string,
       project: string,
       reportTo: string,
-      input: PayloadOf<"Remote.Spawn">,
+      input: RemoteSpawnPayload,
     ) {
       const bytes = new TextEncoder().encode(input.prompt).length
 

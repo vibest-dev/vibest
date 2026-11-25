@@ -1,8 +1,8 @@
 import fs from "node:fs/promises"
-import net from "node:net"
+import http from "node:http"
 import path from "node:path"
 
-import { Predicate, type Schema } from "effect"
+import { Predicate } from "effect"
 
 import { LOG_KEEP_BYTES, LOG_MAX_BYTES } from "../../../packages/platform-bun/src/log-file.ts"
 import { PROTOCOL } from "../../../packages/schema/src/version.ts"
@@ -16,22 +16,42 @@ type Status = { daemon: { status: string; pid?: number | null; protocol?: number
 const status = (w: World) => w.json<Status>(["status"])
 const running = async (w: World) => (await status(w)).daemon
 
-const raw = (w: World, request: Schema.JsonObject) =>
-  new Promise<Schema.JsonObject>((resolve, reject) => {
-    const socket = net.connect(path.join(w.vibestHome, "vibest.sock"))
-    let buffer = ""
-    socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`))
-    socket.on("data", (chunk) => {
-      buffer += chunk.toString()
-      const line = buffer.split("\n")[0]
+const raw = (
+  w: World,
+  request: {
+    readonly method: string
+    readonly path: string
+    readonly headers?: Record<string, string>
+    readonly body?: string
+  },
+) =>
+  new Promise<{ readonly status: number; readonly body: string }>((resolve, reject) => {
+    const req = http.request(
+      {
+        socketPath: path.join(w.vibestHome, "vibest.sock"),
+        method: request.method,
+        path: request.path,
+        headers: request.headers,
+      },
+      (res) => {
+        let body = ""
+        res.on("data", (chunk: Buffer) => {
+          body += chunk.toString()
+        })
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, body })
+        })
+      },
+    )
 
-      if (buffer.includes("\n") && line) {
-        socket.destroy()
-        resolve(JSON.parse(line) as Schema.JsonObject)
-      }
+    req.on("error", reject)
+    req.setTimeout(5_000, () => {
+      req.destroy()
+      reject(new Error("no reply in 5 s"))
     })
-    socket.on("error", reject)
-    setTimeout(() => (socket.destroy(), reject(new Error("no reply in 5 s"))), 5_000)
+
+    if (request.body !== undefined) req.write(request.body)
+    req.end()
   })
 
 const hungTeardownPlugin = `import { Plugin } from "@vibest/plugin/effect"
@@ -150,18 +170,18 @@ const checks: ReadonlyArray<Check> = [
 
         await exitsAtDeadline(w, pid, async () => {
           const reply = await raw(w, {
-            jsonrpc: "2.0",
-            id: "1",
-            method: "Daemon.Stop",
-            params: { instance: info.instance },
-            headers: [
-              ["vibest-protocol", String(PROTOCOL)],
-              ["vibest-caller", "cli"],
-              ["vibest-repository", w.repository],
-            ],
+            method: "POST",
+            path: "/api/daemon/stop",
+            headers: {
+              "content-type": "application/json",
+              "vibest-protocol": String(PROTOCOL),
+              "vibest-caller": "cli",
+              "vibest-repository": w.repository,
+            },
+            body: JSON.stringify({ instance: info.instance }),
           })
 
-          expect(!("error" in reply), `Daemon.Stop was refused: ${JSON.stringify(reply)}`)
+          expect(reply.status === 200, `daemon.stop was refused: ${JSON.stringify(reply)}`)
         })
       }
 
@@ -184,16 +204,14 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       await w.ok(["daemon"])
 
-      for (const headers of [undefined, [["vibest-protocol", "0"]]]) {
+      for (const headers of [undefined, { "vibest-protocol": "0" }]) {
         const reply = await raw(w, {
-          jsonrpc: "2.0",
-          id: "1",
-          method: "List",
-          params: {},
+          method: "GET",
+          path: "/api/session",
           ...(headers && { headers }),
         })
 
-        expect(JSON.stringify(reply).includes("ProtocolRejected"), `not refused: ${JSON.stringify(reply)}`)
+        expect(reply.status === 409 && reply.body.includes("ProtocolRejected"), `not refused: ${JSON.stringify(reply)}`)
       }
 
       expect((await running(w)).status === "running", "vibestd stopped answering")

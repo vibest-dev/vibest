@@ -30,7 +30,7 @@ const capture = Plugin.define({
 })
 
 const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
   Layer.provideMerge(testLayer({ plugins: [capture] })),
 )
 

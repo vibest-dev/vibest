@@ -1,17 +1,24 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { SocketConnector } from "@vibest/client/socket-connector"
+import { withHeaders } from "@vibest/client/unix-http"
 import { Db } from "@vibest/core/database/db"
 import { Identity } from "@vibest/core/identity"
 import { Plugin } from "@vibest/plugin/effect"
+import { WatchLagged } from "@vibest/protocol/errors"
+import { DaemonGroup } from "@vibest/protocol/groups/daemon"
+import { RemoteGroup } from "@vibest/protocol/groups/remote"
+import { WatchGroup } from "@vibest/protocol/groups/watch"
+import { AdmissionMiddleware, Caller, CallerMiddleware, ProtocolMiddleware } from "@vibest/protocol/middleware"
 import { remoteHeaders } from "@vibest/protocol/protocol"
-import { PingResult, WatchEvent, WatchLagged } from "@vibest/protocol/rpc"
+import type { WatchEvent } from "@vibest/protocol/schemas"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import * as Listing from "@vibest/server/listing"
-import { Effect, Layer, Predicate, Queue, Schema, Stream } from "effect"
-import { Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
+import { Effect, Layer, Predicate, Queue, Stream } from "effect"
+import { Etag, HttpPlatform, HttpRouter } from "effect/http"
+import { HttpApi, HttpApiBuilder } from "effect/http-api"
 
 import * as Platform from "#platform"
 
@@ -20,12 +27,11 @@ import { Net, served } from "./lib/machines-fakes.ts"
 
 const makeStack = (net: Net, plugins: ReadonlyArray<Plugin.Plugin> = []) =>
   Effect.gen(function* () {
-    const dial = yield* SocketConnector.Service
-    const context = yield* Layer.build(served({ transport: net.transport(dial), plugins }))
+    const context = yield* Layer.build(served({ transport: net.transport(), plugins }))
     const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideContext(effect, context)
     const layout = yield* run(Layout)
     const raw = yield* connect(layout.socket)
-    const cli = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(layout.home))
+    const cli = <A, E>(effect: Effect.Effect<A, E>) => withHeaders(effect, cliHeaders(layout.home))
 
     return { context, run, layout, raw, cli, id: (yield* run(Identity.Service)).id }
   })
@@ -33,8 +39,8 @@ const makeStack = (net: Net, plugins: ReadonlyArray<Plugin.Plugin> = []) =>
 const watchStream = (raw: Effect.Success<ReturnType<typeof connect>>, headers: Readonly<Record<string, string>>) =>
   Effect.gen(function* () {
     const events = yield* Queue.unbounded<WatchEvent>()
-    yield* raw.Watch(undefined, { headers }).pipe(
-      Stream.runForEach((event) => Queue.offer(events, event)),
+    yield* withHeaders(raw["server.watch"]["watch.subscribe"]({}), headers).pipe(
+      Effect.flatMap((stream) => stream.pipe(Stream.runForEach((event) => Queue.offer(events, event)))),
       Effect.forkScoped,
     )
 
@@ -52,20 +58,7 @@ const watchStream = (raw: Effect.Success<ReturnType<typeof connect>>, headers: R
 
 const isSnapshot = (e: WatchEvent): e is Extract<WatchEvent, { _tag: "Snapshot" }> => Predicate.isTagged(e, "Snapshot")
 
-const FakeRemoteRpcs = RpcGroup.make(
-  Rpc.make("Ping", { success: PingResult }),
-  Rpc.make("Remote.Hello", {
-    payload: { id: Schema.String, name: Schema.String, callsMe: Schema.String },
-    success: Schema.Struct({
-      id: Schema.String,
-      name: Schema.String,
-      version: Schema.String,
-      runtimes: Schema.Array(Schema.Unknown),
-    }),
-  }),
-  Rpc.make("Remote.Outbox", { success: Schema.Unknown, stream: true }),
-  Rpc.make("Watch", { success: WatchEvent, error: WatchLagged, stream: true }),
-)
+const FakeRemoteApi = HttpApi.make("fake-remote").add(DaemonGroup).add(RemoteGroup).add(WatchGroup)
 
 const fakeRemoteSocket = (options: {
   readonly protocol: number
@@ -79,24 +72,53 @@ const fakeRemoteSocket = (options: {
     const socket = `${dir}/remote.sock`
     const remoteId = options.id ?? randomId()
 
-    const handlers = FakeRemoteRpcs.toLayer({
-      Ping: () =>
-        Effect.succeed({
-          version: options.version,
-          protocol: options.protocol,
-          capabilities: { ...(options.remoteWatch === true && { remoteWatch: true }) },
-        }),
-      "Remote.Hello": () =>
-        Effect.succeed({ id: remoteId, name: "legacy-box", version: options.version, runtimes: [] }),
-      "Remote.Outbox": () => Stream.never,
-      Watch: () => (options.watch ? options.watch() : Stream.never),
-    })
+    const daemonHandlers = HttpApiBuilder.group(FakeRemoteApi, "server.daemon", (handlers) =>
+      handlers
+        .handle("daemon.ping", () =>
+          Effect.succeed({
+            version: options.version,
+            protocol: options.protocol,
+            capabilities: { ...(options.remoteWatch === true && { remoteWatch: true }) },
+          }),
+        )
+        .handle("daemon.stop", () => Effect.die("unused"))
+        .handle("daemon.handoff", () => Effect.die("unused"))
+        .handle("daemon.concurrency", () => Effect.die("unused"))
+        .handle("daemon.republish", () => Effect.die("unused")),
+    )
 
-    const server = RpcServer.layer(FakeRemoteRpcs).pipe(
-      Layer.provide(handlers),
-      Layer.provide(RpcServer.layerProtocolSocketServer),
-      Layer.provide(RpcSerialization.layerNdJsonRpc()),
-      Layer.provide(Platform.socketServer(socket)),
+    const remoteHandlers = HttpApiBuilder.group(FakeRemoteApi, "server.remote", (handlers) =>
+      handlers
+        .handle("remote.hello", () =>
+          Effect.succeed({ id: remoteId, name: "legacy-box", version: options.version, runtimes: [] }),
+        )
+        .handle("remote.outbox", () => Effect.succeed(Stream.never))
+        .handle("remote.ack", () => Effect.void)
+        .handle("remote.spawn", () => Effect.die("unused"))
+        .handle("remote.link", () => Effect.die("unused"))
+        .handle("remote.unlink", () => Effect.die("unused")),
+    )
+
+    const watchHandlers = HttpApiBuilder.group(FakeRemoteApi, "server.watch", (handlers) =>
+      handlers.handle("watch.subscribe", () => Effect.succeed(options.watch ? options.watch() : Stream.never)),
+    )
+
+    const noopMiddleware = Layer.mergeAll(
+      Layer.succeed(AdmissionMiddleware, (httpEffect) => httpEffect),
+      Layer.succeed(ProtocolMiddleware, (httpEffect) => httpEffect),
+      Layer.succeed(CallerMiddleware, (httpEffect) =>
+        Effect.provideService(httpEffect, Caller, { _tag: "Cli" as const, repositoryRoot: dir }),
+      ),
+    )
+
+    const apiLayer = HttpApiBuilder.layer(FakeRemoteApi).pipe(
+      Layer.provide(Layer.mergeAll(daemonHandlers, remoteHandlers, watchHandlers)),
+      Layer.provide(noopMiddleware),
+    )
+
+    const server = HttpRouter.serve(apiLayer).pipe(
+      Layer.provide(Platform.httpServer(socket)),
+      Layer.provide(Layer.merge(HttpPlatform.layer, Etag.layerWeak)),
     )
 
     yield* Effect.forkScoped(Layer.launch(server))
@@ -140,20 +162,27 @@ describe("Watch with remote machines", () => {
           ),
         )
 
-        yield* a.cli(a.raw["Machine.Add"]({ name: "box2", target: "b-host" }))
-        yield* b.cli(b.raw["Machine.Add"]({ name: "box1", target: "a-host" }))
+        yield* a.cli(a.raw["server.machine"]["machine.add"]({ payload: { name: "box2", target: "b-host" } }))
+        yield* b.cli(b.raw["server.machine"]["machine.add"]({ payload: { name: "box1", target: "a-host" } }))
 
-        yield* until(a.cli(a.raw.Watch(undefined).pipe(Stream.take(1), Stream.runCollect)), (chunk) => {
-          const snap = chunk[0]
+        yield* until(
+          a.cli(
+            a.raw["server.watch"]
+              ["watch.subscribe"]({})
+              .pipe(Effect.flatMap((stream) => stream.pipe(Stream.take(1), Stream.runCollect))),
+          ),
+          (chunk) => {
+            const snap = chunk[0]
 
-          return (
-            snap !== undefined &&
-            isSnapshot(snap) &&
-            snap.machines.some((m) => m.name === "box2" && m.state === "connected") &&
-            snap.projects.some((p) => p.id === bProject && p.machine === "box2") &&
-            snap.sessions.some((s) => s.id === bEntry.sessionId && s.machine === "box2")
-          )
-        })
+            return (
+              snap !== undefined &&
+              isSnapshot(snap) &&
+              snap.machines.some((m) => m.name === "box2" && m.state === "connected") &&
+              snap.projects.some((p) => p.id === bProject && p.machine === "box2") &&
+              snap.sessions.some((s) => s.id === bEntry.sessionId && s.machine === "box2")
+            )
+          },
+        )
 
         const remoteWatch = yield* watchStream(a.raw, remoteHeaders(b.id))
         const remoteSnap = yield* remoteWatch.next(isSnapshot)
@@ -204,7 +233,7 @@ describe("Watch with remote machines", () => {
 
         assert.strictEqual(added.session.projectId, bProject)
 
-        yield* b.cli(b.raw.Archive({ id: bSub }))
+        yield* b.cli(b.raw["server.session"]["session.archive"]({ params: { id: bSub }, payload: {} }))
 
         const ended = yield* cliWatch.next(
           (e): e is Extract<WatchEvent, { _tag: "SessionEnded" }> =>
@@ -213,7 +242,7 @@ describe("Watch with remote machines", () => {
 
         assert.strictEqual(ended.projectId, bProject)
 
-        yield* a.cli(a.raw["Machine.Remove"]({ name: "box2" }))
+        yield* a.cli(a.raw["server.machine"]["machine.remove"]({ params: { name: "box2" } }))
 
         const removed = yield* cliWatch.next(
           (e): e is Extract<WatchEvent, { _tag: "MachineRemoved" }> =>
@@ -230,11 +259,11 @@ describe("Watch with remote machines", () => {
       const a = yield* makeStack(net)
       const remote = yield* fakeRemoteSocket({ protocol: PROTOCOL, version: "0.0.2-dev", remoteWatch: true })
       net.route("offline-host", remote.socket)
-      yield* a.cli(a.raw["Machine.Add"]({ name: "offline-box", target: "offline-host" }))
+      yield* a.cli(a.raw["server.machine"]["machine.add"]({ payload: { name: "offline-box", target: "offline-host" } }))
 
       net.fail("offline-host", 255, "ssh: connect to host offline-host port 22: Connection refused")
       yield* net.cutAll("offline-host")
-      yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "unreachable")
+      yield* until(a.cli(a.raw["server.machine"]["machine.list"]({})), (rows) => rows[0]?.state === "unreachable")
 
       const startedAt = Date.now()
       const watch = yield* watchStream(a.raw, cliHeaders(a.layout.home))
@@ -259,7 +288,7 @@ describe("Watch with remote machines", () => {
 
         const oldRemote = yield* fakeRemoteSocket({ protocol: PROTOCOL, version: "0.0.1-old", remoteWatch: false })
         net.route("old-host", oldRemote.socket)
-        yield* a.cli(a.raw["Machine.Add"]({ name: "old-box", target: "old-host" }))
+        yield* a.cli(a.raw["server.machine"]["machine.add"]({ payload: { name: "old-box", target: "old-host" } }))
 
         const watch = yield* watchStream(a.raw, cliHeaders(a.layout.home))
         const snap = yield* watch.next(isSnapshot)
@@ -271,7 +300,10 @@ describe("Watch with remote machines", () => {
         const mismatchRemote = yield* fakeRemoteSocket({ protocol: PROTOCOL - 1, version: "0.0.0-mismatch" })
         net.route("old-host", mismatchRemote.socket)
         yield* net.cutAll("old-host")
-        yield* untilVirtual(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "incompatible")
+        yield* untilVirtual(
+          a.cli(a.raw["server.machine"]["machine.list"]({})),
+          (rows) => rows[0]?.state === "incompatible",
+        )
 
         const mismatched = yield* watch.next(
           (e): e is Extract<WatchEvent, { _tag: "Machine" }> =>
@@ -356,19 +388,26 @@ describe("Watch with remote machines", () => {
         })
 
         net.route("laggy-host", remote.socket)
-        yield* a.cli(a.raw["Machine.Add"]({ name: "laggy-box", target: "laggy-host" }))
+        yield* a.cli(a.raw["server.machine"]["machine.add"]({ payload: { name: "laggy-box", target: "laggy-host" } }))
 
-        yield* untilVirtual(a.cli(a.raw.Watch(undefined).pipe(Stream.take(1), Stream.runCollect)), (chunk) => {
-          const snap = chunk[0]
+        yield* untilVirtual(
+          a.cli(
+            a.raw["server.watch"]
+              ["watch.subscribe"]({})
+              .pipe(Effect.flatMap((stream) => stream.pipe(Stream.take(1), Stream.runCollect))),
+          ),
+          (chunk) => {
+            const snap = chunk[0]
 
-          return (
-            snap !== undefined &&
-            isSnapshot(snap) &&
-            snap.sessions.some((s) => s.id === s2 && s.machine === "laggy-box") &&
-            !snap.sessions.some((s) => s.id === s1) &&
-            snap.projects.some((p) => p.id === p2 && p.machine === "laggy-box")
-          )
-        })
+            return (
+              snap !== undefined &&
+              isSnapshot(snap) &&
+              snap.sessions.some((s) => s.id === s2 && s.machine === "laggy-box") &&
+              !snap.sessions.some((s) => s.id === s1) &&
+              snap.projects.some((p) => p.id === p2 && p.machine === "laggy-box")
+            )
+          },
+        )
 
         assert.isAtLeast(watchAttempts, 2)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
@@ -493,29 +532,42 @@ describe("Watch with remote machines", () => {
           ),
         )
 
-        yield* a.cli(a.raw["Machine.Add"]({ name: "mac-mini", target: "b-host" }))
+        yield* a.cli(a.raw["server.machine"]["machine.add"]({ payload: { name: "mac-mini", target: "b-host" } }))
 
-        const snap = yield* until(a.cli(a.raw.Watch(undefined).pipe(Stream.take(1), Stream.runCollect)), (chunk) => {
-          const first = chunk[0]
+        const snap = yield* until(
+          a.cli(
+            a.raw["server.watch"]
+              ["watch.subscribe"]({})
+              .pipe(Effect.flatMap((stream) => stream.pipe(Stream.take(1), Stream.runCollect))),
+          ),
+          (chunk) => {
+            const first = chunk[0]
 
-          return (
-            first !== undefined &&
-            isSnapshot(first) &&
-            first.sessions.some((s) => s.id === bRemoteId && s.machine === "mac-mini")
-          )
-        })
+            return (
+              first !== undefined &&
+              isSnapshot(first) &&
+              first.sessions.some((s) => s.id === bRemoteId && s.machine === "mac-mini")
+            )
+          },
+        )
 
         const snapshot = snap[0]!
         assert.isTrue(isSnapshot(snapshot))
 
         if (!isSnapshot(snapshot)) return
 
-        const listed = yield* RpcClient.withHeaders(a.raw.List({}), cliHeaders(aRepo))
-        const gotLocal = yield* a.cli(a.raw.Get({ id: aEntry.sessionId }))
-        const gotSecondary = yield* a.cli(a.raw.Get({ id: aSecondaryId }))
+        const listed = yield* withHeaders(a.raw["server.session"]["session.list"]({ query: {} }), cliHeaders(aRepo))
 
-        const gotRemote = yield* RpcClient.withHeaders(
-          a.raw.Get({ id: bRemoteId, machine: "mac-mini" }),
+        const gotLocal = yield* a.cli(
+          a.raw["server.session"]["session.get"]({ params: { id: aEntry.sessionId }, query: {} }),
+        )
+
+        const gotSecondary = yield* a.cli(
+          a.raw["server.session"]["session.get"]({ params: { id: aSecondaryId }, query: {} }),
+        )
+
+        const gotRemote = yield* withHeaders(
+          a.raw["server.session"]["session.get"]({ params: { id: bRemoteId }, query: { machine: "mac-mini" } }),
           cliHeaders(aRepo),
         )
 

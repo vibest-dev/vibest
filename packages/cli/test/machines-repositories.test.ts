@@ -45,12 +45,14 @@ describe("Remote.Spawn for a project of several repositories", () => {
           project?: string,
         ) =>
           call(
-            b.raw["Remote.Spawn"]({
-              agent: "general",
-              repositories,
-              ...(project !== undefined && { project }),
-              prompt: "x",
-              request: randomId(),
+            b.raw["server.remote"]["remote.spawn"]({
+              payload: {
+                agent: "general",
+                repositories,
+                ...(project !== undefined && { project }),
+                prompt: "x",
+                request: randomId(),
+              },
             }),
           )
 
@@ -130,7 +132,11 @@ describe("Remote.Spawn for a project of several repositories", () => {
                   ]
 
             const out = yield* Effect.result(
-              call(b.raw["Remote.Spawn"]({ agent: "general", prompt: "x", request: randomId(), repositories })),
+              call(
+                b.raw["server.remote"]["remote.spawn"]({
+                  payload: { agent: "general", prompt: "x", request: randomId(), repositories },
+                }),
+              ),
             )
 
             return { out, spawns: b.spawns, root }
@@ -174,12 +180,14 @@ describe("Remote.Spawn for a project of several repositories", () => {
             const call = yield* b.as(randomId(), "aproj")
 
             const spawn = call(
-              b.raw["Remote.Spawn"]({
-                agent: "general",
-                prompt: "x",
-                request: randomId(),
-                repository: x,
-                commit: COMMIT,
+              b.raw["server.remote"]["remote.spawn"]({
+                payload: {
+                  agent: "general",
+                  prompt: "x",
+                  request: randomId(),
+                  repository: x,
+                  commit: COMMIT,
+                },
               }),
             )
 
@@ -226,7 +234,11 @@ describe("Remote.Spawn for a project of several repositories", () => {
         yield* add("s", "https://host/o/s")
 
         const refused = yield* Effect.flip(
-          asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "x", callerEnv: {} })),
+          asEntry(
+            a.raw["server.session"]["session.spawn"]({
+              payload: { agent: "general", machine: "mb", prompt: "x", callerEnv: {} },
+            }),
+          ),
         )
 
         assert.include(refused.message, "has no checkout of https://host/o/s")
@@ -246,7 +258,11 @@ describe("Remote.Spawn for a project of several repositories", () => {
         yield* (yield* a.run(FakeGit)).repository(child, { ...REPOSITORY, origin: REMOTE })
         const project = yield* a.db.project.createProject(root, [{ path: child, remote: REMOTE }])
         const { asEntry } = yield* entryOn({ ...a, project, directory: root })
-        yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "x", callerEnv: {} }))
+        yield* asEntry(
+          a.raw["server.session"]["session.spawn"]({
+            payload: { agent: "general", machine: "mb", prompt: "x", callerEnv: {} },
+          }),
+        )
         assert.strictEqual(b.spawns.at(-1)!.commit, COMMIT)
         assert.isUndefined(b.spawns.at(-1)!.folders)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
@@ -264,14 +280,16 @@ describe("Remote.Spawn for a project of several repositories", () => {
         const call = yield* b.as(randomId(), "aproj")
 
         const spawned = yield* call(
-          b.raw["Remote.Spawn"]({
-            agent: "general",
-            repository: x,
-            identity: "host/o/x",
-            commit: COMMIT,
-            project,
-            prompt: "x",
-            request: randomId(),
+          b.raw["server.remote"]["remote.spawn"]({
+            payload: {
+              agent: "general",
+              repository: x,
+              identity: "host/o/x",
+              commit: COMMIT,
+              project,
+              prompt: "x",
+              request: randomId(),
+            },
           }),
         )
 

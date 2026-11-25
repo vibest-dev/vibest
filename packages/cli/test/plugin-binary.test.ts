@@ -4,6 +4,7 @@ import path from "node:path"
 
 import { assert, beforeAll, it } from "@effect/vitest"
 import { connect, probe, protocolHeaders } from "@vibest/client/client"
+import { withHeaders } from "@vibest/client/unix-http"
 import type { PluginInfo } from "@vibest/core/plugin"
 import { Effect } from "effect"
 
@@ -72,7 +73,7 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
     await f(() =>
       rpc(
         connect(socket).pipe(
-          Effect.flatMap((client) => client.Plugins(undefined, { headers: protocolHeaders() })),
+          Effect.flatMap((client) => withHeaders(client["server.plugin"]["plugin.list"]({}), protocolHeaders())),
           Effect.map((listed) => listed.filter((p) => !p.source.startsWith("builtin:"))),
           Effect.scoped,
         ),

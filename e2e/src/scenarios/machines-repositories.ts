@@ -3,8 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask } from "../fake-model.ts"
-import { binary, expect, until, type World } from "../world.ts"
-import { olderBuild } from "../world/older-build.ts"
+import { binary, compiled, expect, harnesses, until, type World } from "../world.ts"
 import { fakeSsh, setup, sh, stopVibestd, type Setup } from "./machines.ts"
 
 const git = async (w: World, cwd: string, ...args: ReadonlyArray<string>) => {
@@ -32,7 +31,33 @@ const twoRepositories = async (w: World) => {
   return { combo, shop, admin }
 }
 
-const BEFORE_REPOSITORY_LISTS = "55868c318d60222aa0c6a8c3e417bf8ce2b8dd54"
+const disableCapability = (bytes: Buffer, name: string) => {
+  const from = `${name}: true`
+  const to = `${name}: !1  `
+  const at = bytes.indexOf(from)
+  expect(at >= 0 && bytes.indexOf(from, at + 1) < 0, `cannot patch capability ${name}`)
+  bytes.write(to, at)
+}
+
+const beforeRepositoryLists = async (w: World) => {
+  const dir = path.join(w.root, `before-repo-lists-${crypto.randomUUID().slice(0, 8)}`)
+  const bin = path.join(dir, "bin", "vibest")
+  await fs.mkdir(path.dirname(bin), { recursive: true })
+  const bytes = Buffer.from(await fs.readFile(compiled))
+  disableCapability(bytes, "remoteSpawnRepositories")
+  disableCapability(bytes, "remoteSpawnProject")
+  disableCapability(bytes, "projectClone")
+  await fs.writeFile(bin, bytes, { mode: 0o755 })
+
+  if (process.platform === "darwin") {
+    const signed = await w.run(dir, ["codesign", "--force", "-s", "-", bin])
+    expect(signed.code === 0, `codesign: ${signed.stdout}${signed.stderr}`)
+  }
+
+  await fs.cp(harnesses, path.join(dir, "harnesses"), { recursive: true })
+
+  return bin
+}
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -105,7 +130,7 @@ const checks: ReadonlyArray<Check> = [
       let s: Setup | undefined
 
       try {
-        const oldBin = await olderBuild(BEFORE_REPOSITORY_LISTS)
+        const oldBin = await beforeRepositoryLists(w)
         const a = await twoRepositories(w)
         s = await setup(w, { aProject: a.combo })
         await s.okA(["machine", "add", "mb", "b-host"])
@@ -128,9 +153,9 @@ const checks: ReadonlyArray<Check> = [
         expect(addedOld.code === 0, `old B project add: ${addedOld.stderr}${addedOld.stdout}`)
 
         await until(
-          "mb marked incompatible",
+          "mb reconnected",
           async () =>
-            (JSON.parse(await s!.okA(["machine", "ls"])) as Array<{ state: string }>)[0]?.state === "incompatible",
+            (JSON.parse(await s!.okA(["machine", "ls"])) as Array<{ state: string }>)[0]?.state === "connected",
           30_000,
         )
 
@@ -265,7 +290,7 @@ const checks: ReadonlyArray<Check> = [
       const oldHome = path.join(w.root, "old-a-home")
 
       try {
-        const oldBin = await olderBuild(BEFORE_REPOSITORY_LISTS)
+        const oldBin = await beforeRepositoryLists(w)
         s = await setup(w)
         await s.okA(["machine", "add", "mb", "b-host"])
 

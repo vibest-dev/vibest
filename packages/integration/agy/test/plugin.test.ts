@@ -26,7 +26,7 @@ describe("@vibest/agy", () => {
   }
 
   const root = path.join(dir, PLUGIN)
-  const sockPath = path.join(dir, "vibest-http.sock")
+  const sockPath = path.join(dir, "vibest.sock")
   const recorded: Array<Recorded> = []
 
   let responder: (req: Recorded) => { readonly status: number; readonly body?: string } = () => ({
@@ -104,7 +104,7 @@ describe("@vibest/agy", () => {
     assert.deepStrictEqual(await run("SessionStart", { conversationId: "root" }), { code: 0, stdout: "{}" })
     assert.strictEqual(recorded.length, 1)
     assert.strictEqual(recorded[0]!.method, "POST")
-    assert.strictEqual(recorded[0]!.path, "/hooks/agy/prompt")
+    assert.strictEqual(recorded[0]!.path, "/api/hook/agy/prompt")
     assert.strictEqual(recorded[0]!.headers["vibest-protocol"], String(PROTOCOL))
     assert.strictEqual(recorded[0]!.headers["vibest-plugin-version"], pkg.version)
     assert.strictEqual(recorded[0]!.headers["vibest-session-id"], agent.VIBEST_SESSION_ID)
@@ -120,17 +120,17 @@ describe("@vibest/agy", () => {
     assert.deepStrictEqual(await run("Stop", { conversationId: "root" }), { code: 0, stdout: '{"decision":"allow"}' })
     assert.deepStrictEqual(
       recorded.map((r) => r.path),
-      ["/hooks/agy/prompt", "/hooks/agy/prompt", "/hooks/agy/execution-end"],
+      ["/api/hook/agy/prompt", "/api/hook/agy/prompt", "/api/hook/agy/execution-end"],
     )
   })
 
-  it("posts PreToolUse to /hooks/agy/guard, retries on 503, and fails closed when unreachable", async () => {
+  it("posts PreToolUse to /api/hook/agy/guard, retries on 503, and fails closed when unreachable", async () => {
     recorded.length = 0
     const deny = '{"decision":"deny","reason":"no"}'
     responder = () => ({ status: 200, body: deny })
     assert.deepStrictEqual(await run("PreToolUse", { conversationId: "sub" }), { code: 0, stdout: deny })
     assert.strictEqual(recorded.length, 1)
-    assert.strictEqual(recorded[0]!.path, "/hooks/agy/guard")
+    assert.strictEqual(recorded[0]!.path, "/api/hook/agy/guard")
 
     recorded.length = 0
     let attempts = 0

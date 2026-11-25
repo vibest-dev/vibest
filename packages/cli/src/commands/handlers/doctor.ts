@@ -1,10 +1,9 @@
-import { connect, type VibestClient, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
-import type { RuntimeDoctor } from "@vibest/protocol/rpc"
+import { connect, type VibestClient, protocolHeaders, readPing, startDaemon, withHeaders } from "@vibest/client/client"
+import type { RuntimeDoctor } from "@vibest/protocol/schemas"
 import { Layout } from "@vibest/schema/layout"
 import type { AgentListing } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Console, Effect, Option } from "effect"
-import { RpcClient } from "effect/rpc"
 
 import { Runtime } from "../../framework/runtime.ts"
 import { extraVibests, type Finding, updateNotice } from "../../update.ts"
@@ -133,8 +132,8 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         findings: [harnessNote(ping === undefined ? "is not running" : `speaks protocol ${ping.protocol}`)],
       })
     } else {
-      const listed = yield* RpcClient.withHeaders(
-        connect(layout.socket).pipe(Effect.flatMap((c) => c["Harnesses.List"]({}))),
+      const listed = yield* withHeaders(
+        connect(layout.socket).pipe(Effect.flatMap((c) => c["server.harness"]["harness.list"]({ query: {} }))),
         protocolHeaders(),
       ).pipe(Effect.scoped, Effect.option)
 
@@ -161,12 +160,12 @@ export default Runtime.handler(Commands.commands.doctor, () =>
 
     if (talks) {
       const ask = <A, E>(f: (c: VibestClient) => Effect.Effect<A, E>) =>
-        RpcClient.withHeaders(connect(layout.socket).pipe(Effect.flatMap(f)), protocolHeaders()).pipe(
+        withHeaders(connect(layout.socket).pipe(Effect.flatMap(f)), protocolHeaders()).pipe(
           Effect.scoped,
           Effect.option,
         )
 
-      const runtimes = yield* ask((c) => c["Runtimes.Doctor"]({ harnesses: usable }))
+      const runtimes = yield* ask((c) => c["server.runtime"]["runtime.doctor"]({ payload: { harnesses: usable } }))
 
       if (Option.isNone(runtimes) || runtimes.value.length === 0)
         sections.push({
@@ -189,7 +188,7 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         ),
       )
 
-      const concurrency = yield* ask((c) => c.Concurrency())
+      const concurrency = yield* ask((c) => c["server.daemon"]["daemon.concurrency"]())
 
       if (Option.isSome(concurrency)) {
         const { max, problems, unsupported } = concurrency.value
@@ -209,11 +208,11 @@ export default Runtime.handler(Commands.commands.doctor, () =>
         title: "Agent definitions",
         findings: yield* agentDefinitionFindings(
           ping?.capabilities?.agents === true,
-          ask((c) => c["Agents.List"]({})),
+          ask((c) => c["server.agent"]["agent.list"]({ query: {} })),
         ),
       })
 
-      const loaded = yield* ask((c) => c.Plugins())
+      const loaded = yield* ask((c) => c["server.plugin"]["plugin.list"]())
       sections.push({
         title: "Plugins",
         findings: Option.match(loaded, {

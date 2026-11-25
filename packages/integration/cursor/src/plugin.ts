@@ -3,16 +3,17 @@ import { PROTOCOL } from "@vibest/schema/version"
 import pkg from "../package.json" with { type: "json" }
 
 export const HOOK = `#!/bin/sh
-# @vibest/cursor ${pkg.version}: posts hooks directly to vibest-http.sock.
-sock="\${VIBEST_HOME:-$HOME/.vibest}/vibest-http.sock"
+# @vibest/cursor ${pkg.version}: posts hooks directly to vibest.sock.
+sock="\${VIBEST_HOME:-$HOME/.vibest}/vibest.sock"
 log="\${VIBEST_HOME:-$HOME/.vibest}/vibestd.log"
 post() {
   route="$1"
   body="$2"
+  ctype="\${3:-text/plain}"
   tmp=$(mktemp "\${TMPDIR:-/tmp}/vibest-cursor-hook.XXXXXX") || return 1
   trap 'rm -f "$tmp"' EXIT INT TERM
   for delay in 0.1 0.3 0.9 ""; do
-    set -- -sS --max-time 5 --unix-socket "$sock" -o "$tmp" -w '%{http_code}' -X POST -H "vibest-protocol: ${PROTOCOL}" -H "vibest-plugin-version: ${pkg.version}" -H "vibest-session-id: $VIBEST_SESSION_ID" -H "vibest-project-id: $VIBEST_PROJECT_ID" -H "vibest-harness: cursor"
+    set -- -sS --max-time 5 --unix-socket "$sock" -o "$tmp" -w '%{http_code}' -X POST -H "content-type: $ctype" -H "vibest-protocol: ${PROTOCOL}" -H "vibest-caller: session" -H "vibest-plugin-version: ${pkg.version}" -H "vibest-session-id: $VIBEST_SESSION_ID" -H "vibest-project-id: $VIBEST_PROJECT_ID" -H "vibest-harness: cursor"
     if [ -n "\${VIBEST_PROCESS:-}" ]; then
       set -- "$@" -H "vibest-process: $VIBEST_PROCESS"
     fi
@@ -39,7 +40,7 @@ case "\${1:-}" in
     # preToolUse runs fail-closed, where no answer refuses: outside vibest, allow (it grants no approval).
     if [ -z "\${VIBEST_SESSION_ID:-}" ] || [ -z "\${VIBEST_PROJECT_ID:-}" ]; then cat >/dev/null; echo '{"permission":"allow"}'; exit 0; fi
     input=$(cat)
-    out=$(post /hooks/cursor/guard "$input")
+    out=$(post /api/hook/cursor/guard "$input")
     if [ $? -eq 0 ] && [ -n "$out" ]; then
       printf '%s\\n' "$out"
       exit 0
@@ -50,17 +51,17 @@ case "\${1:-}" in
   prompt)
     if [ -z "\${VIBEST_SESSION_ID:-}" ] || [ -z "\${VIBEST_PROJECT_ID:-}" ]; then cat >/dev/null; exit 0; fi
     input=$(cat)
-    post /hooks/cursor/prompt "$input" >/dev/null || exit 1
+    post /api/hook/cursor/prompt "$input" >/dev/null || exit 1
     ;;
   stop)
     if [ -z "\${VIBEST_SESSION_ID:-}" ] || [ -z "\${VIBEST_PROJECT_ID:-}" ]; then cat >/dev/null; exit 0; fi
     input=$(cat)
-    post /hooks/cursor/execution-end "$input" >/dev/null || exit 1
+    post /api/hook/cursor/execution-end "$input" >/dev/null || exit 1
     ;;
   ready)
     if [ -z "\${VIBEST_SESSION_ID:-}" ] || [ -z "\${VIBEST_PROJECT_ID:-}" ]; then cat >/dev/null; exit 0; fi
     cat >/dev/null
-    post /session/ready '{}' >/dev/null || exit 1
+    post /api/hook/ready '{}' 'application/json' >/dev/null || exit 1
     ;;
 esac
 exit 0

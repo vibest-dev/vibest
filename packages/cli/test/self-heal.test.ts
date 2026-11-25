@@ -1,8 +1,10 @@
+import http from "node:http"
 import net from "node:net"
 import path from "node:path"
 
 import { assert, layer } from "@effect/vitest"
 import { accepts, cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
+import { withHeaders } from "@vibest/client/unix-http"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import * as Projectors from "@vibest/core/database/projectors"
@@ -17,8 +19,8 @@ import {
   stopRecorded,
   tempDirectory,
 } from "@vibest/platform-bun/test/lib/fakes"
+import { DaemonBusy, WrongInstance } from "@vibest/protocol/errors"
 import { sessionHeaders } from "@vibest/protocol/protocol"
-import { PingResult } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
@@ -38,7 +40,6 @@ import {
   Stdio,
   Stream,
 } from "effect"
-import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -88,28 +89,35 @@ const isolatedHome = (home: string) =>
       }),
   )
 
-const stopReply = (id: Schema.Json | undefined, replyMembers: string) =>
-  `{"jsonrpc":"2.0","id":${JSON.stringify(id)},${replyMembers}}\n`
+type StopResponse = { readonly status: number; readonly body: string }
 
-const stopRefusal = (refusal: string) =>
-  `"error":{"_tag":"Cause","code":0,"message":"refused","data":[{"_tag":"Fail","error":${refusal}}]}`
+const daemonBusyRefusal: StopResponse = {
+  status: 409,
+  body: JSON.stringify(new DaemonBusy({ blockers: [{ id: "s1", reason: "session working" }] })),
+}
 
-const daemonBusyRefusal = stopRefusal(`{"_tag":"DaemonBusy","blockers":[{"id":"s1","reason":"session working"}]}`)
+const sendStop = (res: http.ServerResponse, reply: StopResponse) => {
+  res.writeHead(reply.status, {
+    "content-type": "application/json",
+    "content-length": String(Buffer.byteLength(reply.body)),
+    connection: "close",
+  })
+  res.end(reply.body)
+}
 
 const fakeVibestd = (
   socket: string,
   ping: Schema.JsonObject,
   onStop: (
-    sock: net.Socket,
-    server: net.Server,
-    id: Schema.Json | undefined,
-    request: { readonly headers?: Schema.Json },
+    res: http.ServerResponse,
+    server: http.Server,
+    request: { readonly headers: ReadonlyArray<readonly [string, string]> },
   ) => void,
   pauseAcceptedSocketUntil?: Promise<void>,
 ) =>
   Effect.acquireRelease(
     Effect.callback<{
-      readonly server: net.Server
+      readonly server: http.Server
       readonly methods: Array<string>
       readonly sockets: Array<net.Socket>
       readonly pingReply: Promise<{ readonly code: string }> | undefined
@@ -129,7 +137,51 @@ const fakeVibestd = (
               }
             })
 
-      const server = net.createServer((sock) => {
+      const server = http.createServer((req, res) => {
+        const url = new URL(req.url ?? "/", "http://vibest")
+
+        if (req.method === "GET" && url.pathname === "/api/daemon/ping") {
+          methods.push("Ping")
+          const body = JSON.stringify(ping)
+
+          const reply = () => {
+            if (res.socket?.destroyed) {
+              finishPing("EPIPE")
+
+              return
+            }
+
+            res.writeHead(200, {
+              "content-type": "application/json",
+              "content-length": String(Buffer.byteLength(body)),
+            })
+            res.end(body)
+          }
+
+          if (pauseAcceptedSocketUntil === undefined) reply()
+          else void pauseAcceptedSocketUntil.then(reply)
+
+          return
+        }
+
+        if (req.method === "POST" && url.pathname === "/api/daemon/stop") {
+          methods.push("Daemon.Stop")
+          req.resume()
+          const headerList: Array<readonly [string, string]> = []
+
+          for (const [k, v] of Object.entries(req.headers)) {
+            if (Predicate.isString(v)) headerList.push([k, v])
+          }
+
+          onStop(res, server, { headers: headerList })
+
+          return
+        }
+
+        res.writeHead(404).end()
+      })
+
+      server.on("connection", (sock) => {
         sockets.push(sock)
         sock.on("error", (err) => {
           const code = Predicate.hasProperty(err, "code") ? err.code : undefined
@@ -137,38 +189,9 @@ const fakeVibestd = (
           if (code === "EPIPE") finishPing("EPIPE")
           else if (code !== "ECONNRESET") throw err
         })
-        let buf = ""
 
-        const onChunk = (chunk: Buffer) => {
-          buf += chunk.toString()
-
-          for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
-            const line = buf.slice(0, nl)
-            buf = buf.slice(nl + 1)
-
-            for (const req of [JSON.parse(line)].flat() as Array<{
-              id?: Schema.Json
-              method?: string
-              headers?: Schema.Json
-            }>) {
-              if (req.method === undefined) continue
-              methods.push(req.method)
-
-              if (req.method === "Ping") sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, result: ping }) + "\n")
-
-              if (req.method === "Daemon.Stop") onStop(sock, server, req.id, req)
-            }
-          }
-        }
-
-        if (pauseAcceptedSocketUntil === undefined) sock.on("data", onChunk)
-        else {
-          sock.pause()
-          pauseAcceptedSocketUntil.then(() => {
-            if (sock.destroyed) return
-            sock.on("data", onChunk)
-            sock.resume()
-          })
+        if (pauseAcceptedSocketUntil !== undefined) {
+          sock.once("close", () => finishPing("EPIPE"))
         }
       })
 
@@ -334,7 +357,7 @@ layer(Platform.services)(
               Effect.map(Effect.flip(e), (x) => x._tag)
 
             const stop = (instance: string, headers: Record<string, string>) =>
-              raw["Daemon.Stop"]({ instance }, { headers })
+              withHeaders(raw["server.daemon"]["daemon.stop"]({ payload: { instance } }), headers)
 
             assert.strictEqual(yield* tag(stop(old.instance!, {})), "ProtocolRejected")
             assert.strictEqual(yield* tag(stop(old.instance!, protocolHeaders())), "InvalidCaller")
@@ -376,7 +399,10 @@ layer(Platform.services)(
             ["DaemonBusy", daemonBusyRefusal, "busy"],
             [
               "WrongInstance",
-              stopRefusal(`{"_tag":"WrongInstance","expected":"old-instance","actual":"other"}`),
+              {
+                status: 409,
+                body: JSON.stringify(new WrongInstance({ expected: "old-instance", actual: "other" })),
+              },
               "unchanged",
             ],
           ] as const) {
@@ -384,8 +410,9 @@ layer(Platform.services)(
             yield* fakeVibestd(
               layout.socket,
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
-              (sock, server, id) => {
-                sock.end(stopReply(id, reply))
+              (res, server) => {
+                sendStop(res, reply)
+                server.closeAllConnections()
                 server.close()
               },
             )
@@ -418,9 +445,9 @@ layer(Platform.services)(
           yield* fakeVibestd(
             layout.socket,
             { version: "0.0.1", protocol: PROTOCOL - 1, instance: "old-instance", runtimeSessions: [] },
-            (sock, server, id, request) => {
+            (res, server, request) => {
               headers.push(request.headers)
-              sock.end(stopReply(id, daemonBusyRefusal))
+              sendStop(res, daemonBusyRefusal)
               server.close()
             },
           )
@@ -442,14 +469,11 @@ layer(Platform.services)(
       60_000,
     )
 
-    const undecodableStopReplies = [
-      ["an unknown refusal", stopRefusal(`{"_tag":"DaemonFrozen","message":"from a later vibestd"}`)],
-      ["a malformed acceptance", `"result":{"bogus":1}`],
-      [
-        "an interruption vibestd reports",
-        `"error":{"_tag":"Cause","code":0,"message":"interrupted","data":[{"_tag":"Interrupt","fiberId":1}]}`,
-      ],
-    ] as const
+    const undecodableStopReplies: ReadonlyArray<readonly [string, StopResponse]> = [
+      ["an unknown refusal", { status: 409, body: '{"_tag":"DaemonFrozen","message":"from a later vibestd"}' }],
+      ["a malformed acceptance", { status: 200, body: '{"bogus":1}' }],
+      ["an interruption vibestd reports", { status: 500, body: '{"_tag":"UnknownError","message":"interrupted"}' }],
+    ]
 
     it.effect(
       "a reply to Stop vibest cannot read is no refusal: vibest watches Ping, and an vibestd still answering is left and reported, with one Stop and nothing started",
@@ -462,8 +486,8 @@ layer(Platform.services)(
             const old = yield* fakeVibestd(
               layout.socket,
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
-              (sock, _server, id) => {
-                sock.write(stopReply(id, reply))
+              (res) => {
+                sendStop(res, reply)
               },
             )
 
@@ -507,9 +531,10 @@ layer(Platform.services)(
             const old = yield* fakeVibestd(
               layout.socket,
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
-              (sock, server, id) => {
-                if (reply === undefined) sock.destroy()
-                else sock.end(stopReply(id, reply))
+              (res, server) => {
+                if (reply === undefined) res.socket?.destroy()
+                else sendStop(res, reply)
+                server.closeAllConnections()
                 server.close()
               },
             )
@@ -593,7 +618,7 @@ layer(Platform.services)(
           yield* Fiber.interrupt(replacing)
           assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(replacing)))
           yield* Effect.sleep("600 millis")
-          assert.deepStrictEqual(old.methods, ["Ping", "Daemon.Stop", "@effect/rpc/Interrupt"])
+          assert.deepStrictEqual(old.methods, ["Ping", "Daemon.Stop"])
           assert.isFalse(yield* probe(layout.socket))
           assert.isTrue(Option.isNone(yield* readDaemonInfo(layout.daemonInfo)))
         }).pipe(Effect.scoped, TestClock.withLive),
@@ -668,18 +693,17 @@ layer(Platform.services)(
       () =>
         Effect.gen(function* () {
           const socket = path.join(yield* tempDirectory("vibest-sock-"), "vibest.sock")
-          const PingOnly = RpcGroup.make(Rpc.make("Ping", { success: PingResult }))
           let pings = 0
-          yield* Layer.launch(
-            RpcServer.layer(PingOnly).pipe(
-              Layer.provide(
-                PingOnly.toLayer({ Ping: () => Effect.sync(() => pings++).pipe(Effect.andThen(Effect.interrupt)) }),
-              ),
-              Layer.provide(RpcServer.layerProtocolSocketServer),
-              Layer.provide(RpcSerialization.layerNdJsonRpc()),
-              Layer.provide(Platform.socketServer(socket)),
-            ),
-          ).pipe(Effect.forkScoped)
+
+          const server = http.createServer((_req, res) => {
+            pings++
+            res.socket?.destroy()
+          })
+
+          yield* Effect.acquireRelease(
+            Effect.callback<void>((resume) => void server.listen(socket, () => resume(Effect.void))),
+            () => Effect.sync(() => server.close()),
+          )
           yield* accepts(socket).pipe(Effect.repeat({ until: (up) => up, schedule: Schedule.spaced("20 millis") }))
           const exit = yield* Effect.exit(readPing(socket))
           assert.deepStrictEqual(exit, Exit.succeed(Option.none()))

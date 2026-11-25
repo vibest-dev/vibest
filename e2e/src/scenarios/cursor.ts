@@ -353,7 +353,7 @@ const reports = (runtime: Runtime): Check => ({
 })
 
 const SEND_THEN_GUARD =
-  'Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready > guard-ran.txt. Then reply with exactly: pong'
+  'Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready > guard-ran.txt. Then reply with exactly: pong'
 
 const noApprovalDialog: Check = {
   id: "I12",

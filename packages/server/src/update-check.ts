@@ -1,5 +1,5 @@
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import type { UpdateStatus } from "@vibest/protocol/rpc"
+import type { UpdateStatus } from "@vibest/protocol/schemas"
 import { Context, type Effect } from "effect"
 
 export * as UpdateCheck from "./update-check.ts"

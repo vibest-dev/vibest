@@ -1,6 +1,6 @@
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 
-import { json, toSessionRef } from "../../caller.ts"
+import { json } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { input } from "../../input.ts"
 import { requested } from "../../requested.ts"
@@ -11,10 +11,13 @@ export default Runtime.handler(Commands.commands.send, (o) =>
     const message = yield* input(o.message, "message")
 
     const sent = yield* requested((client, request) =>
-      client.Send({
-        ...toSessionRef(o.id, o.machine),
-        message,
-        ...(request !== undefined && { request }),
+      client["server.session"]["session.send"]({
+        params: { id: o.id },
+        payload: {
+          ...(Option.isSome(o.machine) && { machine: o.machine.value }),
+          message,
+          ...(request !== undefined && { request }),
+        },
       }),
     )
 

@@ -1,3 +1,4 @@
+import { withHeaders } from "@vibest/client/client"
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
 import { Db } from "@vibest/core/database/db"
 import type { MachineRow } from "@vibest/core/database/remote"
@@ -8,8 +9,8 @@ import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibes
 import { Runtimes } from "@vibest/core/runtimes"
 import { type Runtime } from "@vibest/plugin/effect"
 import { Host } from "@vibest/plugin/host"
+import type { DaemonStopping, InvalidCaller, InvalidRequestError, ProtocolRejected } from "@vibest/protocol/errors"
 import { REMOTE_BY_USER, remoteHeaders } from "@vibest/protocol/protocol"
-import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import {
   AlreadyAdded,
@@ -27,6 +28,7 @@ import {
 import type { Terminal, TerminalTarget } from "@vibest/schema/terminal"
 import { PROTOCOL } from "@vibest/schema/version"
 import {
+  Cause,
   Clock,
   Context,
   Data,
@@ -44,7 +46,8 @@ import {
   Scope,
   Stream,
 } from "effect"
-import { RpcClient, type RpcClientError } from "effect/rpc"
+import type * as Sse from "effect/encoding/Sse"
+import type { HttpClientError } from "effect/http"
 import type * as Socket from "effect/socket/Socket"
 
 export * as Machines from "./machines.ts"
@@ -145,10 +148,23 @@ const exitReason = (name: string, exit: PipeExit) => {
   return last || `ssh exited ${exit.code ?? "on a signal"}`
 }
 
-type LineError = RpcClientError.RpcClientError | ProtocolRejected | DaemonStopping | InvalidCaller | MachineDown
+type LineError =
+  | HttpClientError.HttpClientError
+  | Schema.SchemaError
+  | Sse.Retry
+  | Sse.SseError
+  | InvalidRequestError
+  | ProtocolRejected
+  | DaemonStopping
+  | InvalidCaller
+  | MachineDown
 
 const LINE_TAGS: Record<LineError["_tag"], true> = {
-  RpcClientError: true,
+  HttpClientError: true,
+  SchemaError: true,
+  Retry: true,
+  SseError: true,
+  InvalidRequestError: true,
   ProtocolRejected: true,
   DaemonStopping: true,
   InvalidCaller: true,
@@ -362,7 +378,11 @@ const make = Effect.gen(function* () {
         (e: LineError): Effect.Effect<never, MachineUnavailable | MachineIncompatible> =>
           Match.value(e).pipe(
             Match.tagsExhaustive({
-              RpcClientError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+              HttpClientError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+              SchemaError: (e) => unavailable(`${name}: ${e.message}`),
+              Retry: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+              SseError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+              InvalidRequestError: (e) => unavailable(`${name}: ${e.message}`),
               MachineDown: (e) => unavailable(lost(e.message)),
               ProtocolRejected: (e) =>
                 Effect.fail(new MachineIncompatible({ machine: name, message: `${name}: ${e.message}` })),
@@ -397,9 +417,25 @@ const make = Effect.gen(function* () {
       )
 
       const opening = line((reason) => reason)
-      const client = yield* connectPipe(pipe.socket)
+
+      const client = yield* Effect.raceFirst(connectPipe(pipe.socket), gone).pipe(
+        Effect.catch((e) => {
+          if (Predicate.isTagged(e, "MachineDown")) return Effect.fail(e)
+
+          if (Predicate.isTagged(e, "PipeIncompatible") && !e.message.startsWith("pipe closed"))
+            return Effect.fail(
+              new MachineDown({
+                stop: "mismatch",
+                message: `${name} runs an older vibest; run vibest update there`,
+              }),
+            )
+
+          return Effect.flatMap(down(e), (reason) => Effect.fail(new MachineDown({ message: reason })))
+        }),
+      )
+
       const failed = (e: { readonly message: string }) => new MachineDown({ message: e.message })
-      const ping = yield* opening(client.Ping(undefined)).pipe(Effect.mapError(failed))
+      const ping = yield* opening(client["server.daemon"]["daemon.ping"]()).pipe(Effect.mapError(failed))
 
       if (ping.protocol !== PROTOCOL)
         return yield* new MachineDown({
@@ -408,8 +444,8 @@ const make = Effect.gen(function* () {
         })
 
       const hello = yield* opening(
-        RpcClient.withHeaders(
-          client["Remote.Hello"]({ id: self.id, name: self.name, callsMe: name }),
+        withHeaders(
+          client["server.remote"]["remote.hello"]({ payload: { id: self.id, name: self.name, callsMe: name } }),
           remoteHeaders(self.id),
         ),
       ).pipe(Effect.mapError(failed))
@@ -439,15 +475,21 @@ const make = Effect.gen(function* () {
         if (targetLink !== undefined) {
           const outcome = yield* Effect.result(
             targetLink.call(
-              targetLink.client.Send(
-                { id: targetSessionId, message: content, request: item.id, from },
-                { headers: remoteHeaders(self.id, "relay", REMOTE_BY_USER) },
+              withHeaders(
+                targetLink.client["server.session"]["session.send"]({
+                  params: { id: targetSessionId },
+                  payload: { message: content, request: item.id, from },
+                }),
+                remoteHeaders(self.id, "relay", REMOTE_BY_USER),
               ),
             ),
           )
 
           if (Predicate.isTagged(outcome, "Success")) {
-            yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+            yield* withHeaders(
+              link.client["server.remote"]["remote.ack"]({ payload: { ids: [item.id] } }),
+              remoteHeaders(self.id),
+            )
 
             return
           }
@@ -456,7 +498,10 @@ const make = Effect.gen(function* () {
 
           if (Predicate.isTagged(err, "NoSuchSession") || Predicate.isTagged(err, "Forbidden")) {
             yield* Effect.logWarning(`${name}: dropped relayed ${item.kind} for ${targetSessionId}: ${err.message}`)
-            yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+            yield* withHeaders(
+              link.client["server.remote"]["remote.ack"]({ payload: { ids: [item.id] } }),
+              remoteHeaders(self.id),
+            )
 
             return
           }
@@ -470,7 +515,10 @@ const make = Effect.gen(function* () {
 
         if (targetMachine !== undefined) return
         yield* Effect.logWarning(`${name}: dropped a ${item.kind} for unknown remote ${targetRemoteId}`)
-        yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+        yield* withHeaders(
+          link.client["server.remote"]["remote.ack"]({ payload: { ids: [item.id] } }),
+          remoteHeaders(self.id),
+        )
 
         return
       }
@@ -488,7 +536,10 @@ const make = Effect.gen(function* () {
         yield* Effect.logWarning(
           `${name}: dropped a ${item.kind} for session ${item.recipient}, which this vibestd does not have`,
         )
-      yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+      yield* withHeaders(
+        link.client["server.remote"]["remote.ack"]({ payload: { ids: [item.id] } }),
+        remoteHeaders(self.id),
+      )
     })
 
   type First = {
@@ -521,11 +572,14 @@ const make = Effect.gen(function* () {
       if (first === undefined) yield* Effect.forkScoped(lock.withLock(row.name)(fire(row, "connect")))
       const link = opened.link
 
-      const outbox = link.client["Remote.Outbox"](undefined, { headers: remoteHeaders(self.id) }).pipe(
+      const outbox = Stream.unwrap(
+        withHeaders(link.client["server.remote"]["remote.outbox"](), remoteHeaders(self.id)),
+      ).pipe(
         Stream.runForEach((item) => receive(row, link, item)),
-        Effect.matchCause({
-          onSuccess: () => `${row.name} closed the connection`,
-          onFailure: () => `${row.name} stopped answering`,
+        Effect.matchCauseEffect({
+          onSuccess: () => Effect.succeed(`${row.name} closed the connection`),
+          onFailure: (cause) =>
+            Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed(`${row.name} stopped answering`),
         }),
       )
 
@@ -831,16 +885,18 @@ const make = Effect.gen(function* () {
           message: `${name} runs a vibestd that cannot read its load; run vibest update there`,
         })
 
-      return yield* link.call(RpcClient.withHeaders(link.client["Machine.Load"]({}), remoteHeaders(self.id))).pipe(
-        Effect.catchTag("NoSuchSession", (e) =>
-          Effect.fail(new MachineUnavailable({ machine: name, message: e.message })),
-        ),
-        Effect.timeoutOrElse({
-          duration: LOAD_TIMEOUT,
-          orElse: () =>
-            Effect.fail(new MachineUnavailable({ machine: name, message: `${name} did not answer in 3 s` })),
-        }),
-      )
+      return yield* link
+        .call(withHeaders(link.client["server.machine"]["machine.load"]({ query: {} }), remoteHeaders(self.id)))
+        .pipe(
+          Effect.catchTag("NoSuchSession", (e) =>
+            Effect.fail(new MachineUnavailable({ machine: name, message: e.message })),
+          ),
+          Effect.timeoutOrElse({
+            duration: LOAD_TIMEOUT,
+            orElse: () =>
+              Effect.fail(new MachineUnavailable({ machine: name, message: `${name} did not answer in 3 s` })),
+          }),
+        )
     }),
 
     link: Effect.fn("Machines.link")(function* (name: string) {

@@ -4,9 +4,10 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
+import { BunHttpServer, BunRuntime, BunServices, BunSocket } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { pre } from "@vibest/builtins"
+import { HttpConnector } from "@vibest/client/client"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
@@ -27,12 +28,11 @@ import * as VibestPluginHost from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
 import { type Host, LockFailed } from "@vibest/server/daemon"
-import * as Http from "@vibest/server/http"
 import { Load } from "@vibest/server/machine/load"
 import { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
+import * as Ui from "@vibest/server/ui"
 import { UpdateCheck } from "@vibest/server/update-check"
-import * as Ws from "@vibest/server/ws"
 import * as effect from "effect"
 import { Cause, Duration, Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
@@ -45,6 +45,7 @@ import { SqlClient } from "effect/sql"
 import { layer as hostSample } from "./host-sample.ts"
 import { trimLog } from "./log-file.ts"
 import { graph, pluginLoads, packageName, watch } from "./plugin-source.ts"
+import { nodeUnixHttpClient } from "./unix-http.ts"
 
 const readOnDemand = (handle: fsPromises.FileHandle) =>
   Effect.flatMap(
@@ -99,6 +100,7 @@ const platform = Layer.mergeAll(
   unrefStdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector.Service, (endpoint) => BunSocket.makeNet({ path: endpoint })),
+  Layer.succeed(HttpConnector.Service, nodeUnixHttpClient),
   user,
 )
 
@@ -410,7 +412,8 @@ const dropEnv = (names: ReadonlyArray<string>) => {
 
 export const services = platform
 
-export const socketServer = (path: string) => BunSocketServer.layer({ path })
+export const httpServer = (path: string) =>
+  BunHttpServer.layerServer({ unix: path, idleTimeout: 0, gracefulShutdownTimeout: Duration.zero })
 
 const platformNode = LayerNode.make({ name: "vibest/Platform", layer: platform, deps: [] })
 
@@ -449,39 +452,32 @@ export const replacements: LayerNode.Replacements = [
   ),
   Runtimes.hostEnvNode.replace(Layer.succeed(Runtimes.HostEnv, { drop: dropEnv })),
   Processes.processPlatformNode.replace(Layer.succeed(Processes.ProcessPlatform, processes)),
-  Server.socketServerLayer.replace(
-    LayerNode.make({
-      name: "vibest/SocketServer",
-      layer: Layer.unwrap(
-        Effect.map(Layout, (layout) => Layer.succeed(Server.SocketServerLayer, socketServer(layout.socket))),
-      ),
-      deps: [PlatformNode.layout],
-    }),
-  ),
-  Http.httpServerLayer.replace(
+  Server.httpServerLayer.replace(
     LayerNode.make({
       name: "vibest/HttpServer/unix",
       layer: Layer.unwrap(
         Effect.map(Layout, (layout) =>
-          Layer.succeed(Http.HttpServerLayer, BunHttpServer.layerServer({ unix: layout.httpSocket })),
+          Layer.succeed(
+            Server.HttpServerLayer,
+            BunHttpServer.layerServer({
+              unix: layout.socket,
+              idleTimeout: 0,
+              gracefulShutdownTimeout: Duration.zero,
+            }),
+          ),
         ),
       ),
       deps: [PlatformNode.layout],
     }),
   ),
-  Ws.wsServerLayer.replace(
+  Ui.uiServerLayer.replace(
     Layer.succeed(
-      Ws.WsServerLayer,
+      Ui.UiServerLayer,
       BunHttpServer.layerServer({
         hostname: "127.0.0.1",
         port: 0,
-        gracefulShutdownTimeout: Duration.seconds(1),
-        websocket: {
-          maxPayloadLength: 64 * 1024,
-          backpressureLimit: 1024 * 1024,
-          closeOnBackpressureLimit: true,
-          idleTimeout: 120,
-        },
+        idleTimeout: 0,
+        gracefulShutdownTimeout: Duration.zero,
       }),
     ),
   ),
@@ -541,6 +537,8 @@ export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")
     ? [process.execPath]
     : [process.execPath, process.argv[1]]
+
+export { ConnectFailed, servePipe, type PipeStdio } from "./pipe-server.ts"
 
 export const exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => {
   const { VIBEST_EXECUTION: _, ...inherited } = process.env

@@ -4,10 +4,23 @@ import { ListedMachine } from "@vibest/schema/machine"
 import { MessageStatus } from "@vibest/schema/model"
 import { Routing } from "@vibest/schema/plugin"
 import { ProjectActivity } from "@vibest/schema/project"
-import { AgentStatus, ExecutionState, NoSuchSession } from "@vibest/schema/session"
+import { AgentStatus, ExecutionState } from "@vibest/schema/session"
 import { SessionRef, Terminal } from "@vibest/schema/terminal"
-import { Context, Schema } from "effect"
-import { RpcMiddleware } from "effect/rpc"
+import { Schema, SchemaTransformation } from "effect"
+
+export const BooleanFromQuery = Schema.Literals(["true", "false"]).pipe(
+  Schema.decodeTo(
+    Schema.Boolean,
+    SchemaTransformation.transform({
+      decode: (s) => s === "true",
+      encode: (b) => (b ? "true" : "false"),
+    }),
+  ),
+)
+
+export const IntFromQuery = Schema.FiniteFromString.check(Schema.isInt())
+
+export const NonNegativeIntFromQuery = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 
 export const DaemonIdentity = Schema.Struct({
   pid: Schema.optional(Schema.Number),
@@ -61,88 +74,6 @@ export const PingResult = Schema.Struct({
 })
 
 export type Ping = typeof PingResult.Type
-
-export class ProtocolRejected extends Schema.TaggedError<ProtocolRejected>()("ProtocolRejected", {
-  method: Schema.String,
-  protocol: Schema.NullOr(Schema.String),
-  mismatch: Schema.Struct({
-    protocol: Schema.Number,
-    version: Schema.String,
-    message: Schema.String,
-    action: Schema.String,
-  }),
-}) {
-  override get message() {
-    return `${this.method} refused: ${this.mismatch.message}`
-  }
-}
-
-export class InvalidCaller extends Schema.TaggedError<InvalidCaller>()("InvalidCaller", {
-  method: Schema.String,
-  message: Schema.String,
-}) {}
-
-export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
-  method: Schema.String,
-  message: Schema.String,
-}) {}
-
-export type CallerIdentity =
-  | { readonly _tag: "Cli"; readonly repositoryRoot: string }
-  | { readonly _tag: "Ui" }
-  | {
-      readonly _tag: "Session"
-      readonly sessionId: string
-      readonly projectId: string
-      readonly repositoryRoot?: string
-    }
-  | {
-      readonly _tag: "Remote"
-      readonly remoteId: string
-      readonly projectId?: string
-      readonly session?: string
-    }
-
-export class Caller extends Context.Service<Caller, CallerIdentity>()("vibest/Caller") {}
-
-export class DaemonStopping extends Schema.TaggedError<DaemonStopping>()("DaemonStopping", { method: Schema.String }) {
-  override get message() {
-    return `vibestd is stopping to be replaced; ${this.method} was not run and nothing was recorded. Run it again once vibestd is back (vibest status)`
-  }
-}
-
-export const Blocker = Schema.Struct({ id: Schema.String, reason: Schema.String })
-
-export type Blocker = typeof Blocker.Type
-
-export class DaemonBusy extends Schema.TaggedError<DaemonBusy>()("DaemonBusy", { blockers: Schema.Array(Blocker) }) {
-  override get message() {
-    return ["vibestd was not stopped; still in use by:", ...this.blockers.map((b) => `  ${b.id}: ${b.reason}`)].join(
-      "\n",
-    )
-  }
-}
-
-export class WrongInstance extends Schema.TaggedError<WrongInstance>()("WrongInstance", {
-  expected: Schema.String,
-  actual: Schema.NullOr(Schema.String),
-}) {
-  override get message() {
-    return `vibestd instance ${this.actual ?? "unknown"} answers, not ${this.expected}; nothing was stopped`
-  }
-}
-
-export class ProtocolGate extends RpcMiddleware.Service<ProtocolGate>()("vibest/ProtocolGate", {
-  error: ProtocolRejected,
-}) {}
-
-export class Admission extends RpcMiddleware.Service<Admission>()("vibest/Admission", {
-  error: DaemonStopping,
-}) {}
-
-export class CallerGate extends RpcMiddleware.Service<CallerGate, { provides: Caller }>()("vibest/CallerGate", {
-  error: Schema.Union([InvalidCaller, Forbidden, NoSuchSession]),
-}) {}
 
 export const GitInfo = Schema.Struct({
   branch: Schema.String,
@@ -274,5 +205,3 @@ export const StoredEvent = Schema.Struct({
 })
 
 export type StoredEvent = typeof StoredEvent.Type
-
-export class WatchLagged extends Schema.TaggedError<WatchLagged>()("WatchLagged", { message: Schema.String }) {}

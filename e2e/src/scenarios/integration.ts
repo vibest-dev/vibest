@@ -20,7 +20,7 @@ import { paneOf, compiled, expect, harnesses, herdr, row, rows, SESSIONS, Skip, 
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 const GUARD_TASK =
-  'Run this shell command exactly as written: curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready > guard-ran.txt. Then reply with: pong'
+  'Run this shell command exactly as written: curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready > guard-ran.txt. Then reply with: pong'
 
 export const listed = async (w: World, id: string, cwd = w.repository) =>
   (
@@ -294,7 +294,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I3",
     covers: ["R6", "R8"],
     title:
-      "Pi: vibest run pi (fake model) loads the built extension, which refuses direct vibest-http.sock calls via vibest.guard, and the reply lands as the execution's reply",
+      "Pi: vibest run pi (fake model) loads the built extension, which refuses direct vibest.sock calls via vibest.guard, and the reply lands as the execution's reply",
     run: async (w) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const ran = path.join(w.root, "pi-guard-ran.txt")
@@ -309,7 +309,7 @@ const checks: ReadonlyArray<Check> = [
           ? {
               tool: "bash",
               input: {
-                command: `curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready > ${ran}`,
+                command: `curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready > ${ran}`,
               },
             }
           : "pong\nstatus: completed"
@@ -320,10 +320,10 @@ const checks: ReadonlyArray<Check> = [
         await withSession(w, "pi", ["--env", env], "guard and result", async ({ id }) => {
           await until("the session's result", async () => (await executionState(w, id)) === "completed", 120_000)
           expect(
-            results.some((r) => r.includes("vibest-http.sock is the harness's hook socket")),
-            `the vibest-http.sock call was not refused: ${JSON.stringify(results)}`,
+            results.some((r) => r.includes("vibest.sock is the vibestd daemon socket")),
+            `the vibest.sock call was not refused: ${JSON.stringify(results)}`,
           )
-          expect(!(await Bun.file(ran).exists()), "the refused vibest-http.sock call ran: pi-guard-ran.txt exists")
+          expect(!(await Bun.file(ran).exists()), "the refused vibest.sock call ran: pi-guard-ran.txt exists")
           const message = (await latest(w, id))?.message ?? ""
           expect(/pong/.test(message), message)
         })
@@ -589,7 +589,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I9",
     covers: ["R7"],
     title:
-      "Claude whose --settings only grants its project folder (fake model): vibest.guard refuses VIBEST_SESSION_ID tampering and direct vibest-http.sock requests, while allowing ordinary commands and reading its own project folder",
+      "Claude whose --settings only grants its project folder (fake model): vibest.guard refuses VIBEST_SESSION_ID tampering and direct vibest.sock requests, while allowing ordinary commands and reading its own project folder",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
 
@@ -603,7 +603,7 @@ const checks: ReadonlyArray<Check> = [
       const identityReason =
         "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused."
 
-      const hookReason = "vibest-http.sock is the harness's hook socket, not for agent commands."
+      const hookReason = "vibest.sock is the vibestd daemon socket, not for agent commands."
 
       const calls = (): ReadonlyArray<{ step: Exclude<Step, string>; reason?: string }> => [
         {
@@ -614,7 +614,7 @@ const checks: ReadonlyArray<Check> = [
           step: {
             tool: "Bash",
             input: {
-              command: `curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready > ${ran}`,
+              command: `curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready > ${ran}`,
             },
           },
           reason: hookReason,

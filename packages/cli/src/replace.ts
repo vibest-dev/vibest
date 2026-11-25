@@ -8,23 +8,25 @@ import {
   readPing,
   startDaemon,
   stopByHand,
+  withHeaders,
 } from "@vibest/client/client"
 import { compareVersions } from "@vibest/client/release"
-import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import {
   DaemonBusy,
   DaemonStopping,
   Forbidden,
   InvalidCaller,
-  type Ping,
+  InvalidRequestError,
   ProtocolRejected,
   WrongInstance,
-} from "@vibest/protocol/rpc"
+} from "@vibest/protocol/errors"
+import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
+import type { Ping } from "@vibest/protocol/schemas"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 import { NoSuchSession } from "@vibest/schema/session"
 import { Cause, Console, Duration, Effect, Exit, Option, Path, Predicate, Schedule, Schema } from "effect"
+import type { HttpClientError } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { RpcClient, type RpcClientError } from "effect/rpc"
 
 import { askYesNo, interactive } from "./ask.ts"
 
@@ -42,6 +44,7 @@ const REFUSALS = [
   DaemonStopping,
   ProtocolRejected,
   InvalidCaller,
+  InvalidRequestError,
   NoSuchSession,
 ] as const
 
@@ -49,9 +52,11 @@ type Refusal = InstanceType<(typeof REFUSALS)[number]>
 
 const isRefusal = (e: unknown): e is Refusal => REFUSALS.some((c) => e instanceof c)
 
-type StopError = Effect.Error<ReturnType<VibestClient["Daemon.Stop"]>>
+type StopError = Effect.Error<ReturnType<VibestClient["server.daemon"]["daemon.stop"]>>
 
-const _stopErrorsClassified: [Exclude<StopError, Refusal | RpcClientError.RpcClientError>] extends [never]
+const _stopErrorsClassified: [
+  Exclude<StopError, Refusal | HttpClientError.HttpClientError | Schema.SchemaError>,
+] extends [never]
   ? true
   : never = true
 
@@ -150,8 +155,10 @@ export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
 
     const path = yield* Path.Path
 
-    const reply = yield* RpcClient.withHeaders(
-      connect(layout.socket).pipe(Effect.flatMap((c) => c["Daemon.Stop"]({ instance: old.instance! }))),
+    const reply = yield* withHeaders(
+      connect(layout.socket).pipe(
+        Effect.flatMap((c) => c["server.daemon"]["daemon.stop"]({ payload: { instance: old.instance! } })),
+      ),
       { ...cliHeaders(path.resolve(".")), [PROTOCOL_HEADER]: String(old.protocol) },
     ).pipe(Effect.scoped, Effect.exit, Effect.timeoutOption(timing.reply))
 

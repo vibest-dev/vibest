@@ -9,7 +9,7 @@ export const Attachments = Schema.optional(
   Schema.Array(Schema.Struct({ name: Schema.String, content: Schema.Uint8ArrayFromBase64 })),
 )
 
-export const SpawnPayload = {
+export const SpawnPayload = Schema.Struct({
   name: Schema.optional(Schema.String),
   prompt: Schema.String,
   harness: Schema.optional(Schema.String),
@@ -28,7 +28,9 @@ export const SpawnPayload = {
   from: Schema.optional(Schema.Array(SessionRef)),
   to: Schema.optional(Schema.Array(SessionRef)),
   with: Schema.optional(Schema.Array(SessionRef)),
-}
+})
+
+export type SpawnPayload = typeof SpawnPayload.Type
 
 export const SpawnSuccess = Schema.Struct({
   id: SessionId,
@@ -40,7 +42,7 @@ export const SpawnSuccess = Schema.Struct({
   notes: Schema.optional(Schema.Array(MachineNote)),
 })
 
-export const LaunchPayload = {
+export const LaunchPayload = Schema.Struct({
   projectId: Schema.optional(Schema.String),
   sessionId: Schema.optional(Schema.String),
   fresh: Schema.optional(Schema.Boolean),
@@ -55,7 +57,9 @@ export const LaunchPayload = {
   runtimeSession: Schema.optional(Schema.String),
   runtime: Schema.optional(Schema.String),
   machine: Schema.optional(MachineName),
-}
+})
+
+export type LaunchPayload = typeof LaunchPayload.Type
 
 export const LaunchSuccess = Schema.Struct({
   sessionId: SessionId,
@@ -67,21 +71,23 @@ export const LaunchSuccess = Schema.Struct({
   routing: Schema.optional(Schema.String),
 })
 
-export const SendPayload = {
-  ...SessionRef.fields,
+export const SendBody = Schema.Struct({
+  machine: Schema.optional(MachineName),
   message: Schema.String,
   request: Schema.optional(RequestId),
   from: Schema.optional(AgentFrom),
-}
+})
 
-export const AttachPayload = {
+export type SendBody = typeof SendBody.Type
+
+export const AttachPayload = Schema.Struct({
   callerEnv: Schema.Record(Schema.String, Schema.String),
   runtime: Schema.optional(Schema.String),
   sessionId: Schema.optional(Schema.String),
   fresh: Schema.optional(Schema.Boolean),
   agent: Schema.optional(Schema.String),
   agentNamed: Schema.optional(Schema.Boolean),
-}
+})
 
 export const AttachSuccess = Schema.Struct({
   projectId: ProjectId,
@@ -109,7 +115,7 @@ export const AttachSuccess = Schema.Struct({
   ),
 })
 
-export const ClaimPayload = {
+export const ClaimPayload = Schema.Struct({
   sessionId: Schema.optional(Schema.String),
   harness: Schema.optional(Schema.String),
   agent: Schema.String,
@@ -121,7 +127,7 @@ export const ClaimPayload = {
   provider: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
   pid: Schema.optional(Schema.Number),
-}
+})
 
 export const ClaimSuccess = Schema.Struct({
   sessionId: SessionId,
@@ -157,7 +163,7 @@ export const RemoteHelloSuccess = Schema.Struct({
   runtimes: Schema.optional(Schema.Array(RuntimeThere)),
 })
 
-export const RemoteSpawnPayload = {
+export const RemoteSpawnPayload = Schema.Struct({
   repository: Schema.optional(Schema.String),
   identity: Schema.optional(Schema.String),
   commit: Schema.optional(Schema.String),
@@ -181,7 +187,9 @@ export const RemoteSpawnPayload = {
   runtime: Schema.optional(Schema.String),
   request: Schema.String,
   files: Attachments,
-}
+})
+
+export type RemoteSpawnPayload = typeof RemoteSpawnPayload.Type
 
 export const RemoteSpawnSuccess = Schema.Struct({
   session: Schema.String,

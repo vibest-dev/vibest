@@ -203,7 +203,7 @@ describe("multi-repository project", () => {
 })
 
 const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
   Layer.provideMerge(testLayer()),
 )
@@ -371,17 +371,21 @@ describe("multi-repository isolated workspace", () => {
       yield* repositoryWithOneCommitOnMain(root, "sdk")
       const raw = yield* connect(layout.socket)
 
-      const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["Session.Claim"]({
-        agent: "coordinator",
-        harness: "pi",
-        fresh: false,
-        terminal: { id: "coord" },
+      const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["server.session"]["session.claim"]({
+        payload: {
+          agent: "coordinator",
+          harness: "pi",
+          fresh: false,
+          terminal: { id: "coord" },
+        },
       })
 
       const { id } = yield* authed(
         raw,
         sessionHeaders({ sessionId, repositoryRoot: app, projectId: String(projectId) }),
-      ).Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      )["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
 
       yield* until(
         db.session.getSession(id),
@@ -413,17 +417,21 @@ describe("multi-repository isolated workspace", () => {
       const raw = yield* connect((yield* Layout).socket)
       const cli = authed(raw, cliHeaders(root))
 
-      const { sessionId, projectId } = yield* cli["Session.Claim"]({
-        agent: "coordinator",
-        harness: "pi",
-        fresh: false,
-        terminal: { id: "coord" },
+      const { sessionId, projectId } = yield* cli["server.session"]["session.claim"]({
+        payload: {
+          agent: "coordinator",
+          harness: "pi",
+          fresh: false,
+          terminal: { id: "coord" },
+        },
       })
 
       const { id } = yield* authed(
         raw,
         sessionHeaders({ sessionId, repositoryRoot: workspace, projectId: String(projectId) }),
-      ).Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      )["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
 
       yield* until(db.session.getSession(id), (row) => (row ? executionStateOf(row) : undefined) === "open")
       assert.strictEqual((yield* db.session.getSession(id))!.projectId, (yield* db.project.projectAt(root))?.id)

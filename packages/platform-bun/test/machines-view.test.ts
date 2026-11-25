@@ -121,14 +121,21 @@ const pair = (extra: ReadonlyArray<Plugin.Plugin> = [], options: { readonly late
     })
 
     net.route("b-host", b.layout.socket)
-    const added = yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
-    yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
+    const added = yield* a.cli(a.raw["server.machine"]["machine.add"]({ payload: { name: "mb", target: "b-host" } }))
+    yield* until(a.cli(a.raw["server.machine"]["machine.list"]({})), (rows) => rows[0]?.state === "connected")
     const { asEntry: here } = yield* entryOn(a)
 
     const spawn = (runtime = "view") =>
-      here(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "x", callerEnv: {}, runtime }))
+      here(
+        a.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", machine: "mb", prompt: "x", callerEnv: {}, runtime },
+        }),
+      )
 
-    const listed = (id: string) => Effect.map(here(a.raw.List({})), (r) => r.sessions.find((row) => row.id === id)!)
+    const listed = (id: string) =>
+      Effect.map(here(a.raw["server.session"]["session.list"]({ query: {} })), (r) =>
+        r.sessions.find((row) => row.id === id)!,
+      )
 
     return { net, A, B, a, b, added, here, spawn, listed, spawned }
   })
@@ -154,7 +161,7 @@ describe("another machine's terminals here", () => {
           { message: "mb's herdr agents cannot be shown here; vibest peek <id> --machine mb reads them" },
           { plugin: "view-a", message: "added mb" },
         ])
-        const [row] = yield* a.cli(a.raw["Machine.List"]())
+        const [row] = yield* a.cli(a.raw["server.machine"]["machine.list"]({}))
         assert.deepStrictEqual(
           row!.runtimes?.map((r) => [r.kind, r.here]),
           [
@@ -199,7 +206,11 @@ describe("another machine's terminals here", () => {
         assert.deepStrictEqual((yield* listed(spawned.id)).terminal, row.terminal)
         assert.lengthOf(A.connects, 2)
         A.mirror.clear()
-        const got = yield* here(a.raw.Get({ id: spawned.id, machine: "mb" }))
+
+        const got = yield* here(
+          a.raw["server.session"]["session.get"]({ params: { id: spawned.id }, query: { machine: "mb" } }),
+        )
+
         assert.deepStrictEqual(got.terminal, row.terminal)
         assert.lengthOf(A.connects, 3)
         A.mirror.clear()
@@ -215,11 +226,19 @@ describe("another machine's terminals here", () => {
           target: { id: `t-${other.id}` },
         })
         assert.include(plain.view ?? "", "cannot be shown here")
-        const peeked = yield* here(a.raw.Peek({ id: spawned.id, machine: "mb" }))
+
+        const peeked = yield* here(
+          a.raw["server.session"]["session.peek"]({ params: { id: spawned.id }, query: { machine: "mb" } }),
+        )
+
         assert.deepStrictEqual(peeked.terminal, row.terminal)
         A.refuse = true
         A.mirror.clear()
-        const unseen = yield* here(a.raw.Peek({ id: spawned.id, machine: "mb" }))
+
+        const unseen = yield* here(
+          a.raw["server.session"]["session.peek"]({ params: { id: spawned.id }, query: { machine: "mb" } }),
+        )
+
         assert.strictEqual(unseen.view, "cannot add; fix: add by hand")
       }),
     ),
@@ -316,16 +335,21 @@ describe("another machine's terminals here", () => {
           (n) => n === 2,
         )
         assert.strictEqual(A.mirror.size, 1)
-        const [row] = yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
+
+        const [row] = yield* until(
+          a.cli(a.raw["server.machine"]["machine.list"]({})),
+          (rows) => rows[0]?.state === "connected",
+        )
+
         assert.deepStrictEqual(row!.notes, [], "the last connect left no note")
-        const removed = yield* a.cli(a.raw["Machine.Remove"]({ name: "mb" }))
+        const removed = yield* a.cli(a.raw["server.machine"]["machine.remove"]({ params: { name: "mb" } }))
         assert.lengthOf(A.removes, 1)
         assert.deepStrictEqual(A.removes[0]!.runtimes.find((r) => r.kind === "view")?.link, { core: "core-b" })
         assert.strictEqual(A.mirror.size, 0)
         assert.lengthOf(removed.notes, 1)
         assert.strictEqual(removed.notes[0]!.plugin, "crasher")
         assert.include(removed.notes[0]!.message, "plugin crasher crashed: boom")
-        assert.deepStrictEqual(yield* a.cli(a.raw["Machine.List"]()), [])
+        assert.deepStrictEqual(yield* a.cli(a.raw["server.machine"]["machine.list"]({})), [])
       }),
     ),
   )

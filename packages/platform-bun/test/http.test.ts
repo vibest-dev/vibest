@@ -1,16 +1,19 @@
+import http from "node:http"
+
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { pidOf } from "@vibest/core/database/db-rows"
 import { Inbox } from "@vibest/core/inbox"
+import { Project } from "@vibest/core/project"
 import { Session } from "@vibest/core/session"
 import { sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
-import * as Http from "@vibest/server/http"
-import { Clock, Effect, Logger, Predicate, type Schema, type Scope } from "effect"
-import * as Headers from "effect/http/Headers"
-import { CurrentLogAnnotations } from "effect/References"
-import { TestClock } from "effect/testing"
+import * as Server from "@vibest/server/server"
+import { Effect, Layer, Predicate, type Schema, type Scope } from "effect"
+
+import * as Platform from "#platform"
 
 import {
   VERSION,
@@ -44,14 +47,62 @@ const AGY = {
   guardAnswer: (reason: string | undefined) => (reason ? { decision: "deny", reason } : { decision: "allow" }),
 }
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
-  it.effect(name, () =>
-    program.pipe(Effect.provide(testLayer({ harnesses: [{ ...CLAUDE, delivery: "pull" }, PI, CURSOR, AGY] }))),
+const servedHttp = () =>
+  Server.layer.pipe(
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
+    Layer.provideMerge(Project.layer),
+    Layer.provideMerge(testLayer({ harnesses: [{ ...CLAUDE, delivery: "pull" }, PI, CURSOR, AGY] })),
+  )
+
+const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>) =>
+  it.live(name, () => program.pipe(Effect.scoped, Effect.provide(servedHttp())))
+
+const postUnix = (socketPath: string, path: string, headers: Record<string, string>, body: string) =>
+  Effect.promise(
+    () =>
+      new Promise<{ readonly status: number; readonly body: unknown }>((resolve, reject) => {
+        const req = http.request(
+          {
+            socketPath,
+            method: "POST",
+            path,
+            headers: {
+              "content-type": path === "/api/hook/ready" ? "application/json" : "text/plain",
+              ...headers,
+            },
+          },
+          (res) => {
+            let text = ""
+            res.setEncoding("utf8")
+            res.on("data", (chunk: string) => {
+              text += chunk
+            })
+            res.on("end", () => {
+              let parsed: unknown = undefined
+
+              if (text !== "") {
+                try {
+                  parsed = JSON.parse(text)
+                } catch {
+                  parsed = text
+                }
+              }
+
+              resolve({ status: res.statusCode ?? 0, body: parsed })
+            })
+          },
+        )
+
+        req.on("error", reject)
+        req.write(body)
+        req.end()
+      }),
   )
 
 const project = Effect.gen(function* () {
   const db = yield* Db.Service
   const herdr = yield* FakeRuntime
+  const layout = yield* Layout
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
 
@@ -82,14 +133,9 @@ const project = Effect.gen(function* () {
   })
 
   const projectId = entry.projectId
-  const handle = yield* Http.make
 
   const call = (path: string, who: Partial<SessionIdentity> & { sessionId: string }, body = "{}") =>
-    handle({
-      path,
-      headers: Headers.fromInput(sessionHeaders({ projectId: String(projectId), harness: "claude", ...who })),
-      body,
-    })
+    postUnix(layout.socket, path, sessionHeaders({ projectId: String(projectId), harness: "claude", ...who }), body)
 
   return {
     db,
@@ -105,7 +151,7 @@ const project = Effect.gen(function* () {
   }
 })
 
-describe("vibestd's HTTP API", () => {
+describe("vibestd's unified HTTP API", () => {
   test(
     "a late Ready from the process a restart replaced changes nothing; the restarted harness's Ready is taken",
     Effect.gen(function* () {
@@ -114,14 +160,15 @@ describe("vibestd's HTTP API", () => {
       const first = (yield* db.session.currentProcessId(worker))!
 
       const ready = (process: number, pid: number, pluginVersion = VERSION) =>
-        call("/session/ready", { sessionId: worker, process: String(process), pluginVersion }, JSON.stringify({ pid }))
+        call("/api/hook/ready", { sessionId: worker, process: String(process), pluginVersion }, JSON.stringify({ pid }))
 
       assert.deepStrictEqual((yield* ready(first, 111)).body, { process: first })
       yield* db.session.restartProcess(worker)
       const second = (yield* db.session.currentProcessId(worker))!
       assert.notStrictEqual(second, first)
       const late = yield* ready(first, 111)
-      assert.strictEqual(late.status, 204)
+      assert.strictEqual(late.status, 200)
+      assert.deepStrictEqual(late.body, {})
       assert.isUndefined(yield* db.session.readyAt(worker))
       assert.isUndefined(pidOf((yield* db.session.getSession(worker))!))
       assert.deepStrictEqual((yield* ready(first, 222, "0.0.2-next")).body, { process: second })
@@ -134,57 +181,32 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "Ready takes {} and a numeric pid; a malformed body or a wrong pid type is 400 with the decode message and changes nothing",
+    "Ready takes {} and a numeric pid; a malformed body or a wrong pid type is 400 InvalidRequestError and changes nothing",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
       yield* until(db.session.getSession(worker), (s) => (s ? (s.process?.placedAt ?? null) : undefined) != null)
       const process = (yield* db.session.currentProcessId(worker))!
-      const ready = (body: string) => call("/session/ready", { sessionId: worker, process: String(process) }, body)
+      const ready = (body: string) => call("/api/hook/ready", { sessionId: worker, process: String(process) }, body)
       const pid = () => Effect.map(db.session.getSession(worker), (session) => pidOf(session!))
       const readyAt = yield* db.session.readyAt(worker)
       const reportedPid = yield* pid()
-      yield* TestClock.adjust("1 second")
-      const now = yield* Clock.currentTimeMillis
 
-      const logEntry = ({ fiber, logLevel, message }: Logger.Options<unknown>) => ({
-        message,
-        level: logLevel,
-        annotations: { ...fiber.getRef(CurrentLogAnnotations) },
-      })
+      const badJson = yield* ready("{")
+      assert.strictEqual(badJson.status, 400)
+      assert.strictEqual(yield* db.session.readyAt(worker), readyAt)
+      assert.strictEqual(yield* pid(), reportedPid)
 
-      const logs: Array<ReturnType<typeof logEntry>> = []
+      const badPid = yield* ready(JSON.stringify({ pid: "x" }))
+      assert.strictEqual(badPid.status, 400)
+      assert.strictEqual((badPid.body as { _tag?: string })._tag, "InvalidRequestError")
+      assert.strictEqual(yield* db.session.readyAt(worker), readyAt)
+      assert.strictEqual(yield* pid(), reportedPid)
 
-      const watched = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-        effect.pipe(
-          Effect.provide(
-            Logger.layer([
-              Logger.make((options) => {
-                logs.push(logEntry(options))
-              }),
-            ]),
-          ),
-        )
-
-      const rejected = (body: string, message: string) =>
-        Effect.gen(function* () {
-          const reply = yield* watched(ready(body))
-          assert.strictEqual(reply.status, 400)
-          assert.deepStrictEqual(reply.body, Http.InvalidRequestError.make({ message, kind: "Payload" }))
-          assert.deepStrictEqual(logs.at(-1), {
-            message: ["schema rejection"],
-            level: "Warn",
-            annotations: { kind: "Payload", reason: message },
-          })
-          assert.strictEqual(yield* db.session.readyAt(worker), readyAt)
-          assert.strictEqual(yield* pid(), reportedPid)
-        })
-
-      yield* rejected("{", "Expected a valid JSON string")
-      yield* rejected(JSON.stringify({ pid: "x" }), 'Expected number | undefined\n  at ["pid"]')
       const empty = yield* ready("{}")
       assert.deepStrictEqual(empty, { status: 200, body: { process } })
-      assert.strictEqual(yield* db.session.readyAt(worker), now)
+      assert.isNumber(yield* db.session.readyAt(worker))
       assert.strictEqual(yield* pid(), reportedPid)
+
       const numbered = yield* ready(JSON.stringify({ pid: 1 }))
       assert.deepStrictEqual(numbered, { status: 200, body: { process } })
       assert.strictEqual(pidOf((yield* db.session.getSession(worker))!), 1)
@@ -192,7 +214,7 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "/hooks/<harness>/guard runs guardInputOf and formats allow/deny through adapter.guardAnswer for claude, cursor, and agy",
+    "/api/hook/<harness>/guard runs guardInputOf and formats allow/deny through adapter.guardAnswer for claude, cursor, and agy",
     Effect.gen(function* () {
       const { call, key, repo, sessions, worker } = yield* project
 
@@ -224,7 +246,7 @@ describe("vibestd's HTTP API", () => {
         "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused."
 
       const claudeAllow = yield* call(
-        "/hooks/claude/guard",
+        "/api/hook/claude/guard",
         { sessionId: worker, harness: "claude" },
         JSON.stringify({ tool_name: "Bash", tool_input: { command: "git status" }, cwd: repo }),
       )
@@ -232,7 +254,7 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual(claudeAllow, { status: 200, body: {} })
 
       const claudeDeny = yield* call(
-        "/hooks/claude/guard",
+        "/api/hook/claude/guard",
         { sessionId: worker, harness: "claude" },
         JSON.stringify({ tool_name: "Bash", tool_input: { command: "VIBEST_SESSION_ID=other vibest ls" }, cwd: repo }),
       )
@@ -240,7 +262,7 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual(claudeDeny, { status: 200, body: { deny: identityReason } })
 
       const cursorAllow = yield* call(
-        "/hooks/cursor/guard",
+        "/api/hook/cursor/guard",
         { sessionId: cursorId, harness: "cursor" },
         JSON.stringify({ tool_name: "Shell", tool_input: { command: "git status" }, cwd: repo }),
       )
@@ -248,7 +270,7 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual(cursorAllow, { status: 200, body: { permission: "allow" } })
 
       const cursorDeny = yield* call(
-        "/hooks/cursor/guard",
+        "/api/hook/cursor/guard",
         { sessionId: cursorId, harness: "cursor" },
         JSON.stringify({ tool_name: "Shell", tool_input: { command: "VIBEST_SESSION_ID=other vibest ls" }, cwd: repo }),
       )
@@ -259,7 +281,7 @@ describe("vibestd's HTTP API", () => {
       })
 
       const agyUnmapped = yield* call(
-        "/hooks/agy/guard",
+        "/api/hook/agy/guard",
         { sessionId: agyId, harness: "agy" },
         JSON.stringify({ cwd: repo, toolCall: { name: "list_dir", args: {} } }),
       )
@@ -267,7 +289,7 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual(agyUnmapped, { status: 200, body: { decision: "allow" } })
 
       const agyAllow = yield* call(
-        "/hooks/agy/guard",
+        "/api/hook/agy/guard",
         { sessionId: agyId, harness: "agy" },
         JSON.stringify({ cwd: repo, toolCall: { name: "run_command", args: { CommandLine: "git status" } } }),
       )
@@ -275,7 +297,7 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual(agyAllow, { status: 200, body: { decision: "allow" } })
 
       const agyDeny = yield* call(
-        "/hooks/agy/guard",
+        "/api/hook/agy/guard",
         { sessionId: agyId, harness: "agy" },
         JSON.stringify({
           cwd: repo,
@@ -285,7 +307,7 @@ describe("vibestd's HTTP API", () => {
 
       assert.deepStrictEqual(agyDeny, { status: 200, body: { decision: "deny", reason: identityReason } })
 
-      const agyMalformed = yield* call("/hooks/agy/guard", { sessionId: agyId, harness: "agy" }, "not json")
+      const agyMalformed = yield* call("/api/hook/agy/guard", { sessionId: agyId, harness: "agy" }, "not json")
       assert.strictEqual(agyMalformed.status, 200)
       assert.strictEqual((agyMalformed.body as { decision: string }).decision, "deny")
       assert.include((agyMalformed.body as { reason: string }).reason, "vibest could not check this tool call")

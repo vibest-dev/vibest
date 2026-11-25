@@ -1,18 +1,21 @@
-import { cliHeaders, connect } from "@vibest/client/client"
-import { SocketConnector } from "@vibest/client/socket-connector"
+import stream from "node:stream"
+
+import { cliHeaders, connect, withHeaders } from "@vibest/client/client"
+import { stdioSocket } from "@vibest/client/pipe"
+import type { SocketConnector } from "@vibest/client/socket-connector"
 import { Db } from "@vibest/core/database/db"
 import { senderOfRow, type SenderSql } from "@vibest/core/database/db-rows"
 import { Identity } from "@vibest/core/identity"
 import { Project } from "@vibest/core/project"
 import type { SpawnInput, Session } from "@vibest/core/session"
+import { servePipe } from "@vibest/platform-bun/pipe-server"
 import { remoteHeaders, sessionHeaders } from "@vibest/protocol/protocol"
 import { Sender } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import type { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
-import { Cause, Clock, Deferred, Effect, Exit, Layer, Option, Predicate, Schema } from "effect"
-import { RpcClient } from "effect/rpc"
+import { Cause, Clock, Deferred, Effect, Exit, Layer, Option, Predicate, Schema, Stream } from "effect"
 import * as Socket from "effect/socket/Socket"
 import { SqlClient } from "effect/sql"
 
@@ -22,7 +25,7 @@ import { FakeGit, tempDirectory, testLayer, type TestOptions, until } from "./fa
 
 export const served = (options?: TestOptions) =>
   Server.layer.pipe(
-    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(testLayer(options)),
   )
@@ -63,7 +66,7 @@ export class Net {
     return Effect.forEach(this.routes.get(host)?.pipes ?? [], (p) => p.cut, { discard: true })
   }
 
-  transport(dial: SocketConnector.Interface): Machines.MachineTransport["Service"] {
+  transport(_dial?: SocketConnector.Interface): Machines.MachineTransport["Service"] {
     const { argv: seen, routes } = this
 
     return (argv) =>
@@ -84,8 +87,27 @@ export class Net {
           }
         }
 
-        const inner = yield* dial(route.socket)
+        const clientToServer = new stream.PassThrough()
+        const serverToClient = new stream.PassThrough()
+        yield* Effect.forkScoped(
+          servePipe(route.socket, { stdin: clientToServer, stdout: serverToClient }).pipe(Effect.ignore),
+        )
+
+        const inner = yield* stdioSocket({
+          readable: stream.Readable.toWeb(serverToClient) as ReadableStream<Uint8Array>,
+          writable: stream.Writable.toWeb(clientToServer) as WritableStream<Uint8Array>,
+        })
+
         const cut = yield* Deferred.make<void>()
+
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            Deferred.doneUnsafe(cut, Exit.void)
+            clientToServer.destroy()
+            serverToClient.destroy()
+          }),
+        )
+
         const held = { on: false }
         route.pipes.push({
           cut: Deferred.succeed(cut, undefined).pipe(Effect.asVoid),
@@ -185,7 +207,7 @@ export const REPOSITORY = { origin: REMOTE, head: COMMIT, commits: [COMMIT] }
 export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE) =>
   Effect.gen(function* () {
     const spawns: Array<SpawnInput> = []
-    const transport = net === undefined ? {} : { transport: net.transport(yield* SocketConnector.Service) }
+    const transport = net === undefined ? {} : { transport: net.transport() }
 
     const context = yield* Layer.build(
       served({ ...transport, ...options, sessions: options.sessions ?? fakeSpawns(spawns) }),
@@ -198,25 +220,32 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
     yield* (yield* run(FakeGit)).repository(directory, { ...REPOSITORY, origin: remote })
     const project = yield* db.project.createProject(directory, [{ path: directory, remote }])
     const raw = yield* connect(layout.socket)
-    const cli = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(layout.home))
+    const cli = <A, E>(effect: Effect.Effect<A, E>) => withHeaders(effect, cliHeaders(layout.home))
 
     const as = (remote: string, aProject: string, by = A_ENTRY) =>
       Effect.gen(function* () {
-        yield* RpcClient.withHeaders(
-          raw["Remote.Hello"]({ id: remote, name: `a-${remote.slice(0, 4)}`, callsMe: "mb" }),
+        yield* withHeaders(
+          raw["server.remote"]["remote.hello"]({
+            payload: { id: remote, name: `a-${remote.slice(0, 4)}`, callsMe: "mb" },
+          }),
           remoteHeaders(remote),
         )
 
-        const call = <A, E>(effect: Effect.Effect<A, E>) =>
-          RpcClient.withHeaders(effect, remoteHeaders(remote, aProject, by))
+        const call = <A, E>(effect: Effect.Effect<A, E>) => withHeaders(effect, remoteHeaders(remote, aProject, by))
 
         return Object.assign(call, {
-          outbox: raw["Remote.Outbox"](undefined, { headers: remoteHeaders(remote, aProject, by) }),
+          outbox: Stream.unwrap(
+            withHeaders(raw["server.remote"]["remote.outbox"](), remoteHeaders(remote, aProject, by)),
+          ),
         })
       })
 
     const spawn = (call: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>, request = randomId()) =>
-      call(raw["Remote.Spawn"]({ agent: "general", repository: REMOTE, commit: COMMIT, prompt: "do it", request }))
+      call(
+        raw["server.remote"]["remote.spawn"]({
+          payload: { agent: "general", repository: REMOTE, commit: COMMIT, prompt: "do it", request },
+        }),
+      )
 
     return { run, db, raw, cli, as, spawn, spawns, directory, project, layout, id: (yield* run(Identity.Service)).id }
   })
@@ -235,7 +264,7 @@ export const entryOn = (stack: Effect.Success<ReturnType<typeof repoStack>>) =>
     )
 
     const asEntry = <A, E>(effect: Effect.Effect<A, E>) =>
-      RpcClient.withHeaders(
+      withHeaders(
         effect,
         sessionHeaders({ sessionId: started.sessionId, projectId: stack.project, repositoryRoot: stack.directory }),
       )
@@ -252,8 +281,8 @@ export const twoMachines = (options: { readonly a?: TestOptions; readonly b?: Te
     const b = yield* repoStack(net, options.b)
     net.route("b-host", b.layout.socket)
     const { entryId, asEntry } = yield* entryOn(a)
-    yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
-    yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
+    yield* a.cli(a.raw["server.machine"]["machine.add"]({ payload: { name: "mb", target: "b-host" } }))
+    yield* until(a.cli(a.raw["server.machine"]["machine.list"]({})), (rows) => rows[0]?.state === "connected")
 
     return { net, a, b, entryId, asEntry }
   })

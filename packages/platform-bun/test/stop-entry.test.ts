@@ -48,7 +48,7 @@ const refuseRealKills = Effect.gen(function* () {
 
 const served = (options?: TestOptions) =>
   Server.layer.pipe(
-    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(testLayer(options)),
   )
@@ -75,13 +75,15 @@ const workingPiRoot = Effect.gen(function* () {
   yield* herdr.updateAgent(paneId, (a) => ({ ...a, status: "working" }))
   yield* processes.set(HARNESS, "alive")
 
-  const started = yield* c["Session.Claim"]({
-    agent: "coordinator",
-    harness: "pi",
-    fresh: false,
-    terminal: { id: paneId },
-    runtime: TEST_HERDR,
-    pid: HARNESS,
+  const started = yield* c["server.session"]["session.claim"]({
+    payload: {
+      agent: "coordinator",
+      harness: "pi",
+      fresh: false,
+      terminal: { id: paneId },
+      runtime: TEST_HERDR,
+      pid: HARNESS,
+    },
   })
 
   yield* db.session.noteConversation(started.sessionId, "conversation-1")
@@ -116,25 +118,29 @@ const workingPiRoot = Effect.gen(function* () {
   })
 
   const moveTo = (terminal: string, harness: "pi" | "claude" = "pi") =>
-    c["Session.Claim"]({
-      sessionId: started.sessionId,
-      agent: "coordinator",
-      harness,
-      fresh: false,
-      move: true,
-      terminal: { id: terminal },
-      runtime: TEST_HERDR,
-      pid: 5151,
+    c["server.session"]["session.claim"]({
+      payload: {
+        sessionId: started.sessionId,
+        agent: "coordinator",
+        harness,
+        fresh: false,
+        move: true,
+        terminal: { id: terminal },
+        runtime: TEST_HERDR,
+        pid: 5151,
+      },
     })
 
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
-    c["Session.Claim"]({
-      agent: "coordinator",
-      harness,
-      fresh: false,
-      terminal: { id: terminal },
-      runtime: TEST_HERDR,
-      pid: 5151,
+    c["server.session"]["session.claim"]({
+      payload: {
+        agent: "coordinator",
+        harness,
+        fresh: false,
+        terminal: { id: terminal },
+        runtime: TEST_HERDR,
+        pid: 5151,
+      },
     })
 
   const pending = Effect.map(entryPending(db, projectId), (rows) => rows.map((r) => unwrapped(r.message)))
@@ -318,12 +324,14 @@ describe("Session.Claim move: SIGTERM to the recorded harness PID only, never a 
       const exits = yield* Effect.all(
         ["test/p1", "test/p2"].map((terminal) =>
           Effect.exit(
-            c["Session.Claim"]({
-              agent: "coordinator",
-              harness: "pi",
-              fresh: false,
-              terminal: { id: terminal },
-              runtime: TEST_HERDR,
+            c["server.session"]["session.claim"]({
+              payload: {
+                agent: "coordinator",
+                harness: "pi",
+                fresh: false,
+                terminal: { id: terminal },
+                runtime: TEST_HERDR,
+              },
             }),
           ),
         ),

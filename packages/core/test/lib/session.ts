@@ -23,7 +23,7 @@ import { Sends } from "@vibest/core/session/sends"
 import { Summaries } from "@vibest/core/session/summaries"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin/effect"
-import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/rpc"
+import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/schemas"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import {
