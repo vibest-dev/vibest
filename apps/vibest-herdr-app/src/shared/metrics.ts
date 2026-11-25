@@ -57,9 +57,28 @@ interface MutableLayoutNode {
   children?: readonly LayoutNode[]
 }
 
-export const mainChild = (chat: string | null): string => (chat ? CHAT : TABS)
+export interface Chats {
+  readonly shown: string | null
+  readonly kept: readonly string[]
+}
 
-const resize = (node: LayoutNode, m: Metrics, sidebarHidden: boolean, chat: string | null): LayoutNode => {
+const chatId = (terminal: string): string => `${CHAT}-${terminal.replaceAll(/[^0-9a-z]/gi, "-")}`
+
+export const mainChild = (chat: string | null): string => (chat ? chatId(chat) : TABS)
+
+const chatBlocks = (main: LayoutNode, kept: readonly string[]): LayoutNode[] => {
+  const children = main.children ?? []
+  const template = children.find((c) => c.id === CHAT)
+
+  if (!template) return [...children]
+
+  return [
+    ...children.filter((c) => !c.id?.startsWith(`${CHAT}-`)),
+    ...kept.map((terminal) => ({ ...template, id: chatId(terminal), content: { terminal } })),
+  ]
+}
+
+const resize = (node: LayoutNode, m: Metrics, sidebarHidden: boolean, chats: Chats): LayoutNode => {
   const pane = node.content?.pane
   const next: MutableLayoutNode = { ...node }
 
@@ -76,15 +95,14 @@ const resize = (node: LayoutNode, m: Metrics, sidebarHidden: boolean, chat: stri
   }
 
   if (node.id === MAIN) {
-    next.active = mainChild(chat)
-  }
+    next.active = mainChild(chats.shown)
+    next.children = chatBlocks(node, chats.kept)
 
-  if (node.id === CHAT && chat) {
-    next.content = { terminal: chat }
+    return next
   }
 
   if (node.children) {
-    next.children = node.children.map((c) => resize(c, m, sidebarHidden, chat))
+    next.children = node.children.map((c) => resize(c, m, sidebarHidden, chats))
   }
 
   return next
@@ -93,12 +111,12 @@ const resize = (node: LayoutNode, m: Metrics, sidebarHidden: boolean, chat: stri
 export const fitLayout = (
   layout: LayoutNode | null | undefined,
   m: Metrics,
-  chat: string | null = null,
+  chats: Chats = { shown: null, kept: [] },
 ): LayoutNode | null => {
   if (!layout?.children) return null
 
   const next = {
-    ...resize(layout, m, Boolean(findNode(layout, "sidebar")?.hidden), chat),
+    ...resize(layout, m, Boolean(findNode(layout, "sidebar")?.hidden), chats),
     traffic_lights: m.lights,
     terminal_padding: [CONTENT, CONTENT],
   }

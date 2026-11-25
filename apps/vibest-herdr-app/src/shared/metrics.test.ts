@@ -61,24 +61,31 @@ describe("left gutter", () => {
 
 describe("main chat", () => {
   const m = { bar: 32, pad: 8, head: 32, searchTop: 13, lights: [13, 12] as const }
+  const chat = { id: "chat", radius: 8, content: { terminal: "" } }
 
-  const layout = (active: string, terminal: string) => ({
+  const layout = (active: string, kept: readonly string[]) => ({
     ...tree(32, [13, 12], 28),
     children: [
       {
         id: "main",
         active,
-        children: [{ id: "terminals" }, { id: "chat", content: { terminal } }],
+        children: [
+          { id: "terminals" },
+          chat,
+          ...kept.map((t) => ({ ...chat, id: `chat-${t.replaceAll("/", "-")}`, content: { terminal: t } })),
+        ],
       },
     ],
   })
 
-  it("shows the project's main conversation in the chat block", () => {
-    expect(fitLayout(layout("terminals", ""), m, "mac-mini/t1pk")).toEqual(layout("chat", "mac-mini/t1pk"))
+  it("keeps a block per recent main conversation and shows the current one", () => {
+    expect(fitLayout(layout("terminals", []), m, { shown: "mac-mini/t1pk", kept: ["mac-mini/t1pk", "t7"] })).toEqual(
+      layout("chat-mac-mini-t1pk", ["mac-mini/t1pk", "t7"]),
+    )
   })
 
-  it("falls back to the tabs when no main conversation is running", () => {
-    expect(fitLayout(layout("chat", "t7"), m, null)).toEqual(layout("terminals", "t7"))
-    expect(fitLayout(layout("chat", "t7"), m, "t7")).toBeNull()
+  it("falls back to the tabs and keeps the blocks when no main conversation is shown", () => {
+    expect(fitLayout(layout("chat-t7", ["t7"]), m, { shown: null, kept: ["t7"] })).toEqual(layout("terminals", ["t7"]))
+    expect(fitLayout(layout("chat-t7", ["t7"]), m, { shown: "t7", kept: ["t7"] })).toBeNull()
   })
 })

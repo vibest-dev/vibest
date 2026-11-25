@@ -83,6 +83,7 @@ export const showSession = (s: VibestSession): boolean => {
 
 const RECENT = "vibest.recent"
 const CHAT = "vibest.chat"
+const KEPT = "vibest.chats"
 const RECENT_KEEP = 8
 
 const recentProjects = (): string[] => {
@@ -99,8 +100,14 @@ export const mainChat = (): string | null => {
   return chat === "" ? null : chat
 }
 
+const keptChats = (): string[] => {
+  const list = shared(KEPT)
+
+  return Array.isArray(list) ? list.map(String) : []
+}
+
 export const applyLayout = (): void => {
-  const next = fitLayout(liveLayout(), liveMetrics(), mainChat())
+  const next = fitLayout(liveLayout(), liveMetrics(), { shown: mainChat(), kept: keptChats() })
 
   if (next) run("layout.set", { layout: next })
 }
@@ -120,6 +127,8 @@ const launchMain = (m: MachineMember, cx: Context): void => {
 }
 
 const showChat = (terminal: string | null): void => {
+  if (terminal) setShared(KEPT, [terminal, ...keptChats().filter((t) => t !== terminal)].slice(0, RECENT_KEEP))
+
   setShared(CHAT, terminal)
   applyLayout()
   run("layout.select", { stack: MAIN, child: mainChild(terminal) })
