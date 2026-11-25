@@ -261,10 +261,10 @@ const checks: ReadonlyArray<Check> = [
           ) as { id: string }
         ).id
 
-        const id = printed.slice(3)
+        const firstAddress = `mb/${printed.slice(0, 8)}`
 
-        const bRow = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
-          id.startsWith(r.id.slice(0, 8)),
+        const bRow = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find(
+          (r) => r.id === printed,
         )
 
         expect(bRow?.runtime === "herdr", `B's row: ${JSON.stringify(bRow)}`)
@@ -288,7 +288,7 @@ const checks: ReadonlyArray<Check> = [
 
         const onB = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions
         expect(
-          onB.find((r) => coordinator.slice(3).startsWith(r.id.slice(0, 8)))?.agent === "coordinator",
+          onB.find((r) => r.id === coordinator)?.agent === "coordinator",
           `B's rows: ${JSON.stringify(onB.map((r) => [r.id, r.agent]))}`,
         )
         expect(onB.length === 2, `the refused run left a session on B: ${onB.length}`)
@@ -322,7 +322,7 @@ const checks: ReadonlyArray<Check> = [
           row?.terminal?.target.machine === label
 
         expect(matches(first), `A's row: ${JSON.stringify(first)}`)
-        await until("the first notice", () => s!.notices(printed.slice(0, 11), "hseven") === 1, 120_000)
+        await until("the first notice", () => s!.notices(firstAddress, "hseven") === 1, 120_000)
 
         const typed = await s.herdrA("--machine", label, "pane", "run", name, ask("hstep"))
         expect(typed.code === 0, `herdr --machine pane run: ${typed.stdout}${typed.stderr}`)
@@ -336,7 +336,7 @@ const checks: ReadonlyArray<Check> = [
             )?.n ?? 0) === 1,
           60_000,
         )
-        await until("the typed execution's notice", () => s!.notices(printed.slice(0, 11), "hstep") === 1, 120_000)
+        await until("the typed execution's notice", () => s!.notices(firstAddress, "hstep") === 1, 120_000)
 
         const removedInHerdr = await s.herdrA("machine", "remove", saved[0]!.id)
         expect(removedInHerdr.code === 0, `herdr machine remove: ${removedInHerdr.stderr}`)
@@ -355,6 +355,8 @@ const checks: ReadonlyArray<Check> = [
             await w.okViaEntry(["run", "--machine", "mb", "pi", "--", ask("hnine")], { env: s.aEnv, asIs: true }),
           ) as { id: string }
         ).id
+
+        const againAddress = `mb/${again.slice(0, 8)}`
 
         await until(
           "A's row of the agent after B's herdr session restarted has its terminal",
@@ -376,7 +378,7 @@ const checks: ReadonlyArray<Check> = [
           "A's saved herdr machine changed when B's session restarted",
         )
 
-        await until("the notice after B's restart", () => s!.notices(again.slice(0, 11), "hnine") === 1, 120_000)
+        await until("the notice after B's restart", () => s!.notices(againAddress, "hnine") === 1, 120_000)
 
         const removed = JSON.parse(await s.okA(["machine", "rm", "mb"])) as { notes: Array<{ plugin: string }> }
         expect(
@@ -384,7 +386,7 @@ const checks: ReadonlyArray<Check> = [
           `machine rm notes: ${JSON.stringify(removed)}`,
         )
         expect((await s.profiles()).length === 0, `A's herdr after machine rm: ${JSON.stringify(await s.profiles())}`)
-        expect(s.notices(printed.slice(0, 11), "hseven") === 1, "the first notice repeated")
+        expect(s.notices(firstAddress, "hseven") === 1, "the first notice repeated")
         await w.writeEvidence(path.join(evidence, "M7-ssh.log"), await fs.readFile(s.log, "utf8"))
       } finally {
         await s?.stop()

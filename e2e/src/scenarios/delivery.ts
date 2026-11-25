@@ -167,7 +167,7 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S45",
     title:
-      "a Pi subagent's vibest send to the Pi entry session is one send row from the subagent to the entry session, delivered, with one inbox.queued and one inbox.moved to delivered, and the entry session's model request holds <vibest-agent-message> with the subagent's id",
+      "a Pi subagent's vibest send to the Pi entry session is one send row from the subagent to the entry session, delivered, with one session.inbox.enqueued and one session.inbox.delivered, and the entry session's model request holds <vibest-agent-message> with the subagent's id",
     run: async (w) => {
       needs()
       const entryModel = recordingModel(() => reply("ok"))
@@ -191,7 +191,7 @@ const sendChecks: ReadonlyArray<Check> = [
               entryId,
               sent[0]!.id,
             ) === 1,
-          `the send ${sent[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
+          `the send ${sent[0]!.id} has not exactly one session.inbox.enqueued and one session.inbox.delivered`,
         )
         await until("the entry session's model saw the send", () => seen(entryModel).includes("hello-main"), 60_000)
         expect(
@@ -208,7 +208,7 @@ const sendChecks: ReadonlyArray<Check> = [
   },
   {
     id: "S46",
-    title: "a Pi subagent's vibest send to a sibling is refused, and no inbox.queued row is written",
+    title: "a Pi subagent's vibest send to a sibling is refused, and no session.inbox.enqueued row is written",
     run: async (w) => {
       needs()
       const entryModel = recordingModel(() => reply("ok"))
@@ -239,7 +239,9 @@ const sendChecks: ReadonlyArray<Check> = [
         await until("the sender answered", async () => (await replyOf(w, id, m.repo)).includes("done-send"), 90_000)
         const out = await fs.readFile(refused, "utf8")
         expect(
-          out.includes(siblingId) && out.includes("did not start") && out.includes(entryIdOf(w)),
+          out.includes(
+            `${siblingId} is not linked from this session; link them with vibest session link (you may send to ${entryIdOf(w)})`,
+          ),
           `vibest send printed: ${out}`,
         )
         expect(
@@ -253,7 +255,7 @@ const sendChecks: ReadonlyArray<Check> = [
             siblingId,
             id,
           ) === 0,
-          "inbox.queued was written for the refused send",
+          "session.inbox.enqueued was written for the refused send",
         )
       } finally {
         entryModel.stop()
@@ -266,7 +268,7 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S47",
     title:
-      "a Pi subagent's vibest send to a session of another project is Forbidden, and to an archived sibling (not its creator, not its child) Forbidden too; neither appends an inbox.queued",
+      "a Pi subagent's vibest send to a session of another project is Forbidden, and to an archived sibling (not its creator, not its child) Forbidden too; neither appends a session.inbox.enqueued",
     run: async (w) => {
       needs()
       const entryModel = recordingModel(() => reply("ok"))
@@ -303,7 +305,12 @@ const sendChecks: ReadonlyArray<Check> = [
         )
         const written = await fs.readFile(refused, "utf8")
         expect(
-          written.includes("belongs to another entry session") && written.includes("is not the agent that started you"),
+          written.includes(
+            `${foreign} belongs to another project; a message goes only to an agent of your own project`,
+          ) &&
+            written.includes(
+              `${archived} is not linked from this session; link them with vibest session link (you may send to ${entryIdOf(w)})`,
+            ),
           `missing a Forbidden refusal: ${written}`,
         )
         expect(
@@ -498,7 +505,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S3",
     title:
-      "an execution end sends nothing: a Pi subagent ends its execution without sending; the execution completes with its reply, no inbox row has the subagent as sender, no inbox.queued names it as sender, and the entry session's model gets no request after the subagent went idle",
+      "an execution end sends nothing: a Pi subagent ends its execution without sending; the execution completes with its reply, no inbox row has the subagent as sender, no session.inbox.enqueued names it as sender, and the entry session's model gets no request after the subagent went idle",
     run: async (w) => {
       needs()
       const entryModel = recordingModel(() => reply("ok"))

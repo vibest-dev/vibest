@@ -106,8 +106,7 @@ CREATE TABLE migration (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL) ST
 
 CREATE TABLE project (
   id               TEXT PRIMARY KEY CHECK (length(id) = 36),  -- UUIDv4, never changed
-  directory        TEXT UNIQUE,                       -- realpath of the project root; null: imported with none known
-  entry_session_id TEXT                               -- what a bare `vibest` reopens, and the fallback recipient; not identity
+  directory        TEXT UNIQUE                        -- realpath of the project root; null: imported with none known
 ) STRICT;
 
 CREATE TABLE project_repository (
@@ -145,13 +144,6 @@ CREATE TABLE session_edge (                           -- directed messaging grap
   PRIMARY KEY (from_session_id, to_remote_id, to_session_id)
 ) STRICT;
 CREATE INDEX session_edge_to ON session_edge (to_remote_id, to_session_id);
-
-CREATE TABLE session_edge (                           -- directed messaging graph; projected from session.linked / session.unlinked
-  from_session_id       TEXT NOT NULL,
-  to_session_id         TEXT NOT NULL,
-  PRIMARY KEY (from_session_id, to_session_id)
-) STRICT;
-CREATE INDEX session_edge_to ON session_edge (to_session_id);
 
 CREATE TABLE process (                                -- id: the seq of its process.started in the session
   session_id           TEXT    NOT NULL,
@@ -342,7 +334,7 @@ type or key changes or removes rows, in the same pull request.
   (`project.ts`, `session.ts`, `inbox.ts`, `remote.ts`) from the in-transaction statements of `session-statements.ts`,
   `inbox.ts` and `remote.ts`. The session row
   callers read (`SessionRow`) is built from the read model plus the memory listed below (`database/ledger-read.ts` holds the
-  reads the import's referee shares). It carries `endedAt`, `parentId`, `entry`, the current `process`, the `openExecution` (outcome null) and the `lastExecution` (the most recently ended one); a
+  reads the import's referee shares). It carries `endedAt`, `parentId`, the current `process`, the `openExecution` (outcome null) and the `lastExecution` (the most recently ended one); a
   session with neither never ran an execution.
 - Writes go through intent methods, one per fact: `startProcess` opens a process, except that it reuses a live process
   that has no terminal yet when the harness, provider, model, runtime and routing are identical; `placeProcess` only
@@ -412,8 +404,7 @@ E2E runs it on every world's database at the end of each check.
 - Pending rows: read when a fact for their recipient arrives, and once in a reconcile (at start, when a runtime
   registers or comes back): inbox `WHERE status = 'pending'` through `inbox_status`; the cost does not grow with history. Nothing scans on an interval.
 - Open execution of a session: `execution_open`. Live process and pid: `session.process_id`, or `process_live`.
-- Session or entry session by terminal: `process_terminal`, joined to `session.process_id` and
-  `project.entry_session_id`.
+- Session by terminal: `process_terminal`, joined to `session.process_id`.
 - In-place restart after an update: live sessions (`session_live`), their live process, compare the integration.
   Order: restarting mark in memory, SIGTERM, then `process.ended` (restart); the execution is not given a result by the restart, then the new
   `process.started`. A refused SIGTERM writes nothing.
