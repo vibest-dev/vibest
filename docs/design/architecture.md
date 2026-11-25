@@ -162,7 +162,7 @@ modules' names, except a domain facade re-exporting its own domain, see below).
 
 | Package                 | Role                                                                                                                                                                                              |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`                | Browser-safe contracts: branded ids, domain structs and errors, fact definitions (`event.ts`), the layout, `PROTOCOL` and `VERSION` (`version.ts`).                                               |
+| `schema`                | Browser-safe contracts: branded ids, domain structs and errors, unified `Event` definitions (`event.ts` and domain `*-event.ts` modules), the layout, `PROTOCOL` and `VERSION` (`version.ts`).    |
 | `plugin`                | The plugin authoring API, as an Effect plugin (`effect/`) or a Promise plugin (`promise/`).                                                                                                       |
 | `protocol`              | The single `RpcGroup` (effect/rpc, one JSON object per line), caller and peer headers, tagged errors, the contract in `contract/`.                                                                |
 | `client`                | The Effect RPC client with the per-command preflight and auto-start, the socket connector, the release lookup (`release.ts`).                                                                     |

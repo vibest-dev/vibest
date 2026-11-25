@@ -184,10 +184,15 @@ const sendChecks: ReadonlyArray<Check> = [
         const sent = sendsFrom(w, id, entryId)
         expect(sent.length === 1, `${sent.length} sends from ${id} to the entry session: ${JSON.stringify(sent)}`)
         expect(
-          countFacts(w, "aggregate = ? AND type = 'session.inbox.enqueued' AND seq = ?", entryId, sent[0]!.id) === 1 &&
+          countFacts(
+            w,
+            "aggregate_id = ? AND type = 'session.inbox.enqueued.1' AND json_extract(data, '$.messageId') = ?",
+            entryId,
+            sent[0]!.id,
+          ) === 1 &&
             countFacts(
               w,
-              "aggregate = ? AND type = 'session.inbox.delivered' AND json_extract(data, '$.messageId') = ?",
+              "aggregate_id = ? AND type = 'session.inbox.delivered.1' AND json_extract(data, '$.messageId') = ?",
               entryId,
               sent[0]!.id,
             ) === 1,
@@ -251,7 +256,7 @@ const sendChecks: ReadonlyArray<Check> = [
         expect(
           countFacts(
             w,
-            "aggregate = ? AND type = 'session.inbox.enqueued' AND json_extract(data, '$.sender.session') = ?",
+            "aggregate_id = ? AND type = 'session.inbox.enqueued.1' AND json_extract(data, '$.sender.session') = ?",
             siblingId,
             id,
           ) === 0,
@@ -314,7 +319,7 @@ const sendChecks: ReadonlyArray<Check> = [
           `missing a Forbidden refusal: ${written}`,
         )
         expect(
-          countFacts(w, "type = 'session.inbox.enqueued' AND json_extract(data, '$.sender.session') = ?", id) === 0,
+          countFacts(w, "type = 'session.inbox.enqueued.1' AND json_extract(data, '$.sender.session') = ?", id) === 0,
           `a session.inbox.enqueued names ${id} as sender`,
         )
       } finally {
@@ -411,7 +416,12 @@ const checks: ReadonlyArray<Check> = [
         )
 
         const seqOf = (type: string) =>
-          row<{ seq: number }>(w, "SELECT min(seq) AS seq FROM event WHERE aggregate = ? AND type = ?", sub, type)?.seq
+          row<{ seq: number }>(
+            w,
+            "SELECT min(seq) AS seq FROM event WHERE aggregate_id = ? AND type = ?",
+            sub,
+            `${type}.1`,
+          )?.seq
 
         const started = seqOf("session.execution.allocated")
         const placed = seqOf("process.updated")
@@ -531,7 +541,7 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(inboxRows(w, "? IN (sender_session_id, about_session_id)", id) === 0, `rows sent by ${id}`)
         expect(
-          countFacts(w, "type = 'session.inbox.enqueued' AND json_extract(data, '$.sender.session') = ?", id) === 0,
+          countFacts(w, "type = 'session.inbox.enqueued.1' AND json_extract(data, '$.sender.session') = ?", id) === 0,
           `a session.inbox.enqueued names ${id} as sender`,
         )
       } finally {

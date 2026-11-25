@@ -1,10 +1,11 @@
-import { type FactOf, ProjectCreated, ProjectMoved, ProjectRepositoriesChanged } from "@vibest/schema/event"
+import { type DurableEventOf } from "@vibest/schema/durable-event-manifest"
+import { ProjectEvent } from "@vibest/schema/project-event"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 
-type Repositories = FactOf<"project.created">["data"]["repositories"]
+type Repositories = DurableEventOf<"project.created">["data"]["repositories"]
 
 const putRepositories = (sql: SqlClient.SqlClient, projectId: string, repositories: Repositories) =>
   Effect.forEach(
@@ -19,25 +20,25 @@ export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const sql = yield* SqlClient.SqlClient
-    yield* bus.project(ProjectCreated, (fact) =>
+    yield* bus.project(ProjectEvent.Created, (event) =>
       Effect.andThen(
-        sql`INSERT INTO project (id, directory) VALUES (${fact.projectId!}, ${fact.data.directory ?? null})`,
-        putRepositories(sql, fact.projectId!, fact.data.repositories),
+        sql`INSERT INTO project (id, directory) VALUES (${event.data.projectId}, ${event.data.directory ?? null})`,
+        putRepositories(sql, event.data.projectId, event.data.repositories),
       ),
     )
-    yield* bus.project(ProjectMoved, (fact) =>
+    yield* bus.project(ProjectEvent.Moved, (event) =>
       Effect.gen(function* () {
-        const id = fact.projectId!
-        const { from, to } = fact.data
+        const id = event.data.projectId
+        const { from, to } = event.data
         yield* sql`UPDATE project SET directory = ${to} WHERE id = ${id}`
         yield* sql`DELETE FROM project_repository WHERE project_id = ${id}`
-        yield* putRepositories(sql, id, fact.data.repositories)
+        yield* putRepositories(sql, id, event.data.repositories)
         yield* sql`UPDATE session SET directory = ${to} || substr(directory, length(${from}) + 1)
           WHERE project_id = ${id} AND (directory = ${from} OR substr(directory, 1, length(${from}) + 1) = ${`${from}/`})`
       }),
     )
-    yield* bus.project(ProjectRepositoriesChanged, (fact) =>
-      putRepositories(sql, fact.projectId!, fact.data.repositories),
+    yield* bus.project(ProjectEvent.RepositoriesChanged, (event) =>
+      putRepositories(sql, event.data.projectId, event.data.repositories),
     )
   }),
 )

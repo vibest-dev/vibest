@@ -227,19 +227,19 @@ export const sessionListing = (deps: {
       const sessionIds = new Set<string>()
 
       for (const event of events) {
-        if (event.type === "session.changed") sessionIds.add(event.sessionId)
+        if (event.type === "session.changed") sessionIds.add(event.data.sessionId)
         else if (event.type === "project.changed") {
-          repositoryCache.delete(event.projectId)
-          projectIds.add(event.projectId)
+          repositoryCache.delete(event.data.projectId)
+          projectIds.add(event.data.projectId)
         } else if (
           event.type === "terminal.state" ||
           event.type === "terminal.exited" ||
           event.type === "terminal.seen"
         )
-          for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
+          for (const id of yield* sessionsAt(event.data.runtime, event.data.terminal)) sessionIds.add(id)
         else if (event.type === "runtime.reset")
           for (const info of yield* listed(ListScope.All(), false))
-            if (info.runtime === event.runtime) sessionIds.add(info.id)
+            if (info.runtime === event.data.runtime) sessionIds.add(info.id)
       }
 
       for (const id of sessionIds) {

@@ -1,13 +1,6 @@
-import {
-  MachineAdded,
-  MachineConnected,
-  MachineRemoved,
-  OutboxAcked,
-  OutboxQueued,
-  RemoteSeen,
-  type AgentFrom,
-} from "@vibest/schema/event"
+import { type AgentFrom } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
+import { MachineEvent } from "@vibest/schema/machine-event"
 import { Effect } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
@@ -103,11 +96,11 @@ export const statements = Effect.gen(function* () {
           ? yield* sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${row.sessionId} AND owner = 1`
           : []
 
-      yield* publish(OutboxQueued, {
-        ...(row.at !== undefined && { at: row.at }),
-        data: {
+      yield* publish(
+        MachineEvent.OutboxQueued,
+        {
           id,
-          remote: viaRemote,
+          remoteId: viaRemote,
           session: row.sessionId,
           recipient,
           kind: row.kind,
@@ -115,7 +108,8 @@ export const statements = Effect.gen(function* () {
           ...(row.from !== undefined && { from: row.from }),
           ...(open !== undefined && { execution: open.id }),
         },
-      })
+        row.at === undefined ? undefined : { at: row.at },
+      )
 
       return true
     })
@@ -164,7 +158,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
               const taken = yield* sql`SELECT 1 FROM machine WHERE name = ${row.name} OR remote_id = ${row.remoteId}`
 
               if (taken.length > 0) return undefined
-              yield* publish(MachineAdded, { data: { name: row.name, target: row.target, remote: row.remoteId } })
+              yield* publish(MachineEvent.Added, { name: row.name, target: row.target, remote: row.remoteId })
 
               return yield* machineNamed(row.name)
             }),
@@ -175,7 +169,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
         tx(
           Effect.gen(function* () {
             if ((yield* machineNamed(name)) === undefined) return false
-            yield* publish(MachineRemoved, { data: { name } })
+            yield* publish(MachineEvent.Removed, { name })
 
             return true
           }),
@@ -185,7 +179,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
       machineConnected: Effect.fn("Db.remote.machineConnected")((name: string) =>
         tx(
           Effect.gen(function* () {
-            if ((yield* machineNamed(name)) !== undefined) yield* publish(MachineConnected, { data: { name } })
+            if ((yield* machineNamed(name)) !== undefined) yield* publish(MachineEvent.Connected, { name })
           }),
         ).pipe(Effect.orDie),
       ),
@@ -303,8 +297,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
                 const [first, ...rest] = found.map((row) => row.id)
 
-                if (first !== undefined)
-                  yield* publish(OutboxAcked, { data: { remote: remoteId, ids: [first, ...rest] } })
+                if (first !== undefined) yield* publish(MachineEvent.OutboxAcked, { remoteId, ids: [first, ...rest] })
               }),
             )
         ).pipe(Effect.orDie),
@@ -316,7 +309,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
             const rows = yield* sql<{ name: string }>`SELECT name FROM remote WHERE id = ${row.id}`
 
             if (rows[0]?.name === row.name) return
-            yield* publish(RemoteSeen, { data: { id: row.id, name: row.name } })
+            yield* publish(MachineEvent.RemoteSeen, { remoteId: row.id, name: row.name })
           }),
         ).pipe(Effect.orDie),
       ),

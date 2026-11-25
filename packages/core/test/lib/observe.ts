@@ -84,11 +84,22 @@ const decodeEventData = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Re
 export const eventsOf = (sessionId: string, type?: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    const versioned = type === undefined ? undefined : type.includes(".") && /\.\d+$/.test(type) ? type : `${type}.1`
 
-    const rows = yield* sql<{ seq: number; type: string; at: number; data: string }>`SELECT seq, type, at, data
-      FROM event WHERE aggregate = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY seq`
+    const rows = yield* sql<{
+      seq: number
+      type: string
+      created: number
+      data: string
+    }>`SELECT seq, type, created, data
+      FROM event WHERE aggregate_id = ${sessionId} ${versioned === undefined ? sql`` : sql`AND type = ${versioned}`} ORDER BY seq`
 
-    return rows.map((r) => ({ id: r.seq, type: r.type, at: r.at, data: decodeEventData(r.data) }))
+    return rows.map((r) => ({
+      id: r.seq,
+      type: r.type.replace(/\.\d+$/, ""),
+      at: r.created,
+      data: decodeEventData(r.data),
+    }))
   }).pipe(Effect.orDie)
 
 export const replyText = (id: string) => replyOf(id).pipe(Effect.map((reply) => reply ?? ""))

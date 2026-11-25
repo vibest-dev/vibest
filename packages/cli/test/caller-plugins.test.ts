@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Bus } from "@vibest/core/bus"
+import { Bus, DrainReleased } from "@vibest/core/bus"
 import { callerTarget, attachPlace, specHits, type CallerHit } from "@vibest/core/caller"
 import { Builtins, builtinsNode } from "@vibest/core/plugin"
 import type { Caller } from "@vibest/core/plugin/domains"
@@ -127,7 +127,7 @@ describe("the runtime registry", () => {
             for (;;) {
               const event = yield* PubSub.take(seen)
 
-              if (event.type === "terminal.exited") passed.push(event.terminal["id"]!)
+              if (event.type === "terminal.exited") passed.push(event.data.terminal["id"]!)
 
               if (event.type === type) return passed
             }
@@ -139,7 +139,7 @@ describe("the runtime registry", () => {
         yield* Queue.offer(queue, exited("after"))
 
         for (let i = 0; i < 20; i++) yield* Effect.yieldNow
-        yield* bus.observe({ type: "drain.released" })
+        yield* bus.publish(DrainReleased, {})
         assert.deepStrictEqual(yield* until("drain.released"), [])
         assert.deepStrictEqual(
           (yield* runtimes.all).map((runtime) => runtime.id),

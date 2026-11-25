@@ -16,7 +16,7 @@ import {
   type SessionToolExecuteBefore,
   type Registration,
 } from "@vibest/plugin/effect"
-import { PublicCatalog, type Fact } from "@vibest/schema/event"
+import { isPublicEventType, type PublicDurableEvent } from "@vibest/schema/durable-event-manifest"
 import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -522,15 +522,15 @@ describe("plugins: loading", () => {
   )
 })
 
-const held: Array<Fact> = []
+const held: Array<PublicDurableEvent> = []
 const { promise: gate, resolve: release } = Promise.withResolvers<void>()
 
 const watcher = Plugin.define({
   id: "watcher",
   effect: (ctx) =>
     ctx.event.subscribe().pipe(
-      Stream.runForEach((fact) =>
-        Effect.promise(() => gate).pipe(Effect.andThen(Effect.sync(() => void held.push(fact)))),
+      Stream.runForEach((event) =>
+        Effect.promise(() => gate).pipe(Effect.andThen(Effect.sync(() => void held.push(event)))),
       ),
       Effect.forkScoped,
       Effect.asVoid,
@@ -539,7 +539,7 @@ const watcher = Plugin.define({
 
 describe("plugins: event.subscribe", () => {
   test(
-    "a consumer that holds up its facts does not hold up the commits, and gets every fact in order once it goes on",
+    "a consumer that holds up its events does not hold up the commits, and gets every event in order once it goes on",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const sessions = yield* Session.Service
@@ -550,17 +550,20 @@ describe("plugins: event.subscribe", () => {
       release()
       yield* until(
         Effect.sync(() => held),
-        (facts) => facts.some((fact) => fact.sessionId === second.id && fact.type === "session.execution.allocated"),
+        (events) =>
+          events.some(
+            (event) => event.durable.aggregateId === second.id && event.type === "session.execution.allocated",
+          ),
       )
 
-      assert.isTrue(held.every((fact) => Object.hasOwn(PublicCatalog, fact.type)))
+      assert.isTrue(held.every((event) => isPublicEventType(event.type)))
 
-      for (const aggregate of new Set(held.map((fact) => fact.aggregate))) {
-        const seqs = held.flatMap((fact) => (fact.aggregate === aggregate ? [fact.seq] : []))
+      for (const aggregate of new Set(held.map((event) => event.durable.aggregateId))) {
+        const seqs = held.flatMap((event) => (event.durable.aggregateId === aggregate ? [event.durable.seq] : []))
         assert.isTrue(seqs.every((seq, i) => i === 0 || seq > seqs[i - 1]!))
       }
 
-      assert.isTrue(held.some((fact) => fact.sessionId === second.id && fact.type === "session.created"))
+      assert.isTrue(held.some((event) => event.durable.aggregateId === second.id && event.type === "session.created"))
     }),
     { plugins: [watcher] },
   )

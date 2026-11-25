@@ -161,7 +161,7 @@ describe("vibest.sock", () => {
       )
 
       const queued = (request: string) =>
-        sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'session.inbox.enqueued'
+        sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'session.inbox.enqueued.1'
           AND json_extract(data, '$.requestId') = ${request}`.pipe(Effect.map((rows) => rows[0]!.n))
 
       const sends = sql<{ n: number }>`SELECT count(*) AS n FROM inbox i WHERE i.sender_type != 'vibest'

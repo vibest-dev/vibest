@@ -1,9 +1,13 @@
-import type { PublicFact as Fact, PublicFactOf as FactOf, PublicFactType as FactType } from "@vibest/schema/event"
+import type {
+  PublicDurableEvent as DurableEvent,
+  PublicEventOf as EventOf,
+  PublicEventType as EventType,
+} from "@vibest/schema/durable-event-manifest"
 
-export type { Fact, FactOf, FactType }
+export type { DurableEvent, EventOf, EventType }
 
 export interface EventDomain {
-  readonly subscribe: <T extends FactType = FactType>(input?: {
+  readonly subscribe: <T extends EventType = EventType>(input?: {
     readonly types?: ReadonlyArray<T>
-  }) => AsyncIterable<FactOf<T>>
+  }) => AsyncIterable<EventOf<T>>
 }

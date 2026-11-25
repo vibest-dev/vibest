@@ -47,9 +47,7 @@ export const layer = Layer.effect(
     Effect.andThen(open()),
     Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA journal_mode = WAL")))),
     Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
-    Effect.andThen(
-      SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE meta SET value = value WHERE key = ''`)),
-    ),
+    Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE kv SET value = value WHERE key = ''`))),
     Effect.andThen(make),
   ),
 )

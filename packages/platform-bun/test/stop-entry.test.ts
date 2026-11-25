@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Bus } from "@vibest/core/bus"
+import { Bus, TerminalExited } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { harnessIdOf, placedTerminal, runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
 import { Processes } from "@vibest/core/processes"
@@ -259,8 +259,7 @@ describe("Session.Claim move: SIGTERM to the recorded harness PID only, never a 
       const moving = yield* Effect.forkChild(s.moveTo("test/p2"))
       yield* until(s.processes.signaled, (pids) => pids.length === 1)
       const terminal = { id: s.paneId }
-      yield* (yield* Bus.Service).observe({
-        type: "terminal.exited",
+      yield* (yield* Bus.Service).publish(TerminalExited, {
         runtime: s.origin.runtime,
         terminal,
         processes: yield* (yield* Db.Service).session.processesAt(s.origin.runtime, terminal),

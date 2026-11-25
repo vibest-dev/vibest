@@ -77,7 +77,7 @@ const writers = [
 const openingWrite = {
   file: "/packages/core/src/database/db.ts",
   count: 1,
-  accepts: (text) => text.trim() === "UPDATE meta SET value = value WHERE key = ''",
+  accepts: (text) => text.trim() === "UPDATE kv SET value = value WHERE key = ''",
 }
 
 const writeMessage = "Only the bus, the projectors, the schema, migrations and the import write tables."

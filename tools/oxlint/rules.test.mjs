@@ -250,12 +250,12 @@ describe("ledger access rules", () => {
   })
 
   it("projector-writes: db.ts may hold only its one opening write", () => {
-    const opening = "export const a = `UPDATE meta SET value = value WHERE key = ''`\n"
+    const opening = "export const a = `UPDATE kv SET value = value WHERE key = ''`\n"
     expect(oxlintFindings(opening, core("database/db.ts"))).toEqual([])
     expect(oxlintFindings(opening + opening.replace("const a", "const b"), core("database/db.ts"))).toEqual([
       "2 vibest(projector-writes)",
     ])
-    expect(oxlintFindings(`export const a = "DELETE FROM meta"\n`, core("database/db.ts"))).toEqual([
+    expect(oxlintFindings(`export const a = "DELETE FROM kv"\n`, core("database/db.ts"))).toEqual([
       "1 vibest(projector-writes)",
     ])
   })

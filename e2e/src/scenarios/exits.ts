@@ -520,9 +520,9 @@ const checks: ReadonlyArray<Check> = [
         const input = row<{ n: number }>(
           w,
           `SELECT count(*) AS n FROM event e
-            JOIN inbox i ON i.recipient_session_id = e.aggregate AND i.id = e.data ->> '$.messageId'
+            JOIN inbox i ON i.recipient_session_id = e.aggregate_id AND i.id = e.data ->> '$.messageId'
             JOIN session s ON s.id = i.recipient_session_id AND s.message_id = i.id
-            WHERE e.aggregate = ? AND e.type = 'session.inbox.delivered' AND e.data ->> '$.recipientExecutionId' IS NOT NULL`,
+            WHERE e.aggregate_id = ? AND e.type = 'session.inbox.delivered.1' AND e.data ->> '$.recipientExecutionId' IS NOT NULL`,
           sub,
         )?.n
 

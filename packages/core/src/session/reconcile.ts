@@ -1,5 +1,6 @@
-import { ExecutionFailed, InboxDelivered, InboxEnqueued, ProcessEnded } from "@vibest/schema/event"
 import { sessionLabel } from "@vibest/schema/id"
+import { ProcessEvent } from "@vibest/schema/process-event"
+import { SessionEvent } from "@vibest/schema/session-event"
 import { Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
 import { type BoundProcess, Bus, RuntimeReset, TerminalExited, TerminalState } from "../bus.ts"
@@ -241,15 +242,13 @@ export const make = Effect.gen(function* () {
   const checkFailed = (id: string) =>
     Effect.forkIn(locked(id, true)(check(id)).pipe(logged(`check ${id}`)), scope).pipe(Effect.asVoid)
 
-  yield* reactor.on([ExecutionFailed], (event) => checkFailed(event.sessionId!))
-  yield* reactor.on([InboxDelivered], (event) =>
-    reactor.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!)),
+  yield* reactor.on([SessionEvent.ExecutionFailed], (event) => checkFailed(event.data.sessionId))
+  yield* reactor.on([SessionEvent.InboxDelivered], (event) =>
+    reactor.arm(`miss:${event.data.sessionId}`, CONFIRM_TIMEOUT, checkSession(event.data.sessionId)),
   )
-  yield* reactor.on([InboxEnqueued], (event) =>
+  yield* reactor.on([SessionEvent.InboxEnqueued], (event) =>
     Effect.gen(function* () {
-      const id = event.sessionId!
-
-      if (id === undefined) return
+      const id = event.data.sessionId
       const session = yield* db.session.getSession(id)
 
       if (session === undefined || executionStateOf(session) !== "open" || (yield* db.session.executionTaken(id)))
@@ -261,10 +260,12 @@ export const make = Effect.gen(function* () {
       yield* reactor.arm(`miss:${id}`, Duration.millis(Math.max(left, 0)), checkSession(id))
     }),
   )
-  yield* reactor.on([TerminalState], (event) => onTerminal(event.processes, event.state === "working"))
-  yield* reactor.on([TerminalExited], (event) => onTerminal(event.processes, false))
-  yield* reactor.on([ProcessEnded], (event) => forgetIfDone(event.sessionId!))
-  yield* reactor.on([RuntimeReset], (event) => republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime }))))
+  yield* reactor.on([TerminalState], (event) => onTerminal(event.data.processes, event.data.state === "working"))
+  yield* reactor.on([TerminalExited], (event) => onTerminal(event.data.processes, false))
+  yield* reactor.on([ProcessEvent.Ended], (event) => forgetIfDone(event.data.sessionId))
+  yield* reactor.on([RuntimeReset], (event) =>
+    republish().pipe(Effect.andThen(reconcile({ runtime: event.data.runtime }))),
+  )
 
   yield* Effect.forkIn(republish().pipe(Effect.andThen(reconcile("all")), logged("reconcile")), scope)
 

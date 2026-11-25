@@ -1,63 +1,120 @@
-import type { Runtime } from "@vibest/plugin/effect"
 import {
-  Catalog,
+  AllDurableDefinitions,
+  type AnyDurableDefinition,
   decodeRow,
+  type DurableEvent,
+  type DurableEventOf,
   encodeData,
-  type Fact,
-  type FactOf,
-  type FactType,
-  isFactOf,
-  type Row,
-  UnknownFact,
-} from "@vibest/schema/event"
-import type { TerminalTarget } from "@vibest/schema/terminal"
-import { Clock, Context, type Duration, Effect, Layer, Option, PubSub, Queue, Schema, type Scope, Stream } from "effect"
+  isDurableEventOf,
+  type StoredRow,
+} from "@vibest/schema/durable-event-manifest"
+import { Event, InvalidDurableEvent } from "@vibest/schema/event"
+import { TerminalTarget } from "@vibest/schema/terminal"
+import {
+  Clock,
+  Context,
+  type Duration,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  PubSub,
+  Queue,
+  Schema,
+  type Scope,
+  Stream,
+} from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import {
-  ledgerOf,
-  LOG_SCHEMA,
-  MIGRATION_TABLE,
-  PROJECTION_SCHEMA,
-  PROJECTION_TABLES,
-  PROJECTION_VERSION,
-  setMeta,
-} from "./database/db-schema.ts"
+import { LOG_SCHEMA, MIGRATION_TABLE, PROJECTION_SCHEMA, PROJECTION_TABLES } from "./database/db-schema.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 
 export * as Bus from "./bus.ts"
 
-export type Signal =
-  | {
-      readonly type: "terminal.state"
-      readonly runtime: string
-      readonly terminal: TerminalTarget
-      readonly state: Runtime.AgentState
-      readonly processes: ReadonlyArray<BoundProcess>
-    }
-  | {
-      readonly type: "terminal.exited"
-      readonly runtime: string
-      readonly terminal: TerminalTarget
-      readonly processes: ReadonlyArray<BoundProcess>
-    }
-  | { readonly type: "terminal.seen"; readonly runtime: string; readonly terminal: TerminalTarget }
-  | { readonly type: "runtime.reset"; readonly runtime: string }
-  | { readonly type: "drain.released" }
-  | { readonly type: "session.changed"; readonly sessionId: string }
-  | { readonly type: "project.changed"; readonly projectId: string }
+const AgentStateSchema = Schema.Literals(["idle", "working", "blocked", "unknown"])
 
-export interface BoundProcess {
-  readonly sessionId: string
-  readonly process: number
-}
+export const BoundProcessSchema = Schema.Struct({
+  sessionId: Schema.String,
+  process: Schema.Number,
+})
 
-export type BusEvent = Fact | Signal
+export type BoundProcess = typeof BoundProcessSchema.Type
 
-export const TerminalState = { type: "terminal.state" } as const
-export const TerminalExited = { type: "terminal.exited" } as const
-export const RuntimeReset = { type: "runtime.reset" } as const
+export const TerminalState = Event.ephemeral({
+  type: "terminal.state",
+  schema: {
+    runtime: Schema.String,
+    terminal: TerminalTarget,
+    state: AgentStateSchema,
+    processes: Schema.Array(BoundProcessSchema),
+  },
+})
+
+export const TerminalExited = Event.ephemeral({
+  type: "terminal.exited",
+  schema: {
+    runtime: Schema.String,
+    terminal: TerminalTarget,
+    processes: Schema.Array(BoundProcessSchema),
+  },
+})
+
+export const TerminalSeen = Event.ephemeral({
+  type: "terminal.seen",
+  schema: {
+    runtime: Schema.String,
+    terminal: TerminalTarget,
+  },
+})
+
+export const RuntimeReset = Event.ephemeral({
+  type: "runtime.reset",
+  schema: {
+    runtime: Schema.String,
+  },
+})
+
+export const DrainReleased = Event.ephemeral({
+  type: "drain.released",
+  schema: {},
+})
+
+export const SessionChanged = Event.ephemeral({
+  type: "session.changed",
+  schema: {
+    sessionId: Schema.String,
+  },
+})
+
+export const ProjectChanged = Event.ephemeral({
+  type: "project.changed",
+  schema: {
+    projectId: Schema.String,
+  },
+})
+
+export const EphemeralDefinitions = Event.inventory(
+  TerminalState,
+  TerminalExited,
+  TerminalSeen,
+  RuntimeReset,
+  DrainReleased,
+  SessionChanged,
+  ProjectChanged,
+)
+
+export type AnyEphemeralDefinition = (typeof EphemeralDefinitions)[number]
+
+export type EphemeralEvent = {
+  readonly [D in AnyEphemeralDefinition as D["type"]]: Event.Payload<D>
+}[AnyEphemeralDefinition["type"]]
+
+export type BusEvent = DurableEvent | EphemeralEvent
+
+export type Definition = AnyDurableDefinition
+
+export type AnyBusDefinition = AnyDurableDefinition | AnyEphemeralDefinition
 
 type EventOf<T extends BusEvent["type"]> = Extract<BusEvent, { readonly type: T }>
 
@@ -68,15 +125,12 @@ export interface Subscribe {
   ): Effect.Effect<PubSub.Subscription<EventOf<T>>, never, Scope.Scope>
 }
 
-export type Definition = (typeof Catalog)[FactType]
+export type Projector<D extends Definition> = (
+  event: DurableEventOf<D["type"]>,
+) => Effect.Effect<unknown, SqlError.SqlError>
 
-export type Projector<D extends Definition> = (fact: FactOf<D["type"]>) => Effect.Effect<unknown, SqlError.SqlError>
-
-export interface PublishInput<D extends Definition> {
-  readonly sessionId?: string
-  readonly projectId?: string
+export interface PublishOptions {
   readonly at?: number
-  readonly data: D["data"]["Type"]
 }
 
 interface TransactionBuffer {
@@ -90,40 +144,34 @@ const Buffer = Context.Reference<TransactionBuffer | undefined>("vibest/BusBuffe
 
 const REPLAY_PAGE = 1000
 
-type Logged = Row & { readonly position: number }
+type Logged = StoredRow & { readonly position: number }
 
 const readLog = (sql: SqlClient.SqlClient, after: number) =>
-  sql<Logged>`SELECT position, aggregate, seq, at, type, data
+  sql<Logged>`SELECT position, id, aggregate_id, seq, created, type, data
     FROM event WHERE position > ${after} ORDER BY position LIMIT ${REPLAY_PAGE}`
 
 type Cursor = { readonly aggregate: string; readonly after: number } | { readonly log: number }
 
-type Step = readonly [ReadonlyArray<Row>, Cursor]
+type Step = readonly [ReadonlyArray<DurableEvent>, Cursor]
 
 const readPage = (sql: SqlClient.SqlClient, cursor: Cursor, until: number | undefined) =>
   "aggregate" in cursor
-    ? sql<Logged>`SELECT position, aggregate, seq, at, type, data
-        FROM event WHERE aggregate = ${cursor.aggregate} AND seq > ${cursor.after} AND seq <= ${until ?? Number.MAX_SAFE_INTEGER}
+    ? sql<Logged>`SELECT position, id, aggregate_id, seq, created, type, data
+        FROM event WHERE aggregate_id = ${cursor.aggregate} AND seq > ${cursor.after} AND seq <= ${until ?? Number.MAX_SAFE_INTEGER}
         ORDER BY seq LIMIT ${REPLAY_PAGE}`
-    : sql<Logged>`SELECT position, aggregate, seq, at, type, data
+    : sql<Logged>`SELECT position, id, aggregate_id, seq, created, type, data
         FROM event WHERE position > ${cursor.log} AND position <= ${until ?? Number.MAX_SAFE_INTEGER}
         ORDER BY position LIMIT ${REPLAY_PAGE}`
 
 const watermark = (sql: SqlClient.SqlClient, cursor: Cursor) => {
   const latest: Effect.Effect<ReadonlyArray<{ latest: number }>, SqlError.SqlError> = "aggregate" in cursor
-    ? sql<{ latest: number }>`SELECT coalesce(max(seq), 0) AS latest FROM event WHERE aggregate = ${cursor.aggregate}`
+    ? sql<{
+        latest: number
+      }>`SELECT coalesce(max(seq), 0) AS latest FROM event WHERE aggregate_id = ${cursor.aggregate}`
     : sql<{ latest: number }>`SELECT coalesce(max(position), 0) AS latest FROM event`
 
   return latest.pipe(Effect.map((rows) => rows[0]!.latest))
 }
-
-const publicRow = (row: Row): Row => ({
-  aggregate: row.aggregate,
-  seq: row.seq,
-  at: row.at,
-  type: row.type,
-  data: row.data,
-})
 
 const advance = (cursor: Cursor, page: ReadonlyArray<Logged>): Cursor => {
   const last = page[page.length - 1]!
@@ -131,19 +179,19 @@ const advance = (cursor: Cursor, page: ReadonlyArray<Logged>): Cursor => {
   return "aggregate" in cursor ? { aggregate: cursor.aggregate, after: last.seq } : { log: last.position }
 }
 
-const followFacts = (
+const followEvents = (
   sql: SqlClient.SqlClient,
   wake: Effect.Effect<void>,
   start: Cursor,
   follow: boolean,
-): Stream.Stream<Row, SqlError.SqlError> =>
+): Stream.Stream<DurableEvent, SqlError.SqlError | InvalidDurableEvent> =>
   Stream.unwrap(
     Effect.map(follow ? Effect.undefined : watermark(sql, start), (until) =>
       Stream.unfold(start, (cursor) =>
         readPage(sql, cursor, until).pipe(
           Effect.flatMap((page) =>
             page.length > 0
-              ? Effect.succeed<Step>([page.map(publicRow), advance(cursor, page)])
+              ? Effect.forEach(page, decodeRow).pipe(Effect.map((decoded): Step => [decoded, advance(cursor, page)]))
               : follow
                 ? wake.pipe(Effect.andThen(Effect.succeed<Step>([[], cursor])))
                 : Effect.undefined,
@@ -156,55 +204,72 @@ const followFacts = (
 const dropProjection = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const objects = yield* sql<{ type: string; name: string }>`SELECT type, name FROM sqlite_schema
-      WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' AND name NOT IN ('event', 'meta', ${MIGRATION_TABLE})
+      WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'
+        AND name NOT IN ('event', 'event_sequence', 'kv', ${MIGRATION_TABLE})
       ORDER BY type = 'index'`
 
     for (const object of objects)
       yield* sql.unsafe(`DROP ${object.type === "table" ? "TABLE" : "INDEX"} IF EXISTS "${object.name}"`)
   })
 
+const aggregateIdOf = (definition: AnyDurableDefinition, data: Event.Data<AnyBusDefinition>) => {
+  if (Predicate.isObject(data)) {
+    const value = Object.entries(data).find(([key]) => key === definition.durable.aggregate)?.[1]
+
+    if (Predicate.isString(value) && value.length > 0) return Effect.succeed(value)
+  }
+
+  return Effect.die(
+    new InvalidDurableEvent({
+      type: definition.type,
+      message: `${definition.type} is missing string aggregate field ${definition.durable.aggregate}`,
+    }),
+  )
+}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const pubsub = yield* PubSub.unbounded<BusEvent>()
   const typed = new Map<string, Set<PubSub.PubSub<BusEvent>>>()
-  const projectors = new Map<string, (fact: Fact) => ReturnType<Projector<Definition>>>()
+  const projectors = new Map<string, (event: DurableEvent) => ReturnType<Projector<Definition>>>()
 
   const project = Effect.fn("Bus.project")(<D extends Definition>(definition: D, projector: Projector<D>) =>
     Effect.sync(
       () =>
-        void projectors.set(definition.type, (fact) =>
-          isFactOf<D["type"]>(definition.type, fact)
-            ? projector(fact)
-            : Effect.die(new Error(`${fact.type} reached the ${definition.type} projector`)),
+        void projectors.set(Event.versionedType(definition.type, definition.durable.version), (event) =>
+          isDurableEventOf<D["type"]>(definition.type, event)
+            ? projector(event)
+            : Effect.die(new Error(`${event.type} reached the ${definition.type} projector`)),
         ),
     ),
   )
 
-  const projectFact = (fact: Fact): Effect.Effect<unknown, SqlError.SqlError | UnknownFact> => {
-    const projector = projectors.get(fact.type)
+  const projectEvent = (event: DurableEvent): Effect.Effect<unknown, SqlError.SqlError | InvalidDurableEvent> => {
+    const key = Event.versionedType(event.type, event.durable.version)
+    const projector = projectors.get(key)
 
     return projector === undefined
       ? Effect.fail(
-          new UnknownFact({
-            aggregate: fact.aggregate,
-            seq: fact.seq,
-            type: fact.type,
-            message: `event ${fact.aggregate} ${fact.seq}: ${fact.type} has no projector`,
+          new InvalidDurableEvent({
+            aggregateId: event.durable.aggregateId,
+            seq: event.durable.seq,
+            type: key,
+            message: `event ${event.durable.aggregateId} ${event.durable.seq}: ${key} has no projector`,
           }),
         )
-      : projector(fact)
+      : projector(event)
   }
 
-  const replayFact = (fact: Fact): Effect.Effect<void, UnknownFact> =>
-    Effect.asVoid(projectFact(fact)).pipe(
+  const replayEvent = (event: DurableEvent): Effect.Effect<void, InvalidDurableEvent> =>
+    Effect.asVoid(projectEvent(event)).pipe(
       Effect.mapError((error) =>
-        error instanceof UnknownFact
+        error instanceof InvalidDurableEvent
           ? error
-          : new UnknownFact({
-              aggregate: fact.aggregate,
-              seq: fact.seq,
-              type: fact.type,
-              message: `event ${fact.aggregate} ${fact.seq}: ${fact.type} cannot be projected: ${error.message}`,
+          : new InvalidDurableEvent({
+              aggregateId: event.durable.aggregateId,
+              seq: event.durable.seq,
+              type: Event.versionedType(event.type, event.durable.version),
+              message: `event ${event.durable.aggregateId} ${event.durable.seq}: ${event.type} cannot be projected: ${error.message}`,
             }),
       ),
     )
@@ -290,66 +355,72 @@ const make = Effect.gen(function* () {
     )
   })
 
-  let ledger: string | undefined
-
-  const ledgerId = Effect.gen(function* () {
-    ledger ??= yield* ledgerOf(sql)
-
-    if (ledger === undefined) return yield* Effect.die(new Error("the database has no ledger id"))
-
-    return ledger
-  })
-
-  const aggregateOf = (definition: Definition, input: PublishInput<Definition>) =>
+  const writeDurable = (aggregateId: string, created: number, versionedType: string, data: string) =>
     Effect.gen(function* () {
-      const { sessionId, projectId } = input
+      const [sequence] = yield* sql<{ seq: number }>`INSERT INTO event_sequence (aggregate_id, seq)
+        VALUES (${aggregateId}, 1)
+        ON CONFLICT(aggregate_id) DO UPDATE SET seq = seq + 1
+        RETURNING seq`
 
-      if (definition.aggregate === "session" && sessionId !== undefined && projectId === undefined) return sessionId
+      const id = Event.createId(created)
+      const seq = sequence!.seq
+      yield* sql`INSERT INTO event (id, aggregate_id, seq, created, type, data)
+        VALUES (${id}, ${aggregateId}, ${seq}, ${created}, ${versionedType}, ${data})`
 
-      if (definition.aggregate === "project" && projectId !== undefined && sessionId === undefined) return projectId
+      const event = yield* decodeRow({ id, aggregateId, seq, created, type: versionedType, data })
+      yield* projectEvent(event)
 
-      if (definition.aggregate === "ledger" && sessionId === undefined && projectId === undefined)
-        return yield* ledgerId
-
-      return yield* Effect.die(new Error(`${definition.type} belongs to a ${definition.aggregate} aggregate`))
+      return event
     })
 
-  const write = (aggregate: string, at: number, type: FactType, data: string) =>
-    Effect.gen(function* () {
-      const [row] = yield* sql<{ seq: number }>`INSERT INTO event (aggregate, seq, at, type, data)
-        VALUES (${aggregate}, (SELECT coalesce(max(seq), 0) + 1 FROM event WHERE aggregate = ${aggregate}), ${at},
-          ${type}, ${data}) RETURNING seq`
+  function publish<D extends AnyBusDefinition>(
+    definition: D,
+    data: Event.Data<D>,
+    options?: PublishOptions,
+  ): Effect.Effect<Event.Payload<D>>
+  function publish(
+    definition: AnyBusDefinition,
+    data: Event.Data<AnyBusDefinition>,
+    options?: PublishOptions,
+  ): Effect.Effect<BusEvent> {
+    if (definition.durability === "ephemeral") {
+      return Effect.gen(function* () {
+        const created = options?.at ?? (yield* Clock.currentTimeMillis)
+        const id = Event.createId(created)
 
-      const fact = yield* decodeRow({ aggregate, seq: row!.seq, at, type, data })
-      yield* projectFact(fact)
+        const event = yield* Schema.decodeUnknownEffect(definition)({
+          id,
+          type: definition.type,
+          created,
+          data,
+        }).pipe(Effect.orDie)
 
-      return fact
-    })
+        const buffer = yield* Buffer
 
-  const publish = Effect.fn("Bus.publish")(function* <D extends Definition>(definition: D, input: PublishInput<D>) {
-    return yield* transaction(
+        if (buffer !== undefined && !buffer.closed) buffer.events.push(event)
+        else yield* deliver([event])
+
+        return event
+      }).pipe(Effect.withSpan("Bus.publish"))
+    }
+
+    return transaction(
       Effect.gen(function* () {
         const buffer = yield* Buffer
 
         if (buffer === undefined || buffer.closed || (yield* Effect.fiberId) !== buffer.fiberId)
           return yield* Effect.die(new Error("publish not from the transaction fiber"))
-        const aggregate = yield* aggregateOf(definition, input)
-        const at = input.at ?? (yield* Clock.currentTimeMillis)
-        const data = yield* encodeData(definition, input.data).pipe(Effect.orDie)
-        const fact = yield* write(aggregate, at, definition.type, data).pipe(Effect.orDie)
-        buffer.events.push(fact)
+        const aggregateId = yield* aggregateIdOf(definition, data)
+        const created = options?.at ?? (yield* Clock.currentTimeMillis)
+        const encoded = yield* encodeData(definition, data).pipe(Effect.orDie)
+        const versioned = Event.versionedType(definition.type, definition.durable.version)
+        const event = yield* writeDurable(aggregateId, created, versioned, encoded).pipe(Effect.orDie)
+        buffer.events.push(event)
 
-        return fact.seq
+        return event
       }),
-    )
-  })
-
-  const observe = Effect.fn("Bus.observe")(function* (signal: Signal) {
-    const buffer = yield* Buffer
-
-    if (buffer !== undefined && !buffer.closed) buffer.events.push(signal)
-    else yield* deliver([signal])
-  })
+    ).pipe(Effect.orDie, Effect.withSpan("Bus.publish"))
+  }
 
   const afterCommit = Effect.fn("Bus.afterCommit")(function* (apply: () => void) {
     const buffer = yield* Buffer
@@ -366,30 +437,30 @@ const make = Effect.gen(function* () {
     const start: Cursor =
       input.aggregate === undefined ? { log: 0 } : { aggregate: input.aggregate, after: input.after ?? 0 }
 
-    if (!input.follow) return followFacts(sql, Effect.void, start, false).pipe(Stream.orDie)
+    if (!input.follow) return followEvents(sql, Effect.void, start, false).pipe(Stream.orDie)
 
     return Stream.unwrap(
       Effect.gen(function* () {
         const wake = yield* Queue.sliding<void>(1)
-        yield* Stream.fromSubscription(yield* subscribe(Object.values(Catalog))).pipe(
+        yield* Stream.fromSubscription(yield* subscribe(AllDurableDefinitions)).pipe(
           Stream.runForEach((event) =>
-            input.aggregate === undefined || event.aggregate === input.aggregate
+            input.aggregate === undefined || event.durable.aggregateId === input.aggregate
               ? Queue.offer(wake, undefined)
               : Effect.void,
           ),
           Effect.forkScoped,
         )
 
-        return followFacts(sql, Queue.take(wake), start, true).pipe(Stream.orDie)
+        return followEvents(sql, Queue.take(wake), start, true).pipe(Stream.orDie)
       }),
     )
   }
 
-  const replayFrom = (after: number): Effect.Effect<void, SqlError.SqlError | UnknownFact> =>
+  const replayFrom = (after: number): Effect.Effect<void, SqlError.SqlError | InvalidDurableEvent> =>
     readLog(sql, after).pipe(
       Effect.flatMap((rows) =>
         Effect.gen(function* () {
-          for (const row of rows) yield* replayFact(yield* decodeRow(row))
+          for (const row of rows) yield* replayEvent(yield* decodeRow(row))
 
           if (rows.length === REPLAY_PAGE) yield* replayFrom(rows[rows.length - 1]!.position)
         }),
@@ -402,11 +473,10 @@ const make = Effect.gen(function* () {
 
       for (const statement of PROJECTION_SCHEMA) yield* sql.unsafe(statement)
       yield* replayFrom(0)
-      yield* setMeta(sql, "projection", PROJECTION_VERSION)
     }),
   )
 
-  return { observe, subscribe, publish, transaction, afterCommit, log, project, rebuild }
+  return { subscribe, publish, transaction, afterCommit, log, project, rebuild }
 })
 
 export type Interface = Effect.Success<typeof make>
@@ -431,13 +501,28 @@ const copyLog = (
     Effect.flatMap((rows) =>
       Effect.gen(function* () {
         for (const row of rows)
-          yield* to`INSERT INTO event (position, aggregate, seq, at, type, data)
-            VALUES (${row.position}, ${row.aggregate}, ${row.seq}, ${row.at}, ${row.type}, ${row.data})`
+          yield* to`INSERT INTO event (position, id, aggregate_id, seq, created, type, data)
+            VALUES (${row.position}, ${row.id}, ${row.aggregateId}, ${row.seq}, ${row.created}, ${row.type}, ${row.data})`
 
         if (rows.length === REPLAY_PAGE) yield* copyLog(from, to, rows[rows.length - 1]!.position)
       }),
     ),
   )
+
+const copySequences = (from: SqlClient.SqlClient, to: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    const rows = yield* from<{ aggregateId: string; seq: number }>`SELECT aggregate_id, seq FROM event_sequence`
+
+    for (const row of rows)
+      yield* to`INSERT INTO event_sequence (aggregate_id, seq) VALUES (${row.aggregateId}, ${row.seq})`
+  })
+
+const copyKv = (from: SqlClient.SqlClient, to: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    const rows = yield* from<{ key: string; value: string }>`SELECT key, value FROM kv`
+
+    for (const row of rows) yield* to`INSERT INTO kv (key, value) VALUES (${row.key}, ${row.value})`
+  })
 
 const firstDifference = (
   table: string,
@@ -459,6 +544,8 @@ export const copyWholeLog = (stored: SqlClient.SqlClient, scratch: SqlClient.Sql
   scratch.withTransaction(
     Effect.gen(function* () {
       for (const statement of LOG_SCHEMA) yield* scratch.unsafe(statement)
+      yield* copyKv(stored, scratch)
+      yield* copySequences(stored, scratch)
       yield* copyLog(stored, scratch, 0)
     }),
   )
@@ -494,15 +581,6 @@ export class ReplayDiffers extends Schema.TaggedError<ReplayDiffers>()("ReplayDi
 
 export const checkReplay = (stored: SqlClient.SqlClient) =>
   Effect.gen(function* () {
-    const [projection] = yield* stored<{ value: string }>`SELECT value FROM meta WHERE key = 'projection'`
-
-    if (Number(projection?.value) !== PROJECTION_VERSION) {
-      const scratch = yield* SqlClient.SqlClient
-      yield* copyWholeLog(stored, scratch)
-
-      return yield* (yield* Service).rebuild
-    }
-
     const difference = yield* equalToReplay(stored)
 
     if (difference !== undefined)
@@ -546,23 +624,34 @@ export const withChanges = (events: ReadonlyArray<BusEvent>): ReadonlyArray<BusE
   const projects = new Set<string>()
 
   for (const event of events) {
-    if (event.type === "session.changed") sessions.add(event.sessionId)
-    else if (event.type === "project.changed") projects.add(event.projectId)
+    if (event.type === "session.changed") sessions.add(event.data.sessionId)
+    else if (event.type === "project.changed") projects.add(event.data.projectId)
   }
 
   const changes: Array<BusEvent> = []
 
   for (const event of events) {
-    if (!("seq" in event)) continue
+    if (!("durable" in event)) continue
 
-    if (event.sessionId !== undefined && !sessions.has(event.sessionId)) {
-      sessions.add(event.sessionId)
-      changes.push({ type: "session.changed", sessionId: event.sessionId })
-    }
-
-    if (event.projectId !== undefined && !projects.has(event.projectId)) {
-      projects.add(event.projectId)
-      changes.push({ type: "project.changed", projectId: event.projectId })
+    if (
+      (event.type.startsWith("session.") || event.type.startsWith("process.")) &&
+      !sessions.has(event.durable.aggregateId)
+    ) {
+      sessions.add(event.durable.aggregateId)
+      changes.push({
+        id: Event.createId(event.created),
+        type: "session.changed",
+        created: event.created,
+        data: { sessionId: event.durable.aggregateId },
+      })
+    } else if (event.type.startsWith("project.") && !projects.has(event.durable.aggregateId)) {
+      projects.add(event.durable.aggregateId)
+      changes.push({
+        id: Event.createId(event.created),
+        type: "project.changed",
+        created: event.created,
+        data: { projectId: event.durable.aggregateId },
+      })
     }
   }
 

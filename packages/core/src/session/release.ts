@@ -67,7 +67,7 @@ export const stopAgent = (
               gone.pipe(Effect.map((yes) => (yes ? Option.some(true) : Option.none()))),
               (event) =>
                 Effect.succeed(
-                  event.type === "terminal.exited" && canonicalTarget(event.terminal) === canonicalTarget(terminal)
+                  event.type === "terminal.exited" && canonicalTarget(event.data.terminal) === canonicalTarget(terminal)
                     ? Option.some(true)
                     : Option.none(),
                 ),

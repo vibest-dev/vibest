@@ -163,7 +163,7 @@ export const ledgerSnapshot = (home: string) => {
 
   try {
     const facts = (
-      db.query("SELECT aggregate, seq, at, type, data FROM event ORDER BY position").all() as Array<{
+      db.query("SELECT id, aggregate_id, seq, created, type, data FROM event ORDER BY position").all() as Array<{
         data: string
       }>
     ).map((fact) => ({ ...fact, data: JSON.parse(fact.data) as unknown }))

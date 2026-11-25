@@ -426,14 +426,14 @@ const checks: ReadonlyArray<Check> = [
 
         const started = s.bDb<{ remote: string | null; facts: string }>(
           `SELECT origin_remote AS remote, (SELECT group_concat(type, ' ') FROM
-            (SELECT type FROM event WHERE aggregate = session.id ORDER BY seq)) AS facts
+            (SELECT type FROM event WHERE aggregate_id = session.id ORDER BY seq)) AS facts
           FROM session WHERE id LIKE ?`,
           `${id8}%`,
         )
 
         expect(
           started?.remote === a.id &&
-            /inbox\.enqueued session\.created .*process\.started .*execution\.allocated .*execution\.started .*execution\.succeeded .*session\.archived/.test(
+            /inbox\.enqueued\.1 session\.created\.1 .*process\.started\.1 .*execution\.allocated\.1 .*execution\.started\.1 .*execution\.succeeded\.1 .*session\.archived\.1/.test(
               started.facts,
             ),
           `B's session started for A: ${JSON.stringify(started)}`,
@@ -441,8 +441,8 @@ const checks: ReadonlyArray<Check> = [
 
         const outbox = () =>
           s!.bDb<{ queued: number; acked: number }>(
-            `SELECT count(*) FILTER (WHERE type = 'remote.outbox.queued') AS queued,
-              count(*) FILTER (WHERE type = 'remote.outbox.acked') AS acked FROM event`,
+            `SELECT count(*) FILTER (WHERE type = 'remote.outbox.queued.1') AS queued,
+              count(*) FILTER (WHERE type = 'remote.outbox.acked.1') AS acked FROM event`,
           )
 
         await until("B's outbox items all acked", () => {
@@ -536,7 +536,7 @@ const checks: ReadonlyArray<Check> = [
           120_000,
         )
         await Bun.sleep(3_000)
-        const queued = s.bDb<{ n: number }>("SELECT count(*) AS n FROM event WHERE type = 'remote.outbox.queued'")?.n
+        const queued = s.bDb<{ n: number }>("SELECT count(*) AS n FROM event WHERE type = 'remote.outbox.queued.1'")?.n
         expect(queued === 0, `${queued} remote.outbox.queued facts on B`)
         expect(s.notices(id8, "quietone") === 0, "A got a notice for an execution end")
 

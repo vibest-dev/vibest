@@ -1,19 +1,18 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
-import { checkLedger, open } from "@vibest/core/database/migration"
 import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
-import { projectOf, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
-import { database, session } from "@vibest/platform-bun/test/lib/unit-helpers"
-import { Catalog, CATALOG_VERSION } from "@vibest/schema/event"
-import { Effect, Exit, FileSystem, Layer, Path } from "effect"
+import { projectOf } from "@vibest/platform-bun/test/lib/fakes"
+import { session } from "@vibest/platform-bun/test/lib/unit-helpers"
+import { MachineEvent } from "@vibest/schema/machine-event"
+import { SessionEvent } from "@vibest/schema/session-event"
+import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
 const S = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-const MIGRATION = "20261122000000_execution_lifecycle"
 
 const memoryDb = () =>
   Db.layer.pipe(
@@ -40,71 +39,6 @@ const harnessEnd = (status: "completed" | "failed" | "interrupted", at: number, 
   conversation: undefined,
   needsReady: false,
   ...(execution !== undefined && { execution }),
-})
-
-const P = "11111111-1111-4111-8111-111111111111"
-const E = "22222222-2222-4222-8222-222222222222"
-const PEER = "55555555-5555-4555-8555-555555555555"
-
-type Fact = readonly [aggregate: string, seq: number, type: string, data: object]
-
-const oldFacts = (ledger: string): ReadonlyArray<Fact> => [
-  [P, 1, "project.created", { directory: "/p", repositories: [] }],
-  [S, 1, "session.created", { project: P, agent: "general", name: "s", directory: "/p/s" }],
-  [S, 2, "process.started", { harness: "pi", runtime: "herdr" }],
-  [S, 3, "execution.started", { process: 2, typed: "typed line" }],
-  [S, 4, "execution.accepted", { execution: 3 }],
-  [S, 5, "execution.ended", { execution: 3, outcome: "completed", reply: "done", conversation: "conv-1" }],
-  [S, 6, "execution.started", {}],
-  [S, 7, "execution.ended", { execution: 6, outcome: "lost", failure: { message: "gone" } }],
-  [S, 8, "execution.started", {}],
-  [S, 9, "execution.ended", { execution: 8, outcome: "not_started" }],
-  [E, 1, "session.created", { project: P, agent: "coordinator", name: "entry", directory: "/p" }],
-  [
-    E,
-    2,
-    "inbox.queued",
-    {
-      kind: "send",
-      sender: { type: "agent", session: S },
-      content: "hi",
-      status: "pending",
-      execution: 3,
-    },
-  ],
-  [
-    ledger,
-    1,
-    "outbox.queued",
-    {
-      id: "66666666-6666-4666-8666-666666666661",
-      remote: PEER,
-      session: S,
-      kind: "send",
-      content: "remote",
-      execution: 3,
-    },
-  ],
-]
-
-const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
-
-const oldLedger = Effect.gen(function* () {
-  const path = yield* Path.Path
-  const file = path.join(yield* tempDirectory("vibest-execution-life-"), "vibest.db")
-  yield* Effect.void.pipe(Effect.provide(database(file)))
-  yield* Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const [ledger] = yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`
-    yield* sql`DELETE FROM migration WHERE id >= '20261121000000_inbox_v1'`
-    yield* sql`UPDATE meta SET value = '5' WHERE key = 'catalog'`
-
-    for (const [aggregate, seq, type, data] of oldFacts(ledger!.value))
-      yield* sql`INSERT INTO event (aggregate, seq, at, type, data)
-        VALUES (${aggregate}, ${seq}, ${seq}, ${type}, ${JSON.stringify(data)})`
-  }).pipe(Effect.provide(Platform.sqlite(file)))
-
-  return file
 })
 
 describe("execution lifecycle", () => {
@@ -162,7 +96,8 @@ describe("execution lifecycle", () => {
         "lost",
       )
       assert.strictEqual(
-        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'session.execution.interrupted'`)[0]?.n,
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'session.execution.interrupted.1'`)[0]
+          ?.n,
         0,
       )
     }).pipe(Effect.provide(memoryDb())),
@@ -187,16 +122,8 @@ describe("execution lifecycle", () => {
         const bus = yield* Bus.Service
         yield* bus.transaction(
           Effect.gen(function* () {
-            yield* bus.publish(Catalog["session.execution.allocated"], {
-              sessionId: S,
-              at: 40,
-              data: { executionId: successor },
-            })
-            yield* bus.publish(Catalog["session.execution.started"], {
-              sessionId: S,
-              at: 41,
-              data: { executionId: successor },
-            })
+            yield* bus.publish(SessionEvent.ExecutionAllocated, { sessionId: S, executionId: successor }, { at: 40 })
+            yield* bus.publish(SessionEvent.ExecutionStarted, { sessionId: S, executionId: successor }, { at: 41 })
           }),
         )
         assert.isUndefined(yield* db.session.endObserved(S, harnessEnd("completed", 50, "late")))
@@ -226,7 +153,8 @@ describe("execution lifecycle", () => {
         assert.strictEqual(
           (yield* sql<{
             n: number
-          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'session.execution.succeeded'`)[0]?.n,
+          }>`SELECT count(*) AS n FROM event WHERE aggregate_id = ${S} AND type = 'session.execution.succeeded.1'`)[0]
+            ?.n,
           2,
         )
       }).pipe(Effect.provide(memoryDb())),
@@ -243,36 +171,38 @@ describe("execution lifecycle", () => {
       assert.strictEqual(
         (yield* sql<{
           n: number
-        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'session.execution.succeeded'`)[0]?.n,
+        }>`SELECT count(*) AS n FROM event WHERE aggregate_id = ${S} AND type = 'session.execution.succeeded.1'`)[0]?.n,
         1,
       )
 
       const again = (yield* db.session.startExecution(S, 8)).execution
       const bus = yield* Bus.Service
       yield* bus.transaction(
-        bus.publish(Catalog["remote.outbox.queued"], {
-          at: 9,
-          data: {
+        bus.publish(
+          MachineEvent.OutboxQueued,
+          {
             id: "66666666-6666-4666-8666-666666666661",
-            remote: "55555555-5555-4555-8555-555555555555",
+            remoteId: "55555555-5555-4555-8555-555555555555",
             session: S,
             kind: "send",
             content: "remote",
             execution: again,
           },
-        }),
+          { at: 9 },
+        ),
       )
       assert.strictEqual(yield* db.inbox.sentIn(S, again), 1)
       yield* bus.transaction(
-        bus.publish(Catalog["remote.outbox.queued"], {
-          at: 10,
-          data: {
+        bus.publish(
+          MachineEvent.OutboxQueued,
+          {
             id: "66666666-6666-4666-8666-666666666662",
-            remote: "55555555-5555-4555-8555-555555555555",
+            remoteId: "55555555-5555-4555-8555-555555555555",
             session: S,
             content: "a notice",
           },
-        }),
+          { at: 10 },
+        ),
       )
       assert.strictEqual(yield* db.inbox.sentIn(S, again), 1)
       yield* db.session.archive(S)
@@ -304,7 +234,7 @@ describe("execution lifecycle", () => {
       assert.strictEqual(
         (yield* sql<{
           n: number
-        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'session.execution.succeeded'`)[0]?.n,
+        }>`SELECT count(*) AS n FROM event WHERE aggregate_id = ${S} AND type = 'session.execution.succeeded.1'`)[0]?.n,
         0,
       )
       assert.deepStrictEqual(
@@ -319,7 +249,7 @@ describe("execution lifecycle", () => {
       assert.strictEqual(
         (yield* sql<{
           n: number
-        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND data LIKE ${"%second typed%"}`)[0]?.n,
+        }>`SELECT count(*) AS n FROM event WHERE aggregate_id = ${S} AND data LIKE ${"%second typed%"}`)[0]?.n,
         1,
       )
       assert.notStrictEqual(
@@ -347,7 +277,8 @@ describe("execution lifecycle", () => {
         assert.strictEqual(
           (yield* sql<{
             n: number
-          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S} AND type = 'session.execution.succeeded'`)[0]?.n,
+          }>`SELECT count(*) AS n FROM event WHERE aggregate_id = ${S} AND type = 'session.execution.succeeded.1'`)[0]
+            ?.n,
           0,
         )
 
@@ -403,138 +334,13 @@ describe("execution lifecycle", () => {
 
         const eventsBeforeReplay = (yield* sql<{
           n: number
-        }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S}`)[0]?.n
+        }>`SELECT count(*) AS n FROM event WHERE aggregate_id = ${S}`)[0]?.n
 
         assert.strictEqual(yield* db.session.endObserved(S, harnessEnd("completed", 14, "sole reply")), "completed")
         assert.strictEqual(
-          (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate = ${S}`)[0]?.n,
+          (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate_id = ${S}`)[0]?.n,
           eventsBeforeReplay,
         )
       }).pipe(Effect.provide(memoryDb())),
-  )
-
-  it.effect("a trailing accepted fact is dropped by clean_event_catalog and the next append continues densely", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path
-      const file = path.join(yield* tempDirectory("vibest-execution-accepted-"), "vibest.db")
-      yield* Effect.void.pipe(Effect.provide(database(file)))
-      const accepted = 5
-      yield* Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        yield* sql`DELETE FROM migration WHERE id >= '20261121000000_inbox_v1'`
-        yield* sql`UPDATE meta SET value = '5' WHERE key = 'catalog'`
-
-        const facts = [
-          [P, 1, "project.created", { directory: "/p", repositories: [] }],
-          [S, 1, "session.created", { project: P, agent: "general", name: "s", directory: "/p/s" }],
-          [S, 2, "process.started", { harness: "pi", runtime: "herdr" }],
-          [S, 3, "execution.started", { process: 2 }],
-          [S, accepted, "execution.accepted", { execution: 3 }],
-        ] as const
-
-        for (const [aggregate, seq, type, data] of facts)
-          yield* sql`INSERT INTO event (aggregate, seq, at, type, data)
-            VALUES (${aggregate}, ${seq}, ${seq}, ${type}, ${JSON.stringify(data)})`
-      }).pipe(Effect.provide(Platform.sqlite(file)))
-
-      yield* Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const bus = yield* Bus.Service
-
-        const acceptedRows = yield* sql<{ seq: number }>`SELECT seq FROM event
-          WHERE aggregate = ${S} AND type = 'execution.accepted'`
-
-        assert.deepStrictEqual(acceptedRows, [])
-        yield* bus.transaction(
-          bus.publish(Catalog["session.renamed"], { sessionId: S, at: 9, data: { name: "later" } }),
-        )
-        const [next] = yield* sql<{ seq: number }>`SELECT max(seq) AS seq FROM event WHERE aggregate = ${S}`
-        assert.strictEqual(next?.seq, 4)
-      }).pipe(
-        Effect.provide(
-          Db.layer.pipe(
-            Layer.provide(Projectors.layer),
-            Layer.provideMerge(Bus.layer),
-            Layer.provide(SessionLive.layer),
-            Layer.provideMerge(Platform.sqlite(file)),
-          ),
-        ),
-      )
-    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-  )
-
-  it.effect(
-    "an old log keeps execution ids, does not turn lost or not_started into failures, and keeps send counts",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const file = yield* oldLedger
-        const before = yield* fs.readFile(file)
-
-        const stored = yield* Layer.build(Platform.sqlite(file)).pipe(
-          Effect.flatMap((context) => SqlClient.SqlClient.pipe(Effect.provide(context))),
-        )
-
-        const checked = yield* Effect.exit(
-          checkLedger(stored).pipe(
-            Effect.provide(Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))),
-          ),
-        )
-
-        assert.isTrue(Exit.isSuccess(checked), String(checked))
-        assert.deepStrictEqual(yield* fs.readFile(file), before)
-
-        yield* open().pipe(Effect.provide(runner(file)))
-
-        const read = <A extends object>(query: string) =>
-          Effect.flatMap(SqlClient.SqlClient, (sql) => sql.unsafe<A>(query)).pipe(Effect.provide(Platform.sqlite(file)))
-
-        assert.deepStrictEqual(
-          yield* read(
-            "SELECT id, outcome, typed, started_at AS started FROM execution WHERE session_id = '" +
-              S +
-              "' ORDER BY id",
-          ),
-          [
-            { id: 3, outcome: "completed", typed: "typed line", started: null },
-            { id: 6, outcome: "lost", typed: null, started: null },
-            { id: 8, outcome: "not_started", typed: null, started: null },
-          ],
-        )
-
-        const sent = yield* read<{ sent: number }>(
-          `SELECT (SELECT count(*) FROM inbox m WHERE m.sender_type = 'agent' AND m.sender_machine IS NULL AND m.sender_session_id = '${S}' AND m.sender_execution_id = 3 AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)) + (SELECT count(*) FROM outbox WHERE session_id = '${S}' AND kind = 'send' AND execution_id = 3) AS sent`,
-        )
-
-        assert.strictEqual(sent[0]?.sent, 2)
-
-        const names = yield* read<{ type: string }>(
-          "SELECT type FROM event WHERE type LIKE 'session.execution.%' ORDER BY position",
-        )
-
-        assert.deepStrictEqual(
-          names.map((row) => row.type),
-          [
-            "session.execution.allocated",
-            "session.execution.succeeded",
-            "session.execution.allocated",
-            "session.execution.unresolved",
-            "session.execution.allocated",
-            "session.execution.unresolved",
-          ],
-        )
-
-        const catalog = yield* read<{ catalog: string; applied: number }>(
-          `SELECT (SELECT value FROM meta WHERE key = 'catalog') AS catalog, (SELECT count(*) FROM migration WHERE id = '${MIGRATION}') AS applied`,
-        )
-
-        assert.deepStrictEqual(catalog, [{ catalog: String(CATALOG_VERSION), applied: 1 }])
-
-        const conversation = yield* read<{ harnessSessionId: string | null }>(
-          `SELECT harness_session_id FROM process WHERE session_id = '${S}' AND id = 2`,
-        )
-
-        assert.strictEqual(conversation[0]?.harnessSessionId, "conv-1")
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

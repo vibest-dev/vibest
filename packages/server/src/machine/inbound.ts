@@ -9,7 +9,6 @@ import { safeRepositoryDirectory, sameWorktreeBucket } from "@vibest/core/paths"
 import { repositoryIdentity } from "@vibest/core/repository-url"
 import { defaultSessionName, Session } from "@vibest/core/session"
 import type { PayloadOf } from "@vibest/protocol/rpc"
-import { OutboxQueued } from "@vibest/schema/event"
 import {
   NoCommit,
   NoProject,
@@ -18,6 +17,7 @@ import {
   PROMPT_MAX,
   PromptTooLarge,
 } from "@vibest/schema/machine"
+import { MachineEvent } from "@vibest/schema/machine-event"
 import { NoRuntime, NoSuchSession } from "@vibest/schema/session"
 import { Context, Effect, Layer, Option, Queue, Stream } from "effect"
 
@@ -286,10 +286,10 @@ const make = Effect.gen(function* () {
     outbox: (remote: string): Stream.Stream<OutboxItem> =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const subscription = yield* bus.subscribe([OutboxQueued])
+          const subscription = yield* bus.subscribe([MachineEvent.OutboxQueued])
           const slot = yield* Queue.sliding<void>(1)
           yield* Stream.fromSubscription(subscription).pipe(
-            Stream.filter((event) => event.data.remote === remote),
+            Stream.filter((event) => event.data.remoteId === remote),
             Stream.runForEach(() => Queue.offer(slot, undefined)),
             Effect.forkScoped,
           )

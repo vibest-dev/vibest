@@ -426,9 +426,9 @@ const conversationAtStart: Check = {
     const fact = (id: string, type: string) =>
       rows<{ at: number; data: string }>(
         w,
-        "SELECT at, data FROM event WHERE aggregate = ? AND type = ? ORDER BY seq",
+        "SELECT created AS at, data FROM event WHERE aggregate_id = ? AND type = ? ORDER BY seq",
         id,
-        type,
+        `${type}.1`,
       )
 
     const closePane = async (id: string) => {

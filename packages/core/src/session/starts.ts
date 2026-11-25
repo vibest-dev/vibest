@@ -1,4 +1,5 @@
-import { ProcessEnded, SessionArchived } from "@vibest/schema/event"
+import { ProcessEvent } from "@vibest/schema/process-event"
+import { SessionEvent } from "@vibest/schema/session-event"
 import { Context, Effect, Layer, Semaphore, Stream } from "effect"
 
 import { Bus } from "../bus.ts"
@@ -99,7 +100,7 @@ export const make = Effect.gen(function* () {
       }),
     )
 
-  yield* reactor.on([ProcessEnded, SessionArchived], () => walk)
+  yield* reactor.on([ProcessEvent.Ended, SessionEvent.Archived], () => walk)
   yield* concurrency.limits.pipe(
     Stream.runForEach(() => walk),
     Effect.forkScoped,

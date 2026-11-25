@@ -1,5 +1,5 @@
-import { SessionLinked, SessionUnlinked } from "@vibest/schema/event"
 import { shortId } from "@vibest/schema/id"
+import { SessionEvent } from "@vibest/schema/session-event"
 import type { SessionRef } from "@vibest/schema/terminal"
 import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
@@ -148,14 +148,16 @@ export const make = Effect.gen(function* () {
                 AND to_remote_id = ${remote} AND to_session_id = ${edge.to}`).length > 0
 
           if (add && !exists)
-            yield* publish(SessionLinked, {
+            yield* publish(SessionEvent.Linked, {
               sessionId: edge.from,
-              data: { to: edge.to, ...(remote !== "" && { remote }) },
+              to: edge.to,
+              ...(remote !== "" && { remote }),
             })
           else if (!add && exists)
-            yield* publish(SessionUnlinked, {
+            yield* publish(SessionEvent.Unlinked, {
               sessionId: edge.from,
-              data: { to: edge.to, ...(remote !== "" && { remote }) },
+              to: edge.to,
+              ...(remote !== "" && { remote }),
             })
 
           out.push({ from: edge.from, to: edge.to, ...(remote !== "" && { remote }) })

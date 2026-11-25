@@ -125,7 +125,7 @@ export const make = Effect.gen(function* () {
     const look = Effect.map(again, (yes) => (yes ? Option.some(true) : Option.none()))
 
     const reported = (event: BusEvent) => {
-      if (event.type !== "process.ready" || event.sessionId !== id) return false
+      if (event.type !== "process.ready" || event.data.sessionId !== id) return false
       const { pid, integration } = event.data
 
       if (!Predicate.isNumber(pid) || !Predicate.isObjectOrArray(integration)) return false
@@ -140,7 +140,7 @@ export const make = Effect.gen(function* () {
       (event) =>
         reported(event)
           ? Effect.succeed(Option.some(true))
-          : event.type === "process.ready" && event.sessionId === id
+          : event.type === "process.ready" && event.data.sessionId === id
             ? look
             : Effect.succeed(Option.none()),
       RESTART_TIMEOUT,

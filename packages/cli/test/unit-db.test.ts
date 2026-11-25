@@ -7,21 +7,11 @@ import { noticeEnvelope } from "@vibest/core/replies"
 import { SessionLive } from "@vibest/core/session/live"
 import { EXECUTIONS, projectOf } from "@vibest/platform-bun/test/lib/fakes"
 import { session, place } from "@vibest/platform-bun/test/lib/unit-helpers"
-import { Catalog, type FactType } from "@vibest/schema/event"
+import { SessionEvent } from "@vibest/schema/session-event"
 import { Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
-
-const fact = (
-  type: FactType,
-  input: { readonly sessionId?: string; readonly projectId?: string; readonly at?: number; readonly data: object },
-) =>
-  Effect.gen(function* () {
-    const bus = yield* Bus.Service
-
-    return yield* bus.publish(Catalog[type] as never, input as never)
-  }).pipe(Effect.orDie)
 
 const memoryDb = () =>
   Db.layer.pipe(
@@ -497,42 +487,47 @@ describe("Db", () => {
             FROM execution WHERE session_id = ${id}`
 
           const executionId = row?.id ?? 1
-          yield* fact("session.execution.allocated", { sessionId: id, at, data: { executionId } })
+          const bus = yield* Bus.Service
+          yield* bus.publish(SessionEvent.ExecutionAllocated, { sessionId: id, executionId }, { at })
 
           if (end === undefined) return
           const reply = end.reply === undefined ? {} : { reply: end.reply }
 
           if (end.outcome === "completed") {
-            yield* fact("session.execution.succeeded", { sessionId: id, at: end.at, data: { executionId, ...reply } })
+            yield* bus.publish(
+              SessionEvent.ExecutionSucceeded,
+              { sessionId: id, executionId, ...reply },
+              { at: end.at },
+            )
 
             return
           }
 
           if (end.outcome === "failed") {
-            yield* fact("session.execution.failed", {
-              sessionId: id,
-              at: end.at,
-              data: { executionId, failure: { message: "failed" }, ...reply },
-            })
+            yield* bus.publish(
+              SessionEvent.ExecutionFailed,
+              { sessionId: id, executionId, failure: { message: "failed" }, ...reply },
+              { at: end.at },
+            )
 
             return
           }
 
           if (end.outcome === "interrupted") {
-            yield* fact("session.execution.interrupted", {
-              sessionId: id,
-              at: end.at,
-              data: { executionId, ...reply },
-            })
+            yield* bus.publish(
+              SessionEvent.ExecutionInterrupted,
+              { sessionId: id, executionId, ...reply },
+              { at: end.at },
+            )
 
             return
           }
 
-          yield* fact("session.execution.unresolved", {
-            sessionId: id,
-            at: end.at,
-            data: { executionId, observation: end.outcome, ...reply },
-          })
+          yield* bus.publish(
+            SessionEvent.ExecutionUnresolved,
+            { sessionId: id, executionId, observation: end.outcome as "lost" | "not_started", ...reply },
+            { at: end.at },
+          )
         })
 
       yield* db.session.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
@@ -726,7 +721,7 @@ describe("Db", () => {
         assert.deepStrictEqual(
           yield* sql<{
             n: number
-          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id} AND type = 'session.inbox.delivered'`,
+          }>`SELECT count(*) AS n FROM event WHERE aggregate_id = ${id} AND type = 'session.inbox.delivered.1'`,
           [{ n: 0 }],
         )
       }),

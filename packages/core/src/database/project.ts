@@ -1,14 +1,14 @@
-import { ProjectCreated, ProjectMoved, ProjectRepositoriesChanged } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
+import { ProjectEvent } from "@vibest/schema/project-event"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 
-import { Bus } from "../bus.ts"
+import { Bus, SessionChanged } from "../bus.ts"
 import { type RepositoryRow } from "./db-rows.ts"
 
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const { publish, observe, transaction: tx } = yield* Bus.Service
+  const { publish, transaction: tx } = yield* Bus.Service
 
   const projectPrefixTaken = (short: string) =>
     sql`SELECT 1 FROM project WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
@@ -52,12 +52,13 @@ export const make = Effect.gen(function* () {
               const changed = yield* changedRepositories(existing.id, repositories)
 
               if (changed.length > 0)
-                yield* publish(ProjectRepositoriesChanged, { projectId: existing.id, data: { repositories: changed } })
+                yield* publish(ProjectEvent.RepositoriesChanged, { projectId: existing.id, repositories: changed })
             } else {
               const id = yield* newId(projectPrefixTaken)
-              yield* publish(ProjectCreated, {
+              yield* publish(ProjectEvent.Created, {
                 projectId: id,
-                data: { ...(directory && { directory }), repositories: repositoriesOf(repositories) },
+                ...(directory && { directory }),
+                repositories: repositoriesOf(repositories),
               })
             }
 
@@ -75,7 +76,7 @@ export const make = Effect.gen(function* () {
             const changed = yield* changedRepositories(id, repositories)
 
             if (changed.length > 0)
-              yield* publish(ProjectRepositoriesChanged, { projectId: id, data: { repositories: changed } })
+              yield* publish(ProjectEvent.RepositoriesChanged, { projectId: id, repositories: changed })
           }),
         ).pipe(Effect.orDie),
     ),
@@ -86,15 +87,17 @@ export const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const [row] = yield* sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${id}`
             const from = row!.directory
-            yield* publish(ProjectMoved, {
+            yield* publish(ProjectEvent.Moved, {
               projectId: id,
-              data: { from, to, repositories: repositoriesOf(repositories) },
+              from,
+              to,
+              repositories: repositoriesOf(repositories),
             })
 
             for (const session of yield* sql<{
               id: string
             }>`SELECT id FROM session WHERE project_id = ${id} AND ended_at IS NULL`)
-              yield* observe({ type: "session.changed", sessionId: session.id })
+              yield* publish(SessionChanged, { sessionId: session.id })
 
             return from
           }),

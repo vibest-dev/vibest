@@ -28,7 +28,7 @@ export default Plugin.define({
     ctx.event.subscribe({ types: ["session.execution.succeeded", "session.archived"] }).pipe(
       Stream.runForEach((fact) =>
         Effect.gen(function* () {
-          const id = fact.sessionId
+          const id = fact.data.sessionId
           if (fact.type === "session.archived") {
             yield* ctx.session.send({ to: id, message: "after-archive", request: \`after:\${id}\` })
             return
@@ -323,7 +323,7 @@ const idleStopChecks: ReadonlyArray<Check> = [
 
         const by = rows<{ data: string }>(
           w,
-          "SELECT data FROM event WHERE aggregate = ? AND type = 'process.ended' ORDER BY seq DESC LIMIT 1",
+          "SELECT data FROM event WHERE aggregate_id = ? AND type = 'process.ended.1' ORDER BY seq DESC LIMIT 1",
           quiet,
         ).map((r) => (JSON.parse(r.data) as { by?: unknown }).by)[0]
 
