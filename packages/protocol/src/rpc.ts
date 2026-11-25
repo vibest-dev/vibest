@@ -665,6 +665,8 @@ export class VibestRpcs extends RpcGroup.make(
         runtime: Schema.optional(Schema.String),
         sessionId: Schema.optional(Schema.String),
         fresh: Schema.optional(Schema.Boolean),
+        agent: Schema.optional(Schema.String),
+        agentNamed: Schema.optional(Schema.Boolean),
       },
       success: Schema.Struct({
         projectId: ProjectId,
@@ -697,9 +699,22 @@ export class VibestRpcs extends RpcGroup.make(
         NotInRepository,
         NoSuchSession,
         LaunchFailed,
+        UnknownAgent,
         RuntimeUnreachable,
         RuntimeIncompatible,
       ]),
+    }),
+  ),
+  scoped(
+    Rpc.make("Session.Focus", {
+      success: Schema.NullOr(
+        Schema.Struct({
+          sessionId: SessionId,
+          place: Schema.String,
+          focused: Schema.Boolean,
+        }),
+      ),
+      error: Schema.Union([InvalidCaller, Forbidden, NotInRepository]),
     }),
   ),
   scoped(

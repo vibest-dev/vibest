@@ -1,13 +1,8 @@
 import { EdgeChain, EdgeDirected, EdgeMutual, type EdgeSpec } from "@vibest/protocol/rpc"
-import type { SessionRef } from "@vibest/schema/terminal"
 import { Effect, Option } from "effect"
 
+import { toSessionRef } from "../../../caller.ts"
 import { EmptyInput } from "../../../input.ts"
-
-const toRef =
-  (machine: Option.Option<string>) =>
-  (id: string): SessionRef =>
-    Option.isSome(machine) ? { id, machine: machine.value } : { id }
 
 export const edgeSpecOf = (o: {
   readonly ids: ReadonlyArray<string>
@@ -21,11 +16,12 @@ export const edgeSpecOf = (o: {
   if (Option.isSome(o.toMachine) && o.to.length === 0)
     return Effect.fail(new EmptyInput({ message: "--to-machine needs --to" }))
 
-  const ids = o.ids.map(toRef(o.machine))
+  const ids = o.ids.map((id) => toSessionRef(id, o.machine))
 
   if (o.chain) return Effect.succeed(EdgeChain.make({ ids }))
 
-  if (o.to.length > 0) return Effect.succeed(EdgeDirected.make({ from: ids, to: o.to.map(toRef(o.toMachine)) }))
+  if (o.to.length > 0)
+    return Effect.succeed(EdgeDirected.make({ from: ids, to: o.to.map((id) => toSessionRef(id, o.toMachine)) }))
 
   return Effect.succeed(EdgeMutual.make({ ids }))
 }

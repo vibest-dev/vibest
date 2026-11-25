@@ -235,7 +235,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   id,
                   sessionId: item.recipient,
                   kind: item.kind,
-                  from: item.from,
+                  ...(item.kind === "send" && { from: item.from }),
                   content: item.kind === "send" ? item.content : `${noticeSender}: ${item.content}`,
                 })
 

@@ -1,8 +1,12 @@
 import { Claim, type VibestClient } from "@vibest/client/client"
 import { Forbidden } from "@vibest/protocol/rpc"
+import type { SessionRef } from "@vibest/schema/terminal"
 import { Config, Console, Effect, Option, Path, Schema } from "effect"
 
 import { withVibest } from "./client.ts"
+
+export const toSessionRef = (id: string, machine: Option.Option<string>): SessionRef =>
+  Option.isSome(machine) ? { id, machine: machine.value } : { id }
 
 export const caller = Effect.gen(function* () {
   const path = yield* Path.Path

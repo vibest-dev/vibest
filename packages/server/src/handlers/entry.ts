@@ -91,7 +91,7 @@ export const make = Effect.gen(function* () {
         ),
       ),
 
-    "Session.Attach": ({ callerEnv, runtime, sessionId, fresh }) =>
+    "Session.Attach": ({ callerEnv, runtime, sessionId, fresh, agent, agentNamed }) =>
       Effect.gen(function* () {
         const c = yield* cliOnly("Session.Attach")
         const project = yield* resolveAt(c.repositoryRoot)
@@ -111,6 +111,14 @@ export const make = Effect.gen(function* () {
             })
         }
 
+        if (agent !== undefined || agentNamed === true)
+          yield* sessionLaunch.checkAgent(
+            project.id,
+            sessionId,
+            fresh === true,
+            rootAgent(agent ?? DEFAULT_AGENT, agentNamed),
+          )
+
         const hasRoot = (yield* db.session.latestRoot(project.id)) !== undefined
 
         const running =
@@ -120,6 +128,12 @@ export const make = Effect.gen(function* () {
 
         return { projectId: project.id, directory: project.directory, hasRoot, place, running }
       }),
+
+    "Session.Focus": () =>
+      cliOnly("Session.Focus").pipe(
+        Effect.flatMap((c) => resolveAt(c.repositoryRoot)),
+        Effect.flatMap((project) => sessionLaunch.focus(project.id)),
+      ),
 
     "Session.Claim": ({
       sessionId,
@@ -166,4 +180,4 @@ export const make = Effect.gen(function* () {
   } satisfies Handlers
 })
 
-export const layer = group(["Launch", "Session.Attach", "Session.Claim"]).toLayer(make)
+export const layer = group(["Launch", "Session.Attach", "Session.Claim", "Session.Focus"]).toLayer(make)

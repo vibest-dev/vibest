@@ -1,15 +1,14 @@
 import { formatTerminalTarget } from "@vibest/schema/terminal"
 import { Console, Effect, Option } from "effect"
 
-import { vibest } from "../../caller.ts"
+import { toSessionRef, vibest } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.peek, (o) =>
   vibest((client) =>
     client.Peek({
-      id: o.id,
-      ...(Option.isSome(o.machine) && { machine: o.machine.value }),
+      ...toSessionRef(o.id, o.machine),
       lines: Option.getOrUndefined(o.lines),
     }),
   ).pipe(

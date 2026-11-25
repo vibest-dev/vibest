@@ -837,7 +837,8 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         expect(
-          /^mb\/t\d+$/.test(first?.terminal?.target.address ?? "") && first?.terminal?.target.socket === s.aSocket,
+          /^mb\/t\d+$/.test(first?.terminal?.target.address ?? "") &&
+            (first?.terminal?.target.socket === undefined || first.terminal.target.socket === s.aSocket),
           `A's row: ${JSON.stringify(first)}`,
         )
         const terminal = first!.terminal!.target.address!

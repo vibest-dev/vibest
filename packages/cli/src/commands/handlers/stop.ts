@@ -1,11 +1,9 @@
-import { Effect, Option } from "effect"
+import { Effect } from "effect"
 
-import { json, vibest } from "../../caller.ts"
+import { json, toSessionRef, vibest } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.stop, (o) =>
-  vibest((client) => client.Stop({ id: o.id, ...(Option.isSome(o.machine) && { machine: o.machine.value }) })).pipe(
-    Effect.flatMap(json),
-  ),
+  vibest((client) => client.Stop(toSessionRef(o.id, o.machine))).pipe(Effect.flatMap(json)),
 )

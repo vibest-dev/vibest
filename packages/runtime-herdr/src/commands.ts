@@ -242,33 +242,21 @@ const daemonOn = ({ withVibest }: VibestClients) => {
     republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
     openEntry: (directory: string) =>
       Effect.gen(function* () {
-        const env = callerEnvOf()
+        const focused = yield* ask(directory, (client) => client["Session.Focus"]())
+
+        if (focused !== null)
+          return {
+            action: focused.focused ? ("focused" as const) : ("runs in" as const),
+            place: focused.place,
+          }
 
         const opened = yield* ask(directory, (client) =>
-          client
-            .Launch({
-              agent: "coordinator",
-              focus: true,
-              runtime: KIND,
-              callerEnv: env,
-            })
-            .pipe(
-              Effect.catchTag("Forbidden", () =>
-                client["Session.Attach"]({ callerEnv: env, runtime: KIND }).pipe(
-                  Effect.flatMap((attached) =>
-                    client.Launch({
-                      projectId: attached.projectId,
-                      agent: "coordinator",
-                      fresh: true,
-                      ...(attached.running !== null && { harness: attached.running.harness }),
-                      focus: true,
-                      runtime: KIND,
-                      callerEnv: env,
-                    }),
-                  ),
-                ),
-              ),
-            ),
+          client.Launch({
+            agent: "coordinator",
+            focus: true,
+            runtime: KIND,
+            callerEnv: callerEnvOf(),
+          }),
         )
 
         return { action: "opened" as const, place: opened.place }

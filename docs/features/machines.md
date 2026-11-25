@@ -50,7 +50,7 @@ even when B keeps that checkout inside a project folder.
 
 ## M12. A B too old for several repositories
 
-A `vibest run --machine` from a project of several repositories to a B whose vibest does not take a repository list is
+A `vibest run --machine` from a project of several repositories to a B whose vibest predates repository lists (or speaks an older protocol) is
 refused on A with `run vibest update on <B>`; B starts nothing.
 
 ## M13. Choosing B's project

@@ -71,6 +71,7 @@ export default Runtime.handler(Commands, (o) =>
           client["Session.Attach"]({
             callerEnv: callerEnvOf(),
             fresh: o.fresh,
+            ...(agentNamed && { agent, agentNamed: true }),
             ...(runtime !== undefined && { runtime }),
           })
 

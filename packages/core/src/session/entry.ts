@@ -576,7 +576,29 @@ const make = Effect.gen(function* () {
     )
   })
 
-  return { running, launch, claim }
+  const checkAgent = Effect.fn("SessionLaunch.checkAgent")(function* (
+    projectId: string,
+    sessionId: string | undefined,
+    fresh: boolean,
+    agent: RootAgent,
+  ) {
+    const current = yield* targetSession(projectId, sessionId, fresh)
+    yield* rootAgent(current, fresh, agent)
+  })
+
+  const focus = Effect.fn("SessionLaunch.focus")(function* (projectId: string) {
+    const found = yield* running(projectId, undefined)
+
+    if (found === null) return null
+    const runtime = runtimes.find(found.runtime)
+
+    if (runtime?.focus === undefined) return { sessionId: found.sessionId, place: found.place, focused: false }
+    const focused = yield* runtime.focus(found.target).pipe(Effect.exit)
+
+    return { sessionId: found.sessionId, place: found.place, focused: Exit.isSuccess(focused) }
+  })
+
+  return { running, checkAgent, launch, claim, focus }
 })
 
 export type Interface = Effect.Success<typeof make>

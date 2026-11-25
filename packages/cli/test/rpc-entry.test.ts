@@ -312,6 +312,27 @@ describe("vibest.sock", () => {
 
       assert.strictEqual(moved.sessionId, first.sessionId)
       assert.notStrictEqual(moved.terminal, first.terminal)
+
+      const herdr = yield* FakeRuntime
+      yield* herdr.seedAgent(moved.terminal["id"]!)
+
+      const wrongAgent = yield* Effect.flip(
+        c["Session.Attach"]({
+          callerEnv: {},
+          runtime: "herdr",
+          agent: "general",
+          agentNamed: true,
+        }),
+      )
+
+      assert.strictEqual(wrongAgent._tag, "LaunchFailed")
+
+      if (Predicate.isTagged(wrongAgent, "LaunchFailed")) {
+        assert.include(
+          wrongAgent.message,
+          "this session runs as coordinator; add --new to start a new conversation as general",
+        )
+      }
     }),
   )
 })

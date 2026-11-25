@@ -403,7 +403,7 @@ const make = Effect.gen(function* () {
 
       if (ping.protocol !== PROTOCOL)
         return yield* new MachineDown({
-          message: `${name} runs vibest ${ping.version} (protocol ${ping.protocol ?? "none"}); run vibest update there`,
+          message: `${name} runs vibest ${ping.version} (protocol ${ping.protocol ?? "none"}); run vibest update on ${name}`,
           stop: "mismatch",
         })
 

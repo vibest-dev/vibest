@@ -151,31 +151,29 @@ const makeRouting = Effect.gen(function* () {
             })
           : routed("Send", p, local, (at, project, by) =>
               Effect.gen(function* () {
-                let targetAt = at
-                let forwardBy = by
+                const [targetAt, forwardBy] =
+                  by === REMOTE_BY_USER
+                    ? ([at, by] as const)
+                    : yield* Effect.gen(function* () {
+                        const machineRow = yield* db.remote.machineNamed(at.machine)
 
-                if (by !== REMOTE_BY_USER) {
-                  const machineRow = yield* db.remote.machineNamed(at.machine)
+                        if (machineRow === undefined) return [at, by] as const
+                        const matches = yield* db.session.resolveRemoteEdges(by, at.id, machineRow.remoteId)
 
-                  if (machineRow !== undefined) {
-                    const matches = yield* db.session.resolveRemoteEdges(by, at.id, machineRow.remoteId)
+                        if (matches.length === 0)
+                          return yield* new Forbidden({
+                            method: "Send",
+                            message: `${p.id} on ${at.machine} is not linked from this session; link them with vibest session link`,
+                          })
 
-                    if (matches.length === 0)
-                      return yield* new Forbidden({
-                        method: "Send",
-                        message: `${p.id} on ${at.machine} is not linked from this session; link them with vibest session link`,
+                        if (matches.length > 1)
+                          return yield* new AmbiguousSession({
+                            prefix: at.id,
+                            matches: matches.map((m) => m.session),
+                          })
+
+                        return [{ ...at, id: matches[0]!.session }, REMOTE_BY_USER] as const
                       })
-
-                    if (matches.length > 1)
-                      return yield* new AmbiguousSession({
-                        prefix: at.id,
-                        matches: matches.map((m) => m.session),
-                      })
-
-                    targetAt = { ...at, id: matches[0]!.session }
-                    forwardBy = REMOTE_BY_USER
-                  }
-                }
 
                 return yield* forwardSend(p, targetAt, project, forwardBy, by)
               }),

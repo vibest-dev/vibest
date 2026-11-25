@@ -347,4 +347,104 @@ describe("cross-machine directed session graph", () => {
         yield* until(b.run(inboxOf(r2Id)), (rows) => rows.some((r) => r.content.includes("from spawned --with")))
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
+
+  it.effect(
+    "local+remote 8-char prefix collisions return AmbiguousSession on Session.Link and Spawn --with (including archived local), and 13-char prefix completes",
+    () =>
+      Effect.gen(function* () {
+        const { a, b, asEntry } = yield* twoMachines()
+
+        const localCollidingId = "756c38b6-101c-4da9-b8ba-b63399edb05a"
+        const remoteCollidingId = "756c38b6-202d-4da9-b8ba-b63399edb05b"
+        const aRuntime = yield* a.run(FakeRuntime)
+        const bRuntime = yield* b.run(FakeRuntime)
+
+        yield* aRuntime.seedAgent("p-local-col")
+        yield* a.db.session.insertSession(
+          { ...peerSession, id: localCollidingId, name: "local-col", createdAt: 1, lastActive: 1 },
+          a.project,
+          { cwd: a.directory },
+        )
+        yield* a.db.session.startProcess(localCollidingId, {
+          harness: "pi",
+          runtime: "herdr",
+          terminal: { id: "p-local-col" },
+        })
+
+        yield* bRuntime.seedAgent("p-remote-col")
+        yield* b.db.session.insertSession(
+          { ...peerSession, id: remoteCollidingId, name: "remote-col", createdAt: 1, lastActive: 1 },
+          b.project,
+          { cwd: b.directory, origin: { remote: a.id, project: a.project } },
+        )
+        yield* b.db.session.startProcess(remoteCollidingId, {
+          harness: "pi",
+          runtime: "herdr",
+          terminal: { id: "p-remote-col" },
+        })
+
+        const peer = yield* asEntry(a.raw.Spawn({ agent: "general", prompt: "peer", callerEnv: {} }))
+
+        const ambigLiveLink = yield* Effect.flip(
+          asEntry(
+            a.raw["Session.Link"]({
+              spec: EdgeDirected.make({ from: [{ id: peer.id.slice(0, 8) }], to: [{ id: "756c38b6" }] }),
+            }),
+          ),
+        )
+
+        assert.strictEqual(ambigLiveLink._tag, "AmbiguousSession")
+
+        if (Predicate.isTagged(ambigLiveLink, "AmbiguousSession")) {
+          assert.deepStrictEqual([...ambigLiveLink.matches].sort(), [localCollidingId, remoteCollidingId].sort())
+        }
+
+        const ambigLiveSpawn = yield* Effect.flip(
+          asEntry(
+            a.raw.Spawn({
+              agent: "general",
+              prompt: "colliding --with",
+              with: [{ id: "756c38b6" }],
+              callerEnv: {},
+            }),
+          ),
+        )
+
+        assert.strictEqual(ambigLiveSpawn._tag, "AmbiguousSession")
+
+        if (Predicate.isTagged(ambigLiveSpawn, "AmbiguousSession")) {
+          assert.deepStrictEqual([...ambigLiveSpawn.matches].sort(), [localCollidingId, remoteCollidingId].sort())
+        }
+
+        yield* a.db.session.endProcess(localCollidingId, "archived")
+        yield* a.db.session.archive(localCollidingId)
+
+        const ambigArchivedLocalLink = yield* Effect.flip(
+          asEntry(
+            a.raw["Session.Link"]({
+              spec: EdgeDirected.make({ from: [{ id: peer.id.slice(0, 8) }], to: [{ id: "756c38b6" }] }),
+            }),
+          ),
+        )
+
+        assert.strictEqual(ambigArchivedLocalLink._tag, "AmbiguousSession")
+
+        if (Predicate.isTagged(ambigArchivedLocalLink, "AmbiguousSession")) {
+          assert.deepStrictEqual(
+            [...ambigArchivedLocalLink.matches].sort(),
+            [localCollidingId, remoteCollidingId].sort(),
+          )
+        }
+
+        const completedRemote = yield* asEntry(
+          a.raw["Session.Link"]({
+            spec: EdgeDirected.make({ from: [{ id: peer.id.slice(0, 8) }], to: [{ id: "756c38b6-202d" }] }),
+          }),
+        )
+
+        assert.deepStrictEqual(completedRemote.edges, [
+          { from: { id: peer.id }, to: { id: remoteCollidingId, machine: "mb" } },
+        ])
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
 })

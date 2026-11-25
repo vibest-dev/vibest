@@ -30,6 +30,7 @@ export const ACCESS = {
   "Session.Seen": "cli",
   "Session.Attach": "cli",
   "Session.Claim": "cli",
+  "Session.Focus": "cli",
   "Project.Open": ["cli", "remote"],
   "Project.Move": "cli",
   "Project.Create": "cli",
