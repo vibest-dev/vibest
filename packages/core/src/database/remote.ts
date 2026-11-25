@@ -215,10 +215,12 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               const heir = route.alive === 1 ? { local: item.recipient } : yield* session.nearestAlive(item.recipient)
 
+              const noticeSender = item.from.machine ? `${item.sender} (on ${item.from.machine})` : item.sender
+
               const content =
                 item.kind === "send"
-                  ? sessionEnvelope(item.sender, item.content)
-                  : noticeEnvelope(`${item.sender}: ${item.content}`)
+                  ? sessionEnvelope(item.from.session, item.content, item.from.machine)
+                  : noticeEnvelope(`${noticeSender}: ${item.content}`)
 
               if (heir !== undefined && "remote" in heir) {
                 const [leg] = yield* sql<{
@@ -233,7 +235,8 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   id,
                   sessionId: item.recipient,
                   kind: item.kind,
-                  content: `${item.sender}: ${item.content}`,
+                  ...(item.kind === "send" && { from: item.from }),
+                  content: item.kind === "send" ? item.content : `${noticeSender}: ${item.content}`,
                 })
 
                 if (!queued) return "unknown" as const

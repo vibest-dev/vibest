@@ -246,7 +246,7 @@ describe.concurrent("an idle session takes its next batch", () => {
           id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
           recipient: entry.sessionId,
           kind: "send",
-          sender: "mb/aaaaaaaa",
+          sender: "aaaaaaaa",
           from: { session: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", agent: "general", title: "Ask me", machine: "mb" },
           content: "report from afar",
         }),

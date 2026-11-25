@@ -97,7 +97,7 @@ const spawningModel = (child: string, flags: string) => {
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
       const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
-      const vibest = /run `([^`]+) send [0-9a-f-]{36} -- '<message>'`/.exec(system)?.[1]
+      const vibest = /run `([^`]+) send [0-9a-f-]{8,36} -- '<message>'`/.exec(system)?.[1]
       const last = messages.at(-1)
 
       const answer =

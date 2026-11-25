@@ -7,7 +7,7 @@ import { REMOTE_BY_USER, REMOTE_PROJECT_HEADER } from "@vibest/protocol/protocol
 import { Caller, type CallerIdentity, Forbidden, type PayloadOf } from "@vibest/protocol/rpc"
 import { MachineIncompatible } from "@vibest/schema/machine"
 import { AmbiguousSession, type NotInRepository } from "@vibest/schema/session"
-import { formatSessionRef, type SessionRef } from "@vibest/schema/terminal"
+import type { SessionRef } from "@vibest/schema/terminal"
 import { Context, Effect, Layer, Predicate, Stream } from "effect"
 
 import * as Listing from "../listing.ts"
@@ -85,53 +85,99 @@ const makeRouting = Effect.gen(function* () {
           ),
         )
 
+  const forwardSend = (p: PayloadOf<"Send">, targetAt: At, project: string, forwardBy: string, senderBy: string) =>
+    Effect.gen(function* () {
+      const from = yield* senderHere(senderBy)
+
+      return yield* remote.forward(targetAt, project, forwardBy, (c, { id }, o) =>
+        c.Send(
+          {
+            id,
+            message: p.message,
+            ...(p.request !== undefined && { request: p.request }),
+            ...(from !== undefined && { from }),
+          },
+          o,
+        ),
+      )
+    })
+
   return {
     reach,
     routed: {
       Send: <A, E, R2>(p: PayloadOf<"Send">, local: Local<A, E, R2>) =>
-        routed("Send", p, local, (at, project, by) =>
-          Effect.gen(function* () {
-            let targetAt = at
-            let forwardBy = by
+        p.machine === undefined
+          ? Effect.flatMap(Caller, (caller) => {
+              if (!Predicate.isTagged(caller, "Session")) return local(p.id)
 
-            if (by !== REMOTE_BY_USER) {
-              const machineRow = yield* db.remote.machineNamed(at.machine)
+              return Effect.gen(function* () {
+                const remoteMatches = yield* db.session.resolveRemoteEdges(caller.sessionId, p.id)
 
-              if (machineRow !== undefined) {
-                const matches = yield* db.session.resolveRemoteEdges(by, at.id, machineRow.remoteId)
+                if (remoteMatches.length === 0) return yield* local(p.id)
 
-                if (matches.length === 0)
-                  return yield* new Forbidden({
-                    method: "Send",
-                    message: `${formatSessionRef(p)} is not linked from this session; link them with vibest session link`,
-                  })
+                const localLookup = yield* Effect.result(db.session.resolveSession(p.id))
 
-                if (matches.length > 1)
+                if (Predicate.isTagged(localLookup, "Success"))
                   return yield* new AmbiguousSession({
-                    prefix: at.id,
-                    matches: matches.map((m) => `${at.machine}/${m.session}`),
+                    prefix: p.id,
+                    matches: [localLookup.success, ...remoteMatches.map((m) => m.session)],
                   })
 
-                targetAt = { ...at, id: matches[0]!.session }
-                forwardBy = REMOTE_BY_USER
-              }
-            }
+                if (Predicate.isTagged(localLookup.failure, "AmbiguousSession"))
+                  return yield* new AmbiguousSession({
+                    prefix: p.id,
+                    matches: [...localLookup.failure.matches, ...remoteMatches.map((m) => m.session)],
+                  })
 
-            const from = yield* senderHere(by)
+                if (remoteMatches.length > 1)
+                  return yield* new AmbiguousSession({
+                    prefix: p.id,
+                    matches: remoteMatches.map((m) => m.session),
+                  })
 
-            return yield* remote.forward(targetAt, project, forwardBy, (c, { id }, o) =>
-              c.Send(
-                {
-                  id,
-                  message: p.message,
-                  ...(p.request !== undefined && { request: p.request }),
-                  ...(from !== undefined && { from }),
-                },
-                o,
-              ),
-            )
-          }),
-        ),
+                const [match] = remoteMatches
+                const machineRow = yield* db.remote.machineWithRemote(match!.remote)
+
+                if (machineRow === undefined) return yield* local(p.id)
+
+                return yield* forwardSend(
+                  p,
+                  { machine: machineRow.name, id: match!.session },
+                  caller.projectId,
+                  REMOTE_BY_USER,
+                  caller.sessionId,
+                )
+              })
+            })
+          : routed("Send", p, local, (at, project, by) =>
+              Effect.gen(function* () {
+                const [targetAt, forwardBy] =
+                  by === REMOTE_BY_USER
+                    ? ([at, by] as const)
+                    : yield* Effect.gen(function* () {
+                        const machineRow = yield* db.remote.machineNamed(at.machine)
+
+                        if (machineRow === undefined) return [at, by] as const
+                        const matches = yield* db.session.resolveRemoteEdges(by, at.id, machineRow.remoteId)
+
+                        if (matches.length === 0)
+                          return yield* new Forbidden({
+                            method: "Send",
+                            message: `${p.id} on ${at.machine} is not linked from this session; link them with vibest session link`,
+                          })
+
+                        if (matches.length > 1)
+                          return yield* new AmbiguousSession({
+                            prefix: at.id,
+                            matches: matches.map((m) => m.session),
+                          })
+
+                        return [{ ...at, id: matches[0]!.session }, REMOTE_BY_USER] as const
+                      })
+
+                return yield* forwardSend(p, targetAt, project, forwardBy, by)
+              }),
+            ),
       Interrupt: <A, E, R2>(p: PayloadOf<"Interrupt">, local: Local<A, E, R2>) =>
         routed("Interrupt", p, local, (at, project, by) =>
           remote.forward(at, project, by, (c, { id }, o) => c.Interrupt({ id }, o)),

@@ -1,12 +1,11 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask } from "../fake-model.ts"
 import { binary, expect, until, type World } from "../world.ts"
 import { olderBuild } from "../world/older-build.ts"
-import { setup, type Setup } from "./machines.ts"
+import { fakeSsh, setup, sh, stopVibestd, type Setup } from "./machines.ts"
 
 const git = async (w: World, cwd: string, ...args: ReadonlyArray<string>) => {
   const r = await w.run(cwd, ["git", ...args])
@@ -34,50 +33,6 @@ const twoRepositories = async (w: World) => {
 }
 
 const BEFORE_REPOSITORY_LISTS = "55868c318d60222aa0c6a8c3e417bf8ce2b8dd54"
-const BEFORE_REPOSITORY_LISTS_PROTOCOL = 13
-
-const withCurrentProtocol = (bytes: Buffer, label: string) => {
-  const found = [
-    ...bytes.toString("latin1").matchAll(new RegExp(`PROTOCOL\\d* = ${BEFORE_REPOSITORY_LISTS_PROTOCOL}\\b`, "g")),
-  ]
-
-  expect(
-    found.length === 1,
-    `${label}: expected one PROTOCOL = ${BEFORE_REPOSITORY_LISTS_PROTOCOL}, found ${found.length}`,
-  )
-  const from = found[0]![0]
-  const to = from.replace(/\d+$/, String(PROTOCOL).padStart(String(BEFORE_REPOSITORY_LISTS_PROTOCOL).length))
-  const at = bytes.indexOf(from)
-  expect(
-    at >= 0 && bytes.indexOf(from, at + 1) < 0 && from.length === to.length,
-    `${label}: cannot swap ${from} for ${to}`,
-  )
-  bytes.write(to, at)
-}
-
-const beforeRepositoryLists = async (w: World) => {
-  const built = await olderBuild(BEFORE_REPOSITORY_LISTS)
-  const dir = path.join(w.root, "before-repository-lists")
-  const bin = path.join(dir, "bin", "vibest")
-  await fs.mkdir(path.dirname(bin), { recursive: true })
-  const bytes = Buffer.from(await fs.readFile(built))
-  withCurrentProtocol(bytes, built)
-  await fs.writeFile(bin, bytes, { mode: 0o755 })
-
-  if (process.platform === "darwin") {
-    const signed = await w.run(dir, ["codesign", "--force", "-s", "-", bin])
-    expect(signed.code === 0, `codesign: ${signed.stderr}${signed.stdout}`)
-  }
-
-  const builtHarnesses = path.join(path.dirname(path.dirname(built)), "harnesses")
-  await fs.cp(builtHarnesses, path.join(dir, "harnesses"), { recursive: true })
-  const extension = path.join(dir, "harnesses", "pi", "extension.mjs")
-  const source = Buffer.from(await fs.readFile(extension))
-  withCurrentProtocol(source, extension)
-  await fs.writeFile(extension, source)
-
-  return bin
-}
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -109,8 +64,8 @@ const checks: ReadonlyArray<Check> = [
         await s.refusedOnA("mcommit", `backoffice does not have ${commit}`, "push it and fetch it there")
 
         await git(w, path.join(work, "backoffice"), "fetch", "-q", a.admin, "main")
-        const address = await s.run("mtworepos")
-        await until("the message on A", () => s!.notices(address, "mtworepos") === 1, 120_000)
+        const id8 = await s.run("mtworepos")
+        await until("the message on A", () => s!.notices(id8, "mtworepos") === 1, 120_000)
 
         const inCombo = async (args: ReadonlyArray<string>) => {
           const r = await w.run(a.combo, [binary, ...args], { env: s!.aEnv })
@@ -119,7 +74,7 @@ const checks: ReadonlyArray<Check> = [
           return r.stdout
         }
 
-        const got = JSON.parse(await inCombo(["result", address])) as { worktree: string }
+        const got = JSON.parse(await inCombo(["result", id8, "--machine", "mb"])) as { worktree: string }
         const folders = (await fs.readdir(got.worktree)).filter((name) => !name.startsWith(".")).sort()
         expect(folders.join() === "admin,shop", `B's worktree ${got.worktree} holds ${folders.join()}`)
 
@@ -136,7 +91,7 @@ const checks: ReadonlyArray<Check> = [
           )
         }
 
-        await inCombo(["archive", address])
+        await inCombo(["archive", id8, "--machine", "mb"])
       } finally {
         await s?.stop()
       }
@@ -145,14 +100,40 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M12",
     title:
-      "a project of two repositories and a B running a vibest built from before repository lists: run --machine is refused on A with run vibest update on B, and B starts nothing",
+      "a project of two repositories and a B running an unmodified vibest built from before repository lists: run --machine is refused on A with run vibest update on mb, and B starts nothing",
     run: async (w) => {
       let s: Setup | undefined
 
       try {
+        const oldBin = await olderBuild(BEFORE_REPOSITORY_LISTS)
         const a = await twoRepositories(w)
-        s = await setup(w, { aProject: a.combo, bBinary: await beforeRepositoryLists(w) })
+        s = await setup(w, { aProject: a.combo })
         await s.okA(["machine", "add", "mb", "b-host"])
+
+        await stopVibestd(s.bEnv.VIBEST_HOME)
+
+        for (const file of ["vibest.db", "vibest.db-wal", "vibest.db-shm"])
+          await fs.rm(path.join(s.bEnv.VIBEST_HOME, file), { force: true })
+
+        const oldBEnv = { ...s.bEnv, PATH: `${path.dirname(oldBin)}:${s.bEnv.PATH}` }
+
+        const exports = Object.entries(oldBEnv)
+          .flatMap(([k, v]) => (v === undefined ? [] : [`${k}=${sh(v)}`]))
+          .join(" ")
+
+        const empty = path.join(w.root, "empty-zdotdir")
+        await fs.writeFile(path.join(w.root, "bin", "ssh"), fakeSsh(w.root, exports, empty), { mode: 0o755 })
+
+        const addedOld = await w.run(path.join(s.b, "shop"), [oldBin, "project", "add"], { env: oldBEnv })
+        expect(addedOld.code === 0, `old B project add: ${addedOld.stderr}${addedOld.stdout}`)
+
+        await until(
+          "mb marked incompatible",
+          async () =>
+            (JSON.parse(await s!.okA(["machine", "ls"])) as Array<{ state: string }>)[0]?.state === "incompatible",
+          30_000,
+        )
+
         await s.refusedOnA("mold", "run vibest update on mb")
         const started = s.bDb<{ n: number }>("SELECT count(*) AS n FROM session")?.n
         expect(started === 0, `B has ${started} sessions`)
@@ -186,16 +167,17 @@ const checks: ReadonlyArray<Check> = [
           }),
         ) as { id: string; machine?: string }
 
-        const address = `${chosen.machine}/${chosen.id.slice(0, 8)}`
+        expect(chosen.machine === "mb", `run --machine --project: ${JSON.stringify(chosen)}`)
+        const id8 = chosen.id.slice(0, 8)
 
-        await until("the message on A", () => s!.notices(address, "mchosen") === 1, 120_000)
-        const got = JSON.parse(await s.okA(["result", address])) as { worktree: string }
+        await until("the message on A", () => s!.notices(id8, "mchosen") === 1, 120_000)
+        const got = JSON.parse(await s.okA(["result", id8, "--machine", "mb"])) as { worktree: string }
         const common = await git(w, got.worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
         expect(
           common === path.join(await fs.realpath(second), ".git"),
           `the session on B runs in ${got.worktree} of ${common}`,
         )
-        await s.okA(["archive", address])
+        await s.okA(["archive", id8, "--machine", "mb"])
       } finally {
         await s?.stop()
       }
@@ -280,23 +262,34 @@ const checks: ReadonlyArray<Check> = [
       "a new vibest CLI whose local vibestd predates --project refuses run --machine --project with run vibest update, and B starts nothing",
     run: async (w) => {
       let s: Setup | undefined
+      const oldHome = path.join(w.root, "old-a-home")
 
       try {
-        s = await setup(w, { aDaemonBinary: await beforeRepositoryLists(w) })
+        const oldBin = await olderBuild(BEFORE_REPOSITORY_LISTS)
+        s = await setup(w)
         await s.okA(["machine", "add", "mb", "b-host"])
 
-        const r = await w.viaEntry(["run", "--machine", "mb", "--project", "elsewhere", "pi", "--", "say hello"], {
-          env: s.aEnv,
-          asIs: true,
+        await fs.mkdir(oldHome, { recursive: true })
+
+        const startedOld = await w.run(w.repository, [oldBin, "daemon"], {
+          env: { ...s.aEnv, VIBEST_HOME: oldHome },
         })
 
-        expect(
-          r.code !== 0 && r.stderr.includes("does not take --project") && r.stderr.includes("vibest update"),
-          `run --project: ${r.code} ${r.stdout}${r.stderr}`,
+        expect(startedOld.code === 0, `old A daemon: ${startedOld.stderr}${startedOld.stdout}`)
+
+        const r = await w.run(
+          w.repository,
+          [binary, "run", "--machine", "mb", "--project", "elsewhere", "pi", "--", "say hello"],
+          {
+            env: { ...s.aEnv, VIBEST_HOME: oldHome, VIBEST_SESSION_ID: crypto.randomUUID() },
+          },
         )
+
+        expect(r.code !== 0 && r.stderr.includes("vibest update"), `run --project: ${r.code} ${r.stdout}${r.stderr}`)
         const started = s.bDb<{ n: number }>("SELECT count(*) AS n FROM session")?.n
         expect(started === 0, `B has ${started} sessions`)
       } finally {
+        await stopVibestd(oldHome)
         await s?.stop()
       }
     },

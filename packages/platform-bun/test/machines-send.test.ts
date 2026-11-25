@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import { Inbox } from "@vibest/core/inbox"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import { Inbound } from "@vibest/server/machine/inbound"
@@ -9,7 +10,7 @@ import { SqlClient, Statement } from "effect/sql"
 import * as Platform from "#platform"
 
 import { until } from "./lib/fakes.ts"
-import { onB, peerSession, repoStack, twoMachines } from "./lib/machines-fakes.ts"
+import { inboxOf, onB, peerSession, repoStack, twoMachines } from "./lib/machines-fakes.ts"
 
 const outboxCount = Effect.flatMap(SqlClient.SqlClient, (sql) =>
   sql`SELECT id FROM outbox WHERE acked_at IS NULL`.pipe(Effect.map((r) => r.length)),
@@ -104,6 +105,42 @@ describe("a Send retried with the same request across machines", () => {
       )
       assert.strictEqual(reads.length, 25)
       assert.isTrue(reads.every((params) => params.includes(100)))
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect("a 2-hop notice relay across a -> mb -> mc preserves both intermediate and leaf machine names", () =>
+    Effect.gen(function* () {
+      const { net, a, b, entryId, asEntry } = yield* twoMachines()
+      const c = yield* repoStack(net)
+      net.route("c-host", c.layout.socket)
+      yield* b.cli(b.raw["Machine.Add"]({ name: "mc", target: "c-host" }))
+      yield* until(b.cli(b.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
+
+      const midOnB = (yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "mid", callerEnv: {} }))).id
+
+      const asMid = <A, E>(effect: Effect.Effect<A, E>) =>
+        RpcClient.withHeaders(
+          effect,
+          sessionHeaders({ sessionId: midOnB, projectId: b.project, repositoryRoot: b.directory }),
+        )
+
+      const leafOnC = (yield* asMid(b.raw.Spawn({ agent: "general", machine: "mc", prompt: "leaf", callerEnv: {} }))).id
+      yield* b.db.session.archive(midOnB)
+
+      yield* c.run(
+        Effect.flatMap(Inbox.Service, (inbox) => inbox.enqueue({ sessionId: leafOnC, message: "leaf crashed" })),
+      )
+
+      const expected = `${midOnB.slice(0, 8)} (on mb): ${leafOnC.slice(0, 8)} (on mc): leaf crashed`
+
+      const aRows = yield* until(a.run(inboxOf(entryId)), (rows) =>
+        rows.some((r) => r.content.includes("leaf crashed")),
+      )
+
+      assert.isTrue(
+        aRows.some((r) => r.content.includes(expected)),
+        `expected ${expected}, got ${JSON.stringify(aRows)}`,
+      )
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

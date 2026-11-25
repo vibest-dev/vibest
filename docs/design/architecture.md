@@ -109,9 +109,10 @@ manages it. Items marked planned are not built.
   to_session_id)` graph projected from `session.linked` and `session.unlinked` facts: every spawn links `parent <-> child`
   and any `--from`, `--to`, or `--with` targets in the same transaction, and `vibest session link` / `unlink` add or
   remove mutual, directed, or chained edges at runtime.
-- **An optional entry session** (`project.entry_session_id`, `main_session_id` before the schema baseline): the session a
-  bare `vibest` reopens. It is not identity, and no message falls back to it. "One entry session per
-  project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.
+- **User-opened root sessions** (`parent_session_id IS NULL AND origin_remote IS NULL`): bare `vibest` reopens the most
+  recent live or resumable user-opened session of the project (or starts a new `coordinator` session when none exists or
+  `--new` is passed); `vibest <id>` reopens a specific session. There is no `project.entry_session_id` pointer, and no
+  message falls back to a root session.
 - **Harnesses registered by plugins**: a plugin adds a `HarnessDefinition` with
   `context.harness.transform((editor) => editor.add(definition))`, like a runtime with `context.runtime.transform`.
   The shipped harnesses are the builtin plugins `vibest.harness-pi`, `vibest.harness-claude`, `vibest.harness-cursor` and `vibest.harness-agy` in

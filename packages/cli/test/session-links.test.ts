@@ -144,7 +144,7 @@ describe("Session graph links RPC", () => {
       const entryId = (yield* db.session.sessionParents([a.id])).get(a.id)!
 
       const promptBefore = yield* placement.systemPromptOf(rowA)
-      assert.include(promptBefore, `vibest send ${entryId}`)
+      assert.include(promptBefore, `vibest send ${entryId.slice(0, 8)}`)
 
       yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [refA], to: [{ id: entryId }] }) })
 
@@ -153,7 +153,7 @@ describe("Session graph links RPC", () => {
       assert.notInclude(refusedParent.message, `you may send to ${entryId}`)
 
       const promptAfter = yield* placement.systemPromptOf(rowA)
-      assert.notInclude(promptAfter, `vibest send ${entryId}`)
+      assert.notInclude(promptAfter, `vibest send ${entryId.slice(0, 8)}`)
       assert.include(promptAfter, "not linked to message it directly")
 
       const remoteCreatorId = "99999999-9999-4999-8999-999999999999"
@@ -167,12 +167,12 @@ describe("Session graph links RPC", () => {
 
       const remoteRow = (yield* db.session.getSession(remoteSessionId))!
       const remotePrompt = yield* placement.systemPromptOf(remoteRow)
-      assert.include(remotePrompt, `vibest send ${remoteCreatorId}`)
+      assert.include(remotePrompt, `vibest send ${remoteCreatorId.slice(0, 8)}`)
       assert.notInclude(remotePrompt, "not linked to message it directly")
 
       yield* db.session.unlinkSessions([{ from: remoteSessionId, to: remoteCreatorId, remote: "remote-1" }])
       const remotePromptUnlinked = yield* placement.systemPromptOf(remoteRow)
-      assert.notInclude(remotePromptUnlinked, `vibest send ${remoteCreatorId}`)
+      assert.notInclude(remotePromptUnlinked, `vibest send ${remoteCreatorId.slice(0, 8)}`)
       assert.include(remotePromptUnlinked, "not linked to message it directly")
     }),
   )

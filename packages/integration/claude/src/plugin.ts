@@ -1,5 +1,5 @@
 import { hookRoute, isTaken, sessionHeaders, TAKE_ROUTE } from "@vibest/protocol/protocol"
-import type { Taken } from "@vibest/schema/session"
+import { formatDelivery, type Taken } from "@vibest/schema/session"
 import type { EngineInterface, On, Register, ToolCallInput } from "claude-code"
 import * as Predicate from "effect/Predicate"
 
@@ -14,42 +14,7 @@ export const REPORT_TRY_MS = 10_000
 export const UNREACHABLE = "vibestd unreachable; the tool call is refused."
 export const FULL_MAX = 100
 
-const PREVIEW = 120
-
-const titled = (agent: string) => (agent === "" ? "" : `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`)
-
-const clip = (s: string) => {
-  const cps = [...s]
-
-  return cps.length <= PREVIEW ? s : `${cps.slice(0, PREVIEW - 1).join("")}…`
-}
-
-const agentHead = (sender: Extract<Taken["detail"][number]["sender"], { readonly type: "agent" }>) => {
-  const id = sender.session.slice(0, 8)
-
-  if (sender.agent !== undefined)
-    return `Message from @${titled(sender.agent)} · ${sender.title ?? ""} (${sender.machine === undefined ? id : `${sender.machine}/${id}`})`
-
-  return sender.machine === undefined
-    ? `Message from @${titled(id)}`
-    : `Message from @${titled(sender.machine)} · (${sender.machine}/${id})`
-}
-
-const head = (sender: Taken["detail"][number]["sender"]) => {
-  switch (sender.type) {
-    case "vibest":
-      return "Message from Vibest"
-    case "user":
-      return "Message from You"
-    case "plugin":
-      return `Message from Vibest · ${sender.plugin}`
-    case "agent":
-      return agentHead(sender)
-  }
-}
-
-export const shown = (detail: Taken["detail"]) =>
-  detail.map((entry) => `${head(entry.sender)}\n${clip(entry.message.trim().split("\n")[0] ?? "")}`).join("\n\n")
+export const shown = (detail: Taken["detail"]) => formatDelivery(detail)
 
 type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
 

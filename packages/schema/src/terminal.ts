@@ -41,6 +41,3 @@ export const SessionRef = Schema.Struct({
 })
 
 export type SessionRef = typeof SessionRef.Type
-
-export const formatSessionRef = (ref: SessionRef): string =>
-  ref.machine === undefined ? ref.id : `${ref.machine}/${ref.id}`

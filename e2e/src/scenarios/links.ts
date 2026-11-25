@@ -78,31 +78,37 @@ const S67: Check = {
       repo = m.repo
 
       const a = await start("a")
-      const b = await start("b", "--with", a.id)
+      const b = await start("b", "--with", a.id.slice(0, 8))
       const c = await start("c")
 
       const system = text(b.model.requests[0]!.find((x) => x.role === "system" || x.role === "developer"))
-      expect(system.includes(a.id), `b's system prompt should mention linked session ${a.id}: ${system}`)
+      expect(
+        system.includes(a.id.slice(0, 8)) && !system.includes(a.id),
+        `b's system prompt should mention linked session ${a.id.slice(0, 8)}: ${system}`,
+      )
 
-      const toSelf = await tell(a, `${binary} send ${a.id} -- to-myself`)
+      const toSelf = await tell(a, `${binary} send ${a.id.slice(0, 8)} -- to-myself`)
       expect(toSelf.includes("Forbidden") && toSelf.includes("does not send to itself"), `a send to oneself: ${toSelf}`)
       expect(inboxFrom(w, a.id) === 0, "a's send to itself was queued")
 
-      await tell(a, `${binary} send ${b.id} -- hello-from-a`)
+      await tell(a, `${binary} send ${b.id.slice(0, 8)} -- hello-from-a`)
       await until("b got a's message", () => seen(b.model).includes("hello-from-a"), 90_000)
       const got = text(b.model.requests.find((r) => text(r.at(-1)).includes("hello-from-a"))!.at(-1))
-      expect(got.includes("<vibest-agent-message>") && got.includes(a.id), `b saw: ${got}`)
+      expect(
+        got.includes("<vibest-agent-message>") && got.includes(`<session-id>${a.id.slice(0, 8)}</session-id>`),
+        `b saw: ${got}`,
+      )
 
-      const unlinked = await tell(c, `${binary} send ${a.id} -- not-linked`)
+      const unlinked = await tell(c, `${binary} send ${a.id.slice(0, 8)} -- not-linked`)
       expect(unlinked.includes("Forbidden") && unlinked.includes("not linked"), `unlinked c -> a: ${unlinked}`)
       expect(inboxFrom(w, c.id) === 0, "c's refused send was queued")
 
-      await w.okViaEntry(["session", "link", c.id, "--to", a.id], { cwd: repo })
-      await tell(c, `${binary} send ${a.id} -- linked-now`)
+      await w.okViaEntry(["session", "link", c.id.slice(0, 8), "--to", a.id.slice(0, 8)], { cwd: repo })
+      await tell(c, `${binary} send ${a.id.slice(0, 8)} -- linked-now`)
       await until("a got c's message", () => seen(a.model).includes("linked-now"), 90_000)
 
-      await w.okViaEntry(["session", "unlink", c.id, "--to", a.id], { cwd: repo })
-      const afterUnlink = await tell(c, `${binary} send ${a.id} -- unlinked-now`)
+      await w.okViaEntry(["session", "unlink", c.id.slice(0, 8), "--to", a.id.slice(0, 8)], { cwd: repo })
+      const afterUnlink = await tell(c, `${binary} send ${a.id.slice(0, 8)} -- unlinked-now`)
       expect(
         afterUnlink.includes("Forbidden") && afterUnlink.includes("not linked"),
         `after unlink c -> a: ${afterUnlink}`,

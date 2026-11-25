@@ -1,4 +1,5 @@
 import type { Sender } from "@vibest/schema/event"
+import { shortId } from "@vibest/schema/id"
 import type { Detail, HarnessId } from "@vibest/schema/session"
 import { Option, Schema } from "effect"
 
@@ -46,8 +47,12 @@ export const envelope = (
     `</${tag}>`,
   ].join("\n")
 
-export const sessionEnvelope = (id: string, message: string) =>
-  envelope("vibest-agent-message", [["session-id", id]], ["message", message])
+export const sessionEnvelope = (id: string, message: string, machine?: string) =>
+  envelope(
+    "vibest-agent-message",
+    [["session-id", shortId(id)], ...(machine === undefined ? [] : ([["machine", machine]] as const))],
+    ["message", message],
+  )
 
 export const noticeEnvelope = (message: string) => envelope("vibest-message", [], ["message", message])
 
@@ -60,7 +65,7 @@ export const envelopeFrom = (sender: Sender, message: string) => {
     case "plugin":
       return envelope("vibest-message", [["plugin", sender.plugin]], ["message", message])
     case "agent":
-      return sessionEnvelope(sender.session, message)
+      return sessionEnvelope(sender.session, message, sender.machine)
   }
 }
 

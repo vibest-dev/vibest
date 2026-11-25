@@ -602,7 +602,8 @@ describe("another machine's vibestd runs agents here", () => {
           ),
         )
 
-        assert.include(sent[0]!.content, `<session-id>${A_ENTRY}</session-id>`)
+        assert.include(sent[0]!.content, `<session-id>${A_ENTRY.slice(0, 8)}</session-id>`)
+        assert.include(sent[0]!.content, "<machine>my-workstation</machine>")
         assert.strictEqual(sent[1]!.content, "from the user")
         assert.deepStrictEqual(yield* b.run(sendersTo(session)), [
           { type: "agent", ...from, machine: "my-workstation" },
@@ -801,7 +802,7 @@ describe("vibest run --machine and remote sessions", () => {
         yield* finish(b.db, onB(spawned.id), "General Agent completed")
         const [notice] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
         assert.strictEqual(notice!.senderType, "vibest")
-        assert.strictEqual(unwrapped(notice!.content), `mb/${spawned.id.slice(0, 8)}: General Agent completed`)
+        assert.strictEqual(unwrapped(notice!.content), `${spawned.id.slice(0, 8)} (on mb): General Agent completed`)
         yield* until(b.run(outboxRows), (rows) => rows.length === 0)
         const shortId = spawned.id.slice(0, 8)
         const got = yield* asEntry(a.raw.Get({ id: shortId, machine: "mb" }))
@@ -830,17 +831,15 @@ describe("vibest run --machine and remote sessions", () => {
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
-  it.effect("a send from B's session to its creator arrives on A as a message from mb/<id>, not as a notice", () =>
+  it.effect("a send from B's session to its creator arrives on A with short <session-id> and <machine>", () =>
     Effect.gen(function* () {
       const { a, b, entryId, asEntry } = yield* twoMachines()
-      const spawned = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "ask me", callerEnv: {} }))
-      assert.deepStrictEqual(
-        yield* b.db.remote.sendToLinkedRemote(onB(spawned.id), entryId.slice(0, 8), "which branch?"),
-        { sent: entryId },
-      )
+      const spawned = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "ask", callerEnv: {} }))
+      const sentResult = yield* b.db.remote.sendToLinkedRemote(onB(spawned.id), entryId.slice(0, 8), "which branch?")
+      assert.deepStrictEqual(sentResult, { sent: entryId })
       const [sent] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
       assert.notStrictEqual(sent!.senderType, "vibest")
-      assert.include(sent!.content, `<session-id>mb/${spawned.id.slice(0, 8)}</session-id>`)
+      assert.include(sent!.content, `<session-id>${spawned.id.slice(0, 8)}</session-id>\n<machine>mb</machine>`)
       assert.include(sent!.content, "which branch?")
       const asker = (yield* b.db.session.getSession(onB(spawned.id)))!
       assert.deepStrictEqual(yield* a.run(sendersTo(entryId)), [
@@ -972,7 +971,7 @@ describe("vibest run --machine and remote sessions", () => {
       assert.lengthOf(yield* b.run(outboxRows), 1, "it waits on B")
       yield* a.cli(a.raw["Machine.Add"]({ name: "mb2", target: "b-host" }))
       const rows = yield* until(a.run(inboxOf(entryId)), (r) => r.length === 2)
-      assert.strictEqual(unwrapped(rows[1]!.content), `mb2/${onB(second.id).slice(0, 8)}: after rm`)
+      assert.strictEqual(unwrapped(rows[1]!.content), `${onB(second.id).slice(0, 8)} (on mb2): after rm`)
       yield* until(b.run(outboxRows), (r) => r.length === 0)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )

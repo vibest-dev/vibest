@@ -22,14 +22,7 @@ export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered"
 
 export type InboxStatus = typeof InboxStatus.Type
 
-export {
-  canonicalTarget,
-  formatSessionRef,
-  formatTerminalTarget,
-  SessionRef,
-  Terminal,
-  TerminalTarget,
-} from "./terminal.ts"
+export { canonicalTarget, formatTerminalTarget, SessionRef, Terminal, TerminalTarget } from "./terminal.ts"
 
 export const RuntimeLocation = Schema.Union([
   Schema.Struct({ socketPath: Schema.String }),
@@ -61,6 +54,45 @@ export const Detail = Schema.Struct({
 })
 
 export type Detail = typeof Detail.Type
+
+const PREVIEW = 120
+
+const titledSender = (agent: string) => (agent === "" ? "" : `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`)
+
+const clipPreview = (s: string) => {
+  const cps = [...s]
+
+  return cps.length <= PREVIEW ? s : `${cps.slice(0, PREVIEW - 1).join("")}…`
+}
+
+const agentHead = (sender: Extract<Detail["sender"], { readonly type: "agent" }>) => {
+  const id = sender.session.slice(0, 8)
+
+  if (sender.agent !== undefined)
+    return `Message from @${titledSender(sender.agent)} · ${sender.title ?? ""} (${sender.machine === undefined ? id : `${id} on ${sender.machine}`})`
+
+  return sender.machine === undefined
+    ? `Message from @${titledSender(id)}`
+    : `Message from @${titledSender(sender.machine)} · (${id} on ${sender.machine})`
+}
+
+const senderHead = (sender: Detail["sender"]) => {
+  switch (sender.type) {
+    case "vibest":
+      return "Message from Vibest"
+    case "user":
+      return "Message from You"
+    case "plugin":
+      return `Message from Vibest · ${sender.plugin}`
+    case "agent":
+      return agentHead(sender)
+  }
+}
+
+export const formatDelivery = (detail: ReadonlyArray<Detail>) =>
+  detail
+    .map((entry) => `${senderHead(entry.sender)}\n${clipPreview(entry.message.trim().split("\n")[0] ?? "")}`)
+    .join("\n\n")
 
 export const Taken = Schema.Struct({
   execution: Schema.Number,
@@ -103,7 +135,7 @@ export class AmbiguousSession extends Schema.TaggedError<AmbiguousSession>()("Am
   matches: Schema.Array(Schema.String),
 }) {
   override get message() {
-    return `${this.prefix} matches ${this.matches.join(", ")}; give more characters of the session id`
+    return `${this.prefix} matches ${this.matches.join(", ")}; retry with more characters of the session id`
   }
 }
 

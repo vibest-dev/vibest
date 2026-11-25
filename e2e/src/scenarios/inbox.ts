@@ -677,7 +677,7 @@ const checks: ReadonlyArray<Check> = [
                   e.type === "attachment" &&
                   e.raw.includes("hook_additional_context") &&
                   e.raw.includes("<vibest-agent-message>") &&
-                  e.raw.includes(sub) &&
+                  e.raw.includes(`<session-id>${sub.slice(0, 8)}</session-id>`) &&
                   e.raw.includes("hello-claude"),
               )
             )

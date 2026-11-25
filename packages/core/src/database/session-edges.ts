@@ -1,4 +1,5 @@
 import { SessionLinked, SessionUnlinked } from "@vibest/schema/event"
+import { shortId } from "@vibest/schema/id"
 import type { SessionRef } from "@vibest/schema/terminal"
 import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
@@ -206,16 +207,33 @@ export const make = Effect.gen(function* () {
     ),
 
     linkedTargets: Effect.fn("Db.session.linkedTargets")((id: string, exclude?: string) =>
-      sql<{ id: string; name: string }>`SELECT e.to_session_id AS id, s.name
+      sql<{
+        id: string
+        remoteId: string
+        name: string | null
+        machine: string | null
+      }>`SELECT e.to_session_id AS id, e.to_remote_id AS remote_id, s.name,
+          coalesce(
+            (SELECT m.name FROM machine m WHERE m.remote_id = e.to_remote_id),
+            (SELECT r.name FROM remote r WHERE r.id = e.to_remote_id)
+          ) AS machine
         FROM session_edge e
-        JOIN session s ON s.id = e.to_session_id
-        WHERE e.from_session_id = ${id} AND e.to_remote_id = '' AND s.ended_at IS NULL
+        LEFT JOIN session s ON e.to_remote_id = '' AND s.id = e.to_session_id
+        WHERE e.from_session_id = ${id}
+          AND (e.to_remote_id != '' OR (s.id IS NOT NULL AND s.ended_at IS NULL))
           ${exclude === undefined ? sql`` : sql`AND e.to_session_id != ${exclude}`}
-        ORDER BY s.created_at, s.rowid`.pipe(
+        ORDER BY CASE WHEN e.to_remote_id = '' THEN 0 ELSE 1 END, s.created_at, s.rowid, e.to_remote_id, e.to_session_id`.pipe(
         Effect.map((rows) =>
           rows.map((row) => ({
             id: row.id,
-            label: row.name ? `agent ${row.name}` : row.id,
+            label:
+              row.remoteId === ""
+                ? row.name
+                  ? `agent ${row.name}`
+                  : shortId(row.id)
+                : row.machine
+                  ? `on ${row.machine}`
+                  : "on another machine",
           })),
         ),
         Effect.orDie,

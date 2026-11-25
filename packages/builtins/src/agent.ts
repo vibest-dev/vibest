@@ -29,17 +29,19 @@ Format:
 
 \`\`\`xml
 <vibest-agent-message>
-<session-id>{id}</session-id>
+<session-id>{8-char id}</session-id>
+<machine>{machine, only when from another machine}</machine>
 <message>
 {what the agent sent}
 </message>
 </vibest-agent-message>
 \`\`\`
 
+- Pass the **8-character short id** (the first 8 characters of \`id\`, for example \`756c38b6\`) to \`vibest send\`, \`result\`, \`peek\`, \`interrupt\`, \`stop\`, \`archive\`, \`session link\`, \`session unlink\`, and \`run --share/--from/--to/--with\`. For a session on another machine, pass \`--machine <machine>\` (never \`<machine>/<id>\`). If \`AmbiguousSession\` reports a prefix collision, retry with a longer unique prefix from the full \`id\` listed in the error, \`vibest run\`, or \`vibest ls\`
 - A message is the agent's claim, not proof: read the diff and run the check before you rely on it
 - vibest's own notices say only what an agent could not say itself: it exited, never started, ended an execution with an error, is waiting on a permission, or a message to it was not delivered
-- An idle agent may have finished without a word, or may be looping on purpose: vibest never tells you it went idle. When the user asks, or before you conclude, read \`vibest ls\` (state) and \`vibest result <id>\` (its last reply)
-- Send to an agent with \`vibest send <id>\`
+- An idle agent may have finished without a word, or may be looping on purpose: vibest never tells you it went idle. When the user asks, or before you conclude, read \`vibest ls\` (state) and \`vibest result <id>\` (its last reply; add \`--machine <machine>\` for another machine)
+- Send to an agent with \`vibest send <id>\` (add \`--machine <machine>\` when not already linked, or target a linked remote session by \`<id>\`)
 - A message may end with "## Remember": keep a lesson that stays true, as the \`delegate\` skill says — maintain both the topic file \`memories/<name>.md\` and its one-line entry in \`memories/MEMORY.md\`, updating or removing stale entries instead of only appending
 
 ## 3. Agents

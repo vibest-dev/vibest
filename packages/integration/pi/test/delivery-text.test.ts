@@ -50,7 +50,7 @@ describe("Pi delivery text", () => {
           message: "report",
         },
       ]).split("\n")[0],
-      "Message from @General · Ask me (mb/aaaaaaaa)",
+      "Message from @General · Ask me (aaaaaaaa on mb)",
     )
   })
 
@@ -59,7 +59,7 @@ describe("Pi delivery text", () => {
       { sender: { type: "agent", session: "aaaaaaaa", machine: "mb" }, message: "report" },
     ]).split("\n")
 
-    assert.strictEqual(lines[0], "Message from @Mb · (mb/aaaaaaaa)")
+    assert.strictEqual(lines[0], "Message from @Mb · (aaaaaaaa on mb)")
     assert.strictEqual(lines[1], "report")
   })
 
