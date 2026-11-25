@@ -6,16 +6,16 @@ import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { Session } from "@vibest/core/session"
 import { Starts } from "@vibest/core/session/starts"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { until } from "@vibest/testkit/observe"
+import { makeRepository } from "@vibest/testkit/session"
+import { idleSession, spawnInput, test } from "@vibest/testkit/sessions-helpers"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { projectOf } from "./lib/directory.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
-import { idleSession, spawnInput, test } from "./lib/sessions-helpers.ts"
 
 const here = { runtime: RUNTIME, target: { id: "test/coord" } }
 

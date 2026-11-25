@@ -5,12 +5,11 @@ import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/pl
 import { Hooks } from "@vibest/core/plugin/hooks"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
+import { memoryPluginHost } from "@vibest/testkit/bun"
+import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "@vibest/testkit/harnesses"
+import * as Platform from "@vibest/testkit/platform"
 import { Context, Effect, Fiber, FileSystem, Layer, Path } from "effect"
 import { TestClock } from "effect/testing"
-
-import * as Platform from "../../platform-bun/src/bun.ts"
-import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
-import { memoryPluginHost } from "./platform/bun.ts"
 
 const events: Array<string> = []
 

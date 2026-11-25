@@ -4,12 +4,11 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { SessionLaunch } from "@vibest/core/session/entry"
 import { Placement } from "@vibest/core/session/placement"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { makeRepository } from "@vibest/testkit/session"
+import { test } from "@vibest/testkit/sessions-helpers"
 import { Effect } from "effect"
-
-import { projectOf } from "./lib/directory.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { makeRepository } from "./lib/session.ts"
-import { test } from "./lib/sessions-helpers.ts"
 
 const insertTopLevel = (projectId: string, name: string, cwd: string) =>
   Effect.gen(function* () {

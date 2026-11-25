@@ -24,6 +24,7 @@
     "vibest/projector-writes": "error",
     "vibest/no-background-loop": "error",
     "vibest/no-module-let": "error",
+    "vibest/no-src-tests": "error",
     "vibest/package-imports": "error",
     "eslint/no-unused-vars": "error",
     "eslint/no-unused-expressions": [
@@ -131,7 +132,7 @@
       }
     },
     {
-      "files": ["**/test/**", "**/*.test.ts", "e2e/**"],
+      "files": ["**/test/**", "**/*.test.ts", "packages/testkit/src/**", "e2e/**"],
       "rules": {
         "typescript/consistent-type-assertions": "off"
       }

@@ -4,14 +4,13 @@ import { Harnesses } from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { executionEndFrom } from "@vibest/core/replies"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { PULLING_CLAUDE } from "@vibest/testkit/harnesses"
+import { replyOf, eventsOf, until, writeEnd, yieldToIo } from "@vibest/testkit/observe"
+import { makeRepository } from "@vibest/testkit/session"
+import { idleSession, spawnWorking, test } from "@vibest/testkit/sessions-helpers"
 import { Clock, Effect, Fiber, type Schema } from "effect"
 import { SqlClient } from "effect/sql"
-
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { PULLING_CLAUDE } from "./lib/harnesses.ts"
-import { replyOf, eventsOf, until, writeEnd, yieldToIo } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
-import { idleSession, spawnWorking, test } from "./lib/sessions-helpers.ts"
 
 const observedEnd = (harness: string, payload: Schema.JsonObject) =>
   Effect.gen(function* () {

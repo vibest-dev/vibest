@@ -2,14 +2,13 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { terminalOf, exitedAt } from "@vibest/core/database/db-rows"
 import { Integration } from "@vibest/core/integration"
+import { FakeProcesses } from "@vibest/testkit/fake-processes"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { until } from "@vibest/testkit/observe"
+import { makeRepository, type TestOptions } from "@vibest/testkit/session"
+import { spawnInput, idleSession, sessionWorktree, test } from "@vibest/testkit/sessions-helpers"
 import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
 import { TestClock } from "effect/testing"
-
-import { FakeProcesses } from "./lib/fake-processes.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until } from "./lib/observe.ts"
-import { makeRepository, type TestOptions } from "./lib/session.ts"
-import { spawnInput, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Session", () => {
   const sharersOfDirectory = (ownerId: string) =>

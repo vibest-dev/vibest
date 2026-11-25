@@ -1,9 +1,9 @@
 import http from "node:http"
 
 import { assert, describe, it } from "@effect/vitest"
-import { runVibest as vibest, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
 import { EdgeChain, EdgeDirected, EdgeMutual } from "@vibest/protocol/schemas"
 import { PROTOCOL } from "@vibest/schema/version"
+import { runVibest as vibest, tempDirectory } from "@vibest/testkit/fakes"
 import { Effect, FileSystem, Path, Schema } from "effect"
 
 import * as Platform from "#platform"

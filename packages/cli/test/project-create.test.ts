@@ -11,6 +11,11 @@ import {
   projectRoot,
 } from "@vibest/core/project/create"
 import { Session } from "@vibest/core/session"
+import { sessionHeaders } from "@vibest/protocol/protocol"
+import { liveDaemon } from "@vibest/runtime-herdr/commands"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Layout } from "@vibest/schema/layout"
+import * as Server from "@vibest/server/server"
 import {
   authed,
   FakeGit,
@@ -22,12 +27,7 @@ import {
   until,
   writeEnd,
   projectOf,
-} from "@vibest/platform-bun/test/lib/fakes"
-import { sessionHeaders } from "@vibest/protocol/protocol"
-import { liveDaemon } from "@vibest/runtime-herdr/commands"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Layout } from "@vibest/schema/layout"
-import * as Server from "@vibest/server/server"
+} from "@vibest/testkit/fakes"
 import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 

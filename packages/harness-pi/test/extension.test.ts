@@ -8,6 +8,8 @@ import { Db } from "@vibest/core/database/db"
 import { Project } from "@vibest/core/project"
 import { noticeEnvelope } from "@vibest/core/replies"
 import * as Platform from "@vibest/platform-bun/bun"
+import { Layout } from "@vibest/schema/layout"
+import * as Server from "@vibest/server/server"
 import {
   authed,
   FakeRuntime,
@@ -24,9 +26,7 @@ import {
   untilVirtual,
   projectOf,
   entryPending,
-} from "@vibest/platform-bun/test/lib/fakes"
-import { Layout } from "@vibest/schema/layout"
-import * as Server from "@vibest/server/server"
+} from "@vibest/testkit/fakes"
 import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Schema, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"

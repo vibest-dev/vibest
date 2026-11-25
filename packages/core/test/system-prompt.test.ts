@@ -1,9 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { projectText, systemPrompt } from "@vibest/core/system-prompt"
+import * as Platform from "@vibest/testkit/bun"
+import { tempDirectory } from "@vibest/testkit/directory"
 import { Deferred, Effect, Fiber, FileSystem, Path } from "effect"
-
-import { tempDirectory } from "./lib/directory.ts"
-import * as Platform from "./platform/bun.ts"
 
 const promptOf = (dir: string, text: { preferences: string; memories: string }) =>
   systemPrompt({ system: "You are an agent.\n", id: "a", projectDir: dir, agents: [], ...text })

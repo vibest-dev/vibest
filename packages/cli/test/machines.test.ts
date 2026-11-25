@@ -7,7 +7,12 @@ import { withHeaders } from "@vibest/client/unix-http"
 import { Db } from "@vibest/core/database/db"
 import { Identity } from "@vibest/core/identity"
 import { servePipe } from "@vibest/platform-bun/pipe-server"
-import { runVibest, tempDirectory, until, untilVirtual, yieldToIo } from "@vibest/platform-bun/test/lib/fakes"
+import { REMOTE_BY_USER, remoteHeaders } from "@vibest/protocol/protocol"
+import { randomId } from "@vibest/schema/id"
+import { Layout } from "@vibest/schema/layout"
+import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/machine"
+import { REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nameProblem } from "@vibest/server/machine/machines"
+import { runVibest, tempDirectory, until, untilVirtual, yieldToIo } from "@vibest/testkit/fakes"
 import {
   A_ENTRY,
   COMMIT,
@@ -20,12 +25,7 @@ import {
   repoStack,
   sendersTo,
   served,
-} from "@vibest/platform-bun/test/lib/machines-fakes"
-import { REMOTE_BY_USER, remoteHeaders } from "@vibest/protocol/protocol"
-import { randomId } from "@vibest/schema/id"
-import { Layout } from "@vibest/schema/layout"
-import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/machine"
-import { REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nameProblem } from "@vibest/server/machine/machines"
+} from "@vibest/testkit/machines-fakes"
 import { Cause, type Context, Duration, Effect, Exit, Fiber, Layer, Option, Queue, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"

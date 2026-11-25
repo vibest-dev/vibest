@@ -2,9 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Drain } from "@vibest/core/drain"
 import { stopOnce } from "@vibest/server/stop"
+import { memoryBus } from "@vibest/testkit/unit-helpers"
 import { Deferred, Effect, Fiber, Layer } from "effect"
-
-import { memoryBus } from "./lib/unit-helpers.ts"
 
 const drainLayer = Drain.layer.pipe(Layer.provideMerge(memoryBus))
 

@@ -2,16 +2,16 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { terminalOf } from "@vibest/core/database/db-rows"
 import { Session } from "@vibest/core/session"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeProcesses } from "@vibest/testkit/fake-processes"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { CLAUDE, CURSOR, PI } from "@vibest/testkit/harnesses"
+import { until, processEnds } from "@vibest/testkit/observe"
+import { makeRepository, restartSessions, type TestServices } from "@vibest/testkit/session"
+import { idleSession, sessionWorktree, spawnInput, sqlNotices, test } from "@vibest/testkit/sessions-helpers"
 import { Deferred, Effect, FileSystem } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { projectOf } from "./lib/directory.ts"
-import { FakeProcesses } from "./lib/fake-processes.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { CLAUDE, CURSOR, PI } from "./lib/harnesses.ts"
-import { until, processEnds } from "./lib/observe.ts"
-import { makeRepository, restartSessions, type TestServices } from "./lib/session.ts"
-import { idleSession, sessionWorktree, spawnInput, sqlNotices, test } from "./lib/sessions-helpers.ts"
 
 const nextVibestd = (done: Effect.Effect<boolean, never, TestServices>) =>
   Effect.gen(function* () {

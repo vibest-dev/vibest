@@ -1,4 +1,4 @@
 {
   "extends": "@vibest/tsconfig/neutral.json",
-  "include": ["src", "test"]
+  "include": ["src"]
 }

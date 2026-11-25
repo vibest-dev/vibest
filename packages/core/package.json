@@ -5,12 +5,10 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./*": "./src/*.ts",
-    "./test/lib/*": "./test/lib/*.ts",
-    "./test/platform/*": "./test/platform/*.ts"
+    "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast",
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p test/tsconfig.json",
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/core"
   },
   "dependencies": {
@@ -24,6 +22,7 @@
     "@effect/platform-node-shared": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
     "@vibest/client": "workspace:*",
-    "@vibest/protocol": "workspace:*"
+    "@vibest/protocol": "workspace:*",
+    "@vibest/runtime-herdr": "workspace:*"
   }
 }

@@ -7,11 +7,10 @@ import { LOG_MAX_BYTES } from "@vibest/platform-bun/log-file"
 import { ID } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
+import { PATH_WITHOUT_HARNESS_CLIS, pingOf, recordedInfo, runVibest, tempDirectory } from "@vibest/testkit/fakes"
 import { Effect, Fiber, FileSystem } from "effect"
 
 import * as Platform from "#platform"
-
-import { PATH_WITHOUT_HARNESS_CLIS, pingOf, recordedInfo, runVibest, tempDirectory } from "./lib/fakes.ts"
 
 const execFile = util.promisify(childProcess.execFile)
 

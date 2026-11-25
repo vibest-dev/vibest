@@ -6,6 +6,9 @@ import { noticeEnvelope } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
 import { SessionLive, type Restarted } from "@vibest/core/session/live"
 import { CONTINUE, continueText } from "@vibest/core/session/restart"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { VibestCommand } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
 import {
   CLAUDE,
   CURSOR,
@@ -22,10 +25,7 @@ import {
   untilVirtual,
   writeEnd,
   projectOf,
-} from "@vibest/platform-bun/test/lib/fakes"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { VibestCommand } from "@vibest/schema/layout"
-import { PROTOCOL } from "@vibest/schema/version"
+} from "@vibest/testkit/fakes"
 import { Clock, Effect, Fiber, Ref, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 

@@ -60,6 +60,12 @@ const handoff = {
 
 const isWorkspace = (source) => /^(@vibest\/|#)/.test(source)
 
+const isTestkit = (source) => source === "@vibest/testkit" || source.startsWith("@vibest/testkit/")
+
+const isTestFile = (file) =>
+  /\/packages\/testkit\/src\//.test(file) ||
+  (!/\/packages\/[^/]+\/src\//.test(file) && (/\/test\//.test(file) || /\.test\.[cm]?[jt]sx?$/.test(file)))
+
 const permits = (entry, source) =>
   entry.startsWith("=") ? source === entry.slice(1) : source === entry || source.startsWith(`${entry}/`)
 
@@ -84,18 +90,28 @@ export const packageImports = {
   create(context) {
     const file = context.filename.replaceAll("\\", "/")
     const match = /^(.*\/(?:packages\/([^/]+)|(tools\/verify)))\/src\//.exec(file)
+    const allowTestkit = isTestFile(file)
 
-    if (match === null) return {}
-    const [, root, packageName, tool] = match
+    if (match === null && allowTestkit) return {}
+    const [, root, packageName, tool] = match ?? []
     const name = packageName ?? tool
-    const list = allowed[name]
-
-    if (list === undefined) return {}
+    const list = name === undefined ? undefined : allowed[name]
 
     const check = (node) => {
       const source = specifierOf(node.source)
 
       if (source === undefined) return
+
+      if (!allowTestkit && isTestkit(source)) {
+        context.report({
+          node,
+          message: `@vibest/testkit is test-only and may only be imported under **/test/** or **/*.test.ts.`,
+        })
+
+        return
+      }
+
+      if (list === undefined) return
 
       if (source.startsWith(".")) {
         if (path.posix.resolve(path.posix.dirname(file), source).startsWith(`${root}/`)) return

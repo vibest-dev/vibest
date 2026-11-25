@@ -2,13 +2,20 @@ import { assert, describe } from "@effect/vitest"
 import { exitedAt } from "@vibest/core/database/db-rows"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Exits } from "@vibest/core/session/exits"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { settled, until } from "@vibest/testkit/observe"
+import { makeRepository } from "@vibest/testkit/session"
+import {
+  idleSession,
+  sessionWorktree,
+  spawnInput,
+  spawnWorking,
+  sqlNotices,
+  test,
+} from "@vibest/testkit/sessions-helpers"
 import { Effect, FileSystem } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { settled, until } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
-import { idleSession, sessionWorktree, spawnInput, spawnWorking, sqlNotices, test } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("an exited session", () => {
   const exitedSession = Effect.gen(function* () {

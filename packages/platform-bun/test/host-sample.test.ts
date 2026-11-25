@@ -2,8 +2,9 @@ import os from "node:os"
 
 import { afterEach, assert, describe, it, vi } from "@effect/vitest"
 import { Load } from "@vibest/server/machine/load"
-import { Effect, FileSystem, Layer } from "effect"
+import { Clock, Effect, Fiber, FileSystem, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/process"
+import { TestClock } from "effect/testing"
 
 import { darwinAvailableBytes, layer } from "../src/host-sample.ts"
 
@@ -41,10 +42,10 @@ const linuxRead = (cgroupPath: string, pinned: boolean, limitedAt: string, recla
 
   const fs = FileSystem.layerNoop({
     readFileString: (path) =>
-      Effect.sync(() => {
-        if (path === "/proc/stat") return busyFirstCpu(Date.now())
+      Effect.map(Clock.currentTimeMillis, (now) => {
+        if (path === "/proc/stat") return busyFirstCpu(now)
 
-        if (path === `${root}/cpu.stat`) return `usage_usec ${Date.now() * 1000}\n`
+        if (path === `${root}/cpu.stat`) return `usage_usec ${now * 1000}\n`
 
         return files.get(path) ?? ""
       }),
@@ -55,11 +56,12 @@ const linuxRead = (cgroupPath: string, pinned: boolean, limitedAt: string, recla
     ChildProcessSpawner.make(() => Effect.die("no process on linux")),
   )
 
-  return Effect.runPromise(
-    Effect.flatMap(Load.HostSample, (sample) => sample.read).pipe(
-      Effect.provide(layer.pipe(Layer.provide(Layer.merge(fs, spawner)))),
-    ),
-  )
+  return Effect.gen(function* () {
+    const fiber = yield* Effect.forkChild(Effect.flatMap(Load.HostSample, (sample) => sample.read))
+    yield* TestClock.adjust("200 millis")
+
+    return yield* Fiber.join(fiber)
+  }).pipe(Effect.provide(layer.pipe(Layer.provide(Layer.merge(fs, spawner)))))
 }
 
 describe("host sample", () => {
@@ -70,32 +72,27 @@ describe("host sample", () => {
     assert.strictEqual(darwinAvailableBytes("Pages free: 1.\n"), undefined)
   })
 
-  it("on linux it reads what this process may use: the tightest limit from its own cgroup up, its CPUs, reclaimable cache", async () => {
-    vi.spyOn(os, "platform").mockReturnValue("linux")
-    vi.spyOn(os, "totalmem").mockReturnValue(4096 * MIB)
-    vi.spyOn(os, "cpus").mockImplementation(() => {
-      const now = Date.now()
+  it.effect(
+    "on linux it reads what this process may use: the tightest limit from its own cgroup up, its CPUs, reclaimable cache",
+    () =>
+      Effect.gen(function* () {
+        vi.spyOn(os, "platform").mockReturnValue("linux")
+        vi.spyOn(os, "totalmem").mockReturnValue(4096 * MIB)
 
-      return Array.from({ length: 8 }, (_, i) => ({
-        model: "test",
-        speed: 0,
-        times: { user: i === 0 ? now : 0, nice: 0, sys: 0, idle: i === 0 ? 0 : now, irq: 0 },
-      }))
-    })
+        for (const [cgroup, pinned, limitedAt, reclaimable] of [
+          ["/user.slice/vibest.scope", false, "/user.slice/vibest.scope", 100],
+          ["/", false, "/", 100],
+          ["/", true, "/", 100],
+          ["/system.slice/vibest.service", false, "/", 0],
+        ] as const) {
+          const reading = yield* linuxRead(cgroup, pinned, limitedAt, reclaimable)
+          const shown = `${cgroup} ${pinned ? "pinned" : "quota"}: ${JSON.stringify(reading)}`
 
-    for (const [cgroup, pinned, limitedAt, reclaimable] of [
-      ["/user.slice/vibest.scope", false, "/user.slice/vibest.scope", 100],
-      ["/", false, "/", 100],
-      ["/", true, "/", 100],
-      ["/system.slice/vibest.service", false, "/", 0],
-    ] as const) {
-      const reading = await linuxRead(cgroup, pinned, limitedAt, reclaimable)
-      const shown = `${cgroup} ${pinned ? "pinned" : "quota"}: ${JSON.stringify(reading)}`
-
-      assert.strictEqual(reading.cpu.count, 1, shown)
-      assert.isAbove(reading.cpu.utilization ?? 0, 0.97, shown)
-      assert.strictEqual(reading.memory.total, 1024 * MIB, shown)
-      assert.strictEqual(reading.memory.available, (1024 - (600 - reclaimable)) * MIB, shown)
-    }
-  })
+          assert.strictEqual(reading.cpu.count, 1, shown)
+          assert.strictEqual(reading.cpu.utilization, 1, shown)
+          assert.strictEqual(reading.memory.total, 1024 * MIB, shown)
+          assert.strictEqual(reading.memory.available, (1024 - (600 - reclaimable)) * MIB, shown)
+        }
+      }),
+  )
 })

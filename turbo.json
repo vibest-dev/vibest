@@ -4,6 +4,7 @@
     "tools/tsconfig/base.json",
     "tools/tsconfig/neutral.json",
     "tools/tsconfig/web-globals.d.ts",
+    "packages/testkit/src/**",
     "vitest.config.ts"
   ],
   "tasks": {

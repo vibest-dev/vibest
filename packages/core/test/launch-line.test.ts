@@ -1,10 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { launchLine } from "@vibest/core/launch"
 import { typedLine } from "@vibest/plugin/effect/launch"
+import * as Platform from "@vibest/testkit/bun"
+import { tempDirectory } from "@vibest/testkit/directory"
 import { Effect, FileSystem, Path } from "effect"
-
-import { tempDirectory } from "./lib/directory.ts"
-import * as Platform from "./platform/bun.ts"
 
 const argvOf = (command: ReadonlyArray<string>, env?: Record<string, string>) =>
   Effect.gen(function* () {

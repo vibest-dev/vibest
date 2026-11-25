@@ -238,7 +238,7 @@ describe("ledger access rules", () => {
     const source = "export const q = `SELECT * FROM event`\nexport const p = { position: 1 }\n"
     expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(event-reads)", "2 vibest(event-reads)"])
     expect(oxlintFindings(source, core("bus.ts"))).toEqual([])
-    expect(oxlintFindings(source, core("a.test.ts"))).toEqual([])
+    expect(oxlintFindings(source, "packages/core/test/a.test.ts")).toEqual([])
   })
 
   it("no-payload-sql: json_extract only in the v1 import", () => {
@@ -354,5 +354,38 @@ export { f } from "@vibest/server/server"
       `import { x } from "@vibest/server/server/x"\nexport const v = x\n`,
     ])
       expect(oxlintFindings(other, handler)).toEqual(["1 vibest(package-imports)"])
+  })
+
+  it("forbids @vibest/testkit in every packages/*/src/** and allows it in **/test/** and **/*.test.ts", () => {
+    const tk = `import { tempDirectory } from "@vibest/testkit/fakes"\nexport const v = tempDirectory\n`
+
+    for (const file of [
+      "packages/core/src/a.ts",
+      "packages/server/src/a.ts",
+      "packages/cli/src/a.ts",
+      "packages/platform-bun/src/a.ts",
+      "packages/unknown-pkg/src/a.ts",
+      "packages/foo/src/test/helper.ts",
+      "tools/verify/src/a.ts",
+    ])
+      expect(oxlintFindings(tk, file)).toEqual(["1 vibest(package-imports)"])
+
+    for (const file of [
+      "packages/core/test/a.test.ts",
+      "packages/server/test/a.test.ts",
+      "packages/cli/test/a.test.ts",
+      "packages/platform-bun/test/a.test.ts",
+      "packages/testkit/src/a.ts",
+    ])
+      expect(oxlintFindings(tk, file)).toEqual([])
+  })
+})
+
+describe("no-src-tests", () => {
+  it("forbids *.test.ts inside packages/*/src/** and allows them under packages/*/test/**", () => {
+    const source = `export const ok = true\n`
+    expect(oxlintFindings(source, "packages/core/src/plugin/registry.test.ts")).toEqual(["1 vibest(no-src-tests)"])
+    expect(oxlintFindings(source, "packages/cli/src/foo.test.ts")).toEqual(["1 vibest(no-src-tests)"])
+    expect(oxlintFindings(source, "packages/core/test/plugin/registry.test.ts")).toEqual([])
   })
 })

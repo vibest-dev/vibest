@@ -10,7 +10,6 @@
     }
   },
   "exports": {
-    "./test/*": "./test/*.ts",
     "./*": "./src/*.ts"
   },
   "scripts": {
