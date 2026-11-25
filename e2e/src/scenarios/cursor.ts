@@ -330,10 +330,7 @@ const reports = (runtime: Runtime): Check => ({
       keep("after the message that followed the early interrupt", await c.screen(id))
       const log = await c.log()
       expect(!log.includes("did not reach vibestd"), "a report did not reach vibestd")
-      expect(
-        !screens.some((s) => /vibest integration|did not reach vibestd/.test(s)),
-        "the plugin wrote to the terminal",
-      )
+      expect(!screens.some((s) => /vibest guard|did not reach vibestd/.test(s)), "the plugin wrote to the terminal")
       keep("fresh, before any input", await c.freshScreen())
 
       const timing = row<{ placed: number | null; started: number }>(
@@ -356,13 +353,13 @@ const reports = (runtime: Runtime): Check => ({
 })
 
 const SEND_THEN_GUARD =
-  "Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: vibest integration stop > guard-ran.txt. Then reply with exactly: pong"
+  'Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready > guard-ran.txt. Then reply with exactly: pong'
 
 const noApprovalDialog: Check = {
   id: "I12",
   tier: "agent",
   title:
-    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to run vibest integration stop, it does not run",
+    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to curl vibest-http.sock, it does not run",
   run: async (w) => {
     const c = await cursorWorld(w, "herdr", "i12")
     await fs.writeFile(

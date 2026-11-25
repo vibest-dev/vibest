@@ -7,7 +7,7 @@ import { sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { PROTOCOL } from "@vibest/schema/version"
 import * as Http from "@vibest/server/http"
-import { Clock, Effect, Logger, type Scope } from "effect"
+import { Clock, Effect, Logger, Predicate, type Schema, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { CurrentLogAnnotations } from "effect/References"
 import { TestClock } from "effect/testing"
@@ -25,9 +25,28 @@ import {
   projectOf,
 } from "./lib/fakes.ts"
 
+const AGY = {
+  ...CURSOR,
+  id: "agy",
+  binary: "agy",
+  guardCall: (event: Schema.JsonObject) => {
+    const toolCall = Predicate.isObject(event.toolCall) ? (event.toolCall as Schema.JsonObject) : undefined
+
+    if (!toolCall || toolCall.name !== "run_command") return undefined
+    const args = Predicate.isObject(toolCall.args) ? (toolCall.args as Schema.JsonObject) : {}
+
+    return {
+      tool_name: "Bash",
+      tool_input: { command: Predicate.isString(args.CommandLine) ? args.CommandLine : "" },
+      ...(Predicate.isString(event.cwd) && { cwd: event.cwd }),
+    }
+  },
+  guardAnswer: (reason: string | undefined) => (reason ? { decision: "deny", reason } : { decision: "allow" }),
+}
+
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () =>
-    program.pipe(Effect.provide(testLayer({ harnesses: [{ ...CLAUDE, delivery: "pull" }, PI, CURSOR] }))),
+    program.pipe(Effect.provide(testLayer({ harnesses: [{ ...CLAUDE, delivery: "pull" }, PI, CURSOR, AGY] }))),
   )
 
 const project = Effect.gen(function* () {
@@ -169,6 +188,107 @@ describe("vibestd's HTTP API", () => {
       const numbered = yield* ready(JSON.stringify({ pid: 1 }))
       assert.deepStrictEqual(numbered, { status: 200, body: { process } })
       assert.strictEqual(pidOf((yield* db.session.getSession(worker))!), 1)
+    }),
+  )
+
+  test(
+    "/hooks/<harness>/guard runs guardInputOf and formats allow/deny through adapter.guardAnswer for claude, cursor, and agy",
+    Effect.gen(function* () {
+      const { call, key, repo, sessions, worker } = yield* project
+
+      const { id: cursorId } = yield* sessions.spawn({
+        agent: "general",
+        machine: { id: "local" },
+        root: repo,
+        parentSessionId: "creator",
+        projectId: key,
+        name: "Cursor guard",
+        prompt: "do it",
+        runtime: "herdr",
+        harness: "cursor",
+      })
+
+      const { id: agyId } = yield* sessions.spawn({
+        agent: "general",
+        machine: { id: "local" },
+        root: repo,
+        parentSessionId: "creator",
+        projectId: key,
+        name: "Agy guard",
+        prompt: "do it",
+        runtime: "herdr",
+        harness: "agy",
+      })
+
+      const identityReason =
+        "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused."
+
+      const claudeAllow = yield* call(
+        "/hooks/claude/guard",
+        { sessionId: worker, harness: "claude" },
+        JSON.stringify({ tool_name: "Bash", tool_input: { command: "git status" }, cwd: repo }),
+      )
+
+      assert.deepStrictEqual(claudeAllow, { status: 200, body: {} })
+
+      const claudeDeny = yield* call(
+        "/hooks/claude/guard",
+        { sessionId: worker, harness: "claude" },
+        JSON.stringify({ tool_name: "Bash", tool_input: { command: "VIBEST_SESSION_ID=other vibest ls" }, cwd: repo }),
+      )
+
+      assert.deepStrictEqual(claudeDeny, { status: 200, body: { deny: identityReason } })
+
+      const cursorAllow = yield* call(
+        "/hooks/cursor/guard",
+        { sessionId: cursorId, harness: "cursor" },
+        JSON.stringify({ tool_name: "Shell", tool_input: { command: "git status" }, cwd: repo }),
+      )
+
+      assert.deepStrictEqual(cursorAllow, { status: 200, body: { permission: "allow" } })
+
+      const cursorDeny = yield* call(
+        "/hooks/cursor/guard",
+        { sessionId: cursorId, harness: "cursor" },
+        JSON.stringify({ tool_name: "Shell", tool_input: { command: "VIBEST_SESSION_ID=other vibest ls" }, cwd: repo }),
+      )
+
+      assert.deepStrictEqual(cursorDeny, {
+        status: 200,
+        body: { permission: "deny", user_message: identityReason, agent_message: identityReason },
+      })
+
+      const agyUnmapped = yield* call(
+        "/hooks/agy/guard",
+        { sessionId: agyId, harness: "agy" },
+        JSON.stringify({ cwd: repo, toolCall: { name: "list_dir", args: {} } }),
+      )
+
+      assert.deepStrictEqual(agyUnmapped, { status: 200, body: { decision: "allow" } })
+
+      const agyAllow = yield* call(
+        "/hooks/agy/guard",
+        { sessionId: agyId, harness: "agy" },
+        JSON.stringify({ cwd: repo, toolCall: { name: "run_command", args: { CommandLine: "git status" } } }),
+      )
+
+      assert.deepStrictEqual(agyAllow, { status: 200, body: { decision: "allow" } })
+
+      const agyDeny = yield* call(
+        "/hooks/agy/guard",
+        { sessionId: agyId, harness: "agy" },
+        JSON.stringify({
+          cwd: repo,
+          toolCall: { name: "run_command", args: { CommandLine: "VIBEST_SESSION_ID=other vibest ls" } },
+        }),
+      )
+
+      assert.deepStrictEqual(agyDeny, { status: 200, body: { decision: "deny", reason: identityReason } })
+
+      const agyMalformed = yield* call("/hooks/agy/guard", { sessionId: agyId, harness: "agy" }, "not json")
+      assert.strictEqual(agyMalformed.status, 200)
+      assert.strictEqual((agyMalformed.body as { decision: string }).decision, "deny")
+      assert.include((agyMalformed.body as { reason: string }).reason, "vibest could not check this tool call")
     }),
   )
 })

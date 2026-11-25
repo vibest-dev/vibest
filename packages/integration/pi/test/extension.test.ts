@@ -492,12 +492,15 @@ describe("pi-vibest", () => {
           reason: "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused.",
         },
       ])
-      assert.deepStrictEqual(yield* bash("vibest integration stop"), [
-        {
-          block: true,
-          reason: "vibest integration stop is the harness's hook, not an agent command.",
-        },
-      ])
+      assert.deepStrictEqual(
+        yield* bash('curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready'),
+        [
+          {
+            block: true,
+            reason: "vibest-http.sock is the harness's hook socket, not for agent commands.",
+          },
+        ],
+      )
       assert.deepStrictEqual(yield* s.emit("tool_call", { toolName: "write", input: { path: "a" } }, { cwd: "/" }), [
         undefined,
       ])

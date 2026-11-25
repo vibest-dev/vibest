@@ -135,28 +135,6 @@ describe("vibest CLI without vibestd", () => {
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     TIMEOUT,
   )
-
-  it.effect(
-    "integration guard fails with no answer when no vibest agent runs it, or when vibestd cannot check the call; the plugin refuses the call then",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-guard-cli-" })
-
-        const guard = (env: Record<string, string>, stdin: string) =>
-          vibest(cwd, { HOME: cwd, VIBEST_HOME: cwd, ...env }, ["integration", "guard", "--harness", "cursor"], stdin)
-
-        const noAgent = yield* guard({}, JSON.stringify({ tool_name: "Shell", tool_input: { command: "git status" } }))
-        assert.notStrictEqual(noAgent.code, 0, noAgent.stderr)
-        assert.strictEqual(noAgent.stdout, "")
-        assert.match(noAgent.stderr, /VIBEST_SESSION_ID/)
-        const unchecked = yield* guard({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "s1" }, "not json")
-        assert.notStrictEqual(unchecked.code, 0, unchecked.stderr)
-        assert.strictEqual(unchecked.stdout, "")
-        assert.match(unchecked.stderr, /vibestd/)
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
 })
 
 describe("vibest run links and vibest session link/unlink", () => {

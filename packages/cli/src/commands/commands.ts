@@ -29,8 +29,6 @@ const providerFlag = Flag.String("provider").pipe(
   Flag.optional,
 )
 
-const hookHarness = Flag.String("harness").pipe(Flag.withDescription("Which harness this hook is for"))
-
 export const entryFlags = {
   fresh: Flag.Boolean("new").pipe(
     Flag.withDescription("Start a new conversation instead of reopening the current one"),
@@ -423,33 +421,6 @@ const subscriptions = Spec.make("subscriptions", {
   description: "Each harness login and its usage limits, as last read",
 })
 
-const integration = Spec.make("integration", {
-  description:
-    "What vibest's plugin in a harness calls: a prompt, an execution end, the pre-tool guard. Not for direct use",
-  commands: [
-    Spec.make("guard", {
-      description:
-        "Pre-tool hook. Reads the harness's pre-tool input on stdin and prints a refusal when this session's rules refuse the call",
-      params: { harness: hookHarness },
-    }),
-    Spec.make("prompt", {
-      description:
-        "Execution-start report: the harness's prompt or activity event as JSON on stdin. Exits non-zero when vibestd did not get it. Does not start vibestd",
-      params: { harness: hookHarness },
-    }),
-    Spec.make("stop", {
-      description:
-        "Execution-end report: the harness's execution-end event as JSON on stdin. Exits non-zero when vibestd did not get it. Does not start vibestd",
-      params: { harness: hookHarness },
-    }),
-    Spec.make("ready", {
-      description:
-        "Session-start report: tells vibestd the session takes input. Exits non-zero when vibestd did not get it. Does not start vibestd",
-      params: { harness: hookHarness },
-    }),
-  ],
-})
-
 const onboard = Spec.make("onboard", {
   description:
     "Set up where vibest runs agents and which coding agent it starts: pick a terminal runtime (offering to install herdr-core when none is found) and a harness, and save both as defaults in vibest.json. Works outside a git repository. Only the user runs this",
@@ -554,7 +525,6 @@ export const Commands = Spec.make("vibest", {
     worktree,
     plugins,
     subscriptions,
-    integration,
     onboard,
     doctor,
     update,

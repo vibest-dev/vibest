@@ -34,7 +34,7 @@ The user, or a session for a session it started.
 
 Process level. Planned, not a command on this tree: another pull request adds it. `vibest stop <id>` ends the session's process and its terminal. The session stays. The next `vibest send` resumes it.
 
-This is not `vibest integration stop`, which is a harness hook, and not the herdr plugin action `vibest herdr stop`, which interrupts the session in the focused pane and keeps its terminal.
+This is not the herdr plugin action `vibest herdr stop`, which interrupts the session in the focused pane and keeps its terminal.
 
 ### archive
 
@@ -127,17 +127,6 @@ Only the user. Another machine's vibestd is reached over ssh.
 | `vibest update`              | Update vibest the way it was installed, try the new one aside (it must open the database), replace the running vibestd, then ask about restarting agents still on the old version. A stable install takes the newest stable release; a beta install takes the newest of either channel. `--yes` answers the restart question. | User          |
 | `vibest events`              | The event log as JSON lines. `--session` and `--after <seq>` read one session from a cursor; `--follow` keeps printing.                                                                                                                                                                                                       | User          |
 | `vibest plugins`             | Plugins loaded from `~/.vibest/plugins` and `vibest.json`, with hook counts since vibestd started.                                                                                                                                                                                                                            | User or agent |
-
-### Harness integration
-
-Not for direct use. The harness plugin calls them. They do not start vibestd; a report that does not arrive exits non-zero. `--harness` names which harness.
-
-| Command                     | For                                                                                                         |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `vibest integration prompt` | Execution start: the harness's prompt or activity event as JSON on stdin.                                   |
-| `vibest integration stop`   | Execution end: the harness's execution-end event as JSON on stdin.                                          |
-| `vibest integration ready`  | Session start: the session takes input.                                                                     |
-| `vibest integration guard`  | Pre-tool: the harness's pre-tool input on stdin. Prints a refusal when the session's rules refuse the call. |
 
 ### herdr plugin
 
