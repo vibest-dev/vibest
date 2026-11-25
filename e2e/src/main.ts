@@ -153,8 +153,7 @@ if (method !== "build" && !(await Bun.file(path.join(harnesses, "pi/extension.mj
   try {
     const env = Object.fromEntries(
       Object.entries(process.env).filter(
-        (entry): entry is [string, string] =>
-          entry[1] !== undefined && !entry[0].startsWith("VIBEST_") && entry[0] !== "VIBEST_HARNESSES",
+        (entry): entry is [string, string] => entry[1] !== undefined && !entry[0].startsWith("VIBEST_"),
       ),
     )
 

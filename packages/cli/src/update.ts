@@ -51,9 +51,6 @@ export const ownerOf = (real: string) => {
   return npm ? ({ kind: "npm", prefix: npm[1]! } as const) : undefined
 }
 
-const baselinePkg = (version: string, platform: string) =>
-  platform.includes("-baseline") ? [`@vibest/cli-${platform}@${version}`] : []
-
 export const upgradeCommand = (real: string, version: string, platform = detectPlatformTarget()) => {
   return Match.value(ownerOf(real)).pipe(
     Match.when({ kind: "bun" }, () => [
@@ -63,13 +60,7 @@ export const upgradeCommand = (real: string, version: string, platform = detectP
       `@vibest/cli@${version}`,
       `@vibest/cli-${platform}@${version}`,
     ]),
-    Match.when({ kind: "pnpm" }, () => [
-      "pnpm",
-      "add",
-      "-g",
-      `@vibest/cli@${version}`,
-      ...baselinePkg(version, platform),
-    ]),
+    Match.when({ kind: "pnpm" }, () => ["pnpm", "add", "-g", `@vibest/cli@${version}`]),
     Match.when({ kind: "npm" }, (owner) => [
       `${owner.prefix}/bin/npm`,
       "install",
@@ -77,9 +68,8 @@ export const upgradeCommand = (real: string, version: string, platform = detectP
       "--prefix",
       owner.prefix,
       `@vibest/cli@${version}`,
-      ...baselinePkg(version, platform),
     ]),
-    Match.orElse(() => ["npm", "install", "-g", `@vibest/cli@${version}`, ...baselinePkg(version, platform)]),
+    Match.orElse(() => ["npm", "install", "-g", `@vibest/cli@${version}`]),
   )
 }
 
@@ -93,30 +83,15 @@ export const stageCommand = (real: string, dir: string, version: string, platfor
       `@vibest/cli@${version}`,
       `@vibest/cli-${platform}@${version}`,
     ]),
-    Match.when({ kind: "pnpm" }, () => [
-      "pnpm",
-      "add",
-      "--dir",
-      dir,
-      `@vibest/cli@${version}`,
-      ...baselinePkg(version, platform),
-    ]),
+    Match.when({ kind: "pnpm" }, () => ["pnpm", "add", "--dir", dir, `@vibest/cli@${version}`]),
     Match.when({ kind: "npm" }, (owner) => [
       `${owner.prefix}/bin/npm`,
       "install",
       "--prefix",
       dir,
       `@vibest/cli@${version}`,
-      ...baselinePkg(version, platform),
     ]),
-    Match.orElse(() => [
-      "npm",
-      "install",
-      "--prefix",
-      dir,
-      `@vibest/cli@${version}`,
-      ...baselinePkg(version, platform),
-    ]),
+    Match.orElse(() => ["npm", "install", "--prefix", dir, `@vibest/cli@${version}`]),
   )
 }
 

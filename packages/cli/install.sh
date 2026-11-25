@@ -75,20 +75,7 @@ if [ "$os" = "linux" ]; then
   fi
 fi
 
-baseline=""
-if [ "$cpu" = "x64" ]; then
-  if [ "$os" = "darwin" ]; then
-    if [ "$(sysctl -n hw.optional.avx2_0 2>/dev/null || echo 0)" != "1" ]; then
-      baseline="-baseline"
-    fi
-  else
-    if ! grep -qiE '(^|[[:space:]])avx2([[:space:]]|$)' /proc/cpuinfo 2>/dev/null; then
-      baseline="-baseline"
-    fi
-  fi
-fi
-
-target="${os}-${cpu}${baseline}${abi}"
+target="${os}-${cpu}${abi}"
 
 mkdir -p "$share/versions" "$bin"
 tmp=$(mktemp -d "$share/versions/.download.XXXXXX")

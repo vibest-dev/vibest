@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { detectPlatformTarget, PLATFORM_TARGETS, PRIMARY_TARGETS } from "@vibest/cli/platform-target"
+import { detectPlatformTarget, PLATFORM_TARGETS } from "@vibest/cli/platform-target"
 import { Predicate, Schema } from "effect"
 
 const [version, flag, flagDir] = process.argv.slice(2)
@@ -97,7 +97,7 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
 
     if (manifest.scripts?.postinstall) errors.push("@vibest/cli: must not declare a postinstall script")
 
-    const expectedOpt = new Set(PRIMARY_TARGETS.map((t) => `@vibest/cli-${t.id}`))
+    const expectedOpt = new Set(PLATFORM_TARGETS.map((t) => `@vibest/cli-${t.id}`))
     const actualOpt = new Set(Object.keys(manifest.optionalDependencies ?? {}))
 
     for (const dep of expectedOpt)

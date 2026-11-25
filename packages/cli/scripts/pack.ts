@@ -4,13 +4,7 @@ import path from "node:path"
 import util from "node:util"
 
 import pkg from "../package.json" with { type: "json" }
-import {
-  detectPlatformTarget,
-  findTarget,
-  PLATFORM_TARGETS,
-  type PlatformTarget,
-  PRIMARY_TARGETS,
-} from "../src/platform-target.ts"
+import { detectPlatformTarget, findTarget, PLATFORM_TARGETS, type PlatformTarget } from "../src/platform-target.ts"
 import { buildBinaries } from "./build.ts"
 
 const cliDir = path.dirname(import.meta.dir)
@@ -103,7 +97,7 @@ try {
   fs.chmodSync(path.join(wrapperDir, "bin", "vibest"), 0o755)
   fs.copyFileSync(licensePath, path.join(wrapperDir, "LICENSE"))
 
-  const optionalDependencies = Object.fromEntries(PRIMARY_TARGETS.map((t) => [`@vibest/cli-${t.id}`, pkg.version]))
+  const optionalDependencies = Object.fromEntries(PLATFORM_TARGETS.map((t) => [`@vibest/cli-${t.id}`, pkg.version]))
 
   const wrapperManifest = {
     name: pkg.name,

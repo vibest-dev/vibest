@@ -82,15 +82,14 @@ Settings the workflow needs and cannot set itself. Check them before the first r
       the run); deployment branches: selected, `main` only; "Allow administrators to bypass" off.
 - [ ] Immutable releases on (Settings, General, Releases): a published release's tag and assets cannot change, and the
       release gets an attestation. Drafts stay editable, which recovery relies on.
-- [ ] npm trusted publisher on each published package (11 packages total: `@vibest/cli`, `@vibest/plugin`, and all 9 platform packages `@vibest/cli-darwin-arm64`, `@vibest/cli-darwin-x64`, `@vibest/cli-darwin-x64-baseline`, `@vibest/cli-linux-arm64`, `@vibest/cli-linux-arm64-musl`, `@vibest/cli-linux-x64`, `@vibest/cli-linux-x64-baseline`, `@vibest/cli-linux-x64-musl`, `@vibest/cli-linux-x64-baseline-musl`; `@vibest/schema` and `effect-herdr-sdk` are `"private": true` and not published): GitHub Actions, repository `vibest-dev/vibest`, workflow `release.yml`, environment `release`, "Allow npm publish" on (a new configuration otherwise only allows staged publishing). npm OIDC cannot create brand-new package names, so before the first release with the 7 new platform targets, pre-create and trust each one:
+- [ ] npm trusted publisher on each published package (8 packages total: `@vibest/cli`, `@vibest/plugin`, and all 6 platform packages `@vibest/cli-darwin-arm64`, `@vibest/cli-darwin-x64`, `@vibest/cli-linux-arm64`, `@vibest/cli-linux-arm64-musl`, `@vibest/cli-linux-x64`, `@vibest/cli-linux-x64-musl`; `@vibest/schema` and `effect-herdr-sdk` are `"private": true` and not published): GitHub Actions, repository `vibest-dev/vibest`, workflow `release.yml`, environment `release`, "Allow npm publish" on (a new configuration otherwise only allows staged publishing). npm OIDC cannot create brand-new package names, so before the first release with the 4 new platform targets, pre-create and trust each one:
 
       ```sh
       for pkg in \
         @vibest/cli @vibest/plugin \
-        @vibest/cli-darwin-arm64 @vibest/cli-darwin-x64 @vibest/cli-darwin-x64-baseline \
+        @vibest/cli-darwin-arm64 @vibest/cli-darwin-x64 \
         @vibest/cli-linux-arm64 @vibest/cli-linux-arm64-musl \
-        @vibest/cli-linux-x64 @vibest/cli-linux-x64-baseline \
-        @vibest/cli-linux-x64-musl @vibest/cli-linux-x64-baseline-musl; do
+        @vibest/cli-linux-x64 @vibest/cli-linux-x64-musl; do
         npm trust github "$pkg" --file release.yml --repo vibest-dev/vibest --env release --allow-publish
       done
       ```

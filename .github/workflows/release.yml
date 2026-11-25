@@ -246,23 +246,20 @@ jobs:
           pnpm run verify --no-cache --stage build,archive,pack
           --keep-archive "$RUNNER_TEMP/release/github" --packs "$RUNNER_TEMP/release/npm"
           --exclude-archive darwin-arm64
-      # Checks the tarballs (one per published package; all 9 platform binaries are built here) without
+      # Checks the tarballs (one per published package; all 6 platform binaries are built here) without
       # repacking them: what each holds, @vibest/cli with the linux-x64 binary installed from them and run.
       # Writes their publish order, dependencies first.
       - name: Check the tarballs
         run: bun tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
-      # What install.sh downloads (releases/latest/download/...): an archive per platform (8 targets here, darwin-arm64
+      # What install.sh downloads (releases/latest/download/...): an archive per platform (5 targets here, darwin-arm64
       # from the darwin job), install.sh itself, and `version`, which `vibest update` reads.
       - name: GitHub Release files
         run: |
           out="$RUNNER_TEMP/release/github"
           expected=$(printf '%s\n' \
-            vibest-darwin-x64-baseline.tar.gz \
             vibest-darwin-x64.tar.gz \
             vibest-linux-arm64-musl.tar.gz \
             vibest-linux-arm64.tar.gz \
-            vibest-linux-x64-baseline-musl.tar.gz \
-            vibest-linux-x64-baseline.tar.gz \
             vibest-linux-x64-musl.tar.gz \
             vibest-linux-x64.tar.gz)
           test "$(LC_ALL=C ls "$out")" = "$expected"

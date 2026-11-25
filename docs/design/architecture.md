@@ -178,7 +178,7 @@ modules' names, except a domain facade re-exporting its own domain, see below).
 | `integration/pi`        | The vibest Pi extension, loaded with `pi -e`.                                                                                                                                                     |
 | `integration/cursor`    | The vibest Cursor CLI plugin (hooks posting to `vibest-http.sock`), loaded with `cursor-agent --plugin-dir`.                                                                                      |
 
-`packages/skills` holds the builtin Agent Skills (`delegate`, `pipeline`); platform packages (`@vibest/cli-<os>-<cpu>[-baseline][-musl]`) are generated dynamically at pack time by `packages/cli/scripts/pack.ts`.
+`packages/skills` holds the builtin Agent Skills (`delegate`, `pipeline`); platform packages (`@vibest/cli-<os>-<cpu>[-musl]`) are generated dynamically at pack time by `packages/cli/scripts/pack.ts`.
 
 **Dependencies.** What each package's `src` may import of the workspace:
 
