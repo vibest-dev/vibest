@@ -59,12 +59,6 @@ const Handlers = Runtime.handlers(Commands, {
   },
   plugins: () => import("./commands/handlers/plugins.ts"),
   subscriptions: () => import("./commands/handlers/subscriptions.ts"),
-  integration: {
-    guard: () => import("./commands/handlers/integration/guard.ts"),
-    prompt: () => import("./commands/handlers/integration/prompt.ts"),
-    stop: () => import("./commands/handlers/integration/stop.ts"),
-    ready: () => import("./commands/handlers/integration/ready.ts"),
-  },
   onboard: () => import("./commands/handlers/onboard.ts"),
   doctor: () => import("./commands/handlers/doctor.ts"),
   update: () => import("./commands/handlers/update.ts"),

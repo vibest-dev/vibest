@@ -7,8 +7,7 @@ says what it is and when it counts as working.
 
 ## I1. The plugins ship with vibest
 
-Each harness's plugin is part of the vibest install, and `vibest integration` offers only the hooks the plugins call
-(guard, prompt, stop, ready, start); there is nothing to install.
+Each harness's plugin is part of the vibest install, and there is nothing to install; hooks talk directly to vibestd over its Unix sockets.
 
 ## I2. The binary finds its plugins
 
@@ -17,7 +16,7 @@ The vibest binary finds the plugins installed beside it. A vibest with no plugin
 
 ## I3. Pi runs vibest's extension
 
-A real Pi session started by vibest runs vibest's extension (reporting, guard and inbox; the TUI presentation is a separate extension loaded beside it): a command refused by `vibest.guard` (such as `vibest integration stop`) does not run and returns the guard's reason, and the agent's reply is the execution's reply.
+A real Pi session started by vibest runs vibest's extension (reporting, guard and inbox; the TUI presentation is a separate extension loaded beside it): a command refused by `vibest.guard` (such as `curl --unix-socket "$VIBEST_HOME/vibest-http.sock" ...`) does not run and returns the guard's reason, and the agent's reply is the execution's reply.
 
 ## I4. Claude runs vibest's plugin beside the user's plugins
 
@@ -27,7 +26,7 @@ installed plugin's session-start hook runs too, and the reply is the execution's
 ## I5. Cursor runs vibest's plugin beside the project's hooks
 
 A real cursor-agent session on the user's own login runs vibest's plugin beside the project's own hooks. Asked to run
-`vibest integration stop`, it does not run (the model either tries and `vibest.guard` refuses it, or keeps to its rules); the execution
+a direct `curl --unix-socket` request to `vibest-http.sock`, it does not run (the model either tries and `vibest.guard` refuses it, or keeps to its rules); the execution
 completes with the reply, and the project's own hook ran.
 
 ## I6. The user's harness configuration is untouched
@@ -43,7 +42,7 @@ vibest too, also while a background shell keeps the terminal busy.
 
 ## I9. Claude's guard without settings
 
-Claude starts without a settings file; vibest's plugin guards each tool call instead. Commands refused by `vibest.guard` (`VIBEST_SESSION_ID=other vibest ls`, `vibest integration stop`) are refused with the guard's reason and do not run, while ordinary commands (`hc --version`) and reading in its own Project folder are allowed.
+Claude starts without a settings file; vibest's plugin guards each tool call instead. Commands refused by `vibest.guard` (`VIBEST_SESSION_ID=other vibest ls`, `curl --unix-socket "$VIBEST_HOME/vibest-http.sock" ...`) are refused with the guard's reason and do not run, while ordinary commands (`hc --version`) and reading in its own Project folder are allowed.
 
 ## I10. Cursor reports to vibestd
 
@@ -71,7 +70,7 @@ same vibest: every session starts with `VIBEST_CLI` set to it and its directory 
 
 A Cursor session vibest started runs shell commands without Cursor asking "Run this command?", even on Cursor's default
 `allowlist` approval mode with no allow rule: its `vibest send` to the session that started it arrives, and the session
-is never blocked. vibest's guard still refuses what `vibest.guard` forbids: asked to run `vibest integration stop`, it does not run.
+is never blocked. vibest's guard still refuses what `vibest.guard` forbids: asked to run a direct `curl --unix-socket` request to `vibest-http.sock`, it does not run.
 
 ## I13. A Cursor session resumes from its start
 

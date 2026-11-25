@@ -26,5 +26,8 @@
     "prepack": "bun run build",
     "typecheck": "tsrs --noEmit --fast",
     "test": "cd ../../.. && bun ./node_modules/vitest/vitest.mjs run packages/integration/cursor"
+  },
+  "devDependencies": {
+    "@vibest/schema": "workspace:*"
   }
 }

@@ -2,8 +2,9 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import url from "node:url"
 
+import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
-import { binary, expect, until, type World } from "../world.ts"
+import { expect, until, type World } from "../world.ts"
 import pluginSessions from "./plugin-sessions.ts"
 
 type Info = {
@@ -441,52 +442,75 @@ export default Plugin.define({
       })
 
       const entry = (
-        await w.json<{ sessions: Array<{ id: string; projectId: string }> }>(["ls"]).then((l) => l.sessions)
+        await w
+          .json<{ sessions: Array<{ id: string; projectId: string; harness: string }> }>(["ls"])
+          .then((l) => l.sessions)
       )[0]!
 
       const guard = async (tool: string, input: Record<string, string>) => {
-        const r = await w.run(w.repository, [binary, "integration", "guard", "--harness", "cursor"], {
-          env: { VIBEST_SESSION_ID: entry.id, VIBEST_PROJECT_ID: entry.projectId },
-          stdin: JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository }),
-        })
+        const r = await w.run(w.repository, [
+          "curl",
+          "-sS",
+          "-w",
+          "\n%{http_code}",
+          "--unix-socket",
+          path.join(w.vibestHome, "vibest-http.sock"),
+          "-X",
+          "POST",
+          "-H",
+          `vibest-protocol: ${PROTOCOL}`,
+          "-H",
+          `vibest-session-id: ${entry.id}`,
+          "-H",
+          `vibest-project-id: ${entry.projectId}`,
+          "-H",
+          `vibest-harness: ${entry.harness}`,
+          "--data-binary",
+          JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository }),
+          `http://vibest/hooks/${entry.harness}/guard`,
+        ])
 
-        expect(r.code === 0, `guard exited ${r.code}: ${r.stderr}`)
+        expect(r.code === 0, `guard curl exited ${r.code}: ${r.stderr}`)
+        const at = r.stdout.lastIndexOf("\n")
+        const status = Number(r.stdout.slice(at + 1))
+        expect(status === 200, `guard HTTP ${status}: ${r.stdout}`)
 
-        return JSON.parse(r.stdout) as { permission: string; agent_message?: string }
+        const body = JSON.parse(r.stdout.slice(0, at)) as {
+          deny?: string
+          agent_message?: string
+          reason?: string
+        }
+
+        return body.deny ?? body.agent_message ?? body.reason
       }
 
       const builtinIdentity = await guard("Shell", { command: "VIBEST_SESSION_ID=other vibest ls" })
       expect(
-        builtinIdentity.permission === "deny" &&
-          builtinIdentity.agent_message ===
-            "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused.",
+        builtinIdentity ===
+          "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused.",
         `identity refusal: ${JSON.stringify(builtinIdentity)}`,
       )
 
-      const builtinHook = await guard("Shell", { command: "vibest integration stop" })
+      const builtinHook = await guard("Shell", {
+        command: 'curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready',
+      })
+
       expect(
-        builtinHook.permission === "deny" &&
-          builtinHook.agent_message === "vibest integration stop is the harness's hook, not an agent command.",
+        builtinHook === "vibest-http.sock is the harness's hook socket, not for agent commands.",
         `hook refusal: ${JSON.stringify(builtinHook)}`,
       )
 
       const relaxedHc = await guard("Shell", { command: "hc --version" })
-      expect(relaxedHc.permission === "allow", `hc --version refused: ${JSON.stringify(relaxedHc)}`)
+      expect(relaxedHc === undefined, `hc --version refused: ${JSON.stringify(relaxedHc)}`)
 
       const relaxedWorktree = await guard("Shell", { command: "ls ~/.vibest/worktrees/vibest/1234/src/*.ts" })
-      expect(relaxedWorktree.permission === "allow", `worktree path refused: ${JSON.stringify(relaxedWorktree)}`)
+      expect(relaxedWorktree === undefined, `worktree path refused: ${JSON.stringify(relaxedWorktree)}`)
 
       const effectDenied = await guard("Write", { file_path: "/forbidden-by-effect" })
-      expect(
-        effectDenied.permission === "deny" && effectDenied.agent_message === "e2e effect refused write",
-        `effect refusal: ${JSON.stringify(effectDenied)}`,
-      )
+      expect(effectDenied === "e2e effect refused write", `effect refusal: ${JSON.stringify(effectDenied)}`)
 
       const promiseDenied = await guard("Shell", { command: "blocked-by-promise" })
-      expect(
-        promiseDenied.permission === "deny" && promiseDenied.agent_message === "e2e promise refused shell",
-        `promise refusal: ${JSON.stringify(promiseDenied)}`,
-      )
+      expect(promiseDenied === "e2e promise refused shell", `promise refusal: ${JSON.stringify(promiseDenied)}`)
 
       const seen = (await fs.readFile(seenLog, "utf8"))
         .trim()

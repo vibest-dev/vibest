@@ -377,7 +377,11 @@ importers:
         specifier: 'catalog:'
         version: 4.1.5(effect@4.1.5)
 
-  packages/integration/agy: {}
+  packages/integration/agy:
+    devDependencies:
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../../schema
 
   packages/integration/claude:
     devDependencies:
@@ -391,7 +395,11 @@ importers:
         specifier: 4.1.5
         version: 4.1.5
 
-  packages/integration/cursor: {}
+  packages/integration/cursor:
+    devDependencies:
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../../schema
 
   packages/integration/pi:
     dependencies:

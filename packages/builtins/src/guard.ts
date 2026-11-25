@@ -121,7 +121,8 @@ const WRAPPER_VALUE_OPTIONS: ReadonlyMap<string, ReadonlyArray<string>> = new Ma
 const KEYWORDS = new Set(["!", "{", "if", "then", "elif", "else", "do", "while", "until"])
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"])
 const VARIABLE_SETTERS = new Set(["unset", "export", "declare", "typeset", "readonly", "local"])
-const HARNESS_HOOKS = new Set(["stop", "prompt", "ready"])
+const SOCKET_TOOLS = new Set(["curl", "nc", "ncat", "socat", "wget"])
+const HOOK_SOCKET = /(?:^|[/:=])vibest-http\.sock$/
 
 interface Program {
   readonly argv: ReadonlyArray<string>
@@ -205,16 +206,18 @@ export const shellRefusal = (command: string): string | undefined => {
   for (const p of programsOf(command)) {
     const args = vibestArgs(p.argv)
 
-    if (args === undefined) continue
+    if (args !== undefined) {
+      if (p.identity)
+        return "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused."
+      continue
+    }
 
-    if (p.identity)
-      return "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused."
-    const words = args.slice(0, args.includes("--") ? args.indexOf("--") : undefined)
-    const at = words.indexOf("integration")
-    const subcommand = at !== -1 ? words[at + 1] : undefined
-
-    if (subcommand !== undefined && HARNESS_HOOKS.has(subcommand))
-      return `vibest integration ${subcommand} is the harness's hook, not an agent command.`
+    if (
+      p.argv[0] !== undefined &&
+      SOCKET_TOOLS.has(base(p.argv[0])) &&
+      p.argv.slice(1).some((a) => HOOK_SOCKET.test(a))
+    )
+      return "vibest-http.sock is the harness's hook socket, not for agent commands."
   }
 
   return undefined

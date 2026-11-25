@@ -1,14 +1,41 @@
+import { PROTOCOL } from "@vibest/schema/version"
+
 import pkg from "../package.json" with { type: "json" }
 
 export const PLUGIN = ".agents/plugins/vibest"
 
 export const HOOK = `#!/bin/sh
-# @vibest/agy ${pkg.version}: \`vibest integration guard\` before a tool call, \`prompt\` at a conversation's start and before each model call, \`stop\` at its end.
-# The vibest vibestd started this agent with (VIBEST_CLI), not the first vibest on PATH, which a login shell may reorder.
-vibest() {
-  command "\${VIBEST_CLI:-vibest}" "$@"
-}
+# @vibest/agy ${pkg.version}: posts hooks directly to vibest-http.sock.
+sock="\${VIBEST_HOME:-$HOME/.vibest}/vibest-http.sock"
 log="\${VIBEST_HOME:-$HOME/.vibest}/vibestd.log"
+post() {
+  route="$1"
+  body="$2"
+  tmp=$(mktemp "\${TMPDIR:-/tmp}/vibest-agy-hook.XXXXXX") || return 1
+  trap 'rm -f "$tmp"' EXIT INT TERM
+  for delay in 0.1 0.3 0.9 ""; do
+    set -- -sS --max-time 5 --unix-socket "$sock" -o "$tmp" -w '%{http_code}' -X POST -H "vibest-protocol: ${PROTOCOL}" -H "vibest-plugin-version: ${pkg.version}" -H "vibest-session-id: $VIBEST_SESSION_ID" -H "vibest-project-id: $VIBEST_PROJECT_ID" -H "vibest-harness: agy"
+    if [ -n "\${VIBEST_PROCESS:-}" ]; then
+      set -- "$@" -H "vibest-process: $VIBEST_PROCESS"
+    fi
+    code=$(printf '%s' "$body" | curl "$@" --data-binary @- "http://vibest$route" 2>/dev/null)
+    rc=$?
+    if [ "$rc" -eq 0 ] && [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+      cat "$tmp"
+      rm -f "$tmp"
+      return 0
+    fi
+    if [ "$rc" -eq 7 ] || [ "$code" = "503" ]; then
+      if [ -n "$delay" ]; then
+        sleep "$delay"
+        continue
+      fi
+    fi
+    printf '%s vibest: agy %s of session %s did not reach vibestd (curl=%s http=%s): %s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$route" "$VIBEST_SESSION_ID" "$rc" "\${code:-000}" "$(cat "$tmp" 2>/dev/null)" >>"$log"
+    rm -f "$tmp"
+    return 1
+  done
+}
 # Hooks carry no subagent marker: the first conversation this process reports is its own; agy's subagents are not.
 own_conversation() {
   conversation=$(printf '%s' "$input" | tr '\\n' ' ' | sed -n 's/.*"conversationId" *: *"\\([^"]*\\)".*/\\1/p')
@@ -19,17 +46,29 @@ own_conversation() {
 }
 case "\${1:-}" in
   guard)
-    if [ -z "\${VIBEST_SESSION_ID:-}" ]; then cat >/dev/null; echo '{"decision":"allow"}'; exit 0; fi
-    # agy runs a tool whose hook fails or times out: a failed check answers deny itself.
-    vibest integration guard --harness agy 2>>"$log" ||
-      echo '{"decision":"deny","reason":"vibest integration guard failed; the tool call is refused."}'
-    ;;
-  prompt | stop)
+    if [ -z "\${VIBEST_SESSION_ID:-}" ] || [ -z "\${VIBEST_PROJECT_ID:-}" ]; then cat >/dev/null; echo '{"decision":"allow"}'; exit 0; fi
     input=$(cat)
-    if [ -n "\${VIBEST_SESSION_ID:-}" ] && own_conversation; then
-      printf '%s' "$input" | vibest integration "$1" --harness agy >/dev/null 2>>"$log"
+    # agy runs a tool whose hook fails or times out: a failed check answers deny itself.
+    out=$(post /hooks/agy/guard "$input")
+    if [ $? -eq 0 ] && [ -n "$out" ]; then
+      printf '%s\\n' "$out"
+    else
+      echo '{"decision":"deny","reason":"vibestd unreachable; the tool call is refused."}'
     fi
-    if [ "$1" = stop ]; then echo '{"decision":"allow"}'; else echo '{}'; fi
+    ;;
+  prompt)
+    input=$(cat)
+    if [ -n "\${VIBEST_SESSION_ID:-}" ] && [ -n "\${VIBEST_PROJECT_ID:-}" ] && own_conversation; then
+      post /hooks/agy/prompt "$input" >/dev/null
+    fi
+    echo '{}'
+    ;;
+  stop)
+    input=$(cat)
+    if [ -n "\${VIBEST_SESSION_ID:-}" ] && [ -n "\${VIBEST_PROJECT_ID:-}" ] && own_conversation; then
+      post /hooks/agy/execution-end "$input" >/dev/null
+    fi
+    echo '{"decision":"allow"}'
     ;;
 esac
 exit 0
