@@ -84,7 +84,7 @@ export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input
   const text = input.systemPrompt === undefined ? yield* projectText(layout.project(input.projectId)) : undefined
 
   const saved = yield* input.session
-  const scratchpadDir = layout.scratchpadDir(saved.projectId, saved.sessionId)
+  const scratchpadDir = layout.scratchpadDir(saved.projectId)
 
   const promptText =
     input.systemPrompt ??

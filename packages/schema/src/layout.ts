@@ -27,7 +27,7 @@ export class Layout extends Context.Service<
     readonly project: (projectId: string) => string
     readonly artifacts: (projectId: string) => string
     readonly sessionFolder: (projectId: string, sessionId: string) => string
-    readonly scratchpadDir: (projectId: string, sessionId: string) => string
+    readonly scratchpadDir: (projectId: string) => string
   }
 >()("vibest/Layout") {
   static readonly make = (home: string, scratchRoot?: string) =>
@@ -59,7 +59,7 @@ export class Layout extends Context.Service<
         project: (projectId) => path.join(home, "projects", projectId),
         artifacts: (projectId) => path.join(home, "projects", projectId, "artifacts"),
         sessionFolder: (projectId, sessionId) => path.join(home, "projects", projectId, "sessions", sessionId),
-        scratchpadDir: (projectId, sessionId) => path.join(resolvedScratch, projectId, sessionId, "scratchpad"),
+        scratchpadDir: (projectId) => path.join(resolvedScratch, projectId, "scratchpad"),
       })
     })
 
