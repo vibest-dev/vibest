@@ -274,67 +274,83 @@ describe("ledger migration 20261124050000_clean_event_catalog", () => {
     ),
   )
 
-  it.effect("PublicCatalog filters internal bookkeeping/transport facts from plugin event.subscribe", () =>
-    Effect.gen(function* () {
-      const bus = yield* Bus.Service
-      const subscribe = PluginHost.factsFor(bus, "probe")
+  it.effect(
+    "PublicCatalog filters all process.* and internal bookkeeping/transport facts from plugin event.subscribe",
+    () =>
+      Effect.gen(function* () {
+        const bus = yield* Bus.Service
+        const subscribe = PluginHost.factsFor(bus, "probe")
 
-      assert.isFalse(Object.hasOwn(PublicCatalog, "process.updated"))
-      assert.isFalse(Object.hasOwn(PublicCatalog, "session.inbox.delivering"))
-      assert.isFalse(Object.hasOwn(PublicCatalog, "machine.connected"))
-      assert.isFalse(Object.hasOwn(PublicCatalog, "remote.seen"))
-      assert.isFalse(Object.hasOwn(PublicCatalog, "remote.outbox.queued"))
-      assert.isFalse(Object.hasOwn(PublicCatalog, "remote.outbox.acked"))
+        assert.isFalse(Object.hasOwn(PublicCatalog, "process.started"))
+        assert.isFalse(Object.hasOwn(PublicCatalog, "process.updated"))
+        assert.isFalse(Object.hasOwn(PublicCatalog, "process.ready"))
+        assert.isFalse(Object.hasOwn(PublicCatalog, "process.ended"))
+        assert.isFalse(Object.hasOwn(PublicCatalog, "session.inbox.delivering"))
+        assert.isFalse(Object.hasOwn(PublicCatalog, "machine.connected"))
+        assert.isFalse(Object.hasOwn(PublicCatalog, "remote.seen"))
+        assert.isFalse(Object.hasOwn(PublicCatalog, "remote.outbox.queued"))
+        assert.isFalse(Object.hasOwn(PublicCatalog, "remote.outbox.acked"))
 
-      const fiber = yield* subscribe().pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped)
+        const fiber = yield* subscribe().pipe(Stream.take(3), Stream.runCollect, Effect.forkScoped)
 
-      const explicitFiber = yield* subscribe({ types: ["remote.seen" as never, "session.created"] }).pipe(
-        Stream.take(1),
-        Stream.runCollect,
-        Effect.forkScoped,
-      )
+        const explicitFiber = yield* subscribe({
+          types: [
+            "remote.seen" as never,
+            "process.started" as never,
+            "process.updated" as never,
+            "process.ready" as never,
+            "process.ended" as never,
+            "session.created",
+          ],
+        }).pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped)
 
-      yield* Effect.yieldNow
+        yield* Effect.yieldNow
 
-      yield* bus.transaction(
-        Effect.gen(function* () {
-          yield* bus.publish(Catalog["remote.seen"], { data: { id: REMOTE, name: "box" } })
-          yield* bus.publish(Catalog["project.created"], { projectId: P, data: { directory: "/p", repositories: [] } })
-          yield* bus.publish(Catalog["session.created"], {
-            sessionId: S,
-            data: { project: P, agent: "general", name: "sub", directory: "/p" },
-          })
+        yield* bus.transaction(
+          Effect.gen(function* () {
+            yield* bus.publish(Catalog["remote.seen"], { data: { id: REMOTE, name: "box" } })
+            yield* bus.publish(Catalog["project.created"], {
+              projectId: P,
+              data: { directory: "/p", repositories: [] },
+            })
+            yield* bus.publish(Catalog["session.created"], {
+              sessionId: S,
+              data: { project: P, agent: "general", name: "sub", directory: "/p" },
+            })
 
-          const proc = yield* bus.publish(Catalog["process.started"], {
-            sessionId: S,
-            data: { harness: "pi", runtime: "herdr" },
-          })
+            const proc = yield* bus.publish(Catalog["process.started"], {
+              sessionId: S,
+              data: { harness: "pi", runtime: "herdr" },
+            })
 
-          yield* bus.publish(Catalog["process.updated"], { sessionId: S, data: { process: proc, pid: 42 } })
-        }),
-      )
+            yield* bus.publish(Catalog["process.updated"], { sessionId: S, data: { process: proc, pid: 42 } })
+            yield* bus.publish(Catalog["process.ready"], { sessionId: S, data: { process: proc, pid: 42 } })
+            yield* bus.publish(Catalog["process.ended"], { sessionId: S, data: { process: proc, reason: "archived" } })
+            yield* bus.publish(Catalog["session.archived"], { sessionId: S, data: {} })
+          }),
+        )
 
-      const received = yield* Fiber.join(fiber)
-      assert.deepStrictEqual(
-        received.map((f) => f.type),
-        ["project.created", "session.created"],
-      )
+        const received = yield* Fiber.join(fiber)
+        assert.deepStrictEqual(
+          received.map((f) => f.type),
+          ["project.created", "session.created", "session.archived"],
+        )
 
-      const explicitReceived = yield* Fiber.join(explicitFiber)
-      assert.deepStrictEqual(
-        explicitReceived.map((f) => f.type),
-        ["session.created"],
-      )
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        Db.layer.pipe(
-          Layer.provide(Projectors.layer),
-          Layer.provideMerge(Bus.layer),
-          Layer.provide(SessionLive.layer),
-          Layer.provideMerge(Platform.sqlite(":memory:")),
+        const explicitReceived = yield* Fiber.join(explicitFiber)
+        assert.deepStrictEqual(
+          explicitReceived.map((f) => f.type),
+          ["session.created"],
+        )
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Db.layer.pipe(
+            Layer.provide(Projectors.layer),
+            Layer.provideMerge(Bus.layer),
+            Layer.provide(SessionLive.layer),
+            Layer.provideMerge(Platform.sqlite(":memory:")),
+          ),
         ),
       ),
-    ),
   )
 })

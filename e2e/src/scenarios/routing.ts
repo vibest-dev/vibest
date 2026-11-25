@@ -419,7 +419,7 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
     id: "G12",
     covers: ["G2"],
     title:
-      "a plugin's ctx.event.subscribe sees the ledger facts of a real Pi subagent in order (session.created, process.started, session.execution.started, session.execution.succeeded) and no live events; a new revision of the plugin gets the next agent's facts and the old one stops",
+      "a plugin's ctx.event.subscribe sees the public ledger facts of a real Pi subagent in order (session.inbox.enqueued, session.created, session.execution.started, session.execution.succeeded) and no process.* or live events; a new revision of the plugin gets the next agent's facts and the old one stops",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "observe")
@@ -433,7 +433,12 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
         await fs.rename(`${file}.tmp`, file)
       }
 
-      const ordered = ["session.created", "process.started", "session.execution.started", "session.execution.succeeded"]
+      const ordered = [
+        "session.inbox.enqueued",
+        "session.created",
+        "session.execution.started",
+        "session.execution.succeeded",
+      ]
 
       const of = (lines: ReadonlyArray<string>, id: string) =>
         lines.flatMap((line) => (line.endsWith(` ${id}`) ? [line.split(" ")[0]!] : []))
@@ -480,8 +485,10 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
         await until("the second agent's facts in order", async () => inOrder(of(await factLines(second), two)), 60_000)
         const all = await factLines(second)
         expect(
-          !all.some((line) => /^(terminal\.|runtime\.reset|session\.changed|project\.changed|drain\.)/.test(line)),
-          `signals reached the plugin: ${JSON.stringify(all)}`,
+          !all.some((line) =>
+            /^(process\.|terminal\.|runtime\.reset|session\.changed|project\.changed|drain\.)/.test(line),
+          ),
+          `internal process facts or signals reached the plugin: ${JSON.stringify(all)}`,
         )
         expect(
           (await factLines(first)).length === before,
