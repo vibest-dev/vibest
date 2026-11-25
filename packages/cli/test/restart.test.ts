@@ -384,7 +384,7 @@ describe("restart in place", () => {
       const [restarted] = (yield* eventsOf(id, "process.started")).slice(-1)
       yield* writeEnd(id, "pi", { text: "status: completed\nsummary: old harness" })
       assert.isAbove(restarted!.id, 0)
-      assert.lengthOf(yield* eventsOf(id, "execution.succeeded"), 0)
+      assert.lengthOf(yield* eventsOf(id, "session.execution.succeeded"), 0)
       yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* held.release()
       const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (rows) => rows !== undefined))!
@@ -393,7 +393,7 @@ describe("restart in place", () => {
       yield* sessions.check(id)
       const freshSessions = yield* restartSessions
       yield* freshSessions.check(id)
-      assert.strictEqual((yield* eventsOf(id, "execution.succeeded")).length, 0)
+      assert.strictEqual((yield* eventsOf(id, "session.execution.succeeded")).length, 0)
       assert.isUndefined(yield* db.session.latestReply(id))
     }),
   )

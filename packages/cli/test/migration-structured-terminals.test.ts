@@ -36,7 +36,7 @@ describe("ledger migration 20261124040000_structured_terminal_targets", () => {
 
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        yield* sql`DELETE FROM migration WHERE id = ${MIGRATION}`
+        yield* sql`DELETE FROM migration WHERE id >= ${MIGRATION}`
         yield* sql`UPDATE meta SET value = '14' WHERE key = 'catalog'`
 
         const sessionEvent = (id: string, name: string) =>

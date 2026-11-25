@@ -120,7 +120,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_VERSION = 27
+export const PROJECTION_VERSION = 28
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -212,7 +212,7 @@ export const PROJECTION_SCHEMA = [
     content                TEXT    NOT NULL,
     request_id             TEXT,
     transfer_id            TEXT,
-    status                 TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped', 'unresolved')),
+    status                 TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
     sender_execution_id    INTEGER,
     recipient_execution_id INTEGER,
     PRIMARY KEY (recipient_session_id, id)

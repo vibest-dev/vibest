@@ -138,9 +138,9 @@ export const make = Effect.gen(function* () {
             sameTerminal(event.terminal, terminal) &&
             event.state !== "working" &&
             event.state !== "blocked") ||
-            ((event.type === "execution.succeeded" ||
-              event.type === "execution.failed" ||
-              event.type === "execution.interrupted") &&
+            ((event.type === "session.execution.succeeded" ||
+              event.type === "session.execution.failed" ||
+              event.type === "session.execution.interrupted") &&
               event.sessionId === session.id)
             ? Option.some(true)
             : Option.none(),

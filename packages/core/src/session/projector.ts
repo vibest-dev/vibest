@@ -1,5 +1,4 @@
 import {
-  ExecutionAccepted,
   ExecutionAllocated,
   ExecutionFailed,
   ExecutionInput,
@@ -9,20 +8,17 @@ import {
   ExecutionUnresolved,
   type Fact,
   InboxDelivered,
-  InboxDeliveryFailed,
-  InboxDeliveryStarted,
+  InboxDelivering,
   InboxDropped,
   InboxEnqueued,
-  InboxUnresolved,
-  ProcessConversation,
+  InboxFailed,
   ProcessEnded,
-  ProcessPid,
-  ProcessPlaced,
   ProcessReady,
   ProcessStarted,
+  ProcessUpdated,
+  SessionArchived,
   SessionCreated,
   SessionDirectoryChanged,
-  SessionEnded,
   SessionLinked,
   SessionRenamed,
   SessionUnlinked,
@@ -67,7 +63,7 @@ export const layer = Layer.effectDiscard(
       SessionDirectoryChanged,
       (fact) => sql`UPDATE session SET directory = ${fact.data.directory} WHERE id = ${sessionIdOf(fact)}`,
     )
-    yield* bus.project(SessionEnded, (fact) =>
+    yield* bus.project(SessionArchived, (fact) =>
       Effect.andThen(
         sql`UPDATE session SET ended_at = coalesce(ended_at, ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
         sql`UPDATE outbox SET remote_id = '' WHERE session_id = ${sessionIdOf(fact)} AND acked_at IS NULL`,
@@ -102,13 +98,16 @@ export const layer = Layer.effectDiscard(
       }),
     )
     yield* bus.project(
-      ProcessPlaced,
-      active(
-        (fact) =>
-          sql`UPDATE process SET terminal = ${canonicalTarget(fact.data.terminal)}, placed_at = ${fact.at},
-              pid = coalesce(${fact.data.pid ?? null}, pid)
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
-      ),
+      ProcessUpdated,
+      active((fact) => {
+        const { data } = fact
+
+        return sql`UPDATE process SET terminal = ${data.terminal === undefined ? sql`terminal` : canonicalTarget(data.terminal)},
+            placed_at = ${data.terminal === undefined ? sql`placed_at` : sql`coalesce(placed_at, ${fact.at})`},
+            pid = coalesce(${data.pid ?? null}, pid),
+            harness_session_id = coalesce(${data.conversation ?? null}, harness_session_id)
+          WHERE session_id = ${sessionIdOf(fact)} AND id = ${data.process}`
+      }),
     )
     yield* bus.project(
       ProcessReady,
@@ -120,21 +119,6 @@ export const layer = Layer.effectDiscard(
             integration_protocol = ${integration === undefined ? sql`integration_protocol` : integration.protocol}
           WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`
       }),
-    )
-    yield* bus.project(
-      ProcessPid,
-      active(
-        (fact) =>
-          sql`UPDATE process SET pid = ${fact.data.pid} WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
-      ),
-    )
-    yield* bus.project(
-      ProcessConversation,
-      active(
-        (fact) =>
-          sql`UPDATE process SET harness_session_id = ${fact.data.conversation}
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
-      ),
     )
     yield* bus.project(
       ProcessEnded,
@@ -170,7 +154,6 @@ export const layer = Layer.effectDiscard(
         }),
       ),
     )
-    yield* bus.project(ExecutionAccepted, () => Effect.void)
     yield* bus.project(
       ExecutionStarted,
       active((fact) =>
@@ -261,7 +244,7 @@ export const layer = Layer.effectDiscard(
       active((fact) => inboxRow(sessionIdOf(fact), fact.seq, { ...fact.data, status: "pending" })),
     )
     yield* bus.project(
-      InboxDeliveryStarted,
+      InboxDelivering,
       active(
         (fact) =>
           sql`UPDATE inbox SET status = 'delivering',
@@ -278,7 +261,7 @@ export const layer = Layer.effectDiscard(
       ),
     )
     yield* bus.project(
-      InboxDeliveryFailed,
+      InboxFailed,
       active(
         (fact) =>
           sql`UPDATE inbox SET status = 'failed'
@@ -292,32 +275,6 @@ export const layer = Layer.effectDiscard(
           sql`UPDATE inbox SET status = 'dropped'
             WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
       ),
-    )
-    yield* bus.project(
-      InboxUnresolved,
-      active((fact) => {
-        const { data } = fact
-        const sender = data.sender
-        const content = data.content
-
-        if (data.history === "released" && data.messageId !== undefined)
-          return sql`UPDATE inbox SET status = 'pending', recipient_execution_id = NULL
-            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${data.messageId}`
-
-        if (data.messageId !== undefined || sender === undefined || content === undefined)
-          return sql`UPDATE inbox SET status = 'unresolved'
-            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${data.messageId ?? fact.seq}`
-
-        return inboxRow(sessionIdOf(fact), fact.seq, {
-          sender,
-          content,
-          status: "unresolved",
-          ...(data.senderExecutionId !== undefined && { senderExecutionId: data.senderExecutionId }),
-          ...(data.requestId !== undefined && { requestId: data.requestId }),
-          ...(data.transferId !== undefined && { transferId: data.transferId }),
-          ...(data.aboutSessionId !== undefined && { aboutSessionId: data.aboutSessionId }),
-        })
-      }),
     )
   }),
 )

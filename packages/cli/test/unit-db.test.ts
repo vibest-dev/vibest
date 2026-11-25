@@ -497,19 +497,19 @@ describe("Db", () => {
             FROM execution WHERE session_id = ${id}`
 
           const executionId = row?.id ?? 1
-          yield* fact("execution.allocated", { sessionId: id, at, data: { executionId } })
+          yield* fact("session.execution.allocated", { sessionId: id, at, data: { executionId } })
 
           if (end === undefined) return
           const reply = end.reply === undefined ? {} : { reply: end.reply }
 
           if (end.outcome === "completed") {
-            yield* fact("execution.succeeded", { sessionId: id, at: end.at, data: { executionId, ...reply } })
+            yield* fact("session.execution.succeeded", { sessionId: id, at: end.at, data: { executionId, ...reply } })
 
             return
           }
 
           if (end.outcome === "failed") {
-            yield* fact("execution.failed", {
+            yield* fact("session.execution.failed", {
               sessionId: id,
               at: end.at,
               data: { executionId, failure: { message: "failed" }, ...reply },
@@ -519,12 +519,16 @@ describe("Db", () => {
           }
 
           if (end.outcome === "interrupted") {
-            yield* fact("execution.interrupted", { sessionId: id, at: end.at, data: { executionId, ...reply } })
+            yield* fact("session.execution.interrupted", {
+              sessionId: id,
+              at: end.at,
+              data: { executionId, ...reply },
+            })
 
             return
           }
 
-          yield* fact("execution.unresolved", {
+          yield* fact("session.execution.unresolved", {
             sessionId: id,
             at: end.at,
             data: { executionId, observation: end.outcome, ...reply },
@@ -722,7 +726,7 @@ describe("Db", () => {
         assert.deepStrictEqual(
           yield* sql<{
             n: number
-          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id} AND type = 'inbox.delivered'`,
+          }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id} AND type = 'session.inbox.delivered'`,
           [{ n: 0 }],
         )
       }),

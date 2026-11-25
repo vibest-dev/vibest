@@ -167,7 +167,7 @@ describe.concurrent("vibest archive: process proof", () => {
         })
 
       const reportedExecutionEndEvent = (id: string) =>
-        eventsOf(id, "execution.succeeded").pipe(Effect.map((rows) => rows.at(-1)?.data.reply))
+        eventsOf(id, "session.execution.succeeded").pipe(Effect.map((rows) => rows.at(-1)?.data.reply))
 
       const a = yield* workingSession
       yield* worktreeDeletedOutsideVibest(a)

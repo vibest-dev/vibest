@@ -1,4 +1,4 @@
-import type { Fact, FactOf, FactType } from "@vibest/schema/event"
+import type { PublicFact as Fact, PublicFactOf as FactOf, PublicFactType as FactType } from "@vibest/schema/event"
 import type { Stream } from "effect"
 
 export type { Fact, FactOf, FactType }

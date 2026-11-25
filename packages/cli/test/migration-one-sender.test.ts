@@ -121,38 +121,47 @@ const catalog2 = (ledger: string): ReadonlyArray<Fact> => [
 
 const rewritten = {
   [`${S} 2`]: {
-    type: "inbox.enqueued",
+    type: "session.inbox.enqueued",
     sender: { type: "agent", session: E },
     content: "do it",
   },
   [`${E} 2`]: {
-    type: "inbox.enqueued",
+    type: "session.inbox.enqueued",
     sender: { type: "agent", session: S, agent: "general", title: "sub" },
     content: "done",
     senderExecutionId: 3,
   },
   [`${E} 3`]: {
-    type: "inbox.enqueued",
+    type: "session.inbox.enqueued",
     sender: { type: "vibest" },
     content: "sub archived",
     aboutSessionId: S,
   },
-  [`${E} 4`]: { type: "inbox.enqueued", sender: { type: "agent", session: S }, content: "later" },
-  [`${S} 5`]: { type: "inbox.enqueued", sender: { type: "user" }, content: "typed by the user" },
+  [`${E} 4`]: { type: "session.inbox.enqueued", sender: { type: "agent", session: S }, content: "later" },
+  [`${S} 5`]: { type: "session.inbox.enqueued", sender: { type: "user" }, content: "typed by the user" },
   [`${R} 2`]: {
-    type: "inbox.enqueued",
+    type: "session.inbox.enqueued",
     sender: { type: "agent", session: "far", machine: "box" },
     content: "remote task",
   },
-  [`${E} 5`]: { type: "inbox.enqueued", sender: { type: "vibest" }, content: "far ended", transferId: "item-1" },
+  [`${E} 5`]: {
+    type: "session.inbox.enqueued",
+    sender: { type: "vibest" },
+    content: "far ended",
+    transferId: "item-1",
+  },
   [`${S} 6`]: {
-    type: "inbox.unresolved",
-    history: "route",
+    type: "session.inbox.enqueued",
     sender: { type: "agent", session: E },
     content: "q",
     requestId: "q1",
   },
-  [`${R} 3`]: { type: "inbox.enqueued", sender: { type: "agent", session: E }, content: "q" },
+  [`${S} 7`]: {
+    type: "session.inbox.dropped",
+    messageId: 6,
+    reason: "route",
+  },
+  [`${R} 3`]: { type: "session.inbox.enqueued", sender: { type: "agent", session: E }, content: "q" },
 }
 
 const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
@@ -207,7 +216,8 @@ describe("ledger migration 20261119000000_one_sender", () => {
 
         const inbox = yield* read<{ aggregate: string; seq: number; type: string; data: string }>(
           file,
-          (sql) => sql`SELECT aggregate, seq, type, data FROM event WHERE type LIKE 'inbox.%' ORDER BY position`,
+          (sql) =>
+            sql`SELECT aggregate, seq, type, data FROM event WHERE type LIKE 'session.inbox.%' ORDER BY position`,
         )
 
         assert.deepStrictEqual(
@@ -219,7 +229,7 @@ describe("ledger migration 20261119000000_one_sender", () => {
 
         const outbox = yield* read<{ data: string }>(
           file,
-          (sql) => sql`SELECT data FROM event WHERE type = 'outbox.queued' ORDER BY position`,
+          (sql) => sql`SELECT data FROM event WHERE type = 'remote.outbox.queued' ORDER BY position`,
         )
 
         assert.deepStrictEqual(

@@ -451,14 +451,20 @@ const conversationAtStart: Check = {
       ids.push(id)
       await until("the session start reported", () => fact(id, "process.ready").length > 0, 120_000)
       const ready = fact(id, "process.ready")[0]!
-      await until("the conversation", () => fact(id, "process.conversation").length > 0, 2_000).catch(() => undefined)
-      const noted = fact(id, "process.conversation")
+
+      const conversations = () =>
+        fact(id, "process.updated").filter(
+          (f) => (JSON.parse(f.data) as { conversation?: string }).conversation !== undefined,
+        )
+
+      await until("the conversation", () => conversations().length > 0, 2_000).catch(() => undefined)
+      const noted = conversations()
       expect(
         noted.length > 0 && Math.abs(noted[0]!.at - ready.at) <= 1_000,
         `the conversation was not recorded at the session start: ready ${JSON.stringify(ready)}, conversation ${JSON.stringify(noted)}`,
       )
       const conversation = (JSON.parse(noted[0]!.data) as { conversation: string }).conversation
-      await until("the first task taken", () => fact(id, "execution.input").length > 0, 60_000)
+      await until("the first task taken", () => fact(id, "session.execution.input").length > 0, 60_000)
       await closePane(id)
       expect(
         !c.executions(id).some((x) => x.outcome === "completed"),
@@ -467,9 +473,7 @@ const conversationAtStart: Check = {
       await w.ok(["send", id, "--", "Reply with exactly: i13-second"], { cwd: c.repo })
       await replied(id, "i13-second")
 
-      const resumed = fact(id, "process.conversation").map(
-        (f) => (JSON.parse(f.data) as { conversation: string }).conversation,
-      )
+      const resumed = conversations().map((f) => (JSON.parse(f.data) as { conversation: string }).conversation)
 
       expect(
         resumed.every((r) => r === conversation),
@@ -479,9 +483,7 @@ const conversationAtStart: Check = {
       await w.ok(["send", id, "--", "Reply with exactly: i13-third"], { cwd: c.repo })
       await replied(id, "i13-third")
 
-      const third = fact(id, "process.conversation").map(
-        (f) => (JSON.parse(f.data) as { conversation: string }).conversation,
-      )
+      const third = conversations().map((f) => (JSON.parse(f.data) as { conversation: string }).conversation)
 
       expect(
         third.every((r) => r === conversation),

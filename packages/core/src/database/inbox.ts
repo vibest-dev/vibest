@@ -1,9 +1,9 @@
 import {
   InboxDelivered,
-  InboxDeliveryFailed,
-  InboxDeliveryStarted,
+  InboxDelivering,
   InboxDropped,
   InboxEnqueued,
+  InboxFailed,
   type Sender,
 } from "@vibest/schema/event"
 import { InboxStatus } from "@vibest/schema/session"
@@ -54,7 +54,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
           for (const r of moved) {
             if (to === "delivering") {
-              yield* publish(InboxDeliveryStarted, {
+              yield* publish(InboxDelivering, {
                 sessionId: r.session,
                 at,
                 data: { messageId: r.id, ...(detail?.execution !== undefined && { execution: detail.execution }) },
@@ -79,7 +79,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
             if (reason === undefined)
               return yield* Effect.die(new Error(`inbox ${r.session} ${r.id} ${to} without a reason`))
-            yield* publish(to === "failed" ? InboxDeliveryFailed : InboxDropped, {
+            yield* publish(to === "failed" ? InboxFailed : InboxDropped, {
               sessionId: r.session,
               at,
               data: { messageId: r.id, reason },
@@ -120,7 +120,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           WHERE i.recipient_session_id = ${sessionId} AND i.status = 'pending' AND i.recipient_execution_id IS NULL`
 
         if (task !== undefined)
-          yield* publish(InboxDeliveryStarted, {
+          yield* publish(InboxDelivering, {
             sessionId,
             at,
             data: { messageId: task.id, execution },

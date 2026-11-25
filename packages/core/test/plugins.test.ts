@@ -16,7 +16,7 @@ import {
   type SessionToolExecuteBefore,
   type Registration,
 } from "@vibest/plugin/effect"
-import type { Fact } from "@vibest/schema/event"
+import { PublicCatalog, type Fact } from "@vibest/schema/event"
 import { Layout } from "@vibest/schema/layout"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -553,12 +553,11 @@ describe("plugins: event.subscribe", () => {
         (facts) => facts.some((fact) => fact.sessionId === second.id && fact.type === "process.started"),
       )
 
+      assert.isTrue(held.every((fact) => Object.hasOwn(PublicCatalog, fact.type)))
+
       for (const aggregate of new Set(held.map((fact) => fact.aggregate))) {
         const seqs = held.flatMap((fact) => (fact.aggregate === aggregate ? [fact.seq] : []))
-        assert.deepStrictEqual(
-          seqs,
-          seqs.map((_, i) => seqs[0]! + i),
-        )
+        assert.isTrue(seqs.every((seq, i) => i === 0 || seq > seqs[i - 1]!))
       }
 
       assert.isTrue(held.some((fact) => fact.sessionId === second.id && fact.type === "session.created"))

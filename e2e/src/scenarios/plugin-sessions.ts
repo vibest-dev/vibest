@@ -25,11 +25,11 @@ const log = (line) => fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(l
 export default Plugin.define({
   id: "session-probe",
   effect: (ctx) =>
-    ctx.event.subscribe({ types: ["execution.succeeded", "session.ended"] }).pipe(
+    ctx.event.subscribe({ types: ["session.execution.succeeded", "session.archived"] }).pipe(
       Stream.runForEach((fact) =>
         Effect.gen(function* () {
           const id = fact.sessionId
-          if (fact.type === "session.ended") {
+          if (fact.type === "session.archived") {
             yield* ctx.session.send({ to: id, message: "after-archive", request: \`after:\${id}\` })
             return
           }

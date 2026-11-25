@@ -64,7 +64,7 @@ const story = Effect.gen(function* () {
         data: { harness: "claude", runtime: "herdr" },
       })
 
-      yield* emit(Catalog["process.placed"], {
+      yield* emit(Catalog["process.updated"], {
         sessionId: MAIN,
         at: 225,
         data: { process: mainProcess, terminal: { id: "w1:p1" }, pid: 10 },
@@ -75,8 +75,8 @@ const story = Effect.gen(function* () {
         data: { process: mainProcess, pid: 11, integration: { version: "0.0.1", protocol: 8 } },
       })
       yield* emit(Catalog["process.ready"], { sessionId: MAIN, at: 235, data: { process: mainProcess } })
-      yield* emit(Catalog["process.pid"], { sessionId: MAIN, at: 236, data: { process: mainProcess, pid: 12 } })
-      yield* emit(Catalog["process.conversation"], {
+      yield* emit(Catalog["process.updated"], { sessionId: MAIN, at: 236, data: { process: mainProcess, pid: 12 } })
+      yield* emit(Catalog["process.updated"], {
         sessionId: MAIN,
         at: 237,
         data: { process: mainProcess, conversation: "conv-main" },
@@ -88,7 +88,7 @@ const story = Effect.gen(function* () {
         data: { project: P, agent: "subagent", name: "tests", directory: "/w/app/wt", parent: MAIN },
       })
 
-      const task = yield* emit(Catalog["inbox.enqueued"], {
+      const task = yield* emit(Catalog["session.inbox.enqueued"], {
         sessionId: SUB,
         at: 301,
         data: {
@@ -113,29 +113,29 @@ const story = Effect.gen(function* () {
       })
 
       const execution = subProcess
-      yield* emit(Catalog["execution.allocated"], {
+      yield* emit(Catalog["session.execution.allocated"], {
         sessionId: SUB,
         at: 309,
         data: { executionId: execution, processId: subProcess },
       })
-      yield* emit(Catalog["execution.started"], {
+      yield* emit(Catalog["session.execution.started"], {
         sessionId: SUB,
         at: 310,
         data: { executionId: execution, processId: subProcess },
       })
 
-      yield* emit(Catalog["inbox.delivered"], {
+      yield* emit(Catalog["session.inbox.delivered"], {
         sessionId: SUB,
         at: 311,
         data: { messageId: task, recipientExecutionId: execution },
       })
-      yield* emit(Catalog["execution.succeeded"], {
+      yield* emit(Catalog["session.execution.succeeded"], {
         sessionId: SUB,
         at: 321,
         data: { executionId: execution, reply: "All tests pass." },
       })
 
-      const result = yield* emit(Catalog["inbox.enqueued"], {
+      const result = yield* emit(Catalog["session.inbox.enqueued"], {
         sessionId: MAIN,
         at: 322,
         data: {
@@ -145,7 +145,7 @@ const story = Effect.gen(function* () {
         },
       })
 
-      yield* emit(Catalog["inbox.delivery_started"], { sessionId: MAIN, at: 323, data: { messageId: result } })
+      yield* emit(Catalog["session.inbox.delivering"], { sessionId: MAIN, at: 323, data: { messageId: result } })
 
       yield* emit(Catalog["process.ended"], {
         sessionId: SUB,
@@ -188,17 +188,17 @@ const story = Effect.gen(function* () {
           origin: { remote: PEER, project: OTHER_PROJECT, session: MAIN },
         },
       })
-      yield* emit(Catalog["outbox.queued"], {
+      yield* emit(Catalog["remote.outbox.queued"], {
         at: 510,
         data: { id: ITEM, remote: PEER, session: REMOTE, content: "done" },
       })
-      yield* emit(Catalog["outbox.queued"], {
+      yield* emit(Catalog["remote.outbox.queued"], {
         at: 511,
         data: { id: ITEM_2, remote: PEER, session: REMOTE, kind: "send", content: "archived" },
       })
-      yield* emit(Catalog["outbox.acked"], { at: 520, data: { remote: PEER, ids: [ITEM] } })
+      yield* emit(Catalog["remote.outbox.acked"], { at: 520, data: { remote: PEER, ids: [ITEM] } })
 
-      const notice = yield* emit(Catalog["inbox.enqueued"], {
+      const notice = yield* emit(Catalog["session.inbox.enqueued"], {
         sessionId: MAIN,
         at: 530,
         data: {
@@ -209,18 +209,18 @@ const story = Effect.gen(function* () {
       })
 
       const typed = mainProcess
-      yield* emit(Catalog["execution.allocated"], {
+      yield* emit(Catalog["session.execution.allocated"], {
         sessionId: MAIN,
         at: 539,
         data: { executionId: typed, processId: mainProcess, typed: "hello" },
       })
-      yield* emit(Catalog["execution.started"], {
+      yield* emit(Catalog["session.execution.started"], {
         sessionId: MAIN,
         at: 540,
         data: { executionId: typed, processId: mainProcess },
       })
 
-      yield* emit(Catalog["execution.failed"], {
+      yield* emit(Catalog["session.execution.failed"], {
         sessionId: MAIN,
         at: 541,
         data: { executionId: typed, failure: { message: "model overloaded" } },
@@ -337,13 +337,13 @@ describe("projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("session.ended keeps the first end time and stops offering the session's outbox", () =>
+  it.effect("session.archived keeps the first end time and stops offering the session's outbox", () =>
     Effect.gen(function* () {
       const { sql, bus } = yield* story
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["session.ended"], { sessionId: REMOTE, at: 700, data: { reason: "archived" } })
-          yield* bus.publish(Catalog["session.ended"], { sessionId: REMOTE, at: 800, data: { reason: "archived" } })
+          yield* bus.publish(Catalog["session.archived"], { sessionId: REMOTE, at: 700, data: {} })
+          yield* bus.publish(Catalog["session.archived"], { sessionId: REMOTE, at: 800, data: {} })
         }),
       )
       assert.deepStrictEqual(yield* rowsOf(sql, `SELECT ended_at FROM session WHERE id = '${REMOTE}'`), [
@@ -491,7 +491,7 @@ describe("projectors", () => {
     Effect.gen(function* () {
       const { sql, bus, execution, typed, subProcess, mainProcess } = yield* story
       yield* bus.transaction(
-        bus.publish(Catalog["execution.unresolved"], {
+        bus.publish(Catalog["session.execution.unresolved"], {
           sessionId: SUB,
           at: 999,
           data: { executionId: execution, observation: "lost" },
@@ -584,7 +584,7 @@ describe("projectors", () => {
 
       const exit = yield* bus
         .transaction(
-          bus.publish(Catalog["inbox.enqueued"], {
+          bus.publish(Catalog["session.inbox.enqueued"], {
             sessionId: MAIN,
             data: {
               sender: { type: "vibest" },
@@ -604,7 +604,11 @@ describe("projectors", () => {
       const { sql, bus } = yield* story
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM machine"), [])
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM remote"), [{ id: PEER, name: "mac2", connectedAt: 170 }])
-      const [queued] = yield* sql<{ seq: number }>`SELECT seq FROM event WHERE type = 'outbox.queued' ORDER BY seq DESC`
+
+      const [queued] = yield* sql<{
+        seq: number
+      }>`SELECT seq FROM event WHERE type = 'remote.outbox.queued' ORDER BY seq DESC`
+
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM outbox WHERE acked_at IS NULL"), [
         {
           id: ITEM_2,
@@ -770,7 +774,7 @@ describe("bus", () => {
             sessionId: MAIN,
             data: { project: P, agent: "main", name: "main", directory: "" },
           })
-          yield* bus.publish(Catalog["inbox.enqueued"], {
+          yield* bus.publish(Catalog["session.inbox.enqueued"], {
             sessionId: MAIN,
             data: { sender: { type: "agent", session: MAIN }, content: "hi" },
           })
@@ -785,7 +789,7 @@ describe("bus", () => {
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT position, aggregate, seq, type FROM event ORDER BY position"), [
         { position: 1, aggregate: P, seq: 1, type: "project.created" },
         { position: 2, aggregate: MAIN, seq: 1, type: "session.created" },
-        { position: 3, aggregate: MAIN, seq: 2, type: "inbox.enqueued" },
+        { position: 3, aggregate: MAIN, seq: 2, type: "session.inbox.enqueued" },
         { position: 4, aggregate: ledgerId!.value, seq: 1, type: "remote.seen" },
         { position: 5, aggregate: P, seq: 2, type: "project.moved" },
       ])

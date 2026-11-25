@@ -119,10 +119,10 @@ started it is the `origin` of its `session.created` fact (remote, project, repor
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
 notices go to B's own inbox delivery and no outbox row is written for it.
 
-Every notice of a remote session with a `reportTo` goes to B's `outbox` as a `notice`, and every `vibest send` it makes to a linked remote session goes as a `send`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. A forward writes no local inbox row: the outbox item is the receipt, and it is not an inbox delivery. With no `remote` row nothing is queued. `Remote.Outbox` streams
+Every notice of a remote session with a `reportTo` goes to B's `outbox` as a `notice`, and every `vibest send` it makes to a linked remote session goes as a `send`; an execution end queues nothing. The item is written as `remote.outbox.queued` in the transaction that writes the row. A forward writes no local inbox row: the outbox item is the receipt, and it is not an inbox delivery. With no `remote` row nothing is queued. `Remote.Outbox` streams
 the remote's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
-`Remote.Ack { ids }` appends `outbox.acked`, which sets their `acked_at`; an acknowledged row stays, so a retry of the
-same request id finds it and queues nothing. Archiving a remote session (`session.ended`) deletes its unacknowledged
+`Remote.Ack { ids }` appends `remote.outbox.acked`, which sets their `acked_at`; an acknowledged row stays, so a retry of the
+same request id finds it and queues nothing. Archiving a remote session (`session.archived`) deletes its unacknowledged
 rows.
 
 `List`, `Get`, `Send`, `Interrupt`, `Archive` and `Peek` from a remote resolve a session id only among sessions whose
@@ -212,7 +212,7 @@ and passes `PromptTooLarge` through.
 
 After `Remote.Hello`, A opens `Remote.Outbox`. For each item it runs one transaction (`Db.receiveRemoteItem`): the
 recipient's project (none: logged and acknowledged); an inbox row whose `transfer_id` is the outbox id, or an outbox
-row already carrying that id (found: only acknowledged); otherwise an `inbox.enqueued` with `transferId` set to that
+row already carrying that id (found: only acknowledged); otherwise a `session.inbox.enqueued` with `transferId` set to that
 id, from the remote agent session with its machine (a `notice` is from `"vibest"`), routed to the recipient while it
 has not ended, else to the project's entry session, pending when that one is present, else dropped without being
 handed to an agent. A forward to another machine reuses the same id on the outbox and writes no local delivery. A `notice` has content
@@ -327,7 +327,7 @@ replacing a mirror row when B's vibestd moved to another hc session on the same 
 ## Tables
 
 Read-model tables of the ledger (schema.md), written only by their facts: `machine.added`, `machine.connected` and
-`machine.removed`; `remote.seen`; `outbox.queued` and `outbox.acked`, all facts of the ledger aggregate (`meta.ledger`); `outbox.queued`
+`machine.removed`; `remote.seen`; `remote.outbox.queued` and `remote.outbox.acked`, all facts of the ledger aggregate (`meta.ledger`); `remote.outbox.queued`
 names the sending session and, when the receiver is not the sender's own creator (a send or notice that passes an ended creator on to the nearest living one on another machine), the receiving session (`recipient`) in its data. No fact names a machine: everything in one ledger
 is on this machine, and a session on B is only in B's ledger (A asks B for it).
 
@@ -348,14 +348,14 @@ CREATE TABLE remote (              -- B: a vibestd that dials this one
 
 CREATE TABLE outbox (              -- B: what this vibestd delivers, or delivered, to a remote
   id         TEXT PRIMARY KEY CHECK (length(id) = 36),  -- random UUIDv4; the dedupe key on A (inbox.transfer_id)
-  seq        INTEGER NOT NULL,     -- its outbox.queued in the ledger aggregate: the order it is sent in
+  seq        INTEGER NOT NULL,     -- its remote.outbox.queued in the ledger aggregate: the order it is sent in
   remote_id  TEXT NOT NULL,
   session_id TEXT NOT NULL,        -- the session that sends it
   recipient  TEXT,                 -- the session on the remote that receives it; null in rows from before it existed (then the sender's origin_session)
   kind       TEXT NOT NULL CHECK (kind IN ('send', 'notice')),
   content    TEXT NOT NULL,        -- the text, rendered on A by kind
   created_at INTEGER NOT NULL,
-  acked_at   INTEGER               -- its outbox.acked; null: still to deliver
+  acked_at   INTEGER               -- its remote.outbox.acked; null: still to deliver
 ) STRICT;
 CREATE INDEX outbox_remote ON outbox (remote_id, seq) WHERE acked_at IS NULL;
 CREATE INDEX outbox_session ON outbox (session_id);

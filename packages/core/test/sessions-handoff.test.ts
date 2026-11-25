@@ -276,7 +276,7 @@ test(
     yield* sessions.archive(id)
 
     const dropped = yield* sql<{ type: string }>`SELECT type FROM event
-      WHERE aggregate = ${id} AND type = 'inbox.dropped'`
+      WHERE aggregate = ${id} AND type = 'session.inbox.dropped'`
 
     assert.deepStrictEqual(dropped, [])
 

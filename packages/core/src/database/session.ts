@@ -1,8 +1,8 @@
 import {
   ProcessEnded,
   type ProcessEndReason,
-  ProcessPid,
   ProcessReady,
+  ProcessUpdated,
   SessionCreated,
   SessionDirectoryChanged,
   SessionLinked,
@@ -544,7 +544,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 const current = yield* currentProcess(id)
 
                 if (current === undefined) return undefined
-                yield* publish(ProcessPid, { sessionId: id, data: { process: current.id, pid } })
+                yield* publish(ProcessUpdated, { sessionId: id, data: { process: current.id, pid } })
 
                 return current.id
               }
