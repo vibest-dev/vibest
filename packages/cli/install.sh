@@ -2,8 +2,9 @@
 # Install vibest: curl -fsSL https://github.com/vibest-dev/vibest/releases/latest/download/install.sh | sh
 # The newest stable release; with --beta (sh -s -- --beta), the newest release of either channel, beta or stable.
 #
-# Each version unpacks into its own directory, ~/.local/share/vibest/versions/<version>/ (bin/vibest, the harness
-# plugins, and herdr-plugin/ beside them; herdr-plugin is not linked), and ~/.local/bin/vibest links to the newest. A running vibestd and its sessions keep the version they
+# Each version unpacks into its own directory, ~/.local/share/vibest/versions/<version>/ (a single self-contained
+# bin/vibest binary that extracts harness plugins and herdr-plugin/ into ~/.vibest/cache/assets/<version>-<hash>/ on
+# daemon startup), and ~/.local/bin/vibest links to the newest. A running vibestd and its sessions keep the version they
 # started from; the one before the newest and any a running process still uses are kept, older ones are removed. Nothing
 # outside these paths is written.
 #   VIBEST_DOWNLOAD_URL  the archives of one release, installed whatever the channel
@@ -49,11 +50,45 @@ share=${VIBEST_INSTALL:-$HOME/.local/share/vibest}
 # The link directory an earlier install used, so `vibest update` (which sets only VIBEST_INSTALL) keeps it.
 bin=${VIBEST_BIN:-$(cat "$share/bin" 2>/dev/null || echo "$HOME/.local/bin")}
 
-case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64) target=darwin-arm64 ;;
-  Linux-x86_64) target=linux-x64 ;;
+case "$(uname -s)" in
+  Darwin) os=darwin ;;
+  Linux) os=linux ;;
   *) echo "vibest: no build for $(uname -s) $(uname -m)" >&2; exit 1 ;;
 esac
+
+case "$(uname -m)" in
+  arm64|aarch64) cpu=arm64 ;;
+  x86_64|amd64)
+    if [ "$os" = "darwin" ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+      cpu=arm64
+    else
+      cpu=x64
+    fi
+    ;;
+  *) echo "vibest: no build for $(uname -s) $(uname -m)" >&2; exit 1 ;;
+esac
+
+abi=""
+if [ "$os" = "linux" ]; then
+  if [ -f /etc/alpine-release ] || ldd --version 2>&1 | grep -qi musl; then
+    abi="-musl"
+  fi
+fi
+
+baseline=""
+if [ "$cpu" = "x64" ]; then
+  if [ "$os" = "darwin" ]; then
+    if [ "$(sysctl -n hw.optional.avx2_0 2>/dev/null || echo 0)" != "1" ]; then
+      baseline="-baseline"
+    fi
+  else
+    if ! grep -qiE '(^|[[:space:]])avx2([[:space:]]|$)' /proc/cpuinfo 2>/dev/null; then
+      baseline="-baseline"
+    fi
+  fi
+fi
+
+target="${os}-${cpu}${baseline}${abi}"
 
 mkdir -p "$share/versions" "$bin"
 tmp=$(mktemp -d "$share/versions/.download.XXXXXX")

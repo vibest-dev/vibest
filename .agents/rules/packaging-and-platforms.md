@@ -1,0 +1,18 @@
+# Packaging, AoT, and Platforms
+
+1. **True Self-Contained Single Binary**: `vibest` packs built `harnesses/` (`claude`, `pi`, `cursor`, `agy`) and `herdr-plugin/` into one deterministic compressed archive at build time (`packages/cli/src/assets-archive.ts`) and embeds it once, unencoded, outside JS bytecode via a `BunPlugin` (`import archive from "..." with { type: "file" }`). On `vibestd` startup, embedded assets are materialized idempotently and atomically to `<VIBEST_HOME>/cache/assets/<version>-<hash>/` (preserving `0755` on executable scripts) and `<VIBEST_HOME>/herdr-plugin` is atomically symlinked to the extracted `herdr-plugin/`. Explicit `VIBEST_HARNESSES` overrides embedded assets in tests.
+2. **Bun AoT, PGO, and Untrusted-CWD Safety**:
+   - Production builds (`packages/cli/scripts/build.ts`) compile with `format: "esm"`, `bytecode: true`, signal-safe isolated PGO (`compile.bytecodeOrder`), `compile.jitPolicy: 100` (restoring `Bun.unsafe.setJITPolicy(1)` on foreground `vibestd` startup in `packages/platform-bun/src/bun.ts`), and `compile.execArgv: ["--smol", "--use-system-ca", "--no-warnings", "--"]` (trailing `"--"` prevents Bun from consuming user flags).
+   - `autoloadBunfig`, `autoloadDotenv`, `autoloadTsconfig`, and `autoloadPackageJson` are all `false` so running `vibest` inside an untrusted repository never loads CWD config files.
+   - Synthetic older builds in E2E pass `--no-bytecode` and invoke `process.execPath` (never bare `"bun"`).
+3. **Zero-`postinstall` POSIX npm Wrapper and 9-Target Unix Matrix**:
+   - `@vibest/cli` declares **no `postinstall` script** and requires **no Node.js runtime**. `packages/cli/bin/vibest` is a POSIX `#!/bin/sh` launcher that resolves `$real_self_dir` (symlink-safe across `npm`, `bun`, `pnpm`), detects OS, CPU, Rosetta 2, `musl`, and AVX2 (`-baseline`), verifies `@vibest/cli-<target>` version matches `@vibest/cli`, self-heals on first run via temp hardlink + atomic `mv -f` (cleaning up on failure and never mutating `pnpm` store inodes), and falls back to `exec "$target_bin" "$@"` on read-only filesystems.
+   - All 9 Unix targets are dynamically packed (`packages/cli/scripts/pack.ts` + `targets.ts`): `darwin-arm64`, `darwin-x64`, `darwin-x64-baseline`, `linux-arm64`, `linux-arm64-musl`, `linux-x64`, `linux-x64-baseline`, `linux-x64-musl`, `linux-x64-baseline-musl`, with `libc: ["glibc"]` / `["musl"]` on Linux packages.
+   - The 6 primary targets go into `@vibest/cli`'s `optionalDependencies`; the 3 `-baseline` packages are omitted from `optionalDependencies` (preventing 2x ~60 MB downloads on x64) while still published to npm and GitHub Releases. `install.sh`, `bin/vibest`, and `vibest update` all detect Rosetta 2, `musl`, and AVX2 (`-baseline`).
+   - `installMethod` (`packages/client/src/release.ts`) inspects `realPath(process.execPath)` (matching `/node_modules/@vibest/cli(?:-|$|/)` or `/.pnpm/@vibest+cli`, or `^(.+)/versions/[^/]+/bin/vibest$`) without relying on `VIBEST_HARNESSES`, and `packages/cli/src/update.ts` supports `npm`, `bun`, and `pnpm`.
+4. **Published Package Boundary**:
+   - Only `@vibest/cli`, the 9 `@vibest/cli-<target>` packages, and `@vibest/plugin` are public npm packages.
+   - All internal workspace packages (`@vibest/schema`, `effect-herdr-sdk`, `@vibest/core`, `@vibest/protocol`, `@vibest/server`, `@vibest/client`, etc.) are `"private": true`.
+   - `@vibest/plugin` packs compiled `dist/*.js` (`Bun.build`, `external: ["effect", "effect/*"]`) and `dist/*.d.ts` with `@vibest/schema` inlined (`packages/plugin/scripts/pack.ts`), strips `"@vibest/schema"` from packed `dependencies`, nulls out workspace-only exports, and restores working-tree `package.json` in `finally`.
+
+Status: in force.

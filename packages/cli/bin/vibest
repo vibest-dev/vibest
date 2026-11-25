@@ -1,0 +1,116 @@
+#!/bin/sh
+set -eu
+
+resolve_real() {
+  p="$1"
+  while [ -L "$p" ]; do
+    d=$(CDPATH= cd -- "$(dirname -- "$p")" && pwd)
+    l=$(readlink "$p")
+    case "$l" in
+      /*) p="$l" ;;
+      *) p="$d/$l" ;;
+    esac
+  done
+  d=$(CDPATH= cd -- "$(dirname -- "$p")" && pwd)
+  printf '%s/%s\n' "$d" "$(basename -- "$p")"
+}
+
+read_version() {
+  sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n 1
+}
+
+real_self=$(resolve_real "$0")
+real_self_dir=$(dirname -- "$real_self")
+pkg_dir=$(dirname -- "$real_self_dir")
+cli_version=$(read_version "$pkg_dir/package.json")
+
+case "$(uname -s)" in
+  Darwin) os=darwin ;;
+  Linux) os=linux ;;
+  *) echo "vibest: unsupported OS $(uname -s)" >&2; exit 1 ;;
+esac
+
+case "$(uname -m)" in
+  arm64|aarch64) cpu=arm64 ;;
+  x86_64|amd64)
+    if [ "$os" = "darwin" ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+      cpu=arm64
+    else
+      cpu=x64
+    fi
+    ;;
+  *) echo "vibest: unsupported architecture $(uname -m)" >&2; exit 1 ;;
+esac
+
+abi=""
+if [ "$os" = "linux" ]; then
+  if [ -f /etc/alpine-release ] || ldd --version 2>&1 | grep -qi musl; then
+    abi="-musl"
+  fi
+fi
+
+baseline=""
+if [ "$cpu" = "x64" ]; then
+  if [ "$os" = "darwin" ]; then
+    if [ "$(sysctl -n hw.optional.avx2_0 2>/dev/null || echo 0)" != "1" ]; then
+      baseline="-baseline"
+    fi
+  else
+    if ! grep -qiE '(^|[[:space:]])avx2([[:space:]]|$)' /proc/cpuinfo 2>/dev/null; then
+      baseline="-baseline"
+    fi
+  fi
+fi
+
+target="${os}-${cpu}${baseline}${abi}"
+
+find_pkg() {
+  dir="$1"
+  while :; do
+    cand="$dir/node_modules/@vibest/cli-$target"
+    if [ -x "$cand/bin/vibest" ]; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+    parent=$(dirname -- "$dir")
+    if [ "$parent" = "$dir" ]; then
+      return 1
+    fi
+    dir="$parent"
+  done
+}
+
+install_hint() {
+  pkg="@vibest/cli-$target@$cli_version"
+  case "$real_self_dir" in
+    */.bun/*) printf 'bun add -g %s\n' "$pkg" ;;
+    */.pnpm/*|*/pnpm/*) printf 'pnpm add -g %s\n' "$pkg" ;;
+    */lib/node_modules/@vibest/cli/bin)
+      prefix=${real_self_dir%/lib/node_modules/@vibest/cli/bin}
+      printf 'npm install -g --prefix %s %s\n' "$prefix" "$pkg"
+      ;;
+    *) printf 'npm install -g %s\n' "$pkg" ;;
+  esac
+}
+
+if ! target_pkg=$(find_pkg "$real_self_dir"); then
+  echo "vibest: no binary for $target; install it with: $(install_hint)" >&2
+  exit 1
+fi
+
+target_version=$(read_version "$target_pkg/package.json")
+if [ -n "$cli_version" ] && [ "$target_version" != "$cli_version" ]; then
+  echo "vibest: @vibest/cli-$target@$target_version does not match @vibest/cli@$cli_version; reinstall with: $(install_hint)" >&2
+  exit 1
+fi
+
+target_bin="$target_pkg/bin/vibest"
+tmp_link="$real_self_dir/.vibest.$$"
+if [ -w "$real_self_dir" ]; then
+  if ln "$target_bin" "$tmp_link" 2>/dev/null && mv -f "$tmp_link" "$real_self" 2>/dev/null; then
+    exec "$real_self" "$@"
+  fi
+  rm -f "$tmp_link" 2>/dev/null || true
+fi
+
+exec "$target_bin" "$@"

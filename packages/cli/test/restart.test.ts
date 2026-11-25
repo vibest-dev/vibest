@@ -298,6 +298,7 @@ describe("restart in place", () => {
         "VIBEST_EXECUTION",
         "VIBEST_PROJECT_ID",
         "VIBEST_PROJECT_DIR",
+        "VIBEST_SCRATCH_DIR",
         "VIBEST_AGENT",
         "VIBEST_HARNESS",
         "VIBEST_RUNTIME",

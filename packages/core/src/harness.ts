@@ -1,5 +1,5 @@
 import type { HarnessOption } from "@vibest/plugin/effect"
-import { VibestCommand } from "@vibest/schema/layout"
+import { EmbeddedHarnesses, Layout, VibestCommand } from "@vibest/schema/layout"
 import type { HarnessChoice } from "@vibest/schema/session"
 import { HarnessUnavailable } from "@vibest/schema/session"
 import { Cache, Clock, Config, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
@@ -81,7 +81,11 @@ export const make = Effect.gen(function* () {
           (dir) => fs.exists(dir).pipe(Effect.orElseSucceed(() => false)),
         ).pipe(Effect.map((found) => Option.getOrElse(found, () => path.join(pkg, "harnesses"))))
 
-  const plugins = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))) || beside
+  const envHarnesses = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES")))
+  const layout = Option.getOrUndefined(yield* Effect.serviceOption(Layout))
+  const materialize = yield* EmbeddedHarnesses
+  const embedded = envHarnesses || layout === undefined ? undefined : materialize(layout.home)
+  const plugins = envHarnesses || embedded || beside
   const searchPath = (yield* Config.String("PATH").pipe(Config.withDefault(""))).split(":").filter(Boolean)
 
   const listOf = (key: string) => {

@@ -50,9 +50,15 @@ export const newestIn = (channel: Channel, versions: ReadonlyArray<string>) =>
 
 const GITHUB_RELEASES = "https://github.com/vibest-dev/vibest/releases"
 
-export const installMethod = (self: ReadonlyArray<string>, harnesses: string | undefined) => {
-  if (harnesses) return { kind: "npm" } as const
-  const m = self.length === 1 ? /^(.+)\/versions\/[^/]+\/bin\/vibest$/.exec(self[0]!) : null
+export const installMethod = (self: ReadonlyArray<string>, real?: string) => {
+  if (self.length !== 1) return undefined
+  const candidate = real ?? self[0]!
+
+  if (/\/node_modules\/@vibest\/cli(?:-|$|\/)/.test(candidate) || /\/\.pnpm\/@vibest\+cli/.test(candidate))
+    return { kind: "npm" } as const
+
+  const m =
+    /^(.+)\/versions\/[^/]+\/bin\/vibest$/.exec(self[0]!) ?? /^(.+)\/versions\/[^/]+\/bin\/vibest$/.exec(candidate)
 
   return m ? ({ kind: "curl", share: m[1]! } as const) : undefined
 }

@@ -1,3 +1,6 @@
+import childProcess from "node:child_process"
+import fs from "node:fs"
+
 import { Claim, cliHeaders, connect, type VibestClient, readPing } from "@vibest/client/client"
 import { compareVersions, UpdateError } from "@vibest/client/release"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
@@ -32,14 +35,56 @@ import { VERSION } from "./version.ts"
 
 export type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }
 
+const runText = (cmd: string, args: ReadonlyArray<string>): string => {
+  try {
+    const out = childProcess.spawnSync(cmd, [...args], { encoding: "utf8" })
+
+    return `${out.stdout ?? ""}${out.stderr ?? ""}`.trim()
+  } catch {
+    return ""
+  }
+}
+
+export const detectPlatformTarget = (): string => {
+  const os = process.platform === "darwin" ? "darwin" : "linux"
+  const rawArch = process.arch === "arm64" ? "arm64" : "x64"
+
+  const arch =
+    os === "darwin" && rawArch === "x64" && runText("sysctl", ["-n", "sysctl.proc_translated"]) === "1"
+      ? "arm64"
+      : rawArch
+
+  const musl = os === "linux" && (fs.existsSync("/etc/alpine-release") || /musl/i.test(runText("ldd", ["--version"])))
+
+  const hasAvx2 =
+    arch !== "x64"
+      ? true
+      : os === "darwin"
+        ? runText("sysctl", ["-n", "hw.optional.avx2_0"]) === "1"
+        : (() => {
+            try {
+              return /(^|\s)avx2(\s|$)/i.test(fs.readFileSync("/proc/cpuinfo", "utf8"))
+            } catch {
+              return false
+            }
+          })()
+
+  return `${os}-${arch}${hasAvx2 ? "" : "-baseline"}${musl ? "-musl" : ""}`
+}
+
 export const ownerOf = (real: string) => {
   if (real.includes("/.bun/install/global/node_modules/")) return { kind: "bun" } as const
+
+  if (real.includes("/.pnpm/") || real.includes("/pnpm/global/")) return { kind: "pnpm" } as const
   const npm = /^(.+)\/lib\/node_modules\/@vibest\//.exec(real)
 
   return npm ? ({ kind: "npm", prefix: npm[1]! } as const) : undefined
 }
 
-export const upgradeCommand = (real: string, version: string, platform = `${process.platform}-${process.arch}`) => {
+const baselinePkg = (version: string, platform: string) =>
+  platform.includes("-baseline") ? [`@vibest/cli-${platform}@${version}`] : []
+
+export const upgradeCommand = (real: string, version: string, platform = detectPlatformTarget()) => {
   return Match.value(ownerOf(real)).pipe(
     Match.when({ kind: "bun" }, () => [
       "bun",
@@ -48,6 +93,13 @@ export const upgradeCommand = (real: string, version: string, platform = `${proc
       `@vibest/cli@${version}`,
       `@vibest/cli-${platform}@${version}`,
     ]),
+    Match.when({ kind: "pnpm" }, () => [
+      "pnpm",
+      "add",
+      "-g",
+      `@vibest/cli@${version}`,
+      ...baselinePkg(version, platform),
+    ]),
     Match.when({ kind: "npm" }, (owner) => [
       `${owner.prefix}/bin/npm`,
       "install",
@@ -55,22 +107,47 @@ export const upgradeCommand = (real: string, version: string, platform = `${proc
       "--prefix",
       owner.prefix,
       `@vibest/cli@${version}`,
+      ...baselinePkg(version, platform),
     ]),
-    Match.orElse(() => ["npm", "install", "-g", `@vibest/cli@${version}`]),
+    Match.orElse(() => ["npm", "install", "-g", `@vibest/cli@${version}`, ...baselinePkg(version, platform)]),
   )
 }
 
-export const stageCommand = (
-  real: string,
-  dir: string,
-  version: string,
-  platform = `${process.platform}-${process.arch}`,
-) => {
-  const owner = ownerOf(real)
-
-  return owner?.kind === "bun"
-    ? ["bun", "add", "--cwd", dir, `@vibest/cli@${version}`, `@vibest/cli-${platform}@${version}`]
-    : [owner?.kind === "npm" ? `${owner.prefix}/bin/npm` : "npm", "install", "--prefix", dir, `@vibest/cli@${version}`]
+export const stageCommand = (real: string, dir: string, version: string, platform = detectPlatformTarget()) => {
+  return Match.value(ownerOf(real)).pipe(
+    Match.when({ kind: "bun" }, () => [
+      "bun",
+      "add",
+      "--cwd",
+      dir,
+      `@vibest/cli@${version}`,
+      `@vibest/cli-${platform}@${version}`,
+    ]),
+    Match.when({ kind: "pnpm" }, () => [
+      "pnpm",
+      "add",
+      "--dir",
+      dir,
+      `@vibest/cli@${version}`,
+      ...baselinePkg(version, platform),
+    ]),
+    Match.when({ kind: "npm" }, (owner) => [
+      `${owner.prefix}/bin/npm`,
+      "install",
+      "--prefix",
+      dir,
+      `@vibest/cli@${version}`,
+      ...baselinePkg(version, platform),
+    ]),
+    Match.orElse(() => [
+      "npm",
+      "install",
+      "--prefix",
+      dir,
+      `@vibest/cli@${version}`,
+      ...baselinePkg(version, platform),
+    ]),
+  )
 }
 
 export const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`
@@ -133,6 +210,7 @@ export const progressLine = Effect.gen(function* () {
 export const removeCommand = (link: string, real: string) => {
   return Match.value(ownerOf(real)).pipe(
     Match.when({ kind: "bun" }, () => "bun remove -g @vibest/cli"),
+    Match.when({ kind: "pnpm" }, () => "pnpm remove -g @vibest/cli"),
     Match.when(
       { kind: "npm" },
       (owner) =>

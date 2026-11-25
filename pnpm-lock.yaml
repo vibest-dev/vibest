@@ -305,17 +305,6 @@ importers:
       effect-herdr-sdk:
         specifier: workspace:*
         version: link:../effect-herdr-sdk
-    optionalDependencies:
-      '@vibest/cli-darwin-arm64':
-        specifier: workspace:*
-        version: link:../cli-darwin-arm64
-      '@vibest/cli-linux-x64':
-        specifier: workspace:*
-        version: link:../cli-linux-x64
-
-  packages/cli-darwin-arm64: {}
-
-  packages/cli-linux-x64: {}
 
   packages/client:
     dependencies:

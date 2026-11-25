@@ -84,6 +84,7 @@ export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input
   const text = input.systemPrompt === undefined ? yield* projectText(layout.project(input.projectId)) : undefined
 
   const saved = yield* input.session
+  const scratchDir = layout.scratchDir(saved.projectId, saved.sessionId)
 
   const promptText =
     input.systemPrompt ??
@@ -92,21 +93,24 @@ export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input
       id: saved.sessionId,
       checkout: true,
       projectDir: layout.project(saved.projectId),
+      scratchDir,
       agents: (yield* Agents.Service).all,
       preferences: text?.preferences ?? "",
       memories: text?.memories ?? "",
     })
 
   const promptPath = yield* unsafeOnly(writeSystemPrompt(saved.sessionId, promptText))
-  yield* (yield* FileSystem.FileSystem)
-    .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
-    .pipe(Effect.ignore)
+  const fs = yield* FileSystem.FileSystem
+  yield* fs.makeDirectory(layout.artifacts(saved.projectId), { recursive: true }).pipe(Effect.ignore)
+  yield* fs.makeDirectory(layout.scratchRoot, { recursive: true, mode: 0o700 }).pipe(Effect.ignore)
+  yield* fs.makeDirectory(scratchDir, { recursive: true, mode: 0o700 }).pipe(Effect.ignore)
 
   const commandEnv = {
     ...env,
     VIBEST_SESSION_ID: saved.sessionId,
     VIBEST_PROJECT_ID: saved.projectId,
     VIBEST_PROJECT_DIR: layout.project(saved.projectId),
+    VIBEST_SCRATCH_DIR: scratchDir,
     ...(saved.process !== undefined && { VIBEST_PROCESS: String(saved.process) }),
     ...(saved.execution !== undefined && { VIBEST_EXECUTION: String(saved.execution) }),
     ...(saved.runtime !== undefined && { VIBEST_RUNTIME: saved.runtime }),
@@ -121,6 +125,7 @@ export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input
       {
         worktree: input.worktree ?? input.root,
         projectDir: layout.project(saved.projectId),
+        scratchDir,
         systemPromptFile: promptPath,
         provider: input.provider,
         model: input.model,

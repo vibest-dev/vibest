@@ -178,8 +178,7 @@ modules' names, except a domain facade re-exporting its own domain, see below).
 | `integration/pi`        | The vibest Pi extension, loaded with `pi -e`.                                                                                                                                                     |
 | `integration/cursor`    | The vibest Cursor CLI plugin (hooks posting to `vibest-http.sock`), loaded with `cursor-agent --plugin-dir`.                                                                                      |
 
-`packages/skills` holds the builtin Agent Skills (`delegate`, `pipeline`); `cli-darwin-arm64` and `cli-linux-x64` carry
-the compiled binary.
+`packages/skills` holds the builtin Agent Skills (`delegate`, `pipeline`); platform packages (`@vibest/cli-<os>-<cpu>[-baseline][-musl]`) are generated dynamically at pack time by `packages/cli/scripts/pack.ts`.
 
 **Dependencies.** What each package's `src` may import of the workspace:
 
@@ -934,14 +933,7 @@ works on day one.
 | Read-only      | arguments that keep the CLI from editing files (plan or read-only sandbox modes)                                                         | the instruction "do not edit files" |
 | Interrupt      | keys that stop the agent's current work                                                                                                  | `Escape`                            |
 
-**Integration side: plugins loaded at launch, never installed.** vibest's plugin for each harness ships with the binary
-(`harnesses/<harness>`, `scripts/build-harnesses.ts`): in each release archive beside `bin/vibest`, and in the
-`@vibest/cli` npm package, whose platform packages hold only the binary. `bin/vibest.cjs` hands the npm directory to the
-binary as `VIBEST_HARNESSES`; without it the compiled binary looks beside its own directory (`<root>/bin/vibest`,
-`<root>/harnesses`, the link resolved), which is how install.sh's install runs, without Node; a binary run bare from the
-npm package (a pane vibestd opened runs the binary, not the launcher) then tries the `@vibest/cli` package, flat
-(`node_modules/@vibest/cli`) or nested. From source there is no layout to look beside. The adapter loads the plugin into
-each session it starts, and into the entry session: Pi `-e <dir>/extension.mjs -e <dir>/presentation.mjs`, Claude Code and Cursor `--plugin-dir <dir>`.
+**Integration side: plugins embedded in the binary and loaded at launch, never installed.** vibest's plugin for each harness (`harnesses/<harness>`, `scripts/build-harnesses.ts`) and `herdr-plugin/` are packed into one deterministic archive and embedded inside the compiled `vibest` binary at build time. On `vibestd` startup, embedded assets are materialized idempotently to `<VIBEST_HOME>/cache/assets/<version>-<hash>/` (with a stable `<VIBEST_HOME>/herdr-plugin` symlink); `VIBEST_HARNESSES` overrides embedded assets in tests, and source runs fall back to looking beside the binary. The adapter loads the plugin into each session it starts: Pi `-e <dir>/extension.mjs -e <dir>/presentation.mjs`, Claude Code and Cursor `--plugin-dir <dir>`, agy `--add-dir <dir>`.
 Each of these adds to what the harness loads; the user's own plugins, extensions and hooks keep loading beside it
 (checked against Pi 1.4, Claude Code 2.1.316 and cursor-agent 2026.11.13). Why not install into the harness's config:
 

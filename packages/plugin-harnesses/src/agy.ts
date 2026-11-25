@@ -109,6 +109,7 @@ export const agy: Harness.HarnessDefinition = {
     "--dangerously-skip-permissions",
     "--add-dir",
     i.projectDir,
+    ...(i.scratchDir ? ["--add-dir", i.scratchDir] : []),
     "--add-dir",
     i.pluginDir,
     ...opt("--model", i.model),

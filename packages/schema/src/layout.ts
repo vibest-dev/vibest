@@ -1,5 +1,13 @@
 import { Config, Context, Effect, Layer, Path } from "effect"
 
+export const UserUid = Context.Reference<number | undefined>("vibest/UserUid", {
+  defaultValue: () => undefined,
+})
+
+export const EmbeddedHarnesses = Context.Reference<(home: string) => string | undefined>("vibest/EmbeddedHarnesses", {
+  defaultValue: () => () => undefined,
+})
+
 export class Layout extends Context.Service<
   Layout,
   {
@@ -14,15 +22,25 @@ export class Layout extends Context.Service<
     readonly projects: string
     readonly config: string
     readonly plugins: string
+    readonly scratchRoot: string
     readonly allocationWorktree: (repository: string, name: string) => string
     readonly project: (projectId: string) => string
     readonly artifacts: (projectId: string) => string
     readonly sessionFolder: (projectId: string, sessionId: string) => string
+    readonly scratchDir: (projectId: string, sessionId: string) => string
   }
 >()("vibest/Layout") {
-  static readonly make = (home: string) =>
+  static readonly make = (home: string, scratchRoot?: string) =>
     Effect.gen(function* () {
       const path = yield* Path.Path
+      const uid = yield* UserUid
+
+      const tmp = yield* Config.String("TMPDIR").pipe(
+        Config.withDefault("/tmp"),
+        Effect.orElseSucceed(() => "/tmp"),
+      )
+
+      const resolvedScratch = scratchRoot ?? path.join(tmp, uid === undefined ? "vibest" : `vibest-${uid}`)
 
       return Layout.of({
         home,
@@ -36,10 +54,12 @@ export class Layout extends Context.Service<
         projects: path.join(home, "projects"),
         config: path.join(home, "vibest.json"),
         plugins: path.join(home, "plugins"),
+        scratchRoot: resolvedScratch,
         allocationWorktree: (repository, name) => path.join(home, "worktrees", repository, name),
         project: (projectId) => path.join(home, "projects", projectId),
         artifacts: (projectId) => path.join(home, "projects", projectId, "artifacts"),
         sessionFolder: (projectId, sessionId) => path.join(home, "projects", projectId, "sessions", sessionId),
+        scratchDir: (projectId, sessionId) => path.join(resolvedScratch, projectId, sessionId),
       })
     })
 

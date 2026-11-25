@@ -1,7 +1,11 @@
 # Projects
 
-Each repository (or directory of repositories) is a Project with its own folder of knowledge: `preferences.md`, `docs/`,
-`memories/` and `artifacts/`. Each capability below says what it is and when it counts as working.
+Each repository (or directory of repositories) is a Project with its own folder of knowledge (`VIBEST_PROJECT_DIR`):
+`preferences.md`, `docs/`, `memories/`, and `artifacts/` (reserved strictly for human-facing deliverables: agreed
+`pipeline` plans, UI mockups, diagrams, acceptance reports, explicit user-requested reports). Each session also gets an
+isolated per-session scratchpad (`VIBEST_SCRATCH_DIR`, under `<tmpdir>/vibest-<uid>/<project-id>/<session-id>`, cleaned
+up on `vibest archive`) for temporary agent-to-agent handoffs, `--file` briefs, repro scripts, and scratch notes. Each
+capability below says what it is and when it counts as working.
 
 ## P1. Project info
 

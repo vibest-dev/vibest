@@ -135,6 +135,7 @@ export const make = Effect.gen(function* () {
       yield* fs
         .remove(layout.sessionFolder(session.projectId, id), { recursive: true, force: true })
         .pipe(Effect.ignore)
+      yield* fs.remove(layout.scratchDir(session.projectId, id), { recursive: true, force: true }).pipe(Effect.ignore)
 
       const notOurs =
         recorded === null

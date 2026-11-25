@@ -2,12 +2,12 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import pkg from "../package.json" with { type: "json" }
+import type { BunPlugin } from "bun"
 
-const rawArgs = process.argv.slice(2)
-const noBytecode = rawArgs.includes("--no-bytecode")
-const positional = rawArgs.filter((arg) => arg !== "--no-bytecode")
-const [outfile = "dist/vibest", target] = positional
+import pkg from "../package.json" with { type: "json" }
+import { packDirectoryArchive } from "../src/assets-archive.ts"
+import { PLATFORM_TARGETS } from "./targets.ts"
+
 const cliDir = path.dirname(import.meta.dir)
 
 const PGO_STEPS: ReadonlyArray<{ readonly name: string; readonly args: ReadonlyArray<string> }> = [
@@ -28,18 +28,107 @@ const SIGNALS: ReadonlyArray<readonly [NodeJS.Signals, number]> = [
   ["SIGTERM", 15],
 ]
 
-const compileArgs = (out: string, extra: ReadonlyArray<string>): ReadonlyArray<string> => [
-  "build",
-  "--compile",
-  "./src/main.ts",
-  "--outfile",
-  out,
-  "--no-compile-autoload-bunfig",
-  "--no-compile-autoload-dotenv",
-  "--define",
-  `VIBEST_VERSION=${JSON.stringify(pkg.version)}`,
-  ...extra,
-]
+const EXEC_ARGV = ["--smol", "--use-system-ca", "--no-warnings", "--"]
+
+export const prepareAssetsArchive = (): string => {
+  const harnessesDir = path.join(cliDir, "harnesses")
+
+  const buildHarnesses = Bun.spawnSync(
+    [process.execPath, path.join(cliDir, "scripts/build-harnesses.ts"), harnessesDir],
+    {
+      cwd: cliDir,
+      stdio: ["inherit", "inherit", "inherit"],
+    },
+  )
+
+  if (buildHarnesses.exitCode !== 0) process.exit(buildHarnesses.exitCode)
+
+  const archive = packDirectoryArchive([
+    { prefix: "harnesses", dir: harnessesDir },
+    { prefix: "herdr-plugin", dir: path.join(cliDir, "herdr-plugin") },
+  ])
+
+  const cacheDir = path.join(cliDir, ".cache")
+  fs.mkdirSync(cacheDir, { recursive: true })
+  const archivePath = path.join(cacheDir, "vibest-assets.bin")
+  fs.writeFileSync(archivePath, archive)
+
+  return archivePath
+}
+
+const embeddedAssetsPlugin = (archivePath: string): BunPlugin => ({
+  name: "vibest-embedded-assets",
+  setup(build) {
+    build.onLoad({ filter: /packages[/\\]cli[/\\]src[/\\]embedded-assets\.ts$/ }, () => ({
+      loader: "js",
+      contents: [
+        'import { readFileSync } from "node:fs"',
+        `import archive from ${JSON.stringify(archivePath.replaceAll("\\", "/"))} with { type: "file" }`,
+        "export const loadEmbeddedAssets = () => readFileSync(archive)",
+      ].join("\n"),
+    }))
+  },
+})
+
+export interface BuildJob {
+  readonly outfile: string
+  readonly target?: Bun.Build.CompileTarget | undefined
+}
+
+interface CompileOptions {
+  readonly out: string
+  readonly archivePath: string
+  readonly bytecode: boolean
+  readonly bytecodeOrder?: ReadonlyArray<string> | undefined
+  readonly jitPolicy?: number | undefined
+  readonly target?: Bun.Build.CompileTarget | undefined
+}
+
+type CompileObject = Exclude<NonNullable<Bun.BuildConfig["compile"]>, boolean | Bun.Build.CompileTarget>
+
+type ExtendedCompileOptions = CompileObject & {
+  bytecodeOrder?: Array<string>
+  jitPolicy?: number
+}
+
+const compileBinary = async (options: CompileOptions): Promise<number> => {
+  fs.mkdirSync(path.dirname(options.out), { recursive: true })
+
+  const compile: ExtendedCompileOptions = {
+    outfile: options.out,
+    autoloadBunfig: false,
+    autoloadDotenv: false,
+    autoloadTsconfig: false,
+    autoloadPackageJson: false,
+    execArgv: EXEC_ARGV,
+  }
+
+  if (options.target) compile.target = options.target
+
+  if (options.bytecodeOrder && options.bytecodeOrder.length > 0) compile.bytecodeOrder = [...options.bytecodeOrder]
+
+  if (options.jitPolicy !== undefined) compile.jitPolicy = options.jitPolicy
+
+  const result = await Bun.build({
+    entrypoints: [path.join(cliDir, "src/main.ts")],
+    tsconfig: path.join(cliDir, "tsconfig.json"),
+    plugins: [embeddedAssetsPlugin(options.archivePath)],
+    format: "esm",
+    bytecode: options.bytecode,
+    define: {
+      VIBEST_VERSION: JSON.stringify(pkg.version),
+    },
+    compile,
+  })
+
+  if (!result.success) {
+    for (const log of result.logs) console.error(log)
+
+    return 1
+  }
+
+  return 0
+}
 
 const isolatedEnv = (pgoHome: string) =>
   Object.fromEntries([
@@ -86,7 +175,27 @@ const stopTempDaemon = (pgoHome: string) => {
   }
 }
 
-const buildWithPgo = async (): Promise<number> => {
+export const buildBinaries = async (
+  jobs: ReadonlyArray<BuildJob>,
+  options: { readonly noBytecode?: boolean; readonly archivePath?: string } = {},
+): Promise<number> => {
+  const archivePath = options.archivePath ?? prepareAssetsArchive()
+
+  if (options.noBytecode) {
+    for (const job of jobs) {
+      const code = await compileBinary({
+        out: path.resolve(cliDir, job.outfile),
+        archivePath,
+        bytecode: false,
+        target: job.target,
+      })
+
+      if (code !== 0) return code
+    }
+
+    return 0
+  }
+
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vpgo-"))
   const pgoHome = path.join(tempDir, "h")
   fs.mkdirSync(pgoHome, { recursive: true })
@@ -99,21 +208,6 @@ const buildWithPgo = async (): Promise<number> => {
     cleaned = true
     stopTempDaemon(pgoHome)
     fs.rmSync(tempDir, { recursive: true, force: true })
-  }
-
-  const runBun = async (args: ReadonlyArray<string>): Promise<number> => {
-    const proc = Bun.spawn([process.execPath, ...args], {
-      cwd: cliDir,
-      stdio: ["inherit", "inherit", "inherit"],
-    })
-
-    activeChild = proc
-
-    try {
-      return await proc.exited
-    } finally {
-      activeChild = undefined
-    }
   }
 
   const runProbe = async (
@@ -157,7 +251,12 @@ const buildWithPgo = async (): Promise<number> => {
 
   try {
     const probeBin = path.join(tempDir, "vibest-probe")
-    const probeExit = await runBun(compileArgs(probeBin, ["--bytecode", "--format=esm"]))
+
+    const probeExit = await compileBinary({
+      out: probeBin,
+      archivePath,
+      bytecode: true,
+    })
 
     if (probeExit !== 0) return probeExit
 
@@ -180,33 +279,44 @@ const buildWithPgo = async (): Promise<number> => {
 
     stopTempDaemon(pgoHome)
 
-    const orderArgs = PGO_PRIORITY.flatMap((name) => {
+    const orderFiles = PGO_PRIORITY.flatMap((name) => {
       const orderFile = path.join(tempDir, `order-${name}.txt`)
 
-      return fs.existsSync(orderFile) && fs.statSync(orderFile).size > 0 ? [`--bytecode-order=${orderFile}`] : []
+      return fs.existsSync(orderFile) && fs.statSync(orderFile).size > 0 ? [orderFile] : []
     })
 
-    return await runBun(
-      compileArgs(outfile, [
-        "--bytecode",
-        "--format=esm",
-        ...orderArgs,
-        "--compile-jit-policy=100",
-        "--compile-exec-argv=--smol",
-        ...(target ? ["--target", target] : []),
-      ]),
-    )
+    for (const job of jobs) {
+      const code = await compileBinary({
+        out: path.resolve(cliDir, job.outfile),
+        archivePath,
+        bytecode: true,
+        bytecodeOrder: orderFiles,
+        jitPolicy: 100,
+        target: job.target,
+      })
+
+      if (code !== 0) return code
+    }
+
+    return 0
   } finally {
     for (const [signal, handler] of handlers) process.off(signal, handler)
     cleanup()
   }
 }
 
-const exitCode = noBytecode
-  ? await Bun.spawn([process.execPath, ...compileArgs(outfile, target ? ["--target", target] : [])], {
-      cwd: cliDir,
-      stdio: ["inherit", "inherit", "inherit"],
-    }).exited
-  : await buildWithPgo()
+if (import.meta.main) {
+  const rawArgs = process.argv.slice(2)
+  const noBytecode = rawArgs.includes("--no-bytecode")
+  const positional = rawArgs.filter((arg) => arg !== "--no-bytecode")
+  const [outfile = "dist/vibest", targetArg] = positional
+  const matched = targetArg ? PLATFORM_TARGETS.find((t) => t.bunTarget === targetArg) : undefined
 
-process.exit(exitCode)
+  if (targetArg && !matched) {
+    console.error(`build: unknown bun target ${targetArg}`)
+    process.exit(1)
+  }
+
+  const exitCode = await buildBinaries([{ outfile, target: matched?.bunTarget }], { noBytecode })
+  process.exit(exitCode)
+}

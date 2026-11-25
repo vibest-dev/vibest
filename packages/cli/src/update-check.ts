@@ -1,7 +1,7 @@
 import { channelOf, installMethod, latestOf } from "@vibest/client/release"
 import { NOT_CHECKED } from "@vibest/protocol/rpc"
 import { VibestCommand } from "@vibest/schema/layout"
-import { Clock, Config, Duration, Effect, Exit, Option, Ref, Schedule } from "effect"
+import { Clock, Config, Duration, Effect, Exit, FileSystem, Option, Ref, Schedule } from "effect"
 
 import { VERSION } from "./version.ts"
 
@@ -30,10 +30,10 @@ export const checkEveryHour = <R>(lookup: Effect.Effect<string, unknown, R>) =>
 export const updater = Effect.gen(function* () {
   if (Option.isSome(yield* Config.option(Config.String("VIBEST_NO_UPDATE_CHECK")))) return Effect.succeed(NOT_CHECKED)
 
-  const method = installMethod(
-    yield* VibestCommand,
-    Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))),
-  )
+  const self = yield* VibestCommand
+  const fs = yield* FileSystem.FileSystem
+  const real = self.length === 1 ? yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!)) : undefined
+  const method = installMethod(self, real)
 
   if (!method) return Effect.succeed(NOT_CHECKED)
 

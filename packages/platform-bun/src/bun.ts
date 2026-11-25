@@ -25,7 +25,7 @@ import * as VibestPlugin from "@vibest/plugin"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
 import * as VibestPluginHost from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
-import { Layout } from "@vibest/schema/layout"
+import { Layout, UserUid } from "@vibest/schema/layout"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import * as Http from "@vibest/server/http"
 import { Load } from "@vibest/server/machine/load"
@@ -34,7 +34,19 @@ import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
 import * as Ws from "@vibest/server/ws"
 import * as effect from "effect"
-import { Cause, Duration, Effect, Layer, Predicate, Schedule, Schema, type Scope, Stdio, Stream } from "effect"
+import {
+  Cause,
+  Duration,
+  Effect,
+  type FileSystem,
+  Layer,
+  Predicate,
+  Schedule,
+  Schema,
+  type Scope,
+  Stdio,
+  Stream,
+} from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
 import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, type HttpClient } from "effect/http"
@@ -99,6 +111,7 @@ const platform = Layer.mergeAll(
   unrefStdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector.Service, (endpoint) => BunSocket.makeNet({ path: endpoint })),
+  Layer.succeed(UserUid, process.getuid?.()),
   user,
 )
 
@@ -514,13 +527,13 @@ export const replacements: LayerNode.Replacements = [
 export const app = (info: App.Interface) => App.node.replace(Layer.succeed(App.Service, info))
 
 export const updateCheck = (
-  construct: Effect.Effect<UpdateCheck.Interface, never, Scope.Scope | HttpClient.HttpClient>,
+  construct: Effect.Effect<UpdateCheck.Interface, never, Scope.Scope | HttpClient.HttpClient | FileSystem.FileSystem>,
 ) =>
   UpdateCheck.node.replace(
     LayerNode.make({
       service: UpdateCheck.Service,
       layer: Layer.effect(UpdateCheck.Service, construct),
-      deps: [PlatformNode.httpClient],
+      deps: [PlatformNode.httpClient, PlatformNode.fileSystem],
     }),
   )
 

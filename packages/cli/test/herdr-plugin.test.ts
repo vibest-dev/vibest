@@ -1,4 +1,3 @@
-import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -37,7 +36,8 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { ARCHIVE_ROOTS, copyHerdrPlugin } from "../scripts/archive-layout.ts"
+import { ARCHIVE_ROOTS } from "../scripts/archive-layout.ts"
+import { materializeAssets, packDirectoryArchive } from "../src/assets-archive.ts"
 
 const ctx = (patch: Partial<PluginContext> = {}): PluginContext => ({
   workspaceId: undefined,
@@ -302,25 +302,28 @@ describe("herdr plugin commands", () => {
 })
 
 describe("herdr plugin package", () => {
-  it("the release archive contains herdr-plugin/", () => {
-    const stage = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-archive-"))
+  it("embedded assets pack and materialize herdr-plugin/ with executable mode and stable symlink", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-assets-"))
+    const execSrc = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-exec-"))
 
     try {
-      fs.mkdirSync(path.join(stage, "bin"), { recursive: true })
-      fs.writeFileSync(path.join(stage, "bin", "vibest"), "")
-      fs.mkdirSync(path.join(stage, "harnesses"))
-      copyHerdrPlugin(stage, path.join(import.meta.dirname, "../herdr-plugin"))
-      const archive = path.join(stage, "vibest.tar.gz")
-      childProcess.execFileSync("tar", ["-czf", archive, "-C", stage, ...ARCHIVE_ROOTS])
-      const listed = childProcess.execFileSync("tar", ["-tzf", archive], { encoding: "utf8" })
-      assert.match(listed, /^herdr-plugin\/herdr-plugin\.toml$/m)
-      assert.match(listed, /^herdr-plugin\/bin\/vibest\.sh$/m)
-      assert.match(listed, /^herdr-plugin\/README\.md$/m)
-      const script = fs.readFileSync(path.join(import.meta.dirname, "../scripts/build-archive.ts"), "utf8")
-      assert.match(script, /ARCHIVE_ROOTS/)
-      assert.deepStrictEqual([...ARCHIVE_ROOTS], ["bin", "harnesses", "herdr-plugin"])
+      fs.writeFileSync(path.join(execSrc, "hook.sh"), "#!/bin/sh\necho ok\n", { mode: 0o755 })
+
+      const archive = packDirectoryArchive([
+        { prefix: "harnesses", dir: execSrc },
+        { prefix: "herdr-plugin", dir: path.join(import.meta.dirname, "../herdr-plugin") },
+      ])
+
+      const materialized = materializeAssets(home, "1.2.3", archive)
+      assert.isTrue(fs.existsSync(path.join(materialized.herdrPlugin, "herdr-plugin.toml")))
+      assert.isTrue(fs.existsSync(path.join(materialized.herdrPlugin, "bin/vibest.sh")))
+      assert.isTrue(fs.existsSync(path.join(materialized.herdrPlugin, "README.md")))
+      assert.strictEqual(fs.statSync(path.join(materialized.harnesses, "hook.sh")).mode & 0o111, 0o111)
+      assert.strictEqual(fs.readlinkSync(path.join(home, "herdr-plugin")), materialized.herdrPlugin)
+      assert.deepStrictEqual([...ARCHIVE_ROOTS], ["bin"])
     } finally {
-      fs.rmSync(stage, { recursive: true, force: true })
+      fs.rmSync(home, { recursive: true, force: true })
+      fs.rmSync(execSrc, { recursive: true, force: true })
     }
   })
 
