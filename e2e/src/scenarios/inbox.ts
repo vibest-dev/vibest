@@ -601,7 +601,7 @@ const checks: ReadonlyArray<Check> = [
     id: "S49",
     covers: ["S45"],
     title:
-      "a Pi subagent's vibest send to a Claude entry session (which polls) is one send row from the subagent to the entry session, delivered, with one inbox.queued and one inbox.moved to delivered; the entry session's conversation holds a line naming the subagent and an <vibest-agent-message> with its id and text",
+      "a Pi subagent's vibest send to a Claude entry session (which polls) is one send row from the subagent to the entry session, delivered, with one session.inbox.enqueued and one session.inbox.delivered; the entry session's conversation holds a line naming the subagent and an <vibest-agent-message> with its id and text",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")

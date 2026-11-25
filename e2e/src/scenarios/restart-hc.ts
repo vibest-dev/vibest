@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, holdsSlowMessageModel, piDir } from "../fake-model.ts"
+import { ask, creatorIn, holdsSlowMessageModel, piDir } from "../fake-model.ts"
 import { alive, binary, expect, readDb, rows, SESSIONS, Skip, until } from "../world.ts"
 import { isolatedCore } from "./hc.ts"
 import { project } from "./inbox.ts"
@@ -49,7 +49,11 @@ const checks: ReadonlyArray<Check> = [
               model.seen.some((m) => {
                 const last = m.at(-1)!
 
-                return last.includes("<agent-") && !last.includes("<title>entry</title>") && last.includes(marker)
+                return (
+                  creatorIn(m[0] ?? "") === undefined &&
+                  last.includes("<vibest-agent-message>") &&
+                  last.includes(marker)
+                )
               }),
             120_000,
           ).catch(async (e: Error) => {

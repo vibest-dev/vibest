@@ -407,11 +407,11 @@ const checks: ReadonlyArray<Check> = [
         await until("the second notice", () => s!.notices(address, "mtwo") === 1, 120_000)
         expect(s.notices(address, "mone") === 1, "the first notice repeated")
         const result = JSON.parse(await s.okA(["result", address])) as { id: string; machine: string }
-        expect(result.machine === "mb" && result.id.startsWith(address), `result: ${JSON.stringify(result)}`)
+        expect(result.machine === "mb" && result.id.startsWith(id8), `result: ${JSON.stringify(result)}`)
         await s.okA(["peek", address])
         const listed = (JSON.parse(await s.okA(["ls"])) as { sessions: Array<Listed> }).sessions
         expect(
-          listed.some((r) => r.machine === "mb" && r.id?.startsWith(address)),
+          listed.some((r) => r.machine === "mb" && r.id?.startsWith(id8)),
           `A's ls: ${JSON.stringify(listed)}`,
         )
         await s.okA(["archive", address])
@@ -425,7 +425,7 @@ const checks: ReadonlyArray<Check> = [
 
         expect(
           started?.remote === a.id &&
-            /inbox\.enqueued session\.created .*process\.started .*execution\.allocated .*execution\.started .*execution\.succeeded .*session\.ended/.test(
+            /inbox\.enqueued session\.created .*process\.started .*execution\.allocated .*execution\.started .*execution\.succeeded .*session\.archived/.test(
               started.facts,
             ),
           `B's session started for A: ${JSON.stringify(started)}`,
@@ -446,25 +446,25 @@ const checks: ReadonlyArray<Check> = [
         const notes = path.join(w.root, "m1-notes.md")
         await fs.writeFile(notes, "the answer is m1-word-hazel\n")
 
-        const attachedTo = (
-          JSON.parse(
-            await w.okViaEntry(
-              [
-                "run",
-                "--machine",
-                "mb",
-                "pi",
-                "--file",
-                notes,
-                "--",
-                "Reply done-mfile with the word in the attached file.",
-              ],
-              { env: s.aEnv, asIs: true },
-            ),
-          ) as { id: string }
-        ).id
+        const attached = JSON.parse(
+          await w.okViaEntry(
+            [
+              "run",
+              "--machine",
+              "mb",
+              "pi",
+              "--file",
+              notes,
+              "--",
+              "Reply done-mfile with the word in the attached file.",
+            ],
+            { env: s.aEnv, asIs: true },
+          ),
+        ) as { id: string; machine?: string }
 
-        const remoteId = attachedTo.slice("mb/".length)
+        expect(attached.machine === "mb", `run --machine --file: ${JSON.stringify(attached)}`)
+        const remoteId = attached.id
+        const attachedAddress = `mb/${remoteId.slice(0, 8)}`
         const projects = path.join(s.bEnv.VIBEST_HOME, "projects")
 
         const sessionFolders = async () =>
@@ -487,18 +487,18 @@ const checks: ReadonlyArray<Check> = [
         expect(
           bFolder !== undefined &&
             (await fs.readFile(path.join(bFolder, "files", "m1-notes.md"), "utf8")) === "the answer is m1-word-hazel\n",
-          `B has no copy for ${attachedTo}: ${JSON.stringify(await sessionFolders())}`,
+          `B has no copy for ${attachedAddress}: ${JSON.stringify(await sessionFolders())}`,
         )
         await until(
           "the session on B answers with the word from its copy",
           async () =>
             (
-              (JSON.parse(await s!.okA(["result", attachedTo])) as { reply?: { text?: string | null } | null }).reply
-                ?.text ?? ""
+              (JSON.parse(await s!.okA(["result", attachedAddress])) as { reply?: { text?: string | null } | null })
+                .reply?.text ?? ""
             ).includes("done-mfile hazel"),
           120_000,
         )
-        await s.okA(["archive", attachedTo])
+        await s.okA(["archive", attachedAddress])
         expect((await sessionFolders()).length === 0, `B kept ${bFolder} after archive`)
       } finally {
         await s?.stop()
