@@ -335,6 +335,7 @@ const make = Effect.gen(function* () {
         Launch.sessionCommand({
           harness: chosen,
           agent,
+          projectId: id,
           root,
           worktree: cwd,
           ...(existingPrompt !== undefined && { systemPrompt: existingPrompt }),
@@ -517,6 +518,7 @@ const make = Effect.gen(function* () {
           Launch.sessionCommand({
             harness: chosenHarness,
             agent,
+            projectId,
             root: directory,
             worktree: cwd,
             ...(existingPrompt !== undefined && { systemPrompt: existingPrompt }),

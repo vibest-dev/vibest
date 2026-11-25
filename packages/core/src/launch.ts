@@ -40,6 +40,7 @@ export const withExecution = (launch: Launch, execution: number | undefined): La
 export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input: {
   readonly harness: HarnessId
   readonly agent: string
+  readonly projectId: string
   readonly root: string
   readonly worktree?: string | undefined
   readonly systemPrompt?: string | undefined
@@ -80,6 +81,8 @@ export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input
     ...(yield* cliEnv(vibest, input.harness)),
   }
 
+  const text = input.systemPrompt === undefined ? yield* projectText(layout.project(input.projectId)) : undefined
+
   const saved = yield* input.session
 
   const promptText =
@@ -90,7 +93,8 @@ export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input
       checkout: true,
       projectDir: layout.project(saved.projectId),
       agents: (yield* Agents.Service).all,
-      ...(yield* projectText(layout.project(saved.projectId))),
+      preferences: text?.preferences ?? "",
+      memories: text?.memories ?? "",
     })
 
   const promptPath = yield* unsafeOnly(writeSystemPrompt(saved.sessionId, promptText))
