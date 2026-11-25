@@ -7,8 +7,7 @@ import { Runtimes, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { run as runDaemon } from "@vibest/server/daemon"
-import { hostReplacements } from "@vibest/testkit/fakes"
-import { PATH_WITHOUT_HARNESS_CLIS } from "@vibest/testkit/fakes"
+import { hostReplacements, PATH_WITHOUT_HARNESS_CLIS, tempDirectory } from "@vibest/testkit/fakes"
 import * as Platform from "@vibest/testkit/platform"
 import { unusedRuntime } from "@vibest/testkit/session"
 import { memoryBus } from "@vibest/testkit/unit-helpers"
@@ -276,9 +275,7 @@ describe("caller runtimes", () => {
       process.env[key] = "leaked"
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const base = path.join(import.meta.dirname, ".tmp")
-      yield* fs.makeDirectory(base, { recursive: true })
-      const dir = yield* fs.makeTempDirectoryScoped({ directory: base })
+      const dir = yield* tempDirectory("vibest-caller-plugins-")
       yield* fs.makeDirectory(path.join(dir, "plugins"))
 
       const user = Plugin.define({

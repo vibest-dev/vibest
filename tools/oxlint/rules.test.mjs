@@ -365,6 +365,7 @@ export { f } from "@vibest/server/server"
       "packages/cli/src/a.ts",
       "packages/platform-bun/src/a.ts",
       "packages/unknown-pkg/src/a.ts",
+      "packages/foo/src/test/helper.ts",
       "tools/verify/src/a.ts",
     ])
       expect(oxlintFindings(tk, file)).toEqual(["1 vibest(package-imports)"])

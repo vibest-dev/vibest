@@ -63,7 +63,8 @@ const isWorkspace = (source) => /^(@vibest\/|#)/.test(source)
 const isTestkit = (source) => source === "@vibest/testkit" || source.startsWith("@vibest/testkit/")
 
 const isTestFile = (file) =>
-  /\/test\//.test(file) || /\.test\.[cm]?[jt]sx?$/.test(file) || /\/packages\/testkit\/src\//.test(file)
+  /\/packages\/testkit\/src\//.test(file) ||
+  (!/\/packages\/[^/]+\/src\//.test(file) && (/\/test\//.test(file) || /\.test\.[cm]?[jt]sx?$/.test(file)))
 
 const permits = (entry, source) =>
   entry.startsWith("=") ? source === entry.slice(1) : source === entry || source.startsWith(`${entry}/`)

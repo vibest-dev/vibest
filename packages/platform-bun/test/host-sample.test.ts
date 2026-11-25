@@ -78,15 +78,6 @@ describe("host sample", () => {
       Effect.gen(function* () {
         vi.spyOn(os, "platform").mockReturnValue("linux")
         vi.spyOn(os, "totalmem").mockReturnValue(4096 * MIB)
-        vi.spyOn(os, "cpus").mockImplementation(() => {
-          const now = Date.now()
-
-          return Array.from({ length: 8 }, (_, i) => ({
-            model: "test",
-            speed: 0,
-            times: { user: i === 0 ? now : 0, nice: 0, sys: 0, idle: i === 0 ? 0 : now, irq: 0 },
-          }))
-        })
 
         for (const [cgroup, pinned, limitedAt, reclaimable] of [
           ["/user.slice/vibest.scope", false, "/user.slice/vibest.scope", 100],
