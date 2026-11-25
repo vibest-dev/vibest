@@ -296,6 +296,12 @@ export const captureDaemonLog = (file: string) =>
     }
   })
 
+export const restoreNormalJitPolicy = Effect.sync(() => {
+  const unsafe = Bun.unsafe
+
+  if (Predicate.hasProperty(unsafe, "setJITPolicy") && Predicate.isFunction(unsafe.setJITPolicy)) unsafe.setJITPolicy(1)
+})
+
 export const trimDaemonLog: Host["trimLog"] = (file) =>
   Effect.sync(() => {
     try {
@@ -510,16 +516,9 @@ export const updateCheck = (
     }),
   )
 
-const restoreNormalJitPolicy = () => {
-  const unsafe = Bun.unsafe
-
-  if (Predicate.hasProperty(unsafe, "setJITPolicy") && Predicate.isFunction(unsafe.setJITPolicy)) unsafe.setJITPolicy(1)
-}
-
 const onSignals: Host["onSignals"] = (onSignal) =>
   Effect.acquireRelease(
     Effect.sync(() => {
-      restoreNormalJitPolicy()
       const hangup = () => process.kill(process.pid, "SIGTERM")
       const interactive = process.stdin.isTTY || process.stdout.isTTY
       process.on("SIGTERM", onSignal)

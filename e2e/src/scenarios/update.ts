@@ -83,7 +83,7 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
   await fs.mkdir(path.dirname(bin), { recursive: true })
 
   const built = await w.run(path.join(checkout, "packages", "cli"), [
-    "bun",
+    process.execPath,
     "scripts/build.ts",
     bin,
     `bun-${process.platform}-${process.arch}`,

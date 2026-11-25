@@ -22,6 +22,12 @@ const PGO_STEPS: ReadonlyArray<{ readonly name: string; readonly args: ReadonlyA
 
 const PGO_PRIORITY = ["version", "status", "ls", "plugins", "daemon", "import-check", "help"] as const
 
+const SIGNALS: ReadonlyArray<readonly [NodeJS.Signals, number]> = [
+  ["SIGHUP", 1],
+  ["SIGINT", 2],
+  ["SIGTERM", 15],
+]
+
 const compileArgs = (out: string, extra: ReadonlyArray<string>): ReadonlyArray<string> => [
   "build",
   "--compile",
@@ -35,20 +41,13 @@ const compileArgs = (out: string, extra: ReadonlyArray<string>): ReadonlyArray<s
   ...extra,
 ]
 
-const spawnBun = (args: ReadonlyArray<string>) =>
-  Bun.spawnSync(["bun", ...args], {
-    cwd: cliDir,
-    stdio: ["inherit", "inherit", "inherit"],
-  }).exitCode
-
-const isolatedEnv = (pgoHome: string) => ({
-  ...Object.fromEntries(
-    Object.entries(process.env).filter(
+const isolatedEnv = (pgoHome: string) =>
+  Object.fromEntries([
+    ...Object.entries(process.env).filter(
       ([key, value]) => value !== undefined && !key.startsWith("VIBEST_") && key !== "BUN_BYTECODE_ORDER_OUT",
     ),
-  ),
-  VIBEST_HOME: pgoHome,
-})
+    ["VIBEST_HOME", pgoHome],
+  ])
 
 const readDaemonPid = (pgoHome: string): number | undefined => {
   const pidFile = path.join(pgoHome, "vibestd.pid")
@@ -79,16 +78,86 @@ const stopTempDaemon = (pgoHome: string) => {
       return
     }
   }
+
+  try {
+    process.kill(pid, "SIGKILL")
+  } catch {
+    return
+  }
 }
 
-const buildWithPgo = (): number => {
+const buildWithPgo = async (): Promise<number> => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vpgo-"))
   const pgoHome = path.join(tempDir, "h")
   fs.mkdirSync(pgoHome, { recursive: true })
 
+  let activeChild: Bun.Subprocess | undefined
+  let cleaned = false
+
+  const cleanup = () => {
+    if (cleaned) return
+    cleaned = true
+    stopTempDaemon(pgoHome)
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  }
+
+  const runBun = async (args: ReadonlyArray<string>): Promise<number> => {
+    const proc = Bun.spawn([process.execPath, ...args], {
+      cwd: cliDir,
+      stdio: ["inherit", "inherit", "inherit"],
+    })
+
+    activeChild = proc
+
+    try {
+      return await proc.exited
+    } finally {
+      activeChild = undefined
+    }
+  }
+
+  const runProbe = async (
+    probeBin: string,
+    args: ReadonlyArray<string>,
+    env: Record<string, string>,
+  ): Promise<{ readonly exitCode: number; readonly stderr: string }> => {
+    const proc = Bun.spawn([probeBin, ...args], {
+      cwd: tempDir,
+      env,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "pipe",
+    })
+
+    activeChild = proc
+
+    try {
+      const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()])
+
+      return { exitCode, stderr }
+    } finally {
+      activeChild = undefined
+    }
+  }
+
+  const handlers = SIGNALS.map(([signal, code]) => {
+    const handler = () => {
+      try {
+        activeChild?.kill(signal)
+      } catch {}
+
+      cleanup()
+      process.exit(128 + code)
+    }
+
+    process.on(signal, handler)
+
+    return [signal, handler] as const
+  })
+
   try {
     const probeBin = path.join(tempDir, "vibest-probe")
-    const probeExit = spawnBun(compileArgs(probeBin, ["--bytecode", "--format=esm"]))
+    const probeExit = await runBun(compileArgs(probeBin, ["--bytecode", "--format=esm"]))
 
     if (probeExit !== 0) return probeExit
 
@@ -96,26 +165,28 @@ const buildWithPgo = (): number => {
 
     for (const step of PGO_STEPS) {
       const orderFile = path.join(tempDir, `order-${step.name}.txt`)
-      Bun.spawnSync([probeBin, ...step.args], {
-        cwd: tempDir,
-        env: { ...baseEnv, BUN_BYTECODE_ORDER_OUT: orderFile },
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "ignore",
+
+      const result = await runProbe(probeBin, step.args, {
+        ...baseEnv,
+        BUN_BYTECODE_ORDER_OUT: orderFile,
       })
+
+      if (result.exitCode !== 0) {
+        process.stderr.write(`PGO probe \`vibest ${step.args.join(" ")}\` exited ${result.exitCode}:\n${result.stderr}`)
+
+        return result.exitCode
+      }
     }
 
     stopTempDaemon(pgoHome)
 
-    const orderArgs: Array<string> = []
-
-    for (const name of PGO_PRIORITY) {
+    const orderArgs = PGO_PRIORITY.flatMap((name) => {
       const orderFile = path.join(tempDir, `order-${name}.txt`)
 
-      if (fs.existsSync(orderFile) && fs.statSync(orderFile).size > 0) orderArgs.push(`--bytecode-order=${orderFile}`)
-    }
+      return fs.existsSync(orderFile) && fs.statSync(orderFile).size > 0 ? [`--bytecode-order=${orderFile}`] : []
+    })
 
-    return spawnBun(
+    return await runBun(
       compileArgs(outfile, [
         "--bytecode",
         "--format=esm",
@@ -126,11 +197,16 @@ const buildWithPgo = (): number => {
       ]),
     )
   } finally {
-    stopTempDaemon(pgoHome)
-    fs.rmSync(tempDir, { recursive: true, force: true })
+    for (const [signal, handler] of handlers) process.off(signal, handler)
+    cleanup()
   }
 }
 
-const exitCode = noBytecode ? spawnBun(compileArgs(outfile, target ? ["--target", target] : [])) : buildWithPgo()
+const exitCode = noBytecode
+  ? await Bun.spawn([process.execPath, ...compileArgs(outfile, target ? ["--target", target] : [])], {
+      cwd: cliDir,
+      stdio: ["inherit", "inherit", "inherit"],
+    }).exited
+  : await buildWithPgo()
 
 process.exit(exitCode)
