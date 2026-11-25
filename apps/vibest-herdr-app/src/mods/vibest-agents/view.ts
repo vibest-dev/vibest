@@ -3,14 +3,13 @@ import { div, type Element, svg } from "gpui-kit"
 
 import { icon } from "../../shared/icon-button.ts"
 import { liveMetrics } from "../../shared/live-metrics.ts"
-import { type AgentRow, agentTree, type ProjectGroup } from "../../shared/project-groups.ts"
+import { type AgentRow, groupAgents, type ProjectGroup } from "../../shared/project-groups.ts"
 import { showSession, statusMark } from "../../shared/session-ui.ts"
 import { SMALL, TEXT } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import { LOCAL, type VibestState } from "../../shared/vibest-model.ts"
 
-export const projectAgents = (group: ProjectGroup | undefined): AgentRow[] =>
-  (group?.members ?? []).flatMap((m) => agentTree(m.sessions))
+export const projectAgents = (group: ProjectGroup | undefined): AgentRow[] => (group ? groupAgents(group) : [])
 
 export const shownGroup = (groups: readonly ProjectGroup[], selected: string | null): ProjectGroup | undefined =>
   groups.find((g) => g.key === selected) ?? groups[0]

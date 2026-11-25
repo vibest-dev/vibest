@@ -136,3 +136,9 @@ export const agentTree = (sessions: readonly VibestSession[]): AgentRow[] => {
 
   return walk(null, 0)
 }
+
+export const groupAgents = (group: ProjectGroup): AgentRow[] => {
+  const [primary] = group.members
+
+  return agentTree(group.members.flatMap((m) => (m === primary || !m.main ? m.sessions : [m.main, ...m.sessions])))
+}

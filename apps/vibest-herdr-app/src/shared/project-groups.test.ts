@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { agentTree, groupKey, mainSession, projectGroups } from "./project-groups.ts"
+import { agentTree, groupAgents, groupKey, mainSession, projectGroups } from "./project-groups.ts"
 import { mockState } from "./vibest-mock.ts"
 import { LOCAL, loudest, type VibestProject, type VibestSession } from "./vibest-model.ts"
 
@@ -105,6 +105,41 @@ describe("agentTree", () => {
       ["a1", 1],
       ["a11", 2],
       ["b", 0],
+    ])
+  })
+})
+
+describe("groupAgents", () => {
+  const s = (id: string, machine: string, parentId: string | null, lastActive: number): VibestSession => ({
+    ...mockState(NOW).sessions[0]!,
+    id,
+    machine,
+    parentId,
+    lastActive,
+    terminal: "t1",
+  })
+
+  it("nests sessions across machines and lists other machines' root conversations", () => {
+    const state = {
+      ...mockState(NOW),
+      projects: [
+        { ...base, id: "p", machine: LOCAL, repositories: [{ path: "/a", identity: "h/r" }] },
+        { ...base, id: "p", machine: "mac-mini", repositories: [{ path: "/a", identity: "h/r" }] },
+      ],
+      sessions: [
+        { ...s("main", LOCAL, null, 9), projectId: "p" },
+        { ...s("helper", LOCAL, "main", 8), projectId: "p" },
+        { ...s("remote-child", "mac-mini", "helper", 7), projectId: "p" },
+        { ...s("remote-root", "mac-mini", null, 6), projectId: "p" },
+      ],
+    }
+
+    const [group] = projectGroups(state)
+
+    expect(groupAgents(group!).map((r) => [r.session.id, r.depth])).toEqual([
+      ["helper", 0],
+      ["remote-child", 1],
+      ["remote-root", 0],
     ])
   })
 })
