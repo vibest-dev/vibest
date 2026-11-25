@@ -9,10 +9,9 @@ says what it is and when it counts as working.
 
 Each harness's plugin is part of the vibest install, and there is nothing to install; hooks talk directly to vibestd over its Unix sockets.
 
-## I2. The binary finds its plugins
+## I2. The binary finds its embedded plugins
 
-The vibest binary finds the plugins installed beside it. A vibest with no plugins beside it cannot run a harness, and
-`vibest doctor` names the missing plugin directory for each harness.
+The compiled vibest binary embeds all harness plugins and `herdr-plugin/` inside itself and materializes them to `<VIBEST_HOME>/cache/assets/<version>-<hash>/` on daemon startup, so a standalone copied binary runs `vibest doctor` cleanly without `VIBEST_HARNESSES` or a sibling `harnesses/` folder. When `VIBEST_HARNESSES` is explicitly pointed at a missing directory, `vibest doctor` refuses each harness and names the missing plugin directory.
 
 ## I3. Pi runs vibest's extension
 

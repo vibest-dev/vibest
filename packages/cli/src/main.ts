@@ -7,12 +7,11 @@ import { Effect } from "effect"
 import * as Platform from "#platform"
 
 import { TypedAhead } from "./ask.ts"
-import { materializeAssets } from "./assets-archive.ts"
 import { userOnly } from "./caller.ts"
 import * as Cli from "./cli.ts"
 import { clients } from "./client.ts"
 import { Commands } from "./commands/commands.ts"
-import { loadEmbeddedAssets } from "./embedded-assets.ts"
+import { materializeEmbedded } from "./embedded-assets.ts"
 import { Runtime } from "./framework/runtime.ts"
 import { Host } from "./host.ts"
 import { updater } from "./update-check.ts"
@@ -72,11 +71,7 @@ const Handlers = Runtime.handlers(Commands, {
   },
 })
 
-const embeddedHarnesses = (home: string) => {
-  const archive = loadEmbeddedAssets()
-
-  return archive === undefined ? undefined : materializeAssets(home, VERSION, archive).harnesses
-}
+const embeddedHarnesses = (home: string) => materializeEmbedded(home)?.harnesses
 
 const replacements = [...Platform.replacements, Platform.app({ version: VERSION }), Platform.updateCheck(updater)]
 

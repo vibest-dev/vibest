@@ -3,9 +3,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import { detectPlatformTarget, PLATFORM_TARGETS, PRIMARY_TARGETS } from "@vibest/cli/platform-target"
 import { Predicate, Schema } from "effect"
-
-import { detectPlatformTarget, PLATFORM_TARGET_IDS, PRIMARY_TARGET_IDS } from "./targets.ts"
 
 const [version, flag, flagDir] = process.argv.slice(2)
 
@@ -39,7 +38,7 @@ const packs = path.resolve(flagDir)
 const published: ReadonlyArray<string> = [
   "@vibest/cli",
   "@vibest/plugin",
-  ...PLATFORM_TARGET_IDS.map((id) => `@vibest/cli-${id}`),
+  ...PLATFORM_TARGETS.map((t) => `@vibest/cli-${t.id}`),
 ]
 
 const Dependencies = Schema.optional(Schema.Record(Schema.String, Schema.String))
@@ -98,7 +97,7 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
 
     if (manifest.scripts?.postinstall) errors.push("@vibest/cli: must not declare a postinstall script")
 
-    const expectedOpt = new Set(PRIMARY_TARGET_IDS.map((id) => `@vibest/cli-${id}`))
+    const expectedOpt = new Set(PRIMARY_TARGETS.map((t) => `@vibest/cli-${t.id}`))
     const actualOpt = new Set(Object.keys(manifest.optionalDependencies ?? {}))
 
     for (const dep of expectedOpt)
@@ -110,12 +109,16 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
 
   if (manifest.name === "@vibest/plugin") {
     for (const f of [
+      "README.md",
       "dist/promise/index.js",
       "dist/promise/index.d.ts",
       "dist/effect/index.js",
       "dist/effect/index.d.ts",
     ])
       has(f, "compiled plugin artifact")
+
+    if (files.includes("dist/effect/launch.d.ts"))
+      errors.push("@vibest/plugin: internal dist/effect/launch.d.ts must not be published")
 
     if (manifest.dependencies && "@vibest/schema" in manifest.dependencies)
       errors.push("@vibest/plugin: packed dependencies must not include private @vibest/schema")

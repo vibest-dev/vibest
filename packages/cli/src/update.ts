@@ -1,13 +1,10 @@
-import childProcess from "node:child_process"
-import fs from "node:fs"
-
 import { Claim, cliHeaders, connect, type VibestClient, readPing } from "@vibest/client/client"
-import { compareVersions, UpdateError } from "@vibest/client/release"
+import { compareVersions, installMethod, UpdateError } from "@vibest/client/release"
 import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { type Ping } from "@vibest/protocol/rpc"
 import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
-import { Layout, shellQuote } from "@vibest/schema/layout"
+import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import {
   Cause,
@@ -30,47 +27,20 @@ import { RpcClient } from "effect/rpc"
 
 import { askYesNo, interactive } from "./ask.ts"
 import { withVibest } from "./client.ts"
+import { detectPlatformTarget } from "./platform-target.ts"
 import { type ReplaceFailed, replaceDaemon, versionOf } from "./replace.ts"
 import { VERSION } from "./version.ts"
 
 export type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }
 
-const runText = (cmd: string, args: ReadonlyArray<string>): string => {
-  try {
-    const out = childProcess.spawnSync(cmd, [...args], { encoding: "utf8" })
+export const resolveInstallMethod = Effect.gen(function* () {
+  const self = yield* VibestCommand
+  const fs = yield* FileSystem.FileSystem
 
-    return `${out.stdout ?? ""}${out.stderr ?? ""}`.trim()
-  } catch {
-    return ""
-  }
-}
+  const real = self.length === 1 ? yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!)) : undefined
 
-export const detectPlatformTarget = (): string => {
-  const os = process.platform === "darwin" ? "darwin" : "linux"
-  const rawArch = process.arch === "arm64" ? "arm64" : "x64"
-
-  const arch =
-    os === "darwin" && rawArch === "x64" && runText("sysctl", ["-n", "sysctl.proc_translated"]) === "1"
-      ? "arm64"
-      : rawArch
-
-  const musl = os === "linux" && (fs.existsSync("/etc/alpine-release") || /musl/i.test(runText("ldd", ["--version"])))
-
-  const hasAvx2 =
-    arch !== "x64"
-      ? true
-      : os === "darwin"
-        ? runText("sysctl", ["-n", "hw.optional.avx2_0"]) === "1"
-        : (() => {
-            try {
-              return /(^|\s)avx2(\s|$)/i.test(fs.readFileSync("/proc/cpuinfo", "utf8"))
-            } catch {
-              return false
-            }
-          })()
-
-  return `${os}-${arch}${hasAvx2 ? "" : "-baseline"}${musl ? "-musl" : ""}`
-}
+  return { self, real, method: installMethod(self, real) }
+})
 
 export const ownerOf = (real: string) => {
   if (real.includes("/.bun/install/global/node_modules/")) return { kind: "bun" } as const

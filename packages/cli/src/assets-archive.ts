@@ -19,7 +19,7 @@ export interface MaterializedAssets {
 }
 
 export const encodeArchive = (entries: ReadonlyArray<ArchiveEntry>): Uint8Array => {
-  const sorted = [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  const sorted = [...entries].sort((a, b) => (a.path < b.path ? -1 : Number(a.path > b.path)))
   const parts: Array<Buffer> = []
   const header = Buffer.alloc(8)
   MAGIC.copy(header, 0)

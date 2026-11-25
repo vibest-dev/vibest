@@ -298,10 +298,25 @@ const processes: Processes.ProcessPlatform["Service"] = {
   uid: process.getuid?.(),
 }
 
-const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
+const LIBC_SPEC = {
   dup2: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-})
+} as const
+
+const LIBC_CANDIDATES =
+  process.platform === "darwin"
+    ? ["libc.dylib"]
+    : ["libc.so.6", "libc.musl-x86_64.so.1", "libc.musl-aarch64.so.1", "libc.so"]
+
+const openLibc = () => {
+  for (const name of LIBC_CANDIDATES) {
+    try {
+      return dlopen(name, LIBC_SPEC).symbols
+    } catch {}
+  }
+
+  throw new Error(`could not open libc (tried ${LIBC_CANDIDATES.join(", ")})`)
+}
 
 const LOCK_EX_NB = 2 | 4
 
@@ -311,7 +326,9 @@ export const captureDaemonLog = (file: string) =>
     const fd = fs.openSync(file, "a")
 
     try {
-      if (libc.symbols.dup2(fd, 1) === -1 || libc.symbols.dup2(fd, 2) === -1) throw new Error(`dup2 ${file} failed`)
+      const libc = openLibc()
+
+      if (libc.dup2(fd, 1) === -1 || libc.dup2(fd, 2) === -1) throw new Error(`dup2 ${file} failed`)
     } finally {
       fs.closeSync(fd)
     }
@@ -342,7 +359,7 @@ export const lock: Host["lock"] = (file) =>
         const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600)
 
         try {
-          if (libc.symbols.flock(fd, LOCK_EX_NB) === 0) {
+          if (openLibc().flock(fd, LOCK_EX_NB) === 0) {
             fs.fchmodSync(fd, 0o600)
 
             return fd

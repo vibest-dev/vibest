@@ -227,6 +227,9 @@ importers:
 
   e2e:
     dependencies:
+      '@vibest/cli':
+        specifier: workspace:*
+        version: link:../packages/cli
       effect:
         specifier: 4.1.5
         version: 4.1.5
@@ -630,6 +633,9 @@ importers:
       '@types/node':
         specifier: 26.6.5
         version: 26.6.5
+      '@vibest/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
       effect:
         specifier: 4.1.5
         version: 4.1.5

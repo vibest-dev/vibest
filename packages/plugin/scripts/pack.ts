@@ -1,7 +1,7 @@
-import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import util from "node:util"
 
 import pkg from "../package.json" with { type: "json" }
 
@@ -9,25 +9,20 @@ const pluginDir = path.dirname(import.meta.dir)
 const repoRoot = path.resolve(pluginDir, "../..")
 const schemaDir = path.join(repoRoot, "packages/schema")
 const distDir = path.join(pluginDir, "dist")
-const rawArgs = process.argv.slice(2)
 
-const valueOf = (flag: string): string | undefined => {
-  const at = rawArgs.indexOf(flag)
+const { values } = util.parseArgs({
+  args: process.argv.slice(2),
+  options: {
+    packs: { type: "string", default: "dist/npm" },
+  },
+})
 
-  if (at === -1) return undefined
-
-  return rawArgs[at + 1]
-}
-
-const packsDir = path.resolve(pluginDir, valueOf("--packs") ?? "dist/npm")
+const packsDir = path.resolve(pluginDir, values.packs)
 
 const run = (argv: ReadonlyArray<string>, cwd: string) => {
-  const res = childProcess.spawnSync(argv[0]!, argv.slice(1), {
-    cwd,
-    stdio: ["inherit", "inherit", "inherit"],
-  })
+  const res = Bun.spawnSync([...argv], { cwd, stdio: ["inherit", "inherit", "inherit"] })
 
-  if (res.status !== 0) process.exit(res.status ?? 1)
+  if (res.exitCode !== 0) process.exit(res.exitCode)
 }
 
 const collectFiles = (dir: string, out: Array<string> = []): Array<string> => {
@@ -148,6 +143,11 @@ try {
   )
   run([tscBin, "-p", pluginTsconfig], repoRoot)
 
+  if (fs.existsSync(path.join(distDir, "effect/launch.d.ts"))) {
+    console.error("@vibest/plugin pack: internal dist/effect/launch.d.ts must not be emitted")
+    process.exit(1)
+  }
+
   const emitted = collectFiles(distDir)
 
   for (const file of emitted) {
@@ -173,7 +173,7 @@ try {
     description: pkg.description,
     license: pkg.license,
     repository: pkg.repository,
-    files: ["dist", "LICENSE"],
+    files: ["dist", "README.md", "LICENSE"],
     type: pkg.type,
     exports: {
       ".": { types: "./dist/promise/index.d.ts", import: "./dist/promise/index.js" },

@@ -6,7 +6,7 @@ import type { BunPlugin } from "bun"
 
 import pkg from "../package.json" with { type: "json" }
 import { packDirectoryArchive } from "../src/assets-archive.ts"
-import { PLATFORM_TARGETS } from "./targets.ts"
+import { PLATFORM_TARGETS } from "../src/platform-target.ts"
 
 const cliDir = path.dirname(import.meta.dir)
 
@@ -63,8 +63,11 @@ const embeddedAssetsPlugin = (archivePath: string): BunPlugin => ({
       loader: "js",
       contents: [
         'import { readFileSync } from "node:fs"',
+        'import { materializeAssets } from "./assets-archive.ts"',
+        'import { VERSION } from "./version.ts"',
         `import archive from ${JSON.stringify(archivePath.replaceAll("\\", "/"))} with { type: "file" }`,
         "export const loadEmbeddedAssets = () => readFileSync(archive)",
+        "export const materializeEmbedded = (home) => materializeAssets(home, VERSION, loadEmbeddedAssets())",
       ].join("\n"),
     }))
   },

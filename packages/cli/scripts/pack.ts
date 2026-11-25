@@ -1,35 +1,39 @@
-import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import util from "node:util"
 
 import pkg from "../package.json" with { type: "json" }
-import { detectPlatformTarget } from "../src/update.ts"
-import { ARCHIVE_ROOTS } from "./archive-layout.ts"
+import {
+  detectPlatformTarget,
+  findTarget,
+  PLATFORM_TARGETS,
+  type PlatformTarget,
+  PRIMARY_TARGETS,
+} from "../src/platform-target.ts"
 import { buildBinaries } from "./build.ts"
-import { findTarget, PLATFORM_TARGETS, type PlatformTarget, PRIMARY_TARGETS } from "./targets.ts"
 
 const cliDir = path.dirname(import.meta.dir)
-const rawArgs = process.argv.slice(2)
 
-const valueOf = (flag: string): string | undefined => {
-  const at = rawArgs.indexOf(flag)
+const { values } = util.parseArgs({
+  args: process.argv.slice(2),
+  options: {
+    all: { type: "boolean", default: false },
+    "no-bytecode": { type: "boolean", default: false },
+    packs: { type: "string", default: "dist/npm" },
+    archives: { type: "string" },
+    "exclude-archive": { type: "string", default: "" },
+    target: { type: "string" },
+  },
+})
 
-  if (at === -1) return undefined
+const packsDir = path.resolve(cliDir, values.packs)
+const archivesDir = values.archives ? path.resolve(cliDir, values.archives) : undefined
+const excludeArchives = new Set(values["exclude-archive"].split(",").filter(Boolean))
 
-  return rawArgs[at + 1]
-}
-
-const allFlag = rawArgs.includes("--all")
-const noBytecode = rawArgs.includes("--no-bytecode")
-const packsDir = path.resolve(cliDir, valueOf("--packs") ?? "dist/npm")
-const archivesDir = valueOf("--archives") ? path.resolve(cliDir, valueOf("--archives")!) : undefined
-const excludeArchives = new Set((valueOf("--exclude-archive") ?? "").split(",").filter(Boolean))
-const requestedTargets = valueOf("--target")
-
-const targets: ReadonlyArray<PlatformTarget> = allFlag
+const targets: ReadonlyArray<PlatformTarget> = values.all
   ? PLATFORM_TARGETS
-  : (requestedTargets ? requestedTargets.split(",") : [detectPlatformTarget()]).map((id) => {
+  : (values.target ? values.target.split(",") : [detectPlatformTarget()]).map((id) => {
       const found = findTarget(id)
 
       if (!found) {
@@ -41,12 +45,9 @@ const targets: ReadonlyArray<PlatformTarget> = allFlag
     })
 
 const run = (argv: ReadonlyArray<string>, cwd: string) => {
-  const res = childProcess.spawnSync(argv[0]!, argv.slice(1), {
-    cwd,
-    stdio: ["inherit", "inherit", "inherit"],
-  })
+  const res = Bun.spawnSync([...argv], { cwd, stdio: ["inherit", "inherit", "inherit"] })
 
-  if (res.status !== 0) process.exit(res.status ?? 1)
+  if (res.exitCode !== 0) process.exit(res.exitCode)
 }
 
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-pack-"))
@@ -61,7 +62,7 @@ try {
     target: t.bunTarget,
   }))
 
-  const buildCode = await buildBinaries(jobs, { noBytecode })
+  const buildCode = await buildBinaries(jobs, { noBytecode: values["no-bytecode"] })
 
   if (buildCode !== 0) process.exit(buildCode)
 
@@ -92,7 +93,7 @@ try {
     if (archivesDir && !excludeArchives.has(t.id)) {
       const out = path.join(archivesDir, `vibest-${t.id}.tar.gz`)
       fs.rmSync(out, { force: true })
-      run(["tar", "-czf", out, "-C", pkgDir, ...ARCHIVE_ROOTS], pkgDir)
+      run(["tar", "-czf", out, "-C", pkgDir, "bin"], pkgDir)
     }
   }
 

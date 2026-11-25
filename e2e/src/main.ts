@@ -142,6 +142,60 @@ const selected = checks.filter(
 
 for (const id of elsewhere) console.log(`ELSEWHERE ${id}: not run here; another machine's run proves it`)
 
+if (!(await Bun.file(binary).exists())) {
+  console.error(`no ${binary}; run pnpm run build first`)
+  process.exit(1)
+}
+
+if (method !== "build" && !(await Bun.file(path.join(harnesses, "pi/extension.mjs")).exists())) {
+  const probeHome = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-assets-"))
+
+  try {
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] =>
+          entry[1] !== undefined && !entry[0].startsWith("VIBEST_") && entry[0] !== "VIBEST_HARNESSES",
+      ),
+    )
+
+    const started = Bun.spawnSync([binary, "daemon"], {
+      cwd: probeHome,
+      env: { ...env, VIBEST_HOME: probeHome, VIBEST_NO_UPDATE_CHECK: "1" },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 30_000,
+    })
+
+    if (started.exitCode !== 0) {
+      console.error(`failed to materialize embedded assets from ${binary}: ${started.stderr.toString()}`)
+      process.exit(1)
+    }
+
+    const assetsRoot = path.join(probeHome, "cache", "assets")
+    const entries = await fs.readdir(assetsRoot)
+    const first = entries.find((e) => !e.startsWith("."))
+
+    if (!first) {
+      console.error(`no embedded assets materialized under ${assetsRoot}`)
+      process.exit(1)
+    }
+
+    await fs.cp(path.join(assetsRoot, first, "harnesses"), harnesses, { recursive: true })
+  } finally {
+    const pidText = await fs.readFile(path.join(probeHome, "vibestd.pid"), "utf8").catch(() => "")
+    const match = /"pid"\s*:\s*(\d+)/.exec(pidText)
+
+    if (match) {
+      try {
+        process.kill(Number(match[1]), "SIGTERM")
+      } catch {}
+    }
+
+    await fs.rm(probeHome, { recursive: true, force: true })
+  }
+}
+
 for (const built of [binary, path.join(harnesses, "pi/extension.mjs"), path.join(harnesses, "pi/presentation.mjs")]) {
   if (!(await Bun.file(built).exists())) {
     console.error(`no ${built}; run pnpm run build first`)

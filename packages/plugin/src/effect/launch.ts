@@ -1,6 +1,10 @@
 import { shellQuote } from "@vibest/schema/layout"
 import { Config, Context, Data, Effect, FileSystem, Option, Path, Predicate, Random } from "effect"
 
+import type { Launch } from "./runtime.ts"
+
+export type { Launch } from "./runtime.ts"
+
 export class SystemPromptDirUnsafe extends Data.TaggedError("SystemPromptDirUnsafe")<{ readonly message: string }> {}
 
 export interface LinkInfo {
@@ -97,14 +101,6 @@ export const removeSystemPrompt = (id: string) =>
     const path = yield* Path.Path
     yield* fs.remove(path.join(yield* systemPromptRoot, id), { recursive: true, force: true })
   }).pipe(Effect.ignore)
-
-export interface Launch {
-  readonly harness?: string
-  readonly argv: ReadonlyArray<string>
-  readonly prompt?: string
-  readonly system?: string
-  readonly env: Readonly<Record<string, string>>
-}
 
 export const SHELL_HANDOFF: ReadonlyArray<string> = ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh"]
 

@@ -6,12 +6,10 @@ import { Console, Effect } from "effect"
 
 import { captureDaemonLog, restoreNormalJitPolicy } from "#platform"
 
-import { materializeAssets } from "../../../assets-archive.ts"
 import { userOnly } from "../../../caller.ts"
-import { loadEmbeddedAssets } from "../../../embedded-assets.ts"
+import { materializeEmbedded } from "../../../embedded-assets.ts"
 import { Runtime } from "../../../framework/runtime.ts"
 import { Host } from "../../../host.ts"
-import { VERSION } from "../../../version.ts"
 import { Commands } from "../../commands.ts"
 
 export default Runtime.handler(Commands.commands.daemon, ({ foreground, handoff }) =>
@@ -22,9 +20,8 @@ export default Runtime.handler(Commands.commands.daemon, ({ foreground, handoff 
           const host = yield* Host
           const layout = yield* Layout
           delete process.env[HANDOFF_ENV]
-          const embedded = loadEmbeddedAssets()
 
-          if (embedded !== undefined) yield* Effect.sync(() => materializeAssets(layout.home, VERSION, embedded))
+          if (!process.env.VIBEST_HARNESSES) yield* Effect.sync(() => materializeEmbedded(layout.home))
           yield* Console.log(`vibestd log: ${layout.log}`)
           yield* captureDaemonLog(layout.log)
           yield* restoreNormalJitPolicy

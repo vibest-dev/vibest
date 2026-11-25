@@ -3,6 +3,7 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import { detectPlatformTarget } from "@vibest/cli/platform-target"
 import { Predicate, type Schema } from "effect"
 
 import { commandOf, note } from "../../tools/reap.ts"
@@ -31,8 +32,8 @@ const target = () => {
 
     return {
       binary: path.join(modules, ".bin/vibest"),
-      compiled: path.join(modules, "@vibest", `cli-${process.platform}-${process.arch}`, "bin/vibest"),
-      harnesses: path.join(modules, "@vibest/cli/harnesses"),
+      compiled: path.join(modules, "@vibest", `cli-${detectPlatformTarget()}`, "bin/vibest"),
+      harnesses: path.join(install, "e2e-harnesses"),
     }
   }
 
@@ -46,7 +47,7 @@ const target = () => {
     return {
       binary: path.join(install, "bin/vibest"),
       compiled: path.join(version, "bin/vibest"),
-      harnesses: path.join(version, "harnesses"),
+      harnesses: path.join(install, "e2e-harnesses"),
     }
   }
 

@@ -1,20 +1,21 @@
 import { described, importCheck, readPing, runCaptured } from "@vibest/client/client"
-import { channelOf, compareVersions, installMethod, latestOf, UpdateError } from "@vibest/client/release"
-import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
+import { channelOf, compareVersions, latestOf, UpdateError } from "@vibest/client/release"
+import { Layout, shellQuote } from "@vibest/schema/layout"
 import { Console, Duration, Effect, FileSystem, Match, Option } from "effect"
 
 import { userOnly } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
+import { detectPlatformTarget } from "../../platform-target.ts"
 import { replaceAnyway, type Target, versionOf } from "../../replace.ts"
 import {
   daemonPlan,
-  detectPlatformTarget,
   download,
   extraVibests,
   handoffDaemon,
   megabytes,
   progressLine,
   replaceForUpdate,
+  resolveInstallMethod,
   restartAgents,
   runInherit,
   stageCommand,
@@ -33,13 +34,8 @@ export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, r
 
       if (Option.isSome(restartAgentsAfter))
         return yield* restartAgents(VERSION, yes, "vibest update", restartAgentsAfter.value)
-      const self = yield* VibestCommand
+      const { self, real, method } = yield* resolveInstallMethod
       const fs = yield* FileSystem.FileSystem
-
-      const real =
-        self.length === 1 ? yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!)) : undefined
-
-      const method = installMethod(self, real)
       const layout = yield* Layout
 
       let target: Target = {

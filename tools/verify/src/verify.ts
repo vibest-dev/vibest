@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { detectPlatformTarget } from "./targets.ts"
+import { detectPlatformTarget } from "@vibest/cli/platform-target"
 
 const root = path.resolve(import.meta.dirname, "../../..")
 const noCache = process.argv.includes("--no-cache")
@@ -123,7 +123,7 @@ const packedName = (tarball: string): string =>
 
 const alreadyPacked = tarballsIn(packs).length > 0
 const releasePack = keptPacks !== undefined && has("pack") && !alreadyPacked
-const packAlsoBuildsArchives = releasePack && has("archive")
+const packAlsoBuildsArchives = releasePack && has("archive") && !curlLeg
 
 type Step = readonly [string, ReadonlyArray<string>, Options?]
 

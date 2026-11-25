@@ -16,7 +16,8 @@ resolve_real() {
 }
 
 read_version() {
-  sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n 1
+  [ -f "$1" ] || return 0
+  tr '\n' ' ' < "$1" | awk 'match($0, /"version"[[:space:]]*:[[:space:]]*"[^"]*"/) { s = substr($0, RSTART, RLENGTH); sub(/.*"version"[[:space:]]*:[[:space:]]*"/, "", s); sub(/"$/, "", s); print s; exit }'
 }
 
 real_self=$(resolve_real "$0")
@@ -81,7 +82,11 @@ find_pkg() {
 }
 
 install_hint() {
-  pkg="@vibest/cli-$target@$cli_version"
+  if [ -n "$cli_version" ]; then
+    pkg="@vibest/cli-$target@$cli_version"
+  else
+    pkg="@vibest/cli-$target"
+  fi
   case "$real_self_dir" in
     */.bun/*) printf 'bun add -g %s\n' "$pkg" ;;
     */.pnpm/*|*/pnpm/*) printf 'pnpm add -g %s\n' "$pkg" ;;
@@ -99,8 +104,8 @@ if ! target_pkg=$(find_pkg "$real_self_dir"); then
 fi
 
 target_version=$(read_version "$target_pkg/package.json")
-if [ -n "$cli_version" ] && [ "$target_version" != "$cli_version" ]; then
-  echo "vibest: @vibest/cli-$target@$target_version does not match @vibest/cli@$cli_version; reinstall with: $(install_hint)" >&2
+if [ -z "$cli_version" ] || [ -z "$target_version" ] || [ "$target_version" != "$cli_version" ]; then
+  echo "vibest: @vibest/cli-$target@${target_version:-unknown} does not match @vibest/cli@${cli_version:-unknown}; reinstall with: $(install_hint)" >&2
   exit 1
 fi
 

@@ -36,7 +36,6 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { ARCHIVE_ROOTS } from "../scripts/archive-layout.ts"
 import { materializeAssets, packDirectoryArchive } from "../src/assets-archive.ts"
 
 const ctx = (patch: Partial<PluginContext> = {}): PluginContext => ({
@@ -320,7 +319,6 @@ describe("herdr plugin package", () => {
       assert.isTrue(fs.existsSync(path.join(materialized.herdrPlugin, "README.md")))
       assert.strictEqual(fs.statSync(path.join(materialized.harnesses, "hook.sh")).mode & 0o111, 0o111)
       assert.strictEqual(fs.readlinkSync(path.join(home, "herdr-plugin")), materialized.herdrPlugin)
-      assert.deepStrictEqual([...ARCHIVE_ROOTS], ["bin"])
     } finally {
       fs.rmSync(home, { recursive: true, force: true })
       fs.rmSync(execSrc, { recursive: true, force: true })

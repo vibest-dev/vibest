@@ -1,8 +1,15 @@
 import { formatTerminalTarget } from "@vibest/schema/terminal"
 import { Effect, Option, PubSub, Schema, Stream } from "effect"
 
-import type { Launch } from "./launch.ts"
 import type { Transform } from "./registration.ts"
+
+export interface Launch {
+  readonly harness?: string
+  readonly argv: ReadonlyArray<string>
+  readonly prompt?: string
+  readonly system?: string
+  readonly env: Readonly<Record<string, string>>
+}
 
 export type TerminalTarget = Readonly<Record<string, string>>
 
