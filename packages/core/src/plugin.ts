@@ -24,8 +24,6 @@ import { Archive } from "./session/archive.ts"
 import { Sends } from "./session/sends.ts"
 import { Summaries } from "./session/summaries.ts"
 
-export * as Plugin from "./plugin.ts"
-
 export * as Plugins from "./plugin.ts"
 
 export { SessionRefused, Change, PluginInfo, PluginsNotActive, Routing, TraceEntry } from "@vibest/schema/plugin"

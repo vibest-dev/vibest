@@ -16,8 +16,6 @@ import { detailOf } from "../session/replies.ts"
 import { SessionStore } from "../session/store.ts"
 import { InboxStore } from "./store.ts"
 
-export * as Inbox from "./service.ts"
-
 export type Presence = "idle" | "busy" | "gone" | "unknown"
 
 export const terminalPresence = Effect.fn("Inbox.terminalPresence")(function* (

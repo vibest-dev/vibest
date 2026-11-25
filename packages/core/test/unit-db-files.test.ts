@@ -539,6 +539,12 @@ describe("Db", () => {
           assert.strictEqual(info.mode & 0o777, 0o600)
         }
       }
+
+      const foreign = yield* fileAt(dir, "foreign.db")
+      yield* writeSql(foreign, ["CREATE TABLE other (id INTEGER PRIMARY KEY)"])
+      yield* fs.chmod(foreign, 0o644)
+      assert.include(yield* refusal(foreign), "not this vibest's schema")
+      assert.strictEqual((yield* fs.stat(foreign)).mode & 0o777, 0o644)
     }).pipe(Effect.provide(Platform.services)),
   )
 })

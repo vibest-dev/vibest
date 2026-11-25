@@ -6,14 +6,12 @@ import { Context, Effect, Layer } from "effect"
 
 import { Bus } from "../bus.ts"
 import { Database } from "../database/database.ts"
-import { PlatformNode } from "../effect/platform.ts"
-import { inboxSql } from "../inbox/sql.ts"
+import { moveInbox, queueInbox } from "../inbox/sql.ts"
 import { Projectors } from "../reactor.ts"
-import { SessionLive } from "../session/live.ts"
 import { noticeEnvelope, sessionEnvelope } from "../session/replies.ts"
 import { queryRemoteEdges } from "../session/sql-edges.ts"
-import { sessionSql } from "../session/sql.ts"
-import { remoteSql, type MachineRow } from "./sql.ts"
+import { nearestAlive } from "../session/sql.ts"
+import { hasRemoteItem, listMachines, outboxOf, queueForRemote, remoteName, senderOf, type MachineRow } from "./sql.ts"
 
 export * as RemoteStore from "./store.ts"
 
@@ -21,18 +19,15 @@ export type { MachineRow, OutboxRow, RemoteScope, RemoteStart } from "./sql.ts"
 
 export const make = Effect.gen(function* () {
   const { sql } = yield* Database.Service
-  const { publish, transaction: tx } = yield* Bus.Service
-  const session = yield* sessionSql
-  const remote = yield* remoteSql
-  const inbox = yield* inboxSql(session, remote)
-  const { queueForRemote } = remote
+  const bus = yield* Bus.Service
+  const { publish, transaction: tx } = bus
   const machineColumns = sql`name, target, remote_id, connected_at, created_at`
 
   const machineNamed = (name: string) =>
     sql<MachineRow>`SELECT ${machineColumns} FROM machine WHERE name = ${name}`.pipe(Effect.map((rows) => rows[0]))
 
   return {
-    machines: remote.machines.pipe(Effect.orDie),
+    machines: listMachines(sql).pipe(Effect.orDie),
 
     machineNamed: Effect.fn("RemoteStore.machineNamed")((name: string) => machineNamed(name).pipe(Effect.orDie)),
 
@@ -92,14 +87,14 @@ export const make = Effect.gen(function* () {
 
             if (route === undefined) return "unknown" as const
 
-            if (yield* remote.hasRemoteItem(item.id)) return "duplicate" as const
+            if (yield* hasRemoteItem(sql, item.id)) return "duplicate" as const
 
             const [forwarded] = yield* sql<{ session: string }>`SELECT session_id AS session FROM outbox
               WHERE id = ${item.id}`
 
             if (forwarded !== undefined && forwarded.session === item.recipient) return "duplicate" as const
 
-            const heir = route.alive === 1 ? { local: item.recipient } : yield* session.nearestAlive(item.recipient)
+            const heir = route.alive === 1 ? { local: item.recipient } : yield* nearestAlive(sql, item.recipient)
 
             const noticeSender = item.from.machine ? `${item.sender} (on ${item.from.machine})` : item.sender
 
@@ -117,7 +112,7 @@ export const make = Effect.gen(function* () {
 
               const id = leg === undefined ? item.id : randomId()
 
-              const queued = yield* queueForRemote(heir.remote, heir.session, {
+              const queued = yield* queueForRemote(sql, publish, heir.remote, heir.session, {
                 id,
                 sessionId: item.recipient,
                 kind: item.kind,
@@ -128,16 +123,22 @@ export const make = Effect.gen(function* () {
               if (!queued) return "unknown" as const
 
               if (id !== item.id) {
-                const receipt = yield* inbox.queueInbox({
+                const receipt = yield* queueInbox(sql, publish, {
                   recipient: item.recipient,
                   sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
                   content,
                   transfer: item.id,
                 })
 
-                yield* inbox.moveInbox(sql`recipient_session_id = ${item.recipient} AND id = ${receipt}`, "dropped", {
-                  reason: "forwarded",
-                })
+                yield* moveInbox(
+                  sql,
+                  bus,
+                  sql`recipient_session_id = ${item.recipient} AND id = ${receipt}`,
+                  "dropped",
+                  {
+                    reason: "forwarded",
+                  },
+                )
               }
 
               return "queued" as const
@@ -146,21 +147,21 @@ export const make = Effect.gen(function* () {
             const target = heir !== undefined && "local" in heir ? heir.local : undefined
 
             if (target === undefined) {
-              const queued = yield* inbox.queueInbox({
+              const queued = yield* queueInbox(sql, publish, {
                 recipient: item.recipient,
                 sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
                 content,
                 transfer: item.id,
               })
 
-              yield* inbox.moveInbox(sql`recipient_session_id = ${item.recipient} AND id = ${queued}`, "dropped", {
+              yield* moveInbox(sql, bus, sql`recipient_session_id = ${item.recipient} AND id = ${queued}`, "dropped", {
                 reason: "the session was archived",
               })
 
               return "queued" as const
             }
 
-            yield* inbox.queueInbox({
+            yield* queueInbox(sql, publish, {
               recipient: target,
               sender: item.kind === "send" ? { type: "agent", ...item.from } : { type: "vibest" },
               content,
@@ -176,7 +177,7 @@ export const make = Effect.gen(function* () {
         FROM project p JOIN project_repository r ON r.project_id = p.id ORDER BY p.rowid, r.rowid`.pipe(Effect.orDie),
 
     outboxOf: Effect.fn("RemoteStore.outboxOf")((remoteId: string, after = 0, limit = -1) =>
-      remote.outboxOf(remoteId, after, limit).pipe(Effect.orDie),
+      outboxOf(sql, remoteId, after, limit).pipe(Effect.orDie),
     ),
 
     ackOutbox: Effect.fn("RemoteStore.ackOutbox")((remoteId: string, ids: ReadonlyArray<string>) =>
@@ -206,9 +207,9 @@ export const make = Effect.gen(function* () {
       ).pipe(Effect.orDie),
     ),
 
-    senderOf: Effect.fn("RemoteStore.senderOf")((sessionId: string) => remote.senderOf(sessionId).pipe(Effect.orDie)),
+    senderOf: Effect.fn("RemoteStore.senderOf")((sessionId: string) => senderOf(sql, sessionId).pipe(Effect.orDie)),
 
-    nameForRemote: Effect.fn("RemoteStore.nameForRemote")((id: string) => remote.remoteName(id).pipe(Effect.orDie)),
+    nameForRemote: Effect.fn("RemoteStore.nameForRemote")((id: string) => remoteName(sql, id).pipe(Effect.orDie)),
 
     remoteKnown: Effect.fn("RemoteStore.remoteKnown")((id: string) =>
       sql`SELECT 1 FROM remote WHERE id = ${id}`.pipe(
@@ -228,12 +229,12 @@ export const make = Effect.gen(function* () {
             if (matches.length > 1) return { ambiguous: matches.map((m) => m.session) } as const
             const [match] = matches
 
-            const queued = yield* queueForRemote(match!.remote, match!.session, {
+            const queued = yield* queueForRemote(sql, publish, match!.remote, match!.session, {
               sessionId,
               kind: "send",
               content: message,
               request,
-              from: yield* remote.senderOf(sessionId),
+              from: yield* senderOf(sql, sessionId),
             })
 
             return queued ? ({ sent: match!.session } as const) : ("unknown" as const)
@@ -245,12 +246,12 @@ export const make = Effect.gen(function* () {
       (sender: string, remoteId: string, recipient: string, message: string, request?: string) =>
         tx(
           Effect.gen(function* () {
-            return yield* queueForRemote(remoteId, recipient, {
+            return yield* queueForRemote(sql, publish, remoteId, recipient, {
               sessionId: sender,
               kind: "send",
               content: message,
               request,
-              from: yield* remote.senderOf(sender),
+              from: yield* senderOf(sql, sender),
             })
           }),
         ).pipe(Effect.orDie),
@@ -267,5 +268,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Database.node, Bus.node, Projectors.node, SessionLive.node, PlatformNode.sqlClient],
+  deps: [Database.node, Bus.node, Projectors.node],
 })

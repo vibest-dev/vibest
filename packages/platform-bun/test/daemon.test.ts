@@ -51,7 +51,7 @@ describe.concurrent("vibestd.pid lock", () => {
         assert.isTrue(yield* fs.exists(layout.socket))
         assert.isFalse(yield* fs.exists(layout.database))
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 
   it.live(

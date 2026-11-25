@@ -27,15 +27,24 @@ import {
   type ProcessStart,
   type SpawnedBefore,
 } from "../database/rows.ts"
-import { PlatformNode } from "../effect/platform.ts"
-import { inboxSql } from "../inbox/sql.ts"
+import { confirm, confirmTask, dropUnsent, insertInboxRow, linkTask, moveInbox, queueInbox } from "../inbox/sql.ts"
 import { Projectors } from "../reactor.ts"
-import { remoteSql, type RemoteScope, type RemoteStart } from "../remote/sql.ts"
+import { ofRemote, remoteName, senderOf, type RemoteScope, type RemoteStart } from "../remote/sql.ts"
 import { SessionLive } from "./live.ts"
 import { type ObservedEnd } from "./replies.ts"
 import { sessionEdges, type SpawnLinks } from "./sql-edges.ts"
 import { sessionReads } from "./sql-reads.ts"
-import { sessionSql } from "./sql.ts"
+import {
+  allocateExecution,
+  creatorOf,
+  currentProcessId,
+  fromOldProcess,
+  nearestAlive,
+  observable,
+  openExecution,
+  sessionSql,
+  startedAt,
+} from "./sql.ts"
 
 export * as SessionStore from "./store.ts"
 
@@ -53,34 +62,27 @@ export type SessionFilter = {
 
 export const make = Effect.gen(function* () {
   const { sql } = yield* Database.Service
-  const { publish, afterCommit, transaction: tx } = yield* Bus.Service
+  const bus = yield* Bus.Service
+  const { publish, afterCommit, transaction: tx } = bus
   const sessionLive = yield* SessionLive.Service
   const now = Clock.currentTimeMillis
-  const session = yield* sessionSql
-  const remote = yield* remoteSql
-  const inbox = yield* inboxSql(session, remote)
+  const moving = new Set<string>()
+  const session = sessionSql(sql, bus, sessionLive, moving)
 
   const {
     briefs,
     hadTerminal,
     spawnedBy,
     afterCommitLive,
-    moving,
     running,
     selectSessions,
     findSession,
     currentProcess,
-    currentProcessId,
     latestRoot,
-    openExecution,
     workingExecutions,
-    allocateExecution,
     noteInput,
-    startedAt,
     accept,
-    observable,
     isRoot,
-    fromOldProcess,
     endProcess,
     startProcess,
     ensureProcess,
@@ -90,12 +92,9 @@ export const make = Effect.gen(function* () {
     setStatus,
     liveSessionsAt,
     unusedId,
-    creatorOf,
     fromCurrentHarness,
     canResumeConversation,
   } = session
-
-  const { queueInbox, insertInboxRow } = inbox
 
   const roomFor = (max: number | undefined) =>
     max === undefined
@@ -109,8 +108,8 @@ export const make = Effect.gen(function* () {
       }
     })
 
-  const edges = yield* sessionEdges
-  const queries = yield* sessionReads
+  const edges = sessionEdges(sql, bus)
+  const queries = sessionReads(sql)
 
   return {
     ...edges,
@@ -118,13 +117,13 @@ export const make = Effect.gen(function* () {
 
     hadTerminal: Effect.fn("SessionStore.hadTerminal")((id: string) => hadTerminal(id).pipe(Effect.orDie)),
 
-    creatorOf,
+    creatorOf: (id: string) => creatorOf(sql, id),
 
-    nearestAlive: session.nearestAlive,
+    nearestAlive: (id: string) => nearestAlive(sql, id),
 
     creatorLabel: Effect.fn("SessionStore.creatorLabel")((id: string) =>
       Effect.gen(function* () {
-        const creator = yield* creatorOf(id)
+        const creator = yield* creatorOf(sql, id)
 
         if (creator === undefined) return undefined
 
@@ -178,19 +177,19 @@ export const make = Effect.gen(function* () {
             const message =
               task === undefined
                 ? undefined
-                : yield* queueInbox({
+                : yield* queueInbox(sql, publish, {
                     recipient: row.id,
                     sender:
                       parentSessionId !== undefined
                         ? {
                             type: "agent",
-                            ...((yield* remote.senderOf(parentSessionId)) ?? { session: parentSessionId }),
+                            ...((yield* senderOf(sql, parentSessionId)) ?? { session: parentSessionId }),
                           }
                         : origin?.reportTo !== undefined
                           ? {
                               type: "agent",
                               session: origin.reportTo,
-                              machine: (yield* remote.remoteName(origin.remote)) ?? origin.remote,
+                              machine: (yield* remoteName(sql, origin.remote)) ?? origin.remote,
                             }
                           : { type: "user" },
                     content: task,
@@ -278,8 +277,8 @@ export const make = Effect.gen(function* () {
               )
 
             if (row.executionState !== "none") {
-              const execution = yield* allocateExecution(row.id, row.executionPromptedAt)
-              yield* inbox.linkTask(row.id, execution, row.executionPromptedAt)
+              const execution = yield* allocateExecution(sql, publish, row.id, row.executionPromptedAt)
+              yield* linkTask(sql, publish, row.id, execution, row.executionPromptedAt)
 
               if (row.executionState !== "open")
                 yield* finishExecution(row.id, execution, { outcome: row.executionState }, row.executionPromptedAt)
@@ -305,7 +304,7 @@ export const make = Effect.gen(function* () {
         const rows = yield* sql<{
           id: string
         }>`SELECT s.id FROM session s WHERE s.id >= ${input} AND s.id < ${`${input}~`}
-          ${scope === undefined ? sql`` : sql`AND ${remote.ofRemote(sql`s.id`, scope)}`} ORDER BY s.id LIMIT 11`.pipe(
+          ${scope === undefined ? sql`` : sql`AND ${ofRemote(sql, sql`s.id`, scope)}`} ORDER BY s.id LIMIT 11`.pipe(
           Effect.orDie,
         )
 
@@ -326,7 +325,7 @@ export const make = Effect.gen(function* () {
         [
           ...(filter.projectId === undefined ? [] : [sql`s.project_id = ${filter.projectId}`]),
           ...(filter.unarchived === true ? [sql`s.ended_at IS NULL`] : []),
-          ...(filter.remote === undefined ? [] : [remote.ofRemote(sql`s.id`, filter.remote)]),
+          ...(filter.remote === undefined ? [] : [ofRemote(sql, sql`s.id`, filter.remote)]),
         ],
         filter.stopped || filter.unarchived
           ? undefined
@@ -394,7 +393,7 @@ export const make = Effect.gen(function* () {
 
               const message =
                 creating && start.firstInput !== undefined
-                  ? yield* queueInbox({
+                  ? yield* queueInbox(sql, publish, {
                       recipient: targetId,
                       sender: { type: "user" },
                       content: start.firstInput,
@@ -461,22 +460,22 @@ export const make = Effect.gen(function* () {
               let execution: number | undefined
 
               if (start.firstInput !== undefined && resume === undefined) {
-                execution = yield* allocateExecution(targetId, at)
+                execution = yield* allocateExecution(sql, publish, targetId, at)
 
                 if (message === undefined) {
-                  const queued = yield* queueInbox({
+                  const queued = yield* queueInbox(sql, publish, {
                     recipient: targetId,
                     sender: { type: "user" },
                     content: start.firstInput,
                     at,
                   })
 
-                  yield* inbox.moveInbox(sql`recipient_session_id = ${targetId} AND id = ${queued}`, "delivering", {
+                  yield* moveInbox(sql, bus, sql`recipient_session_id = ${targetId} AND id = ${queued}`, "delivering", {
                     execution,
                   })
                 }
 
-                yield* inbox.linkTask(targetId, execution, at)
+                yield* linkTask(sql, publish, targetId, execution, at)
               }
 
               yield* afterCommit(() => void moving.delete(targetId))
@@ -561,7 +560,7 @@ export const make = Effect.gen(function* () {
 
             if (integration !== undefined) yield* afterCommitLive(sessionLive.setIntegration(id, integration))
 
-            if ((yield* openExecution(id)) === undefined && (yield* sessionLive.status(id)) === "unknown")
+            if ((yield* openExecution(sql, id)) === undefined && (yield* sessionLive.status(id)) === "unknown")
               yield* setStatus(id, "idle")
             yield* publish(
               ProcessEvent.Ready,
@@ -650,16 +649,20 @@ export const make = Effect.gen(function* () {
 
     canResumeConversation,
 
-    openExecution: Effect.fn("SessionStore.openExecution")((id: string) => openExecution(id).pipe(Effect.orDie)),
+    openExecution: Effect.fn("SessionStore.openExecution")((id: string) => openExecution(sql, id).pipe(Effect.orDie)),
     workingExecutions: Effect.fn("SessionStore.workingExecutions")(() => workingExecutions.pipe(Effect.orDie)),
 
     archive: Effect.fn("SessionStore.archive")((id: string) =>
       tx(
         Effect.gen(function* () {
-          const execution = yield* openExecution(id)
+          const execution = yield* openExecution(sql, id)
 
           if (execution !== undefined)
-            yield* releaseExecution(id, execution, (yield* startedAt(id, execution)) === null ? "not_started" : "lost")
+            yield* releaseExecution(
+              id,
+              execution,
+              (yield* startedAt(sql, id, execution)) === null ? "not_started" : "lost",
+            )
           yield* session.archive(id)
         }),
       ).pipe(Effect.orDie),
@@ -668,11 +671,11 @@ export const make = Effect.gen(function* () {
     startExecution: Effect.fn("SessionStore.startExecution")((id: string, at: number) =>
       tx(
         Effect.gen(function* () {
-          const open = yield* openExecution(id)
+          const open = yield* openExecution(sql, id)
 
           if (open !== undefined) return { execution: open, opened: false }
 
-          return { execution: yield* allocateExecution(id, at), opened: true }
+          return { execution: yield* allocateExecution(sql, publish, id, at), opened: true }
         }),
       ).pipe(Effect.orDie),
     ),
@@ -682,7 +685,7 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const accepted = yield* accept(id, execution)
 
-          if (accepted) yield* inbox.confirmTask(id, execution)
+          if (accepted) yield* confirmTask(sql, bus, id, execution)
 
           return accepted
         }),
@@ -691,9 +694,9 @@ export const make = Effect.gen(function* () {
 
     executionAccepted: Effect.fn("SessionStore.executionAccepted")((id: string) =>
       Effect.gen(function* () {
-        const execution = yield* openExecution(id)
+        const execution = yield* openExecution(sql, id)
 
-        return execution !== undefined && (yield* startedAt(id, execution)) !== null
+        return execution !== undefined && (yield* startedAt(sql, id, execution)) !== null
       }).pipe(Effect.orDie),
     ),
 
@@ -731,17 +734,17 @@ export const make = Effect.gen(function* () {
         tx(
           Effect.gen(function* () {
             const at = yield* now
-            const execution = (yield* openExecution(id)) ?? (yield* allocateExecution(id, at))
+            const execution = (yield* openExecution(sql, id)) ?? (yield* allocateExecution(sql, publish, id, at))
             yield* finishExecution(id, execution, { outcome })
-            yield* inbox.dropUnsent(id, "the session did not start")
+            yield* dropUnsent(sql, bus, id, "the session did not start")
 
-            if (notice !== undefined) yield* insertInboxRow({ sessionId: id, message: notice })
+            if (notice !== undefined) yield* insertInboxRow(sql, publish, { sessionId: id, message: notice })
           }),
         ).pipe(Effect.orDie),
     ),
 
     currentProcessId: Effect.fn("SessionStore.currentProcessId")((id: string) =>
-      currentProcessId(id).pipe(Effect.orDie),
+      currentProcessId(sql, id).pipe(Effect.orDie),
     ),
 
     closeExecution: Effect.fn("SessionStore.closeExecution")(
@@ -753,7 +756,7 @@ export const make = Effect.gen(function* () {
       ) =>
         tx(
           Effect.gen(function* () {
-            if ((yield* openExecution(id)) !== execution) return false
+            if ((yield* openExecution(sql, id)) !== execution) return false
 
             const closed = yield* finishExecution(id, execution, {
               outcome: status,
@@ -762,10 +765,10 @@ export const make = Effect.gen(function* () {
 
             if (!closed) return false
 
-            if (status === "completed") yield* inbox.confirm(id, execution)
+            if (status === "completed") yield* confirm(sql, bus, id, execution)
 
             if (options.notice !== undefined && !(yield* isRoot(id)))
-              yield* insertInboxRow({ sessionId: id, message: options.notice })
+              yield* insertInboxRow(sql, publish, { sessionId: id, message: options.notice })
 
             return true
           }),
@@ -774,7 +777,7 @@ export const make = Effect.gen(function* () {
 
     executionTaken: Effect.fn("SessionStore.executionTaken")((id: string) =>
       Effect.gen(function* () {
-        const execution = yield* openExecution(id)
+        const execution = yield* openExecution(sql, id)
 
         if (execution === undefined) return false
 
@@ -789,12 +792,12 @@ export const make = Effect.gen(function* () {
       (id: string, typed: string | undefined, at: number, process?: number, _anonymous = false) =>
         tx(
           Effect.gen(function* () {
-            if (!(yield* observable(id)) || (yield* fromOldProcess(id, process))) return
+            if (!(yield* observable(sql, id)) || (yield* fromOldProcess(sql, id, process))) return
 
             if (typed === undefined || typed === "") return
-            const open = yield* openExecution(id)
+            const open = yield* openExecution(sql, id)
 
-            if (open === undefined) yield* allocateExecution(id, at, typed)
+            if (open === undefined) yield* allocateExecution(sql, publish, id, at, typed)
             else yield* noteInput(id, open, typed)
 
             yield* setStatus(id, "working")
@@ -805,7 +808,7 @@ export const make = Effect.gen(function* () {
     endObserved: Effect.fn("SessionStore.endObserved")((id: string, end: ObservedEnd, process?: number) =>
       tx(
         Effect.gen(function* () {
-          if (!(yield* observable(id))) return undefined
+          if (!(yield* observable(sql, id))) return undefined
           const current = yield* currentProcess(id)
 
           if (current === undefined || current.start.harness !== end.harness) return undefined
@@ -857,8 +860,8 @@ export const make = Effect.gen(function* () {
 
           if (recorded.wrote)
             yield* end.status === "completed" && !(yield* sessionLive.isPrompting(id))
-              ? inbox.confirm(id, recorded.id)
-              : inbox.confirmTask(id, recorded.id)
+              ? confirm(sql, bus, id, recorded.id)
+              : confirmTask(sql, bus, id, recorded.id)
 
           if (!recorded.wrote || !recorded.current) return end.status
 
@@ -866,6 +869,8 @@ export const make = Effect.gen(function* () {
 
           if (end.status === "failed" && !(yield* isRoot(id)))
             yield* insertInboxRow(
+              sql,
+              publish,
               {
                 sessionId: id,
                 message:
@@ -886,12 +891,12 @@ export const make = Effect.gen(function* () {
         tx(
           Effect.gen(function* () {
             const stamp = at === undefined ? yield* now : Math.max(at, yield* now)
-            const execution = (yield* openExecution(id)) ?? (yield* allocateExecution(id, stamp))
+            const execution = (yield* openExecution(sql, id)) ?? (yield* allocateExecution(sql, publish, id, stamp))
             const wrote = yield* finishExecution(id, execution, end, stamp)
 
-            if (wrote && end.outcome === "completed") yield* inbox.confirm(id, execution)
+            if (wrote && end.outcome === "completed") yield* confirm(sql, bus, id, execution)
 
-            if (notice !== undefined) yield* insertInboxRow({ sessionId: id, message: notice }, stamp)
+            if (notice !== undefined) yield* insertInboxRow(sql, publish, { sessionId: id, message: notice }, stamp)
           }),
         ).pipe(Effect.orDie),
     ),
@@ -916,5 +921,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Database.node, Bus.node, Projectors.node, SessionLive.node, PlatformNode.sqlClient],
+  deps: [Database.node, Bus.node, Projectors.node, SessionLive.node],
 })
