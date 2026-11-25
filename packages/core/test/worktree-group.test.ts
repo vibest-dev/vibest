@@ -8,15 +8,15 @@ import { Session } from "@vibest/core/session"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
 import { Layout } from "@vibest/schema/layout"
 import type { HarnessId } from "@vibest/schema/session"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeGit } from "@vibest/testkit/fake-git"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { interruptOnceReady } from "@vibest/testkit/interrupt-at"
+import { until } from "@vibest/testkit/observe"
+import { makeRepository, scriptedLeaves, testLayer, type TestOptions, type TestServices } from "@vibest/testkit/session"
 import { Deferred, Effect, Exit, Fiber, FileSystem, Path, Scheduler, type Scope } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { projectOf } from "./lib/directory.ts"
-import { FakeGit } from "./lib/fake-git.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { interruptOnceReady } from "./lib/interrupt-at.ts"
-import { until } from "./lib/observe.ts"
-import { makeRepository, scriptedLeaves, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
 
 const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   Effect.map(

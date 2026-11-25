@@ -1,6 +1,8 @@
 import { Predicate } from "effect"
 
-const isSource = (file) => /\/packages\/.+\/src\//.test(file) && !file.endsWith(".test.ts")
+const isSource = (file) =>
+  /\/packages\/.+\/src\//.test(file) && !file.includes("/packages/testkit/src/") && !file.endsWith(".test.ts")
+
 const normalized = (context) => context.filename.replaceAll("\\", "/")
 
 const textRule = ({ matches, exempt, message }) => ({

@@ -6,17 +6,25 @@ import { Integration } from "@vibest/core/integration"
 import type { HarnessDefinition } from "@vibest/core/plugin/domains"
 import { unwrapped } from "@vibest/core/replies"
 import { Session } from "@vibest/core/session"
+import { entryPending, projectOf } from "@vibest/testkit/directory"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { CURSOR, FIRST_IN_ARGV, PI } from "@vibest/testkit/harnesses"
+import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd, yieldToIo } from "@vibest/testkit/observe"
+import { makeRepository } from "@vibest/testkit/session"
+import {
+  harnessArgv,
+  spawnInput,
+  spawnWorking,
+  idleSession,
+  test,
+  pick,
+  sqlNotices,
+} from "@vibest/testkit/sessions-helpers"
 import { Clock, Deferred, Effect, Exit, Fiber, PubSub, Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { entryPending, projectOf } from "./lib/directory.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { CURSOR, FIRST_IN_ARGV, PI } from "./lib/harnesses.ts"
-import { replyOf, settled, EXECUTIONS, until, untilVirtual, writeEnd, yieldToIo } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
-import { harnessArgv, spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
 const TRUST_DIALOG_IN_ARGV: HarnessDefinition = {
   ...FIRST_IN_ARGV,

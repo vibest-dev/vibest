@@ -1,8 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
+import { interruptOnceReady } from "@vibest/testkit/interrupt-at"
 import { KeyedMutex } from "@vibest/util/keyed-mutex"
 import { Deferred, Effect, Fiber, Scheduler } from "effect"
-
-import { interruptOnceReady } from "./lib/interrupt-at.ts"
 
 describe("KeyedMutex", () => {
   it.effect("one holder per key; the entry goes once released with nobody waiting", () =>

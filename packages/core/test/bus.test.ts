@@ -7,10 +7,9 @@ import { MachineEvent } from "@vibest/schema/machine-event"
 import { ProcessEvent } from "@vibest/schema/process-event"
 import { ProjectEvent } from "@vibest/schema/project-event"
 import { SessionEvent } from "@vibest/schema/session-event"
+import { memorySqlite } from "@vibest/testkit/bun"
 import { Effect, Exit, Fiber, Layer, PubSub, Stream } from "effect"
 import { SqlClient } from "effect/sql"
-
-import { memorySqlite } from "./platform/bun.ts"
 
 const P = "11111111-1111-4111-8111-111111111111"
 const OTHER_PROJECT = "22222222-2222-4222-8222-222222222222"

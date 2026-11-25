@@ -11,10 +11,6 @@ import { sessionHeaders } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
 import { DaemonHandlers } from "@vibest/server/handlers/daemon"
 import * as Server from "@vibest/server/server"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Schema, type Scope, Stream } from "effect"
-
-import * as Platform from "#platform"
-
 import {
   authed,
   CLAUDE,
@@ -29,8 +25,11 @@ import {
   until,
   untilVirtual,
   writeEnd,
-} from "./lib/fakes.ts"
-import { asEntry } from "./lib/rpc-helpers.ts"
+} from "@vibest/testkit/fakes"
+import { asEntry } from "@vibest/testkit/rpc-helpers"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Schema, type Scope, Stream } from "effect"
+
+import * as Platform from "#platform"
 
 const INSTANCE = "00000000-0000-4000-8000-000000000001"
 

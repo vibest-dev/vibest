@@ -22,7 +22,6 @@
     }
   },
   "exports": {
-    "./test/*": "./test/*.ts",
     "./*": "./src/*.ts"
   },
   "publishConfig": {
@@ -35,7 +34,7 @@
     "build": "bun script/build.ts",
     "pack:npm": "bun script/pack.ts",
     "typecheck": "tsrs --noEmit --fast",
-    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/cli"
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/cli/"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
@@ -52,6 +51,7 @@
     "@vibest/runtime-herdr-core": "workspace:*",
     "@vibest/schema": "workspace:*",
     "@vibest/server": "workspace:*",
+    "@vibest/testkit": "workspace:*",
     "effect": "catalog:"
   }
 }

@@ -1,11 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
+import { memoryPluginHost } from "@vibest/testkit/bun"
+import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "@vibest/testkit/harnesses"
 import { Effect } from "effect"
 
 import { harnessDefaultPlugin } from "../../plugin-builtins/src/harness-default.ts"
 import { Agents } from "../src/agents.ts"
 import { makePlugins } from "../src/plugin.ts"
-import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
-import { memoryPluginHost } from "./platform/bun.ts"
 
 const event = (harness: string | undefined, claude: boolean) => ({
   project: "/r",

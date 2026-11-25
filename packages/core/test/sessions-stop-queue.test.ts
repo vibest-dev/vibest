@@ -1,15 +1,15 @@
 import { assert } from "@effect/vitest"
 import { Concurrency } from "@vibest/core/concurrency"
 import { Starts } from "@vibest/core/session/starts"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { until } from "@vibest/testkit/observe"
+import { makeRepository, PluginHost } from "@vibest/testkit/session"
+import { idleSession, spawnInput, test } from "@vibest/testkit/sessions-helpers"
 import { Effect, Fiber } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import idleStop from "../../plugin-idle-stop/src/index.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until } from "./lib/observe.ts"
-import { makeRepository, PluginHost } from "./lib/session.ts"
-import { idleSession, spawnInput, test } from "./lib/sessions-helpers.ts"
 
 for (const mode of ["direct", "plugin", "failed-close", "waiting"])
   test(

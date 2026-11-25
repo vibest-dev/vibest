@@ -17,6 +17,7 @@
     "@effect/vitest": "catalog:",
     "@oxlint/plugins": "1.90.0",
     "@types/bun": "1.4.2",
+    "@vibest/testkit": "workspace:*",
     "@vibest/tsconfig": "workspace:*",
     "bumpp": "12.3.0",
     "effect": "catalog:",

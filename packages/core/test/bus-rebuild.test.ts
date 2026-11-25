@@ -5,10 +5,9 @@ import { open } from "@vibest/core/database/migration"
 import * as Projectors from "@vibest/core/database/projectors"
 import { ProjectEvent } from "@vibest/schema/project-event"
 import { SessionEvent } from "@vibest/schema/session-event"
+import { memorySqlite } from "@vibest/testkit/bun"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
-
-import { memorySqlite } from "./platform/bun.ts"
 
 const P = "11111111-1111-4111-8111-111111111111"
 const MAIN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"

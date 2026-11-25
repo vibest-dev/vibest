@@ -2,17 +2,17 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Session } from "@vibest/core/session"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { HARNESSES, PULLING_PI } from "@vibest/testkit/harnesses"
+import { until } from "@vibest/testkit/observe"
+import { makeRepository, restartSessions } from "@vibest/testkit/session"
+import { spawnInput, test as plainTest } from "@vibest/testkit/sessions-helpers"
 import { Effect, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { projectOf } from "./lib/directory.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { HARNESSES, PULLING_PI } from "./lib/harnesses.ts"
-import { until } from "./lib/observe.ts"
-import { makeRepository, restartSessions } from "./lib/session.ts"
-import { spawnInput, test as plainTest } from "./lib/sessions-helpers.ts"
 
 const test: typeof plainTest = (name, program, options) =>
   plainTest(name, program, { ...options, harnesses: [...HARNESSES, PULLING_PI] })

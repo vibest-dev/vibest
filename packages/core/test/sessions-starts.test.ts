@@ -8,14 +8,13 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { Session } from "@vibest/core/session"
 import { SessionLaunch } from "@vibest/core/session/entry"
 import { Starts } from "@vibest/core/session/starts"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { settled, until, untilVirtual, writeEnd } from "@vibest/testkit/observe"
+import { makeRepository, restartSessions, type TestOptions } from "@vibest/testkit/session"
+import { entryOfProject, spawnInput, spawnWorking, sqlNotices, test } from "@vibest/testkit/sessions-helpers"
 import { Deferred, Effect, Fiber, PubSub, Ref } from "effect"
 import { SqlClient } from "effect/sql"
-
-import { projectOf } from "./lib/directory.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
-import { makeRepository, restartSessions, type TestOptions } from "./lib/session.ts"
-import { entryOfProject, spawnInput, spawnWorking, sqlNotices, test } from "./lib/sessions-helpers.ts"
 
 const limitTo = (rules: ReadonlyArray<{ readonly max: number }> | undefined) =>
   Effect.flatMap(Concurrency.Service, (c) => c.configure(rules))

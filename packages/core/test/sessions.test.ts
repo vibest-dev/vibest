@@ -6,15 +6,19 @@ import { Integration } from "@vibest/core/integration"
 import { Session } from "@vibest/core/session"
 import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks, terminalLock } from "@vibest/core/session/locks"
-import { Effect, Fiber, Ref } from "effect"
-import { TestClock } from "effect/testing"
-
-import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { projectOf } from "./lib/directory.ts"
-import { FakeGit } from "./lib/fake-git.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { atMostEntryTracked, replyOf, settleEntry, settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeGit } from "@vibest/testkit/fake-git"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import {
+  atMostEntryTracked,
+  replyOf,
+  settleEntry,
+  settled,
+  until,
+  untilVirtual,
+  writeEnd,
+} from "@vibest/testkit/observe"
+import { makeRepository } from "@vibest/testkit/session"
 import {
   entryOfProject,
   idleSession,
@@ -23,7 +27,11 @@ import {
   spawnWorking,
   test,
   sqlNotices,
-} from "./lib/sessions-helpers.ts"
+} from "@vibest/testkit/sessions-helpers"
+import { Effect, Fiber, Ref } from "effect"
+import { TestClock } from "effect/testing"
+
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 
 const entriesAtOneTerminal = Effect.gen(function* () {
   const herdr = yield* FakeRuntime

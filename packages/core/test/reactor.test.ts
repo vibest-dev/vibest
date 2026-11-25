@@ -1,9 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus, TerminalExited } from "@vibest/core/bus"
 import * as Reactor from "@vibest/core/reactor"
+import { memoryBus } from "@vibest/testkit/bun"
 import { Effect, Layer } from "effect"
-
-import { memoryBus } from "./platform/bun.ts"
 
 describe("Reactor", () => {
   it.live("a handler that throws while being built does not end the subscription", () =>

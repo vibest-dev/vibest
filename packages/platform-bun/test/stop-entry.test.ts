@@ -10,11 +10,6 @@ import { SessionLive } from "@vibest/core/session/live"
 import { HARNESS_EXIT_WAIT } from "@vibest/core/session/release"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
-import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
-import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
-
 import {
   authed,
   entryPending,
@@ -29,7 +24,11 @@ import {
   type TestServices,
   until,
   untilVirtual,
-} from "./lib/fakes.ts"
+} from "@vibest/testkit/fakes"
+import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
 
 const refuseRealKills = Effect.gen(function* () {
   const real = process.kill.bind(process)

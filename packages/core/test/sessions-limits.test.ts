@@ -4,14 +4,13 @@ import { harnessIdOf, exitedAt, executionStateOf } from "@vibest/core/database/d
 import { Integration } from "@vibest/core/integration"
 import { Session } from "@vibest/core/session"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { until, writeEnd } from "@vibest/testkit/observe"
+import { makeRepository } from "@vibest/testkit/session"
+import { harnessOf, spawnInput, spawnWorking, sqlNotices, test, limited } from "@vibest/testkit/sessions-helpers"
 import { Effect, HashMap } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
-
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until, writeEnd } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
-import { harnessOf, spawnInput, spawnWorking, sqlNotices, test, limited } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Session", () => {
   test(

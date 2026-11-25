@@ -194,6 +194,9 @@ importers:
       '@types/bun':
         specifier: 1.4.2
         version: 1.4.2
+      '@vibest/testkit':
+        specifier: workspace:*
+        version: link:packages/testkit
       '@vibest/tsconfig':
         specifier: workspace:*
         version: link:tools/tsconfig
@@ -278,6 +281,9 @@ importers:
       '@vibest/server':
         specifier: workspace:*
         version: link:../server
+      '@vibest/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       effect:
         specifier: 4.1.5
         version: 4.1.5
@@ -324,6 +330,9 @@ importers:
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@vibest/runtime-herdr':
+        specifier: workspace:*
+        version: link:../runtime-herdr
 
   packages/harness-agy:
     devDependencies:
@@ -503,6 +512,10 @@ importers:
       effect:
         specifier: 4.1.5
         version: 4.1.5
+    devDependencies:
+      '@vibest/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/plugin-idle-stop:
     dependencies:
@@ -622,8 +635,63 @@ importers:
       effect:
         specifier: 4.1.5
         version: 4.1.5
+    devDependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.1.5(effect@4.1.5)
+      '@vibest/plugin-harnesses':
+        specifier: workspace:*
+        version: link:../plugin-harnesses
+      '@vibest/runtime-herdr':
+        specifier: workspace:*
+        version: link:../runtime-herdr
 
   packages/skills: {}
+
+  packages/testkit:
+    dependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.1.5(effect@4.1.5)
+      '@effect/sql-sqlite-bun':
+        specifier: 'catalog:'
+        version: 4.1.5(effect@4.1.5)
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.1.5(effect@4.1.5)(vitest@5.0.3)
+      '@vibest/client':
+        specifier: workspace:*
+        version: link:../client
+      '@vibest/core':
+        specifier: workspace:*
+        version: link:../core
+      '@vibest/platform-bun':
+        specifier: workspace:*
+        version: link:../platform-bun
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../plugin
+      '@vibest/plugin-builtins':
+        specifier: workspace:*
+        version: link:../plugin-builtins
+      '@vibest/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@vibest/runtime-herdr':
+        specifier: workspace:*
+        version: link:../runtime-herdr
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@vibest/server':
+        specifier: workspace:*
+        version: link:../server
+      '@vibest/util':
+        specifier: workspace:*
+        version: link:../util
+      effect:
+        specifier: 4.1.5
+        version: 4.1.5
 
   packages/util:
     dependencies:
@@ -2896,6 +2964,15 @@ snapshots:
     optionalDependencies:
       vite: 8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.0)
 
+  '@vitest/mocker@5.0.3(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1))':
+    dependencies:
+      '@jridgewell/trace-mapping': 0.3.31
+      '@vitest/spy': 5.0.3
+      estree-walker: 3.0.3
+      magic-string: 1.4.3
+    optionalDependencies:
+      vite: 8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1)
+
   '@vitest/spy@5.0.3': {}
 
   agent-base@7.1.4: {}
@@ -3432,6 +3509,19 @@ snapshots:
       jiti: 2.7.0
       yaml: 2.9.0
 
+  vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1):
+    dependencies:
+      lightningcss: 1.33.0
+      picomatch: 4.0.7
+      postcss: 8.5.30
+      rolldown: 1.2.13
+      tinyglobby: 0.2.17
+    optionalDependencies:
+      '@types/node': 26.6.5
+      fsevents: 2.3.3
+      jiti: 2.7.0
+      yaml: 2.9.1
+
   vitest@5.0.3(@types/node@26.6.5)(@vitest/coverage-v8@5.0.3)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.0)):
     dependencies:
       '@types/chai': 5.2.3
@@ -3447,6 +3537,28 @@ snapshots:
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
       vite: 8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.0)
+      why-is-node-running: 3.2.1
+    optionalDependencies:
+      '@types/node': 26.6.5
+      '@vitest/coverage-v8': 5.0.3(vitest@5.0.3)
+    transitivePeerDependencies:
+      - msw
+
+  vitest@5.0.3(@types/node@26.6.5)(@vitest/coverage-v8@5.0.3)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1)):
+    dependencies:
+      '@types/chai': 5.2.3
+      '@vitest/mocker': 5.0.3(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1))
+      chai: 6.3.0
+      es-module-lexer: 2.3.2
+      expect-type: 1.4.0
+      magic-string: 1.4.3
+      obug: 2.2.1
+      picomatch: 4.0.7
+      std-env: 4.3.0
+      tinybench: 6.2.2
+      tinyexec: 1.3.1
+      tinyglobby: 0.2.17
+      vite: 8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1)
       why-is-node-running: 3.2.1
     optionalDependencies:
       '@types/node': 26.6.5

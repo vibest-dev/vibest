@@ -2,14 +2,11 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
 import { archived, terminalOf, exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
 import { Integration } from "@vibest/core/integration"
-import { Effect, Fiber, FileSystem } from "effect"
-import { TestClock } from "effect/testing"
-
-import { entryPending } from "./lib/directory.ts"
-import { FakeGit } from "./lib/fake-git.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until, untilVirtual, writeEnd } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
+import { entryPending } from "@vibest/testkit/directory"
+import { FakeGit } from "@vibest/testkit/fake-git"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { until, untilVirtual, writeEnd } from "@vibest/testkit/observe"
+import { makeRepository } from "@vibest/testkit/session"
 import {
   claudeEnd,
   spawnWorking,
@@ -18,7 +15,9 @@ import {
   test,
   executionAndSentCounts,
   sqlNotices,
-} from "./lib/sessions-helpers.ts"
+} from "@vibest/testkit/sessions-helpers"
+import { Effect, Fiber, FileSystem } from "effect"
+import { TestClock } from "effect/testing"
 
 describe.concurrent("Session", () => {
   test(

@@ -9,6 +9,12 @@ import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
+import { DaemonBusy, WrongInstance } from "@vibest/protocol/errors"
+import { sessionHeaders } from "@vibest/protocol/protocol"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
+import { readDaemonInfo } from "@vibest/server/daemon"
 import {
   PATH_WITHOUT_HARNESS_CLIS,
   noteRecorded,
@@ -18,13 +24,7 @@ import {
   runVibest,
   stopRecorded,
   tempDirectory,
-} from "@vibest/platform-bun/test/lib/fakes"
-import { DaemonBusy, WrongInstance } from "@vibest/protocol/errors"
-import { sessionHeaders } from "@vibest/protocol/protocol"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Layout, VibestCommand } from "@vibest/schema/layout"
-import { PROTOCOL } from "@vibest/schema/version"
-import { readDaemonInfo } from "@vibest/server/daemon"
+} from "@vibest/testkit/fakes"
 import {
   Cause,
   Duration,

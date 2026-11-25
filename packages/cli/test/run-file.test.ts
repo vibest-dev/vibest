@@ -1,10 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/database/db"
-import { makeRepository, projectOf, runVibest, testLayer } from "@vibest/platform-bun/test/lib/fakes"
 import { Plugin } from "@vibest/plugin/effect"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
+import { makeRepository, projectOf, runVibest, testLayer } from "@vibest/testkit/fakes"
 import { Effect, FileSystem, Layer, Path } from "effect"
 
 import * as Platform from "#platform"
