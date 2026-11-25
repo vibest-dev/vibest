@@ -1,5 +1,5 @@
-import { Context, Effect, Layer, String as Str } from "effect"
-import { SqlClient } from "effect/sql"
+import { Context, Effect, Layer, Predicate, Schedule, String as Str } from "effect"
+import { SqlClient, SqlError } from "effect/sql"
 
 import { Bus } from "../bus.ts"
 import { LayerNode } from "../effect/layer-node.ts"
@@ -39,16 +39,23 @@ const make = Effect.gen(function* () {
 
 export const SQL_NAMES = { transformQueryNames: Str.camelToSnake, transformResultNames: Str.snakeToCamel } as const
 
+const LOCK_RETRY = Schedule.spaced("10 millis").pipe(Schedule.upTo({ duration: "5 seconds" }))
+
+const retryLockTimeout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.retry(effect, {
+    while: (error) => SqlError.isSqlError(error) && Predicate.isTagged(error.reason, "LockTimeoutError"),
+    schedule: LOCK_RETRY,
+  })
+
 export class Service extends Context.Service<Service, Interface>()("vibest/Db") {}
 
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    yield* sql.unsafe("PRAGMA busy_timeout = 5000")
     yield* open()
     yield* sql.unsafe("PRAGMA foreign_keys = ON")
-    yield* sql.unsafe("PRAGMA journal_mode = WAL")
+    yield* retryLockTimeout(sql.unsafe("PRAGMA journal_mode = WAL"))
     yield* sql.unsafe("PRAGMA synchronous = NORMAL")
     yield* sql`UPDATE kv SET value = value WHERE key = ''`
 

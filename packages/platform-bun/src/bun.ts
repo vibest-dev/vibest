@@ -34,13 +34,13 @@ import * as Server from "@vibest/server/server"
 import { UpdateCheck } from "@vibest/server/update-check"
 import * as Ws from "@vibest/server/ws"
 import * as effect from "effect"
-import { Cause, Duration, Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
+import { Cause, Duration, Effect, Layer, Predicate, Schedule, Schema, type Scope, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
 import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, type HttpClient } from "effect/http"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
-import { SqlClient } from "effect/sql"
+import { SqlClient, SqlError } from "effect/sql"
 
 import { layer as hostSample } from "./host-sample.ts"
 import { trimLog } from "./log-file.ts"
@@ -124,10 +124,18 @@ const privateDatabase = (filename: string) =>
     catch: (e) => new DatabaseOpenFailed({ file: filename, message: messageOf(e) }),
   })
 
+const INSPECT_RETRY = Schedule.spaced("10 millis").pipe(Schedule.upTo({ duration: "5 seconds" }))
+
 const inspectFile = (filename: string, known: ReadonlySet<string> = new Set(migrations.map((m) => m.id))) =>
   inspectSchema(known).pipe(
     Effect.provide(sqliteLayer(filename, true)),
     Effect.scoped,
+    Effect.retry({
+      while: (error) =>
+        SqlError.isSqlError(error) &&
+        (Predicate.isTagged(error.reason, "LockTimeoutError") || Predicate.isTagged(error.reason, "ConnectionError")),
+      schedule: INSPECT_RETRY,
+    }),
     Effect.mapError((e) =>
       e instanceof SchemaMismatch
         ? new SchemaMismatch({
