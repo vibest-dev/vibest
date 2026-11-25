@@ -136,11 +136,12 @@ const checks: ReadonlyArray<Check> = [
         const sub = path.join(w.repository, "src")
         await fs.mkdir(sub)
         const out = await w.ok(["--harness", "pi", "--headless"], { cwd: sub, env, timeoutMs: 60_000 })
-        expect(out.includes("the entry session is starting in"), `vibest printed: ${out}`)
+        expect(/^session \S+ is starting in /m.test(out), `vibest printed: ${out}`)
         const socket = socketOf(w, w.herdrSession)
         const { pane } = await piReady(w, "the launched entry session")
         await until("the entry session's row", () => liveEntry(w) !== undefined, 30_000)
         const entry = liveEntry(w)!
+        expect(out.includes(`session ${entry.id} is starting in`), `vibest printed: ${out}`)
         const root = await fs.realpath(w.repository)
         expect(entry.directory === root, `entry session directory ${entry.directory}, not ${root}`)
         const terminal = (JSON.parse(entry.runtime ?? "{}") as { id?: string }).id ?? ""
@@ -374,7 +375,7 @@ const checks: ReadonlyArray<Check> = [
         const env = { PI_CODING_AGENT_DIR: piAgentDir }
         const plain = await w.run(repo, [binary, "--headless"], { env, timeoutMs: 60_000 })
         expect(
-          plain.code === 0 && plain.stdout.includes("the entry session is starting in herdr-core"),
+          plain.code === 0 && /session \S+ is starting in herdr-core/.test(plain.stdout),
           `vibest exited ${plain.code}: ${plain.stdout}${plain.stderr}`,
         )
 

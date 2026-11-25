@@ -486,7 +486,9 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
         const all = await factLines(second)
         expect(
           !all.some((line) =>
-            /^(process\.|terminal\.|runtime\.reset|session\.changed|project\.changed|drain\.)/.test(line),
+            /^(process\.|session\.inbox\.delivering|machine\.connected|remote\.|terminal\.|runtime\.reset|session\.changed|project\.changed|drain\.)/.test(
+              line,
+            ),
           ),
           `internal process facts or signals reached the plugin: ${JSON.stringify(all)}`,
         )

@@ -55,7 +55,7 @@ export const agyWorld = async (w: World, runtime: Runtime, name: string, entry: 
         }
       ).id ?? ""
 
-    return core ? at.slice(0, at.indexOf("@")) : (at.split("/")[1] ?? "")
+    return core ? (at.split("@")[0] ?? "") : (at.split("/")[1] ?? "")
   }
 
   const screen = async (id: string) => {

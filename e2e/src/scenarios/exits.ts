@@ -35,8 +35,9 @@ export const piProject = async (w: World, name: string) => {
     "the entry session's conversation",
     () =>
       q<{ c: string | null }>(
-        `SELECT s.harness_session_id AS c FROM ${SESSIONS} s JOIN project p ON p.entry_session_id = s.id
-          WHERE p.directory = ?`,
+        `SELECT s.harness_session_id AS c FROM ${SESSIONS} s JOIN project p ON p.id = s.project_id
+          WHERE p.directory = ? AND s.parent_session_id IS NULL AND s.ended_at IS NULL
+          ORDER BY s.created_at DESC LIMIT 1`,
         directory,
       )?.c != null,
     60_000,

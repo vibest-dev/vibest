@@ -281,27 +281,23 @@ describe("ledger migration 20261124050000_clean_event_catalog", () => {
         const bus = yield* Bus.Service
         const subscribe = PluginHost.factsFor(bus, "probe")
 
-        assert.isFalse(Object.hasOwn(PublicCatalog, "process.started"))
-        assert.isFalse(Object.hasOwn(PublicCatalog, "process.updated"))
-        assert.isFalse(Object.hasOwn(PublicCatalog, "process.ready"))
-        assert.isFalse(Object.hasOwn(PublicCatalog, "process.ended"))
-        assert.isFalse(Object.hasOwn(PublicCatalog, "session.inbox.delivering"))
-        assert.isFalse(Object.hasOwn(PublicCatalog, "machine.connected"))
-        assert.isFalse(Object.hasOwn(PublicCatalog, "remote.seen"))
-        assert.isFalse(Object.hasOwn(PublicCatalog, "remote.outbox.queued"))
-        assert.isFalse(Object.hasOwn(PublicCatalog, "remote.outbox.acked"))
+        const internal = Object.keys(Catalog).filter((t) => !Object.hasOwn(PublicCatalog, t))
+        assert.deepStrictEqual(internal, [
+          "process.started",
+          "process.updated",
+          "process.ready",
+          "process.ended",
+          "session.inbox.delivering",
+          "machine.connected",
+          "remote.seen",
+          "remote.outbox.queued",
+          "remote.outbox.acked",
+        ])
 
         const fiber = yield* subscribe().pipe(Stream.take(3), Stream.runCollect, Effect.forkScoped)
 
         const explicitFiber = yield* subscribe({
-          types: [
-            "remote.seen" as never,
-            "process.started" as never,
-            "process.updated" as never,
-            "process.ready" as never,
-            "process.ended" as never,
-            "session.created",
-          ],
+          types: [...(internal as Array<never>), "session.created"],
         }).pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped)
 
         yield* Effect.yieldNow
