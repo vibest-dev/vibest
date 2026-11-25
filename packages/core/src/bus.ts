@@ -9,6 +9,7 @@ import {
   type StoredRow,
 } from "@vibest/schema/durable-event-manifest"
 import { Event, InvalidDurableEvent } from "@vibest/schema/event"
+import { McpEvent } from "@vibest/schema/mcp-event"
 import { TerminalTarget } from "@vibest/schema/terminal"
 import { LayerNode } from "@vibest/util/layer-node"
 import {
@@ -102,6 +103,10 @@ export const EphemeralDefinitions = Event.inventory(
   DrainReleased,
   SessionChanged,
   ProjectChanged,
+  McpEvent.StatusChanged,
+  McpEvent.ToolsChanged,
+  McpEvent.ResourcesChanged,
+  McpEvent.EventReceived,
 )
 
 export type AnyEphemeralDefinition = (typeof EphemeralDefinitions)[number]

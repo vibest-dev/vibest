@@ -6,6 +6,7 @@ import { Harnesses } from "@vibest/core/harness/registry"
 import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import { Inbox } from "@vibest/core/inbox"
 import { InboxStore } from "@vibest/core/inbox/store"
+import { Mcp } from "@vibest/core/mcp"
 import { Plugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { RepositoryUrl } from "@vibest/core/project/repository-url"
@@ -57,6 +58,7 @@ export const services = LayerNode.group([
   Inbox.node,
   Subscriptions.node,
   Plugins.node,
+  Mcp.node,
   RepositoryUrl.node,
   Git.node,
   SessionLocks.node,

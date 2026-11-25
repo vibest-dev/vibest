@@ -1,3 +1,4 @@
+import { Mcp } from "@vibest/schema/mcp"
 import { ProjectKind } from "@vibest/schema/project"
 import { Argument, Flag } from "effect/cli"
 
@@ -505,6 +506,125 @@ const machine = Spec.make("machine", {
   ],
 })
 
+const mcp = Spec.make("mcp", {
+  description: "Manage MCP servers, tools, events, OAuth credentials, and compiled SKILL.md indexes",
+  commands: [
+    Spec.make("list", {
+      alias: "ls",
+      description: "List configured MCP servers and their status as JSON",
+    }),
+    Spec.make("add", {
+      description: "Add or update a local or remote MCP server in ~/.vibest/mcp.json",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+        url: Flag.String("url").pipe(Flag.withDescription("Remote MCP server URL"), Flag.optional),
+        command: Flag.String("command").pipe(
+          Flag.withDescription("Local MCP server command and arguments (repeat for each arg)"),
+          Flag.atLeast(0),
+        ),
+        cwd: Flag.String("cwd").pipe(Flag.withDescription("Working directory for a local MCP server"), Flag.optional),
+        exposure: Flag.Literals("exposure", Mcp.ExposureMode.literals).pipe(
+          Flag.withDescription("Tool exposure mode: skill, router, or direct (default skill)"),
+          Flag.optional,
+        ),
+        bearerToken: Flag.String("bearer-token").pipe(
+          Flag.withDescription("Bearer token or !command for a remote MCP server"),
+          Flag.optional,
+        ),
+        idleTimeout: Flag.Int("idle-timeout").pipe(
+          Flag.withDescription("Idle timeout in milliseconds before scale-to-zero eviction"),
+          Flag.optional,
+        ),
+      },
+    }),
+    Spec.make("remove", {
+      alias: "rm",
+      description: "Remove a configured MCP server and stop its connection",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+      },
+    }),
+    Spec.make("search", {
+      description: "Search cached MCP tools across all configured servers",
+      params: {
+        query: Argument.String("query").pipe(Argument.withDescription("Search text")),
+      },
+    }),
+    Spec.make("describe", {
+      description: "Show full metadata and TypeScript signature for one MCP tool",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+        tool: Argument.String("tool").pipe(Argument.withDescription("Tool name")),
+      },
+    }),
+    Spec.make("call", {
+      description: "Invoke an MCP tool with optional JSON object arguments",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+        tool: Argument.String("tool").pipe(Argument.withDescription("Tool name")),
+        json: Argument.String("json").pipe(
+          Argument.withDescription("JSON object of tool arguments"),
+          Argument.optional,
+        ),
+      },
+    }),
+    Spec.make("events", {
+      description: "List SEP-3415 event types advertised by an MCP server",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+      },
+    }),
+    Spec.make("sync-skills", {
+      description: "Compile SKILL.md indexes for MCP servers with skill exposure",
+      params: {
+        project: Flag.String("project").pipe(
+          Flag.withDescription("Project directory to write .agents/skills/mcp-*/SKILL.md into"),
+          Flag.optional,
+        ),
+      },
+    }),
+    Spec.make("auth", {
+      description: "Manage OAuth and static token credentials for remote MCP servers",
+      commands: [
+        Spec.make("start", {
+          description: "Start an OAuth 2.1 PKCE login flow for a remote MCP server",
+          params: {
+            server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+          },
+        }),
+        Spec.make("complete", {
+          description: "Complete a pending OAuth flow by pasting the callback URL or authorization code",
+          params: {
+            server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+            redirect: Argument.String("redirect-url-or-code").pipe(
+              Argument.withDescription("Full callback URL or authorization code"),
+            ),
+            state: Flag.String("state").pipe(
+              Flag.withDescription("Explicit OAuth state when passing only the code"),
+              Flag.optional,
+            ),
+          },
+        }),
+        Spec.make("set-token", {
+          description: "Store an access token in the encrypted MCP credential vault",
+          params: {
+            server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+            token: Argument.String("token").pipe(Argument.withDescription("Access token")),
+            refreshToken: Flag.String("refresh-token").pipe(Flag.optional),
+            scope: Flag.String("scope").pipe(Flag.optional),
+          },
+        }),
+        Spec.make("logout", {
+          description: "Remove stored OAuth credentials for a remote MCP server",
+          params: {
+            server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+          },
+        }),
+      ],
+    }),
+  ],
+})
+
 export const Commands = Spec.make("vibest", {
   description: "In a project directory, open its entry session in this terminal. --new starts a new conversation",
   params: entryFlags,
@@ -527,6 +647,7 @@ export const Commands = Spec.make("vibest", {
     project,
     worktree,
     plugins,
+    mcp,
     subscriptions,
     onboard,
     doctor,

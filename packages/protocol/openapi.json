@@ -17,7 +17,8 @@
     "load": true,
     "agents": true,
     "worktrees": true,
-    "stop": true
+    "stop": true,
+    "mcp": true
   },
   "access": {
     "daemon.ping": [
@@ -102,6 +103,21 @@
     ],
     "runtime.doctor": "open",
     "plugin.list": "open",
+    "mcp.list": "open",
+    "mcp.add": "open",
+    "mcp.remove": "open",
+    "mcp.connect": "open",
+    "mcp.disconnect": "open",
+    "mcp.tools": "open",
+    "mcp.search": "open",
+    "mcp.describe": "open",
+    "mcp.call": "open",
+    "mcp.events": "open",
+    "mcp.syncSkills": "open",
+    "mcp.authStart": "open",
+    "mcp.authComplete": "open",
+    "mcp.authSetToken": "open",
+    "mcp.authLogout": "open",
     "subscription.list": "open",
     "machine.list": "cli",
     "machine.add": "cli",
@@ -8603,6 +8619,1225 @@
           "summary": "List loaded plugins"
         }
       },
+      "/api/mcp": {
+        "get": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.list",
+          "parameters": [
+            {
+              "name": "directory",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "Success",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/McpServerInfo"
+                    }
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "List configured MCP servers"
+        }
+      },
+      "/api/mcp/{server}": {
+        "put": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.add",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "McpServerInfo",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpServerInfo"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "McpConfigError | InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpConfigErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Add or update an MCP server",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerConfig"
+                }
+              }
+            },
+            "required": true
+          }
+        },
+        "delete": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.remove",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "<No Content>"
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Remove an MCP server"
+        }
+      },
+      "/api/mcp/{server}/connect": {
+        "post": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.connect",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "McpServerInfo",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpServerInfo"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Connect an MCP server",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "directory": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": true
+          }
+        }
+      },
+      "/api/mcp/{server}/disconnect": {
+        "post": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.disconnect",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "<No Content>"
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Disconnect an MCP server"
+        }
+      },
+      "/api/mcp/tools": {
+        "get": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.tools",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            },
+            {
+              "name": "directory",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "Success",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/McpToolInfo"
+                    }
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "List MCP tools"
+        }
+      },
+      "/api/mcp/search": {
+        "get": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.search",
+          "parameters": [
+            {
+              "name": "q",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "directory",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "Success",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/McpToolInfo"
+                    }
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Search MCP tools"
+        }
+      },
+      "/api/mcp/{server}/tools/{tool}": {
+        "get": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.describe",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "tool",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "directory",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "McpToolInfo",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpToolInfo"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | McpToolNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/McpToolNotFoundErrorEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Describe an MCP tool"
+        }
+      },
+      "/api/mcp/{server}/tools/{tool}/call": {
+        "post": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.call",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "tool",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "McpCallResult",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpCallResult"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "McpAuthError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpAuthErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            },
+            "502": {
+              "description": "McpToolCallError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpToolCallErrorEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Call an MCP tool",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "arguments": {
+                      "anyOf": [
+                        {
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "directory": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxBytes": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "Infinity",
+                            "-Infinity",
+                            "NaN"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "scratchpadDir": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": true
+          }
+        }
+      },
+      "/api/mcp/{server}/events": {
+        "get": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.events",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "directory",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "Success",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/McpEventType"
+                    }
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            },
+            "502": {
+              "description": "McpToolCallError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpToolCallErrorEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "List MCP server event types"
+        }
+      },
+      "/api/mcp/sync-skills": {
+        "post": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.syncSkills",
+          "parameters": [],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "McpSkillSyncResult",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpSkillSyncResult"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Sync MCP SKILL.md files",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "projectDir": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            },
+            "required": true
+          }
+        }
+      },
+      "/api/mcp/{server}/auth/start": {
+        "post": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.authStart",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "McpAuthStartResult",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpAuthStartResult"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "McpAuthError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpAuthErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Start MCP OAuth flow"
+        }
+      },
+      "/api/mcp/{server}/auth/complete": {
+        "post": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.authComplete",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "McpAuthCompleteResult",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpAuthCompleteResult"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "McpAuthError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpAuthErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Complete MCP OAuth flow",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "redirectUrlOrCode": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "redirectUrlOrCode"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": true
+          }
+        }
+      },
+      "/api/mcp/{server}/auth/token": {
+        "post": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.authSetToken",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "McpAuthCompleteResult",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpAuthCompleteResult"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "McpAuthError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpAuthErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Set static MCP token",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accessToken": {
+                      "type": "string"
+                    },
+                    "refreshToken": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "expiresAt": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "Infinity",
+                            "-Infinity",
+                            "NaN"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "scope": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "accessToken"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": true
+          }
+        }
+      },
+      "/api/mcp/{server}/auth": {
+        "delete": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.authLogout",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "<No Content>"
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "McpAuthError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpAuthErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Remove MCP OAuth credentials"
+        }
+      },
       "/api/subscription": {
         "get": {
           "tags": [
@@ -13506,6 +14741,1259 @@
           ],
           "additionalProperties": false
         },
+        "McpAuthErrorEncoded": {
+          "type": "object",
+          "properties": {
+            "_tag": {
+              "type": "string",
+              "enum": [
+                "McpAuthError"
+              ]
+            },
+            "server": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "requiredScope": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "_tag",
+            "server",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "McpNotFoundErrorEncoded": {
+          "type": "object",
+          "properties": {
+            "_tag": {
+              "type": "string",
+              "enum": [
+                "McpNotFoundError"
+              ]
+            },
+            "server": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "_tag",
+            "server",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "McpAuthCompleteResult": {
+          "type": "object",
+          "properties": {
+            "server": {
+              "$ref": "#/components/schemas/McpServerName"
+            },
+            "authenticated": {
+              "type": "boolean"
+            },
+            "scope": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "expiresAt": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "server",
+            "authenticated"
+          ],
+          "additionalProperties": false
+        },
+        "McpServerName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "McpAuthStartResult": {
+          "type": "object",
+          "properties": {
+            "server": {
+              "$ref": "#/components/schemas/McpServerName"
+            },
+            "authorizationUrl": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            },
+            "callbackUrl": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "server",
+            "authorizationUrl",
+            "state",
+            "expiresAt"
+          ],
+          "additionalProperties": false
+        },
+        "McpSkillSyncResult": {
+          "type": "object",
+          "properties": {
+            "synced": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/McpSkillSyncEntry"
+              }
+            },
+            "removed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "synced",
+            "removed"
+          ],
+          "additionalProperties": false
+        },
+        "McpSkillSyncEntry": {
+          "type": "object",
+          "properties": {
+            "server": {
+              "$ref": "#/components/schemas/McpServerName"
+            },
+            "skillPath": {
+              "type": "string"
+            },
+            "toolCount": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "server",
+            "skillPath",
+            "toolCount"
+          ],
+          "additionalProperties": false
+        },
+        "McpToolCallErrorEncoded": {
+          "type": "object",
+          "properties": {
+            "_tag": {
+              "type": "string",
+              "enum": [
+                "McpToolCallError"
+              ]
+            },
+            "server": {
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "_tag",
+            "server",
+            "tool",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "McpEventType": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "delivery": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "inputSchema": {
+              "anyOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "payloadSchema": {
+              "anyOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "McpCallResult": {
+          "type": "object",
+          "properties": {
+            "isError": {
+              "type": "boolean"
+            },
+            "structured": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "content": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/McpCallContent"
+              }
+            },
+            "truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "outputFile": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "isError",
+            "content"
+          ],
+          "additionalProperties": false
+        },
+        "McpCallContent": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/McpCallContentText"
+            },
+            {
+              "$ref": "#/components/schemas/McpCallContentMedia"
+            }
+          ]
+        },
+        "McpCallContentMedia": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "media"
+              ]
+            },
+            "data": {
+              "type": "string"
+            },
+            "mimeType": {
+              "type": "string"
+            },
+            "uri": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "data",
+            "mimeType"
+          ],
+          "additionalProperties": false
+        },
+        "McpCallContentText": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "text"
+              ]
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "McpToolNotFoundErrorEncoded": {
+          "type": "object",
+          "properties": {
+            "_tag": {
+              "type": "string",
+              "enum": [
+                "McpToolNotFoundError"
+              ]
+            },
+            "server": {
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "_tag",
+            "server",
+            "tool",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "McpToolInfo": {
+          "type": "object",
+          "properties": {
+            "server": {
+              "$ref": "#/components/schemas/McpServerName"
+            },
+            "name": {
+              "type": "string"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "signature": {
+              "type": "string"
+            },
+            "inputSchema": {
+              "type": "object"
+            },
+            "outputSchema": {
+              "anyOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "annotations": {
+              "anyOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "server",
+            "name",
+            "signature",
+            "inputSchema"
+          ],
+          "additionalProperties": false
+        },
+        "McpServerInfo": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "$ref": "#/components/schemas/McpServerName"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "local",
+                "remote"
+              ]
+            },
+            "exposure": {
+              "$ref": "#/components/schemas/McpExposureMode"
+            },
+            "status": {
+              "$ref": "#/components/schemas/McpStatus"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "instructions": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "toolCount": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            },
+            "pooled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "disabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "command": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "type",
+            "exposure",
+            "status",
+            "toolCount"
+          ],
+          "additionalProperties": false
+        },
+        "McpStatus": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/McpStatusConnected"
+            },
+            {
+              "$ref": "#/components/schemas/McpStatusPending"
+            },
+            {
+              "$ref": "#/components/schemas/McpStatusIdle"
+            },
+            {
+              "$ref": "#/components/schemas/McpStatusDisabled"
+            },
+            {
+              "$ref": "#/components/schemas/McpStatusFailed"
+            },
+            {
+              "$ref": "#/components/schemas/McpStatusNeedsAuth"
+            }
+          ]
+        },
+        "McpStatusNeedsAuth": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "needs_auth"
+              ]
+            },
+            "error": {
+              "type": "string"
+            },
+            "requiredScope": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "error"
+          ],
+          "additionalProperties": false
+        },
+        "McpStatusFailed": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "failed"
+              ]
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "error"
+          ],
+          "additionalProperties": false
+        },
+        "McpStatusDisabled": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "disabled"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "McpStatusIdle": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "idle"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "McpStatusPending": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "pending"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "McpStatusConnected": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "connected"
+              ]
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "McpExposureMode": {
+          "type": "string",
+          "enum": [
+            "skill",
+            "router",
+            "direct"
+          ]
+        },
+        "McpConfigErrorEncoded": {
+          "type": "object",
+          "properties": {
+            "_tag": {
+              "type": "string",
+              "enum": [
+                "McpConfigError"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "_tag",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "McpServerConfig": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/McpLocalServerConfig"
+            },
+            {
+              "$ref": "#/components/schemas/McpRemoteServerConfig"
+            }
+          ]
+        },
+        "McpRemoteServerConfig": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "remote"
+              ]
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "headers": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "bearerToken": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "oauth": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/McpOAuthConfig"
+                },
+                {
+                  "type": "boolean",
+                  "enum": [
+                    false
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "disabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exposure": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/McpExposureMode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "idleTimeoutMs": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "pool": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "codemode": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "includeTools": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "excludeTools": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "protocol": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/McpProtocol"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timeout": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/McpTimeoutConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        "McpTimeoutConfig": {
+          "type": "object",
+          "properties": {
+            "startup": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "catalog": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "execution": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "McpProtocol": {
+          "type": "string",
+          "enum": [
+            "legacy",
+            "auto",
+            "2026-07-28"
+          ]
+        },
+        "McpOAuthConfig": {
+          "type": "object",
+          "properties": {
+            "clientId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "clientSecret": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "clientMetadataUrl": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scope": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "callbackPort": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "redirectUri": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "authServerMetadataUrl": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "authorizationParams": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "skipIssuerValidation": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "McpLocalServerConfig": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "local"
+              ]
+            },
+            "command": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "environment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "disabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exposure": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/McpExposureMode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "idleTimeoutMs": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "pool": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "codemode": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "includeTools": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "excludeTools": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "protocol": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/McpProtocol"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timeout": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/McpTimeoutConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "command"
+          ],
+          "additionalProperties": false
+        },
         "NoSuchProjectEncoded": {
           "type": "object",
           "properties": {
@@ -13742,6 +16230,9 @@
       },
       {
         "name": "plugin"
+      },
+      {
+        "name": "mcp"
       },
       {
         "name": "subscription"

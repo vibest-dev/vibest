@@ -10,6 +10,7 @@ import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import { Identity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
 import { InboxStore } from "@vibest/core/inbox/store"
+import { Mcp } from "@vibest/core/mcp"
 import { Plugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { RepositoryUrl } from "@vibest/core/project/repository-url"
@@ -40,6 +41,7 @@ import { HarnessHandler } from "./handlers/harness.ts"
 import { HookHandler } from "./handlers/hook.ts"
 import { InboxHandler } from "./handlers/inbox.ts"
 import { MachineHandler } from "./handlers/machine.ts"
+import { McpHandler } from "./handlers/mcp.ts"
 import { PluginHandler } from "./handlers/plugin.ts"
 import { ProjectHandler } from "./handlers/project.ts"
 import { RemoteHandler, routingLayer } from "./handlers/remote.ts"
@@ -75,6 +77,7 @@ export const handlersCore = Layer.mergeAll(
   HarnessHandler,
   RuntimeHandler,
   PluginHandler,
+  McpHandler,
   SubscriptionHandler,
   MachineHandler,
   RemoteHandler,
@@ -138,6 +141,7 @@ export const handlerDeps = [
   RemoteWatch.node,
   Inbound.node,
   Plugins.node,
+  Mcp.node,
   Processes.node,
   Project.node,
   Remote.node,

@@ -882,6 +882,7 @@ describe("vibest.sock", () => {
       assert.strictEqual((yield* sessionStore.getSession(id))!.process?.pid, 4242)
 
       yield* withHeaders(bare["server.plugin"]["plugin.list"]({}), protocolHeaders())
+      assert.isArray(yield* withHeaders(bare["server.mcp"]["mcp.list"]({ query: {} }), protocolHeaders()))
       yield* withHeaders(bare["server.daemon"]["daemon.concurrency"]({}), protocolHeaders())
       assert.isArray(
         yield* withHeaders(
@@ -912,6 +913,7 @@ describe("vibest.sock", () => {
         ...protectedCalls(bare).map(([method]) => method),
         "daemon.ping",
         "plugin.list",
+        ...Object.keys(VibestApi.groups["server.mcp"].endpoints),
         "daemon.concurrency",
         "harness.list",
         "agent.list",
