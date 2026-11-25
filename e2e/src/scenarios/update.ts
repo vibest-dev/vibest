@@ -81,7 +81,17 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
   const dir = path.join(share, "versions", version)
   const bin = path.join(dir, "bin", "vibest")
   await fs.mkdir(path.dirname(bin), { recursive: true })
-  const bytes = Buffer.from(await fs.readFile(compiled))
+
+  const built = await w.run(path.join(checkout, "packages", "cli"), [
+    "bun",
+    "scripts/build.ts",
+    bin,
+    `bun-${process.platform}-${process.arch}`,
+    "--no-bytecode",
+  ])
+
+  expect(built.code === 0, `olderVibest build exited ${built.code}: ${out(built)}`)
+  const bytes = Buffer.from(await fs.readFile(bin))
   olderProtocol(bytes, protocol)
   olderVersion(bytes, version)
   await fs.writeFile(bin, bytes, { mode: 0o755 })
