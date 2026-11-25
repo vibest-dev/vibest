@@ -5,8 +5,8 @@ Each repository (or directory of repositories) is a Project with its own folder 
 `pipeline` plans, UI mockups, diagrams, acceptance reports, explicit user-requested reports). Each Project also gets a
 shared temporary scratchpad (`VIBEST_SCRATCHPAD_DIR`, under `<os.tmpdir()>/vibest-<uid>/<project-id>/scratchpad`,
 left in OS temp after `vibest archive` so parent agents and users can still inspect it) for temporary agent-to-agent
-handoffs, `--file` briefs, review notes, repro scripts, and scratch files (prefixed with each session's 8-char id so
-parallel sessions never collide). Each capability below says what it is and when it counts as working.
+handoffs, `--file` briefs, review notes, repro scripts, and scratch files. Each capability below says what it is and
+when it counts as working.
 
 ## P1. Project info
 
