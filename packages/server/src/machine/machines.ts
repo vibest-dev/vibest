@@ -2,8 +2,6 @@ import { withHeaders } from "@vibest/client/client"
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
 import { Db } from "@vibest/core/database/db"
 import type { MachineRow } from "@vibest/core/database/remote"
-import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
 import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibest/core/plugin"
 import { Runtimes } from "@vibest/core/runtimes"
@@ -27,6 +25,8 @@ import {
 } from "@vibest/schema/machine"
 import type { Terminal, TerminalTarget } from "@vibest/schema/terminal"
 import { PROTOCOL } from "@vibest/schema/version"
+import { KeyedMutex } from "@vibest/util/keyed-mutex"
+import { LayerNode } from "@vibest/util/layer-node"
 import {
   Cause,
   Clock,

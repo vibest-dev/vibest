@@ -1,6 +1,6 @@
 # HttpApi, Transport, and Naming
 
-1. **Single Contract and Transport**: one `HttpApi.make("server")` (`effect/http-api`) in `@vibest/protocol`, served on `~/.vibest/vibest.sock` (`0600`) for all local CLI commands, `@vibest/client`, harness integrations (`claude`, `pi`, `cursor`, `agy`), and `vibest connect` SSH tunnels, plus the `vibest-token`-authenticated loopback `127.0.0.1:<port>` listener for local UI (`Origin` rejected with `403`, `UI_CALLS` gated). Zero second Unix socket and zero custom JSON-RPC / NDJSON-RPC server.
+1. **Single Contract and Transport**: one `HttpApi.make("server")` (`effect/http-api`) in `@vibest/protocol` (OpenAPI spec at `packages/protocol/openapi.json`, regenerated via `pnpm --filter @vibest/protocol contract`), served on `~/.vibest/vibest.sock` (`0600`) for all local CLI commands, `@vibest/client`, harness integrations (`claude`, `pi`, `cursor`, `agy`), and `vibest connect` SSH tunnels, plus the `vibest-token`-authenticated loopback `127.0.0.1:<port>` listener for local UI (`Origin` rejected with `403`, `UI_CALLS` gated). Zero second Unix socket and zero custom JSON-RPC / NDJSON-RPC server.
 2. **One-Domain-One-File Decomposition**: `packages/protocol/src/groups/<domain>.ts` pairs 1:1 with `packages/server/src/handlers/<domain>.ts` (`daemon`, `project`, `session`, `inbox`, `hook`, `worktree`, `agent`, `harness`, `runtime`, `plugin`, `subscription`, `machine`, `remote`, `event`, `watch`).
 3. **Naming Convention**:
    - Group identifier: `"server.<domain>"` (singular lowercase noun).

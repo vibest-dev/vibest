@@ -1,4 +1,5 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
+import type { Frame, HerdrFailure, HerdrClient, results } from "@vibest/herdr-sdk"
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { typedLine } from "@vibest/plugin/effect/launch"
@@ -17,7 +18,6 @@ import {
   Stream,
 } from "effect"
 import type { FileSystem } from "effect"
-import type { Frame, HerdrFailure, HerdrClient, results } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import type { HerdrPool } from "./pool.ts"

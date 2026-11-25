@@ -1,8 +1,8 @@
 import { Host } from "@vibest/plugin/host"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Duration, Effect, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 
 export * as RepositoryUrl from "./repository-url.ts"

@@ -1,12 +1,12 @@
 import { sessionLabel } from "@vibest/schema/id"
 import { NotReady } from "@vibest/schema/session"
 import { canonicalTarget } from "@vibest/schema/terminal"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, Ref, Schedule, Schema } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type BusEvent, TerminalExited } from "../bus.ts"
 import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harnesses.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
 import {

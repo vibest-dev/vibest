@@ -8,7 +8,7 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast"
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.core.json"
   },
   "dependencies": {
     "@vibest/protocol": "workspace:*",

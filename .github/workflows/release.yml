@@ -88,7 +88,7 @@ env:
   CURSOR_VERSION: 2026.11.05-86047df
   # Every workspace package moves together: workspace:* resolves to it, and the binary and plugins embed it. A run sets
   # the release version in each, in its own checkout.
-  VERSIONED: packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json
+  VERSIONED: packages/*/package.json tools/tsconfig/package.json tools/verify/package.json
 
 jobs:
   # Decides the commit and the version every other job builds, verifies, tags and publishes. It changes nothing.

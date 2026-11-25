@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { commands } from "@vibest/builtins"
 import * as Logging from "@vibest/client/logging"
+import { commands } from "@vibest/plugin-builtins"
 import { EmbeddedHarnesses, Layout, VibestCommand } from "@vibest/schema/layout"
 import { Effect } from "effect"
 

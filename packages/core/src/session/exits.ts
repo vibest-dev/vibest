@@ -1,4 +1,5 @@
 import { sessionLabel } from "@vibest/schema/id"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
 
 import {
@@ -11,7 +12,6 @@ import {
   executionStateOf,
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 import { Inbox } from "../inbox.ts"
 import { paneTail, type Runtime } from "../runtimes.ts"
 import { Archive } from "./archive.ts"

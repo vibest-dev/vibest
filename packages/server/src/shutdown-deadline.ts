@@ -1,5 +1,5 @@
 import { SHUTDOWN_DEADLINE, SHUTDOWN_FLUSH } from "@vibest/client/client"
-import type { Releases } from "@vibest/core/effect/layer-node"
+import type { Releases } from "@vibest/util/layer-node"
 import { Console, Deferred, Duration, Effect, Fiber, type Scope } from "effect"
 
 export interface ShutdownHost {

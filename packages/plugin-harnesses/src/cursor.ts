@@ -3,7 +3,7 @@ import { Effect, FileSystem, Path, Predicate } from "effect"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 import { noProvider, opt } from "./models.ts"
-import { nodePlatform } from "./node-platform.ts"
+import { nodePlatform } from "./platform.node.ts"
 import { cursorSubscription } from "./subscriptions/cursor.ts"
 
 export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {

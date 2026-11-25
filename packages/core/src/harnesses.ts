@@ -1,7 +1,7 @@
 import { addPluginHint, HarnessUnavailable } from "@vibest/schema/session"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
 
-import { LayerNode } from "./effect/layer-node.ts"
 import type { HarnessDefinition, HarnessesDomain } from "./plugin/domains.ts"
 import * as Registry from "./plugin/registry.ts"
 

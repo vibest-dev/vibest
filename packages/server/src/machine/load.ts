@@ -1,6 +1,6 @@
 import { Db } from "@vibest/core/database/db"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import type { MachineLoad } from "@vibest/schema/machine"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Cache, Clock, Context, Duration, Effect, Layer } from "effect"
 
 export * as Load from "./load.ts"

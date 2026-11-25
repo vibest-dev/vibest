@@ -1,6 +1,5 @@
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer, Option, Predicate, type Schema, Stream, SubscriptionRef } from "effect"
-
-import { LayerNode } from "./effect/layer-node.ts"
 
 export * as Concurrency from "./concurrency.ts"
 

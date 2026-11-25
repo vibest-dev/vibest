@@ -1,7 +1,7 @@
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Deferred, Effect, Layer } from "effect"
 
 import { Bus, DrainReleased } from "./bus.ts"
-import { LayerNode } from "./effect/layer-node.ts"
 
 export * as Drain from "./drain.ts"
 

@@ -23,7 +23,7 @@ Status: rules 1, 2, 7 and 8 hold on main: every service module in core, server a
 - Rule 4: `MachineTransport` (`server/src/machine/machines.ts`) and `ShutdownHost.onSignals` (`server/src/shutdown-deadline.ts`) require `Scope` in their type; `plugin/sources.ts` captures `Effect.context` for `Effect.runFork` in watch callbacks, and `server/src/shutdown-deadline.ts` does the same with `Effect.runForkWith`.
 - Rule 5: `MachineTransport` fails with a plain `Error`, which `platform-bun/src/bun.ts` builds in its transport; `SystemPromptDirUnsafe` (`system-prompt.ts`) and `AgentOwnLimit` (`session/placement.ts`) are `Data.TaggedError`s, not `Schema.TaggedError`s.
 - Rule 9: `server/src/listing.ts` (`sessionListing`) takes a dependency bag (`{ db, sessions, runtimes }`).
-- Rule 10: `effect/bounded.ts` detaches the interrupt of a late fiber (`Effect.forkDetach`).
+- Rule 10: `@vibest/util/bounded` detaches the interrupt of a late fiber (`Effect.forkDetach`).
 - Rule 11: `server/src/handlers/session.ts` keeps a per-session lock (`seenLocked`).
 - Rule 12: `database/session-statements.ts` runs after-commit effects with `Effect.runSync`; `plugin/sources.ts` and `server/src/shutdown-deadline.ts` fork from callbacks (rule 4).
 - Rule 13: `session/restart.ts`, `session/placement.ts` (`launch`), `runtimes.ts` (`runtimesHere`) and `server/src/machine/machines.ts` (`ensure`) catch every cause, pure interrupts included, outside a supervision point; the supervision wrappers `reactor.ts` (`logFailure`) and `plugin/supervisor.ts` (the first activation) end a pure interrupt quietly instead of passing it on, and `session/delivery.ts` (`undeliverable`) returns on one.

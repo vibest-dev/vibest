@@ -10,6 +10,7 @@ import {
 } from "@vibest/schema/durable-event-manifest"
 import { Event, InvalidDurableEvent } from "@vibest/schema/event"
 import { TerminalTarget } from "@vibest/schema/terminal"
+import { LayerNode } from "@vibest/util/layer-node"
 import {
   Clock,
   Context,
@@ -27,7 +28,6 @@ import {
 import { SqlClient, type SqlError } from "effect/sql"
 
 import { LOG_SCHEMA, MIGRATION_TABLE, PROJECTION_SCHEMA, PROJECTION_TABLES } from "./database/db-schema.ts"
-import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 
 export * as Bus from "./bus.ts"

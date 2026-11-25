@@ -1,5 +1,7 @@
 import { BunServices, BunSocketServer } from "@effect/platform-bun"
 import { assert, describe, it } from "@effect/vitest"
+import { Hc, SocketConnector } from "@vibest/herdr-core-sdk"
+import * as HcBun from "@vibest/herdr-core-sdk/bun"
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import {
   Cause,
@@ -16,8 +18,6 @@ import {
   type Scope,
   Stream,
 } from "effect"
-import { Hc, SocketConnector } from "effect-herdr-core-sdk"
-import * as HcBun from "effect-herdr-core-sdk/bun"
 import * as Socket from "effect/socket/Socket"
 
 import { hcTerminal, LABEL, TYPED_LAUNCH_MS, make } from "../src/terminal-runtime.ts"

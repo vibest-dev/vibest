@@ -1,9 +1,9 @@
 import { Host } from "@vibest/plugin/host"
 import { NotInRepository } from "@vibest/schema/session"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, Semaphore, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 import { parseRemote, projectRemotes, rankedRemotes } from "./repository-url.ts"
 

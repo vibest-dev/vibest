@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import type { HerdrClient } from "@vibest/herdr-sdk"
 import type { MachineEvent, MachineNote } from "@vibest/plugin/effect"
 import { type Cli, link, locate, type Profile } from "@vibest/runtime-herdr/machines"
 import * as Mirror from "@vibest/runtime-herdr/mirror"
@@ -6,7 +7,6 @@ import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import { agentName, fromPool, type HerdrTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Fiber, Stream } from "effect"
-import type { HerdrClient } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 

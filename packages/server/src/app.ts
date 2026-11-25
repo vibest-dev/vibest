@@ -1,5 +1,5 @@
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
+import { LayerNode } from "@vibest/util/layer-node"
 
 import * as Server from "./server.ts"
 import { services } from "./services.ts"

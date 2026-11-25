@@ -1,0 +1,6 @@
+{
+  "extends": "@vibest/tsconfig/base.json",
+  "compilerOptions": { "types": [], "customConditions": [] },
+  "include": ["src", "../core/types"],
+  "exclude": ["src/*.node.ts"]
+}

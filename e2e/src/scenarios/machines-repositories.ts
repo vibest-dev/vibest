@@ -46,7 +46,7 @@ const beforeRepositoryLists = async (w: World) => {
 
   const built = await w.run(path.join(checkout, "packages", "cli"), [
     process.execPath,
-    "scripts/build.ts",
+    "script/build.ts",
     bin,
     `bun-${process.platform}-${process.arch}`,
     "--no-bytecode",

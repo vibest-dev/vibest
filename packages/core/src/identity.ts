@@ -1,8 +1,8 @@
 import { ID, randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Duration, Effect, FileSystem, Layer, Option, Schema } from "effect"
 
-import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 
 export * as Identity from "./identity.ts"

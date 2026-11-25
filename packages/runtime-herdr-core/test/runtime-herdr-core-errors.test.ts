@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
+import { type HcClient, HcCoreTooOld, HcError, HcTransportError, type api } from "@vibest/herdr-core-sdk"
 import { Effect, Ref, Stream } from "effect"
-import { type HcClient, HcCoreTooOld, HcError, HcTransportError, type api } from "effect-herdr-core-sdk"
 import { TestClock } from "effect/testing"
 
 import { FOLLOW_ATTEMPTS, failure, hcTerminal, make } from "../src/terminal-runtime.ts"

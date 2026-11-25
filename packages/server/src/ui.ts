@@ -1,5 +1,4 @@
 import { App } from "@vibest/core/app"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PluginLoader, pluginLoaderNode } from "@vibest/core/plugin"
 import { UI_CALLS } from "@vibest/protocol/access"
 import { VibestApi } from "@vibest/protocol/api"
@@ -8,6 +7,7 @@ import { Caller, CallerMiddleware, type CallerIdentity, ProtocolMiddleware } fro
 import { PROTOCOL_HEADER, protocolMismatch, TOKEN_HEADER } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Config, Context, Data, Effect, FileSystem, Layer, Option, Schema } from "effect"
 import { Hex } from "effect/encoding"
 import { Etag, Headers, HttpPlatform, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http"

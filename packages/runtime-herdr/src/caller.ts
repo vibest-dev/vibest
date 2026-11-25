@@ -1,5 +1,5 @@
+import { Herdr } from "@vibest/herdr-sdk"
 import { Effect, Schema } from "effect"
-import { Herdr } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { encodeTarget, type HerdrTerminal, terminalOf } from "./terminal-runtime.ts"

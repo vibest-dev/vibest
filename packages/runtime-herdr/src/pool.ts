@@ -1,3 +1,11 @@
+import {
+  Herdr,
+  HerdrProtocolMismatch,
+  type HerdrClient,
+  type Frame,
+  SocketConnector,
+  type Subscription,
+} from "@vibest/herdr-sdk"
 import { Host } from "@vibest/plugin/host"
 import { RuntimeUnreachable as HerdrUnreachable, type RuntimeLocation as HerdrLocation } from "@vibest/schema/session"
 import {
@@ -15,14 +23,6 @@ import {
   Stream,
   SynchronizedRef,
 } from "effect"
-import {
-  Herdr,
-  HerdrProtocolMismatch,
-  type HerdrClient,
-  type Frame,
-  SocketConnector,
-  type Subscription,
-} from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 export interface SessionEvent {

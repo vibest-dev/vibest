@@ -16,6 +16,7 @@
   "dependencies": {
     "@vibest/plugin": "workspace:*",
     "@vibest/schema": "workspace:*",
+    "@vibest/util": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

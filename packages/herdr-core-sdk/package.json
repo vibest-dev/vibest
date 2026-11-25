@@ -1,0 +1,31 @@
+{
+  "name": "@vibest/herdr-core-sdk",
+  "version": "0.0.2-dev",
+  "private": true,
+  "description": "Effect-native client for the herdr-core (hc) JSON-RPC API. Schemas generated from the OpenRPC document hc schema prints.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./bun": "./src/bun.ts"
+  },
+  "scripts": {
+    "generate": "bun script/gen/index.ts",
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.core.json && bun script/gen/index.ts --check",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/herdr-core-sdk"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:"
+  },
+  "peerDependencies": {
+    "@effect/platform-bun": "4.1.5"
+  },
+  "peerDependenciesMeta": {
+    "@effect/platform-bun": {
+      "optional": true
+    }
+  }
+}

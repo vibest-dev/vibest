@@ -11,7 +11,6 @@ import {
   terminalOf,
 } from "@vibest/core/database/db-rows"
 import { resolveEdgeRefs } from "@vibest/core/database/session-edges"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Project } from "@vibest/core/project"
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
 import { Runtimes } from "@vibest/core/runtimes"
@@ -25,6 +24,7 @@ import {
   type WatchSession,
 } from "@vibest/protocol/schemas"
 import { canonicalTarget, type Terminal, type TerminalTarget } from "@vibest/schema/terminal"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Data, Effect, Layer, Predicate } from "effect"
 
 import { ListScope } from "./machine/remote.ts"

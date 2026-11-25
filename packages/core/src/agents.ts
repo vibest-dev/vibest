@@ -1,8 +1,8 @@
 import type { InvalidAgent } from "@vibest/plugin/effect"
 import { UnknownAgent } from "@vibest/schema/session"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
 
-import { LayerNode } from "./effect/layer-node.ts"
 import type { AgentDefinition, AgentsDomain, RegisteredAgent, RejectedAgent } from "./plugin/domains.ts"
 import * as Registry from "./plugin/registry.ts"
 

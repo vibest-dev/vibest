@@ -1,10 +1,10 @@
 import { withHeaders } from "@vibest/client/client"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
 import { Host } from "@vibest/plugin/host"
 import { remoteHeaders } from "@vibest/protocol/protocol"
 import { type ProjectRow, type WatchEvent, type WatchSession } from "@vibest/protocol/schemas"
 import type { ListedMachine } from "@vibest/schema/machine"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, Stream } from "effect"
 
 import * as Listing from "../listing.ts"

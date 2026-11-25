@@ -32,26 +32,26 @@
     "access": "public"
   },
   "scripts": {
-    "build": "bun scripts/build.ts",
-    "pack:npm": "bun scripts/pack.ts",
+    "build": "bun script/build.ts",
+    "pack:npm": "bun script/pack.ts",
     "typecheck": "tsrs --noEmit --fast",
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/cli"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
-    "@vibest/builtins": "workspace:*",
     "@vibest/client": "workspace:*",
     "@vibest/core": "workspace:*",
+    "@vibest/herdr-sdk": "workspace:*",
     "@vibest/platform-bun": "workspace:*",
     "@vibest/plugin": "workspace:*",
+    "@vibest/plugin-builtins": "workspace:*",
     "@vibest/plugin-harnesses": "workspace:*",
     "@vibest/protocol": "workspace:*",
     "@vibest/runtime-herdr": "workspace:*",
     "@vibest/runtime-herdr-core": "workspace:*",
     "@vibest/schema": "workspace:*",
     "@vibest/server": "workspace:*",
-    "effect": "catalog:",
-    "effect-herdr-sdk": "workspace:*"
+    "effect": "catalog:"
   }
 }

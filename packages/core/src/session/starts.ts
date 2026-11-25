@@ -1,12 +1,12 @@
 import { ProcessEvent } from "@vibest/schema/process-event"
 import { SessionEvent } from "@vibest/schema/session-event"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer, Semaphore, Stream } from "effect"
 
 import { Bus } from "../bus.ts"
 import { Concurrency } from "../concurrency.ts"
 import { archived, type ProcessStart } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 import { Inbox } from "../inbox.ts"
 import * as Reactor from "../reactor.ts"
 import { Placement } from "./placement.ts"

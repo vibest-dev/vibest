@@ -5,6 +5,8 @@ declare var TextEncoder: {
   }
 }
 
+declare function queueMicrotask(callback: () => void): void
+
 declare function structuredClone<T>(value: T): T
 
 declare var URL: {

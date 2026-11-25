@@ -1,1 +1,1 @@
-{ "extends": "@vibest/tsconfig/base.json", "include": ["src", "test", "scripts"] }
+{ "extends": "@vibest/tsconfig/base.json", "include": ["src", "test", "script"] }

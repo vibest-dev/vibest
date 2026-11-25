@@ -1,4 +1,5 @@
 import { Layout } from "@vibest/schema/layout"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, HttpClient } from "effect/http"
@@ -6,7 +7,6 @@ import { ChildProcessSpawner } from "effect/process"
 import { SqlClient, type SqlError } from "effect/sql"
 
 import type { DatabaseOpenFailed, SchemaMismatch } from "../database/db-schema.ts"
-import { LayerNode } from "./layer-node.ts"
 
 export * as PlatformNode from "./platform.ts"
 
