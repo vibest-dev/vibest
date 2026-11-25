@@ -7,7 +7,8 @@
     "types": ["bun"],
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["build.ts"]
+  "include": ["build.ts", "install.ts"]
 }

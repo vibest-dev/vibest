@@ -109,12 +109,15 @@ pnpm --filter vibest-herdr-app test    # the tests beside the code, and the mod 
 pnpm --filter vibest-herdr-app check   # herdr-app check on every dist/mods/*/ folder
 ```
 
-Install copies `dist/` into the herdr-app home:
+Install builds, copies `dist/` into the herdr-app home and merges `src/keys.json` into its `keys.json` (new
+sections and keys only; a key the person already bound stays theirs and is reported):
 
 ```sh
-cp -R apps/vibest-herdr-app/dist/* "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/"
+pnpm --filter vibest-herdr-app setup
 herdr-app do layout.switch --name vibest
 ```
+
+In the vibest layout, `ctrl-tab` switches between the two most recently opened projects.
 
 `ctrl-shift-l` switches back to another layout; deleting the copied files removes it.
 
