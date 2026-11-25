@@ -1,8 +1,9 @@
 import { App } from "@vibest/core/app"
-import { Db } from "@vibest/core/database/db"
-import type { RemoteScope } from "@vibest/core/database/remote"
 import { Identity } from "@vibest/core/identity"
-import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
+import type { RemoteScope } from "@vibest/core/remote/sql"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Runtimes, runtimesHere } from "@vibest/core/runtime/registry"
+import { SessionStore } from "@vibest/core/session/store"
 import { VibestApi } from "@vibest/protocol/api"
 import { Forbidden } from "@vibest/protocol/errors"
 import { Caller, type CallerIdentity } from "@vibest/protocol/middleware"
@@ -52,9 +53,9 @@ const makeRouting = Effect.gen(function* () {
   const deps = yield* CallerChecks.Service
   const remote = yield* Remote.Service
   const machines = yield* Machines.Service
-  const db = yield* Db.Service
-
-  const senderHere = (by: string) => (by === REMOTE_BY_USER ? Effect.succeed(undefined) : db.remote.senderOf(by))
+  const sessionStore = yield* SessionStore.Service
+  const remoteStore = yield* RemoteStore.Service
+  const senderHere = (by: string) => (by === REMOTE_BY_USER ? Effect.succeed(undefined) : remoteStore.senderOf(by))
 
   const reach = (method: Routed | "session.list") =>
     Effect.gen(function* () {
@@ -116,11 +117,11 @@ const makeRouting = Effect.gen(function* () {
               if (!Predicate.isTagged(caller, "Session")) return local(p.id)
 
               return Effect.gen(function* () {
-                const remoteMatches = yield* db.session.resolveRemoteEdges(caller.sessionId, p.id)
+                const remoteMatches = yield* sessionStore.resolveRemoteEdges(caller.sessionId, p.id)
 
                 if (remoteMatches.length === 0) return yield* local(p.id)
 
-                const localLookup = yield* Effect.result(db.session.resolveSession(p.id))
+                const localLookup = yield* Effect.result(sessionStore.resolveSession(p.id))
 
                 if (Predicate.isTagged(localLookup, "Success"))
                   return yield* new AmbiguousSession({
@@ -141,7 +142,7 @@ const makeRouting = Effect.gen(function* () {
                   })
 
                 const [match] = remoteMatches
-                const machineRow = yield* db.remote.machineWithRemote(match!.remote)
+                const machineRow = yield* remoteStore.machineWithRemote(match!.remote)
 
                 if (machineRow === undefined) return yield* local(p.id)
 
@@ -160,10 +161,10 @@ const makeRouting = Effect.gen(function* () {
                   by === REMOTE_BY_USER
                     ? ([at, by] as const)
                     : yield* Effect.gen(function* () {
-                        const machineRow = yield* db.remote.machineNamed(at.machine)
+                        const machineRow = yield* remoteStore.machineNamed(at.machine)
 
                         if (machineRow === undefined) return [at, by] as const
-                        const matches = yield* db.session.resolveRemoteEdges(by, at.id, machineRow.remoteId)
+                        const matches = yield* sessionStore.resolveRemoteEdges(by, at.id, machineRow.remoteId)
 
                         if (matches.length === 0)
                           return yield* new Forbidden({
@@ -234,7 +235,7 @@ export const routingLayer = Layer.effect(Routing, makeRouting)
 
 export const RemoteHandler = HttpApiBuilder.group(VibestApi, "server.remote", (handlers) =>
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const remoteStore = yield* RemoteStore.Service
     const self = yield* Identity.Service
     const { version } = yield* App.Service
     const inbound = yield* Inbound.Service
@@ -249,7 +250,7 @@ export const RemoteHandler = HttpApiBuilder.group(VibestApi, "server.remote", (h
               message: "remote.hello names the vibestd that calls it",
             })
 
-          if (id !== self.id) yield* db.remote.noteRemote({ id, name })
+          if (id !== self.id) yield* remoteStore.noteRemote({ id, name })
 
           return { id: self.id, name: self.name, version, runtimes: yield* runtimesHere(runtimes) }
         }),

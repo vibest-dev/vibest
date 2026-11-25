@@ -4,11 +4,10 @@ import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { LaunchFailed, HarnessUnavailable, type HarnessId } from "@vibest/schema/session"
 import { Effect, FileSystem } from "effect"
 
-import { Agents, unknownAgent } from "./agents.ts"
-import { cliEnv, Harness } from "./harness.ts"
-import { Harnesses } from "./harnesses.ts"
-import type { AgentsDomain } from "./plugin/domains.ts"
-import { type Runtime, type Terminal } from "./runtimes.ts"
+import { cliEnv, Harness } from "../harness.ts"
+import { Harnesses } from "../harness/registry.ts"
+import type { AgentDefinition, AgentsDomain } from "../plugin/domains.ts"
+import { type Runtime, type Terminal } from "../runtime/registry.ts"
 import {
   projectText,
   SystemPromptDirUnsafe,
@@ -16,9 +15,38 @@ import {
   systemPromptRoot,
   writeSystemPrompt,
   withTask,
-} from "./system-prompt.ts"
+} from "../session/system-prompt.ts"
+import { Agents, unknownAgent } from "./registry.ts"
 
 export { launchLine, type Launch }
+
+export interface LaunchChoice {
+  readonly harness?: string | undefined
+  readonly provider?: string | undefined
+  readonly model?: string | undefined
+}
+
+const LAUNCH_FIELDS = ["harness", "provider", "model"] as const
+
+export const definitionLaunch = (definition: AgentDefinition, named: LaunchChoice) => {
+  if (named.harness !== undefined || definition.harness === undefined) return undefined
+
+  const choice: LaunchChoice = {
+    harness: definition.harness,
+    provider: named.provider ?? definition.provider,
+    model: named.model ?? definition.model,
+  }
+
+  const decider = `agent:${definition.id}`
+
+  const decidedBy = Object.fromEntries(
+    LAUNCH_FIELDS.flatMap((field) =>
+      named[field] === undefined && definition[field] !== undefined ? [[field, decider]] : [],
+    ),
+  )
+
+  return { choice, decidedBy }
+}
 
 export const definitionIn = (agents: AgentsDomain, id: string) => {
   const found = agents.find(id)

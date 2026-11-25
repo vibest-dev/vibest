@@ -1,8 +1,8 @@
 import module from "node:module"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Agents } from "@vibest/core/agents"
-import { Concurrency } from "@vibest/core/concurrency"
+import { Agents } from "@vibest/core/agent/registry"
+import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import {
   Builtins,
   type Candidate,
@@ -14,7 +14,7 @@ import {
   RECHECK,
 } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
 import { memoryPluginHost } from "@vibest/testkit/bun"

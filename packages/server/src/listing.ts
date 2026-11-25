@@ -1,5 +1,4 @@
 import { type BusEvent } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
 import {
   archived,
   executionStateOf,
@@ -9,13 +8,16 @@ import {
   runtimeOf,
   type SessionBrief,
   terminalOf,
-} from "@vibest/core/database/db-rows"
-import { resolveEdgeRefs } from "@vibest/core/database/session-edges"
+} from "@vibest/core/database/rows"
 import { Project } from "@vibest/core/project"
 import { projectActivity, unseenDone } from "@vibest/core/project/activity"
-import { Runtimes } from "@vibest/core/runtimes"
+import { ProjectStore } from "@vibest/core/project/store"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { type SessionView, Session } from "@vibest/core/session"
+import { resolveEdgeRefs } from "@vibest/core/session/sql-edges"
 import { Starts } from "@vibest/core/session/starts"
+import { SessionStore } from "@vibest/core/session/store"
 import {
   type ProjectRepository,
   type ProjectRow,
@@ -67,13 +69,15 @@ interface CachedRepositories {
 }
 
 export const sessionListing = (deps: {
-  readonly db: Db.Interface
+  readonly projectStore: ProjectStore.Interface
+  readonly sessionStore: SessionStore.Interface
+  readonly remoteStore: RemoteStore.Interface
   readonly projects: Project.Interface
   readonly sessions: Session.Interface
   readonly runtimes: Runtimes.Interface
   readonly starts: Starts.Interface
 }) => {
-  const { db, projects, sessions, runtimes, starts } = deps
+  const { projectStore, sessionStore, remoteStore, projects, sessions, runtimes, starts } = deps
   const repositoryCache = new Map<string, CachedRepositories>()
 
   const resolveRepositories = (id: string, directory: string | null, refresh: boolean) =>
@@ -82,7 +86,7 @@ export const sessionListing = (deps: {
 
       if (!refresh && hit !== undefined && hit.directory === directory) return hit.repositories
 
-      const recorded = yield* db.project.projectRemote(id)
+      const recorded = yield* projectStore.projectRemote(id)
       const repositories = yield* projects.repositories(directory, recorded)
       repositoryCache.set(id, { directory, repositories })
 
@@ -91,7 +95,7 @@ export const sessionListing = (deps: {
 
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
     Effect.gen(function* () {
-      const briefs = yield* db.session.sessionBriefs(rows.map((row) => row.id))
+      const briefs = yield* sessionStore.sessionBriefs(rows.map((row) => row.id))
       const waiting = yield* starts.choices
 
       return rows.map((row) => {
@@ -127,9 +131,9 @@ export const sessionListing = (deps: {
   const watched = (infos: ReadonlyArray<SessionInfo>) =>
     Effect.gen(function* () {
       const ids = infos.map((info) => info.id)
-      const parents = yield* db.session.sessionParents(ids)
-      const edges = yield* db.session.sessionEdges(ids)
-      const machineByRemote = new Map((yield* db.remote.machines).map((row) => [row.remoteId, row.name]))
+      const parents = yield* sessionStore.sessionParents(ids)
+      const edges = yield* sessionStore.sessionEdges(ids)
+      const machineByRemote = new Map((yield* remoteStore.machines).map((row) => [row.remoteId, row.name]))
 
       return yield* Effect.forEach(
         infos,
@@ -146,7 +150,7 @@ export const sessionListing = (deps: {
     })
 
   const snapshotProjects = (sessions: ReadonlyArray<WatchSession>) =>
-    Effect.flatMap(db.project.watchProjects(), (rows) =>
+    Effect.flatMap(projectStore.watchProjects(), (rows) =>
       Effect.forEach(
         rows,
         (row) =>
@@ -164,7 +168,7 @@ export const sessionListing = (deps: {
   const projectStatuses = (id: string) =>
     Effect.gen(function* () {
       return yield* Effect.forEach(
-        yield* db.session.listSessions({ projectId: id, stopped: false }),
+        yield* sessionStore.listSessions({ projectId: id, stopped: false }),
         (s) => Effect.map(seenAt(terminalOf(s)), (seen) => unseenDone(s.status, seen)),
         { concurrency: "unbounded" },
       )
@@ -172,11 +176,11 @@ export const sessionListing = (deps: {
 
   const watchSession = (id: string) =>
     Effect.gen(function* () {
-      const identity = yield* db.session.sessionIdentity(id)
+      const identity = yield* sessionStore.sessionIdentity(id)
 
       if (identity === undefined) return []
       const ended = WatchEvents.SessionEnded({ id, projectId: identity.projectId })
-      const row = yield* db.session.getSession(id)
+      const row = yield* sessionStore.getSession(id)
 
       if (row === undefined || archived(row)) return [ended]
 
@@ -198,7 +202,7 @@ export const sessionListing = (deps: {
 
   const watchProject = (id: string) =>
     Effect.gen(function* () {
-      const [row] = yield* db.project.watchProjects(id)
+      const [row] = yield* projectStore.watchProjects(id)
 
       if (row === undefined) return []
       const activity = projectActivity(yield* projectStatuses(id))
@@ -209,7 +213,7 @@ export const sessionListing = (deps: {
 
   const sessionsAt = (runtime: string, target: TerminalTarget) =>
     Effect.gen(function* () {
-      const rows = yield* db.session.listSessions()
+      const rows = yield* sessionStore.listSessions()
       const wanted = canonicalTarget(target)
 
       return rows
@@ -243,7 +247,7 @@ export const sessionListing = (deps: {
       }
 
       for (const id of sessionIds) {
-        const identity = yield* db.session.sessionIdentity(id)
+        const identity = yield* sessionStore.sessionIdentity(id)
 
         if (identity !== undefined) projectIds.add(identity.projectId)
       }
@@ -265,7 +269,9 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     return sessionListing({
-      db: yield* Db.Service,
+      projectStore: yield* ProjectStore.Service,
+      sessionStore: yield* SessionStore.Service,
+      remoteStore: yield* RemoteStore.Service,
       projects: yield* Project.Service,
       sessions: yield* Session.Service,
       runtimes: yield* Runtimes.Service,
@@ -277,5 +283,13 @@ export const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Db.node, Project.node, Session.node, Runtimes.node, Starts.node],
+  deps: [
+    ProjectStore.node,
+    SessionStore.node,
+    RemoteStore.node,
+    Project.node,
+    Session.node,
+    Runtimes.node,
+    Starts.node,
+  ],
 })

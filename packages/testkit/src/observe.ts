@@ -1,8 +1,8 @@
-import { Db } from "@vibest/core/database/db"
-import { Harnesses } from "@vibest/core/harnesses"
-import { executionEndFrom } from "@vibest/core/replies"
+import { Harnesses } from "@vibest/core/harness/registry"
 import { Session } from "@vibest/core/session"
-import { systemPromptRoot } from "@vibest/core/system-prompt"
+import { executionEndFrom } from "@vibest/core/session/replies"
+import { SessionStore } from "@vibest/core/session/store"
+import { systemPromptRoot } from "@vibest/core/session/system-prompt"
 import { Clock, Duration, Effect, Path, Predicate, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
@@ -58,12 +58,12 @@ export const atMostEntryTracked = (m: { readonly tracked: number; readonly locks
 
 export const writeEnd = (id: string, harness: string, payload: Schema.JsonObject, offsetMs = 1000) =>
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
     const adapter = yield* (yield* Harnesses.Service).get(harness)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
     const named = payload.execution
 
-    const bound = Predicate.isNumber(named) || harness !== "pi" ? named : yield* db.session.openExecution(id)
+    const bound = Predicate.isNumber(named) || harness !== "pi" ? named : yield* sessionStore.openExecution(id)
 
     const withHook =
       harness === "cursor" && payload.hook_event_name === undefined
@@ -76,7 +76,7 @@ export const writeEnd = (id: string, harness: string, payload: Schema.JsonObject
     const observed = adapter.executionEnd?.(body)
 
     if (observed === undefined) return
-    yield* db.session.endObserved(id, executionEndFrom(adapter, observed, at))
+    yield* sessionStore.endObserved(id, executionEndFrom(adapter, observed, at))
   })
 
 const decodeEventData = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)))

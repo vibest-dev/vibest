@@ -1,8 +1,15 @@
 import { assert, describe, it, layer } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
-import { archived, executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
-import { cwdHolders, livenessOf, parseProcessTable, Processes, runFor, sessionTree } from "@vibest/core/processes"
+import { archived, executionStateOf, exitedAt } from "@vibest/core/database/rows"
+import {
+  cwdHolders,
+  livenessOf,
+  parseProcessTable,
+  Processes,
+  runFor,
+  sessionTree,
+} from "@vibest/core/runtime/processes"
 import { Session } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
 import {
   eventsOf,
   FakeRuntime,
@@ -31,7 +38,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 
 const workingSession = Effect.gen(function* () {
   const sessions = yield* Session.Service
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
 
@@ -48,17 +55,17 @@ const workingSession = Effect.gen(function* () {
   })
 
   yield* until(
-    db.session.getSession(id),
+    sessionStore.getSession(id),
     (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
   )
   yield* sessions.check(id)
   const pane = (yield* herdr.agent(id))!.terminal
-  const row = (yield* db.session.getSession(id))!
-  const worktree = yield* db.session.sessionDirectory(row.id)
+  const row = (yield* sessionStore.getSession(id))!
+  const worktree = yield* sessionStore.sessionDirectory(row.id)
 
   if (worktree === undefined) return yield* Effect.die(`spawned ${id} has no worktree path`)
 
-  return { id, repo, pane, sessions, db, herdr, worktree, rules: yield* systemPromptFile(id) }
+  return { id, repo, pane, sessions, sessionStore, herdr, worktree, rules: yield* systemPromptFile(id) }
 })
 
 const idleSession = Effect.gen(function* () {
@@ -102,7 +109,7 @@ describe.concurrent("vibest archive: process proof", () => {
     "the close's reply is lost: the record survives a vibestd restart, and the retry proves it gone",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const { id, pane, sessions, db, herdr, worktree } = yield* idleSession
+      const { id, pane, sessions, sessionStore, herdr, worktree } = yield* idleSession
       const held = yield* herdr.hold("close")
       const removing = yield* Effect.forkChild(Effect.flip(sessions.archive(id)))
       yield* held.reached
@@ -110,7 +117,7 @@ describe.concurrent("vibest archive: process proof", () => {
       yield* closedButReplyLost
       yield* held.release("unreachable")
       assert.strictEqual((yield* Fiber.join(removing))._tag, "RuntimeUnreachable")
-      const row = (yield* db.session.getSession(id))!
+      const row = (yield* sessionStore.getSession(id))!
       assert.isNull(exitedAt(row))
       assert.deepStrictEqual(yield* processEnds(id), [])
       assert.isTrue(archived(row))
@@ -121,7 +128,7 @@ describe.concurrent("vibest archive: process proof", () => {
         pane: "closed",
         worktree: "removed",
       })
-      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.isNotNull(exitedAt((yield* sessionStore.getSession(id))!))
     }),
   )
 
@@ -137,7 +144,7 @@ describe.concurrent("vibest archive: process proof", () => {
       assert.deepInclude(yield* Fiber.join(removing), { processes: "unknown", pane: "kept", worktree: "kept" })
       assert.isTrue(HashMap.has(yield* a.herdr.panes, a.pane))
       assert.deepStrictEqual(yield* processEnds(a.id), [])
-      assert.isNull(exitedAt((yield* a.db.session.getSession(a.id))!))
+      assert.isNull(exitedAt((yield* a.sessionStore.getSession(a.id))!))
       assert.deepInclude(yield* a.sessions.archive(a.id), { pane: "closed", worktree: "removed" })
 
       const b = yield* idleSession
@@ -145,7 +152,7 @@ describe.concurrent("vibest archive: process proof", () => {
       yield* closeByHand
       const gone = yield* b.sessions.archive(b.id)
       assert.deepInclude(gone, { processes: "exited", pane: "closed", worktree: "removed" })
-      assert.isNotNull(exitedAt((yield* b.db.session.getSession(b.id))!))
+      assert.isNotNull(exitedAt((yield* b.sessionStore.getSession(b.id))!))
       assert.isFalse(yield* fs.exists(b.worktree))
       assert.isFalse(yield* fs.exists(b.rules))
     }),
@@ -172,7 +179,7 @@ describe.concurrent("vibest archive: process proof", () => {
       yield* worktreeDeletedOutsideVibest(a)
       yield* a.herdr.runtime.close({ id: a.pane })
       yield* a.sessions.check(a.id)
-      yield* until(a.db.session.getSession(a.id), (row) => (row ? exitedAt(row) : undefined) !== null)
+      yield* until(a.sessionStore.getSession(a.id), (row) => (row ? exitedAt(row) : undefined) !== null)
       yield* settled
       assert.deepInclude(
         yield* a.sessions.archive(a.id),
@@ -196,12 +203,12 @@ describe.concurrent("vibest archive: process proof", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const fake = yield* FakeProcesses
-      const { id, sessions, db, herdr, worktree, rules } = yield* idleSession
+      const { id, sessions, sessionStore, herdr, worktree, rules } = yield* idleSession
       yield* fake.setCwdUsers([4242])
       const out = (yield* removeAdvancingClock(sessions, id))!
       assert.deepInclude(out, { processes: "exited", pane: "closed", worktree: "kept" })
       assert.include(out.reasons.join("\n"), "process 4242 has its working directory in it")
-      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.isNotNull(exitedAt((yield* sessionStore.getSession(id))!))
       assert.isTrue(yield* fs.exists(worktree))
       assert.isTrue(yield* fs.exists(rules))
       assert.strictEqual(
@@ -253,7 +260,7 @@ describe.concurrent("vibest archive: process proof", () => {
     Effect.gen(function* () {
       const leaving = yield* idleSession
       const fake = yield* FakeProcesses
-      const root = (yield* leaving.db.session.getSession(leaving.id))!.process!.pid!
+      const root = (yield* leaving.sessionStore.getSession(leaving.id))!.process!.pid!
       const child = root + 1
       yield* fake.setTree(root, [root, child])
       yield* fake.set(root, "alive")
@@ -272,7 +279,7 @@ describe.concurrent("vibest archive: process proof", () => {
       assert.strictEqual(yield* fake.cwdListings, 1)
 
       const staying = yield* idleSession
-      const stuck = (yield* staying.db.session.getSession(staying.id))!.process!.pid!
+      const stuck = (yield* staying.sessionStore.getSession(staying.id))!.process!.pid!
       yield* fake.setTree(stuck, [stuck])
       yield* fake.set(stuck, "alive")
       yield* fake.setCwdUsers([stuck])
@@ -320,17 +327,17 @@ describe.concurrent("vibest archive: process proof", () => {
     "a working session's idle sample is not an interrupt: the terminal still closes and the execution is not interrupted",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const { id, sessions, db, herdr, worktree } = yield* workingSession
+      const { id, sessions, sessionStore, herdr, worktree } = yield* workingSession
       const out = (yield* removeAdvancingClock(sessions, id))!
       assert.deepInclude(out, { processes: "exited", pane: "closed", worktree: "removed" })
       assert.include(out.reasons.join("\n"), "did not confirm the interrupt")
-      assert.notStrictEqual(executionStateOf((yield* db.session.getSession(id))!), "interrupted")
+      assert.notStrictEqual(executionStateOf((yield* sessionStore.getSession(id))!), "interrupted")
       assert.lengthOf(
         (yield* herdr.callsTo("send")).filter((c: { keys?: ReadonlyArray<string> }) => c.keys),
         1,
         "one key press, the interrupt; the spawn's prompt text is a send without keys",
       )
-      const row = (yield* db.session.getSession(id))!
+      const row = (yield* sessionStore.getSession(id))!
       assert.strictEqual(row.status, "unknown")
       assert.isNotNull(exitedAt(row))
       assert.isFalse(yield* fs.exists(worktree))
@@ -340,7 +347,7 @@ describe.concurrent("vibest archive: process proof", () => {
   test(
     "an interrupt that does not take within 10 s still closes the session's own terminal",
     Effect.gen(function* () {
-      const { id, pane, sessions, db, herdr } = yield* workingSession
+      const { id, pane, sessions, sessionStore, herdr } = yield* workingSession
       const out = (yield* removeAdvancingClock(sessions, id))!
       assert.deepInclude(out, { processes: "exited", pane: "closed" })
       assert.include(
@@ -348,7 +355,7 @@ describe.concurrent("vibest archive: process proof", () => {
         "it did not stop within 10s of the interrupt key; its terminal closed anyway",
       )
       assert.isFalse(HashMap.has(yield* herdr.panes, pane))
-      assert.isNotNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.isNotNull(exitedAt((yield* sessionStore.getSession(id))!))
     }),
     { interruptIgnored: true },
   )

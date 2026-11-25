@@ -8,14 +8,14 @@ import {
 } from "@vibest/schema/durable-event-manifest"
 import { Effect, Predicate, type Scope, Stream } from "effect"
 
-import { Agents } from "../agents.ts"
+import { Agents } from "../agent/registry.ts"
 import { Bus } from "../bus.ts"
-import { Harnesses } from "../harnesses.ts"
-import { Runtimes } from "../runtimes.ts"
+import { Harnesses } from "../harness/registry.ts"
+import { Subscriptions } from "../harness/subscriptions.ts"
+import { Runtimes } from "../runtime/registry.ts"
 import { Archive } from "../session/archive.ts"
 import { Sends } from "../session/sends.ts"
 import { Summaries } from "../session/summaries.ts"
-import { Subscriptions } from "../subscriptions/service.ts"
 import { Hooks } from "./hooks.ts"
 
 type Short = keyof VibestPlugin.SessionHooks

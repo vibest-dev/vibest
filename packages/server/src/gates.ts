@@ -1,7 +1,8 @@
 import { App } from "@vibest/core/app"
-import { Db } from "@vibest/core/database/db"
-import { Drain } from "@vibest/core/drain"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Drain } from "@vibest/core/runtime/drain"
 import { NoSuchSession } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
 import { FORWARDED_CALLS, REMOTE_CALLS } from "@vibest/protocol/access"
 import { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/errors"
 import {
@@ -80,17 +81,17 @@ export const AdmissionLive = Layer.effect(
   }),
 )
 
-const noteConversation = (db: Db.Interface, read: Read, row: { id: string; harness: string }) =>
+const noteConversation = (sessionStore: SessionStore.Interface, read: Read, row: { id: string; harness: string }) =>
   Effect.gen(function* () {
     const conversation = read(HARNESS_SESSION_HEADER)
 
     if (!conversation || read(HARNESS_HEADER) !== row.harness) return
 
-    if (yield* db.session.noteConversation(row.id, conversation, processOf(read)))
+    if (yield* sessionStore.noteConversation(row.id, conversation, processOf(read)))
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
   })
 
-type IdentityRow = NonNullable<Effect.Success<ReturnType<Db.Interface["session"]["sessionIdentity"]>>>
+type IdentityRow = NonNullable<Effect.Success<ReturnType<SessionStore.Interface["sessionIdentity"]>>>
 
 type Identity = Data.TaggedEnum<{
   NoSession: { readonly id: string | undefined }
@@ -103,10 +104,10 @@ const Identity = Data.taggedEnum<Identity>()
 
 const Callers = Data.taggedEnum<CallerIdentity>()
 
-export const identify = (db: Db.Interface, read: Read) =>
+export const identify = (sessionStore: SessionStore.Interface, read: Read) =>
   Effect.gen(function* () {
     const id = read(SESSION_HEADER)
-    const row = id ? yield* db.session.sessionIdentity(id) : undefined
+    const row = id ? yield* sessionStore.sessionIdentity(id) : undefined
 
     if (!row) return Identity.NoSession({ id })
     const project = read(PROJECT_HEADER)
@@ -114,17 +115,17 @@ export const identify = (db: Db.Interface, read: Read) =>
     if (project === undefined) return Identity.NoProject({ row })
 
     if (project !== row.projectId) return Identity.WrongProject({ row, project })
-    yield* noteConversation(db, read, row)
+    yield* noteConversation(sessionStore, read, row)
 
     return Identity.Known({ row })
   })
 
-export const noteOpen = (db: Db.Interface, read: Read, sessionId: string) =>
-  read(SESSION_HEADER) === sessionId ? Effect.asVoid(identify(db, read)) : Effect.void
+export const noteOpen = (sessionStore: SessionStore.Interface, read: Read, sessionId: string) =>
+  read(SESSION_HEADER) === sessionId ? Effect.asVoid(identify(sessionStore, read)) : Effect.void
 
-export const checkProtocol = (db: Db.Interface, read: Read, version: string) =>
+export const checkProtocol = (sessionStore: SessionStore.Interface, read: Read, version: string) =>
   Effect.gen(function* () {
-    yield* noteIntegration(db, read)
+    yield* noteIntegration(sessionStore, read)
     const sent = read(PROTOCOL_HEADER)
 
     if (sent === String(PROTOCOL)) return undefined
@@ -140,7 +141,12 @@ export const checkProtocol = (db: Db.Interface, read: Read, version: string) =>
     }
   })
 
-export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method: string) =>
+export const resolveCaller = (
+  sessionStore: SessionStore.Interface,
+  remoteStore: RemoteStore.Interface,
+  headers: Headers.Headers,
+  method: string,
+) =>
   Effect.gen(function* () {
     const read = reader(headers)
     const kind = Headers.get(headers, CALLER_HEADER)
@@ -161,7 +167,7 @@ export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method
 
       if (!REMOTE_CALLS.has(method)) return yield* bad(`a remote vibestd may not call ${method}`)
 
-      if (method !== "remote.hello" && !(yield* db.remote.remoteKnown(remote)))
+      if (method !== "remote.hello" && !(yield* remoteStore.remoteKnown(remote)))
         return yield* bad(`remote ${remote} has not said remote.hello; call it first`)
       const by = read(REMOTE_BY_HEADER)
 
@@ -194,7 +200,7 @@ export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method
 
       if (Option.isSome(repository) && repository.value.trim() === "")
         return yield* bad(`${method} has an empty repository`)
-      const who = yield* identify(db, read)
+      const who = yield* identify(sessionStore, read)
 
       if (Predicate.isTagged(who, "NoSession"))
         return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
@@ -234,14 +240,14 @@ const safeDecodeUri = (value: string) => {
   }
 }
 
-const noteIntegration = (db: Db.Interface, read: Read): Effect.Effect<void> =>
+const noteIntegration = (sessionStore: SessionStore.Interface, read: Read): Effect.Effect<void> =>
   Effect.gen(function* () {
     const sessionId = read(SESSION_HEADER)
     const integration = integrationOf(read)
 
     if (!sessionId || !integration) return
 
-    if (yield* db.session.noteIntegration(sessionId, integration, processOf(read)))
+    if (yield* sessionStore.noteIntegration(sessionId, integration, processOf(read)))
       yield* Effect.logInfo(
         `session ${sessionId} runs integration ${integration.version} (protocol ${integration.protocol})`,
       ).pipe(
@@ -256,13 +262,13 @@ const noteIntegration = (db: Db.Interface, read: Read): Effect.Effect<void> =>
 export const ProtocolMiddlewareLive = Layer.effect(
   ProtocolMiddleware,
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
     const { version } = yield* App.Service
 
     return ProtocolMiddleware.of((effect, { endpoint }) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
-        const rejected = yield* checkProtocol(db, reader(request.headers), version)
+        const rejected = yield* checkProtocol(sessionStore, reader(request.headers), version)
 
         if (rejected)
           return yield* new ProtocolRejected({
@@ -280,12 +286,13 @@ export const ProtocolMiddlewareLive = Layer.effect(
 export const CallerMiddlewareLive = Layer.effect(
   CallerMiddleware,
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
+    const remoteStore = yield* RemoteStore.Service
 
     return CallerMiddleware.of((effect, { endpoint }) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
-        const caller = yield* resolveCaller(db, request.headers, endpoint.identifier)
+        const caller = yield* resolveCaller(sessionStore, remoteStore, request.headers, endpoint.identifier)
 
         return yield* Effect.provideService(effect, Caller, caller)
       }),

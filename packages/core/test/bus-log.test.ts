@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus, RuntimeReset, TerminalExited } from "@vibest/core/bus"
 import { installBaseline } from "@vibest/core/database/migration"
-import * as Projectors from "@vibest/core/database/projectors"
+import { Projectors } from "@vibest/core/reactor"
 import { ProjectEvent } from "@vibest/schema/project-event"
 import { SessionEvent } from "@vibest/schema/session-event"
 import { memorySqlite } from "@vibest/testkit/bun"

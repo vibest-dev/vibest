@@ -129,7 +129,7 @@ export const queryRemoteEdges = (
     ORDER BY to_session_id LIMIT 11`
 }
 
-export const make = Effect.gen(function* () {
+export const sessionEdges = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const { publish, transaction: tx } = yield* Bus.Service
 
@@ -168,7 +168,7 @@ export const make = Effect.gen(function* () {
     ).pipe(Effect.orDie)
 
   return {
-    sessionParents: Effect.fn("Db.session.sessionParents")((ids: ReadonlyArray<string>) =>
+    sessionParents: Effect.fn("SessionStore.sessionParents")((ids: ReadonlyArray<string>) =>
       (ids.length === 0
         ? Effect.succeed<ReadonlyArray<{ id: string; parentSessionId: string | null }>>([])
         : sql<{ id: string; parentSessionId: string | null }>`SELECT id, parent_session_id FROM session
@@ -179,7 +179,7 @@ export const make = Effect.gen(function* () {
       ),
     ),
 
-    sessionEdges: Effect.fn("Db.session.sessionEdges")((ids: ReadonlyArray<string>) =>
+    sessionEdges: Effect.fn("SessionStore.sessionEdges")((ids: ReadonlyArray<string>) =>
       (ids.length === 0
         ? Effect.succeed<ReadonlyArray<{ fromSessionId: string; toRemoteId: string; toSessionId: string }>>([])
         : sql<{
@@ -208,7 +208,7 @@ export const make = Effect.gen(function* () {
       ),
     ),
 
-    linkedTargets: Effect.fn("Db.session.linkedTargets")((id: string, exclude?: string) =>
+    linkedTargets: Effect.fn("SessionStore.linkedTargets")((id: string, exclude?: string) =>
       sql<{
         id: string
         remoteId: string
@@ -242,14 +242,16 @@ export const make = Effect.gen(function* () {
       ),
     ),
 
-    resolveRemoteEdges: Effect.fn("Db.session.resolveRemoteEdges")(
+    resolveRemoteEdges: Effect.fn("SessionStore.resolveRemoteEdges")(
       (fromSessionId: string, target: string, remoteId?: string) =>
         queryRemoteEdges(sql, fromSessionId, target, remoteId).pipe(Effect.orDie),
     ),
 
-    linkSessions: Effect.fn("Db.session.linkSessions")((edges: ReadonlyArray<SessionEdge>) => mutateEdges(edges, true)),
+    linkSessions: Effect.fn("SessionStore.linkSessions")((edges: ReadonlyArray<SessionEdge>) =>
+      mutateEdges(edges, true),
+    ),
 
-    unlinkSessions: Effect.fn("Db.session.unlinkSessions")((edges: ReadonlyArray<SessionEdge>) =>
+    unlinkSessions: Effect.fn("SessionStore.unlinkSessions")((edges: ReadonlyArray<SessionEdge>) =>
       mutateEdges(edges, false),
     ),
   }

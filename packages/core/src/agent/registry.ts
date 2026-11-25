@@ -3,10 +3,10 @@ import { UnknownAgent } from "@vibest/schema/session"
 import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
 
-import type { AgentDefinition, AgentsDomain, RegisteredAgent, RejectedAgent } from "./plugin/domains.ts"
-import * as Registry from "./plugin/registry.ts"
+import type { AgentDefinition, AgentsDomain, RegisteredAgent, RejectedAgent } from "../plugin/domains.ts"
+import * as Registry from "../plugin/registry.ts"
 
-export * as Agents from "./agents.ts"
+export * as Agents from "./registry.ts"
 
 const AGENT_ID = /^[a-z][a-z0-9-]{0,31}$/
 

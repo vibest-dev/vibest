@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus, equalToReplay } from "@vibest/core/bus"
 import { installBaseline } from "@vibest/core/database/migration"
-import * as Projectors from "@vibest/core/database/projectors"
+import { Projectors } from "@vibest/core/reactor"
 import { type DurableEvent, type DurableEventOf } from "@vibest/schema/durable-event-manifest"
 import { MachineEvent } from "@vibest/schema/machine-event"
 import { ProcessEvent } from "@vibest/schema/process-event"

@@ -1,39 +1,23 @@
 import { newId } from "@vibest/schema/id"
 import { ProjectEvent } from "@vibest/schema/project-event"
-import { Effect } from "effect"
-import { SqlClient } from "effect/sql"
+import { LayerNode } from "@vibest/util/layer-node"
+import { Context, Effect, Layer } from "effect"
 
 import { Bus, SessionChanged } from "../bus.ts"
-import { type RepositoryRow } from "./db-rows.ts"
+import { Database } from "../database/database.ts"
+import { type RepositoryRow } from "../database/rows.ts"
+import { Projectors } from "../reactor.ts"
+import { projectSql, repositoriesOf } from "./sql.ts"
+
+export * as ProjectStore from "./store.ts"
 
 export const make = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient
+  const { sql } = yield* Database.Service
   const { publish, transaction: tx } = yield* Bus.Service
-
-  const projectPrefixTaken = (short: string) =>
-    sql`SELECT 1 FROM project WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
-      Effect.map((rows) => rows.length > 0),
-    )
-
-  const repositoriesOf = (repositories: ReadonlyArray<RepositoryRow>) =>
-    repositories.map((r) => ({ path: r.path, ...(r.remote && { remote: r.remote }) }))
-
-  const changedRepositories = (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
-    Effect.gen(function* () {
-      const changed: Array<RepositoryRow> = []
-
-      for (const r of repositories) {
-        const [row] = yield* sql<{ projectId: string; remoteUrl: string | null }>`SELECT project_id, remote_url
-          FROM project_repository WHERE path = ${r.path}`
-
-        if (row === undefined || (row.projectId === id && row.remoteUrl !== (r.remote || null))) changed.push(r)
-      }
-
-      return repositoriesOf(changed)
-    })
+  const { projectPrefixTaken, changedRepositories } = projectSql(sql)
 
   return {
-    projectAt: Effect.fn("Db.project.projectAt")((root: string) =>
+    projectAt: Effect.fn("ProjectStore.projectAt")((root: string) =>
       sql<{ id: string; directory: string }>`SELECT id, directory FROM project WHERE directory = ${root}
         UNION ALL SELECT p.id, p.directory FROM project_repository r JOIN project p ON p.id = r.project_id
           WHERE r.path = ${root} LIMIT 1`.pipe(
@@ -42,7 +26,7 @@ export const make = Effect.gen(function* () {
       ),
     ),
 
-    createProject: Effect.fn("Db.project.createProject")(
+    createProject: Effect.fn("ProjectStore.createProject")(
       (directory: string, repositories: ReadonlyArray<RepositoryRow>) =>
         tx(
           Effect.gen(function* () {
@@ -69,7 +53,7 @@ export const make = Effect.gen(function* () {
         ).pipe(Effect.orDie),
     ),
 
-    refreshRepositories: Effect.fn("Db.project.refreshRepositories")(
+    refreshRepositories: Effect.fn("ProjectStore.refreshRepositories")(
       (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
         tx(
           Effect.gen(function* () {
@@ -81,7 +65,7 @@ export const make = Effect.gen(function* () {
         ).pipe(Effect.orDie),
     ),
 
-    moveProject: Effect.fn("Db.project.moveProject")(
+    moveProject: Effect.fn("ProjectStore.moveProject")(
       (id: string, to: string, repositories: ReadonlyArray<RepositoryRow>) =>
         tx(
           Effect.gen(function* () {
@@ -104,20 +88,20 @@ export const make = Effect.gen(function* () {
         ).pipe(Effect.orDie),
     ),
 
-    watchProjects: Effect.fn("Db.project.watchProjects")((id?: string) =>
+    watchProjects: Effect.fn("ProjectStore.watchProjects")((id?: string) =>
       sql<{ id: string; directory: string | null }>`SELECT id, directory
           FROM project WHERE directory IS NOT NULL ${id === undefined ? sql`` : sql`AND id = ${id}`}
           ORDER BY rowid`.pipe(Effect.orDie),
     ),
 
-    projectDirectory: Effect.fn("Db.project.projectDirectory")((id: string) =>
+    projectDirectory: Effect.fn("ProjectStore.projectDirectory")((id: string) =>
       sql<{ directory: string | null }>`SELECT directory FROM project WHERE id = ${id}`.pipe(
         Effect.map((rows) => rows[0]?.directory ?? undefined),
         Effect.orDie,
       ),
     ),
 
-    projectRemote: Effect.fn("Db.project.projectRemote")((projectId: string) =>
+    projectRemote: Effect.fn("ProjectStore.projectRemote")((projectId: string) =>
       sql<{ path: string; remote: string | null }>`SELECT path, remote_url AS remote FROM project_repository
         WHERE project_id = ${projectId} ORDER BY rowid`.pipe(Effect.orDie),
     ),
@@ -125,3 +109,13 @@ export const make = Effect.gen(function* () {
 })
 
 export type Interface = Effect.Success<typeof make>
+
+export class Service extends Context.Service<Service, Interface>()("vibest/ProjectStore") {}
+
+export const layer = Layer.effect(Service, make)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Database.node, Bus.node, Projectors.node],
+})

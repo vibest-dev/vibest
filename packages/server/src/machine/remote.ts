@@ -1,17 +1,19 @@
 import { withHeaders } from "@vibest/client/client"
 import type { PipeClient } from "@vibest/client/pipe"
 import { callerKind } from "@vibest/core/caller"
-import { Db } from "@vibest/core/database/db"
-import type { RemoteScope } from "@vibest/core/database/remote"
 import { PlatformNode } from "@vibest/core/effect/platform"
-import { Git } from "@vibest/core/git"
 import { Identity } from "@vibest/core/identity"
 import { PluginLoader, pluginLoaderNode } from "@vibest/core/plugin/sources"
 import { cloneDestination } from "@vibest/core/project/clone"
 import { listProjectRepositories } from "@vibest/core/project/create"
 import { locateProject, resolveProject } from "@vibest/core/project/identity"
-import { repositoryIdentity } from "@vibest/core/repository-url"
-import { Runtimes } from "@vibest/core/runtimes"
+import { repositoryIdentity } from "@vibest/core/project/repository-url"
+import { ProjectStore } from "@vibest/core/project/store"
+import type { RemoteScope } from "@vibest/core/remote/sql"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Runtimes } from "@vibest/core/runtime/registry"
+import { SessionStore } from "@vibest/core/session/store"
+import { Git } from "@vibest/core/worktree/git"
 import type { SpawnPayload } from "@vibest/protocol/payloads"
 import { REMOTE_BY_USER, remoteHeaders } from "@vibest/protocol/protocol"
 import type { SessionInfo } from "@vibest/protocol/schemas"
@@ -50,7 +52,9 @@ const REFUSED = [
 type Away = { readonly machine: ListedMachine; readonly sessions: ReadonlyArray<SessionInfo> }
 
 const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const projectStore = yield* ProjectStore.Service
+  const sessionStore = yield* SessionStore.Service
+  const remoteStore = yield* RemoteStore.Service
   const machines = yield* Machines.Service
   const self = yield* Identity.Service
   const git = yield* Git.Service
@@ -161,7 +165,7 @@ const make = Effect.gen(function* () {
 
           const added = locateProject(dest).pipe(
             provided,
-            Effect.flatMap((at) => resolveProject(db, at)),
+            Effect.flatMap((at) => resolveProject(projectStore, at)),
             Effect.map((project) => ({ projectId: project.id, directory: project.directory })),
             Effect.mapError(failed),
           )
@@ -309,8 +313,8 @@ const make = Effect.gen(function* () {
           })
       }
 
-      const repositories = yield* db.project.projectRemote(from.project)
-      const directory = yield* db.project.projectDirectory(from.project)
+      const repositories = yield* projectStore.projectRemote(from.project)
+      const directory = yield* projectStore.projectDirectory(from.project)
 
       const folders =
         directory !== undefined
@@ -392,10 +396,10 @@ const make = Effect.gen(function* () {
         }),
       )
 
-      const machineRow = yield* db.remote.machineNamed(machine)
+      const machineRow = yield* remoteStore.machineNamed(machine)
 
       if (machineRow !== undefined)
-        yield* db.session.linkSessions([{ from: from.session, to: spawned.session, remote: machineRow.remoteId }])
+        yield* sessionStore.linkSessions([{ from: from.session, to: spawned.session, remote: machineRow.remoteId }])
 
       return {
         id: spawned.session,
@@ -421,7 +425,9 @@ export const node = LayerNode.make({
   service: Service,
   layer: layer,
   deps: [
-    Db.node,
+    ProjectStore.node,
+    SessionStore.node,
+    RemoteStore.node,
     Git.node,
     Machines.node,
     Runtimes.node,

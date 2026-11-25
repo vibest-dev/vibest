@@ -1,7 +1,7 @@
-import { Db } from "@vibest/core/database/db"
-import { Harnesses, unprovided } from "@vibest/core/harnesses"
-import { Integration } from "@vibest/core/integration"
-import { guardInputOf } from "@vibest/core/replies"
+import { Integration } from "@vibest/core/harness/integration"
+import { Harnesses, unprovided } from "@vibest/core/harness/registry"
+import { guardInputOf } from "@vibest/core/session/replies"
+import { SessionStore } from "@vibest/core/session/store"
 import { VibestApi } from "@vibest/protocol/api"
 import { Forbidden } from "@vibest/protocol/errors"
 import { Caller } from "@vibest/protocol/middleware"
@@ -15,7 +15,7 @@ import { integrationOf, noteOpen, processOf, reader } from "../gates.ts"
 
 export const HookHandler = HttpApiBuilder.group(VibestApi, "server.hook", (handlers) =>
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
     const harnesses = yield* Harnesses.Service
     const integration = yield* Integration.Service
 
@@ -35,7 +35,7 @@ export const HookHandler = HttpApiBuilder.group(VibestApi, "server.hook", (handl
         const adapter = harnesses.find(harness)
 
         if (adapter === undefined) return yield* unprovided(harness, harnesses.all)
-        const row = yield* db.session.sessionIdentity(caller.sessionId)
+        const row = yield* sessionStore.sessionIdentity(caller.sessionId)
 
         if (!row) return yield* new Forbidden({ method, message: `no session ${caller.sessionId}` })
 
@@ -54,7 +54,7 @@ export const HookHandler = HttpApiBuilder.group(VibestApi, "server.hook", (handl
           const caller = yield* sessionCaller("hook.ready")
           const request = yield* HttpServerRequest.HttpServerRequest
           const read = reader(request.headers)
-          const row = yield* db.session.sessionIdentity(caller.sessionId)
+          const row = yield* sessionStore.sessionIdentity(caller.sessionId)
 
           if (!row) return yield* new NoSuchSession({ id: caller.sessionId, message: `no session ${caller.sessionId}` })
 
@@ -76,7 +76,7 @@ export const HookHandler = HttpApiBuilder.group(VibestApi, "server.hook", (handl
           const id = read(SESSION_HEADER)
 
           if (id === undefined) return HttpServerResponse.empty({ status: 204 })
-          yield* noteOpen(db, read, id)
+          yield* noteOpen(sessionStore, read, id)
           const body = yield* request.text.pipe(Effect.orElseSucceed(() => ""))
           yield* integration.prompt({ id, harness, process: processOf(read) }, body)
 
@@ -89,7 +89,7 @@ export const HookHandler = HttpApiBuilder.group(VibestApi, "server.hook", (handl
           const id = read(SESSION_HEADER)
 
           if (id === undefined) return HttpServerResponse.empty({ status: 204 })
-          yield* noteOpen(db, read, id)
+          yield* noteOpen(sessionStore, read, id)
           const body = yield* request.text.pipe(Effect.orElseSucceed(() => ""))
           yield* integration.executionEnd({ id, harness, process: processOf(read) }, body)
 

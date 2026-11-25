@@ -2,10 +2,10 @@ import { addPluginHint, HarnessUnavailable } from "@vibest/schema/session"
 import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
 
-import type { HarnessDefinition, HarnessesDomain } from "./plugin/domains.ts"
-import * as Registry from "./plugin/registry.ts"
+import type { HarnessDefinition, HarnessesDomain } from "../plugin/domains.ts"
+import * as Registry from "../plugin/registry.ts"
 
-export * as Harnesses from "./harnesses.ts"
+export * as Harnesses from "./registry.ts"
 
 export const unprovided = (id: string, loaded: ReadonlyArray<HarnessDefinition>) =>
   new HarnessUnavailable({

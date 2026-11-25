@@ -1,6 +1,6 @@
 import { Harness, harnessCatalog } from "@vibest/core/harness"
-import { Harnesses } from "@vibest/core/harnesses"
-import { forProvider } from "@vibest/core/models"
+import { forProvider } from "@vibest/core/harness/models"
+import { Harnesses } from "@vibest/core/harness/registry"
 import { VibestApi } from "@vibest/protocol/api"
 import { Forbidden } from "@vibest/protocol/errors"
 import { CALLER_HEADER } from "@vibest/protocol/protocol"

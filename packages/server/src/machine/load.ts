@@ -1,4 +1,4 @@
-import { Db } from "@vibest/core/database/db"
+import { SessionStore } from "@vibest/core/session/store"
 import type { MachineLoad } from "@vibest/schema/machine"
 import { LayerNode } from "@vibest/util/layer-node"
 import { Cache, Clock, Context, Duration, Effect, Layer } from "effect"
@@ -16,7 +16,7 @@ export class HostSample extends Context.Service<HostSample, { readonly read: Eff
 export const hostSampleNode = LayerNode.unbound(HostSample)
 
 const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const host = yield* HostSample
 
   const sample = Effect.fn("Load.sample")(function* (): Effect.fn.Return<MachineLoad> {
@@ -25,7 +25,7 @@ const make = Effect.gen(function* () {
     return {
       sampledAt: yield* Clock.currentTimeMillis,
       ...reading,
-      executions: { working: yield* db.session.workingExecutions() },
+      executions: { working: yield* sessionStore.workingExecutions() },
     }
   })
 
@@ -49,5 +49,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Db.node, hostSampleNode],
+  deps: [SessionStore.node, hostSampleNode],
 })

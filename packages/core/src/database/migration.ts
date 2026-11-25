@@ -3,7 +3,7 @@ import { Clock, Effect, String as Str } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
 import { Bus, checkReplay } from "../bus.ts"
-import { APPEND_ONLY_TRIGGER, inspectSchema, LOG_SCHEMA, objectCount, PROJECTION_SCHEMA } from "./db-schema.ts"
+import { APPEND_ONLY_TRIGGER, inspectSchema, LOG_SCHEMA, objectCount, PROJECTION_SCHEMA } from "./schema.sql.ts"
 
 export type Migration = {
   readonly id: string

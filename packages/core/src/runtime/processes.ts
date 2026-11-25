@@ -3,7 +3,7 @@ import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Duration, Effect, Layer, Match, Predicate } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import { PlatformNode } from "./effect/platform.ts"
+import { PlatformNode } from "../effect/platform.ts"
 
 export * as Processes from "./processes.ts"
 

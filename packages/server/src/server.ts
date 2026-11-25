@@ -1,25 +1,29 @@
-import { Agents } from "@vibest/core/agents"
+import { Agents } from "@vibest/core/agent/registry"
 import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
-import { Concurrency } from "@vibest/core/concurrency"
-import { Db } from "@vibest/core/database/db"
-import { Drain } from "@vibest/core/drain"
+import { Database } from "@vibest/core/database/database"
 import { PlatformNode } from "@vibest/core/effect/platform"
-import { Git } from "@vibest/core/git"
 import { Harness } from "@vibest/core/harness"
-import { Harnesses } from "@vibest/core/harnesses"
+import { Integration } from "@vibest/core/harness/integration"
+import { Harnesses } from "@vibest/core/harness/registry"
+import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import { Identity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
-import { Integration } from "@vibest/core/integration"
+import { InboxStore } from "@vibest/core/inbox/store"
 import { Plugins } from "@vibest/core/plugin"
-import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
-import { RepositoryUrl } from "@vibest/core/repository-url"
-import { Runtimes } from "@vibest/core/runtimes"
+import { RepositoryUrl } from "@vibest/core/project/repository-url"
+import { ProjectStore } from "@vibest/core/project/store"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
+import { Drain } from "@vibest/core/runtime/drain"
+import { Processes } from "@vibest/core/runtime/processes"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { Session } from "@vibest/core/session"
 import { SessionLaunch } from "@vibest/core/session/entry"
 import { Starts } from "@vibest/core/session/starts"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { SessionStore } from "@vibest/core/session/store"
+import { Git } from "@vibest/core/worktree/git"
 import { VibestApi } from "@vibest/protocol/api"
 import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
@@ -55,6 +59,8 @@ import { schemaErrorLayer } from "./middleware/schema-error.ts"
 import { services } from "./services.ts"
 import { UpdateCheck } from "./update-check.ts"
 import { WatchFeed } from "./watch-feed.ts"
+
+export * as Server from "./server.ts"
 
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
@@ -113,7 +119,11 @@ export const handlerDeps = [
   Bus.node,
   Concurrency.node,
   Starts.node,
-  Db.node,
+  Database.node,
+  ProjectStore.node,
+  SessionStore.node,
+  InboxStore.node,
+  RemoteStore.node,
   Drain.node,
   Git.node,
   Harness.node,

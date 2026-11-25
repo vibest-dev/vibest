@@ -4,7 +4,7 @@ import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "@vibest/testk
 import { Effect } from "effect"
 
 import { harnessDefaultPlugin } from "../../plugin-builtins/src/harness-default.ts"
-import { Agents } from "../src/agents.ts"
+import { Agents } from "../src/agent/registry.ts"
 import { makePlugins } from "../src/plugin.ts"
 
 const event = (harness: string | undefined, claude: boolean) => ({

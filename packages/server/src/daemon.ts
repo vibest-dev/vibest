@@ -2,7 +2,7 @@ import { accepts, DAEMON_START_TIMEOUT, type HttpConnector, probe, stopByHand } 
 import type { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
 import type { ReplayDiffers } from "@vibest/core/bus"
-import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/db-schema"
+import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/schema.sql"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Identity } from "@vibest/core/identity"
 import type { InvalidDurableEvent } from "@vibest/schema/event"
@@ -16,6 +16,8 @@ import { DaemonHandlers } from "./handlers/daemon.ts"
 import * as ShutdownDeadline from "./shutdown-deadline.ts"
 import type { ShutdownHost } from "./shutdown-deadline.ts"
 import * as Ui from "./ui.ts"
+
+export * as Daemon from "./daemon.ts"
 
 export const DaemonInfo = Schema.Struct({
   pid: Schema.Number,

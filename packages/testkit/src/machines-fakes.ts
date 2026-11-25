@@ -3,11 +3,14 @@ import stream from "node:stream"
 import { cliHeaders, connect, withHeaders } from "@vibest/client/client"
 import { stdioSocket } from "@vibest/client/pipe"
 import type { SocketConnector } from "@vibest/client/socket-connector"
-import { Db } from "@vibest/core/database/db"
-import { senderOfRow, type SenderSql } from "@vibest/core/database/db-rows"
+import { senderOfRow, type SenderSql } from "@vibest/core/database/rows"
 import { Identity } from "@vibest/core/identity"
+import { InboxStore } from "@vibest/core/inbox/store"
 import { Project } from "@vibest/core/project"
+import { ProjectStore } from "@vibest/core/project/store"
+import { RemoteStore } from "@vibest/core/remote/store"
 import type { SpawnInput, Session } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
 import * as Platform from "@vibest/platform-bun/bun"
 import { servePipe } from "@vibest/platform-bun/pipe-server"
 import { remoteHeaders, sessionHeaders } from "@vibest/protocol/protocol"
@@ -155,7 +158,7 @@ export const peerSession = {
 
 export const fakeSpawns =
   (spawns: Array<SpawnInput>, terminal: (input: SpawnInput, id: string) => string = () => "") =>
-  (sessions: Session.Interface, db: Db.Interface) => ({
+  (sessions: Session.Interface, sessionStore: SessionStore.Interface) => ({
     ...sessions,
     spawn: (input: SpawnInput) =>
       Effect.gen(function* () {
@@ -164,7 +167,7 @@ export const fakeSpawns =
         const at = yield* Clock.currentTimeMillis
         const t = terminal(input, id)
 
-        const inserted = yield* db.session.insertSession(
+        const inserted = yield* sessionStore.insertSession(
           {
             ...peerSession,
             id,
@@ -214,7 +217,14 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
 
     const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideContext(effect, context)
     const layout = yield* run(Layout)
-    const db = yield* run(Db.Service)
+
+    const db = {
+      project: yield* run(ProjectStore.Service),
+      session: yield* run(SessionStore.Service),
+      inbox: yield* run(InboxStore.Service),
+      remote: yield* run(RemoteStore.Service),
+    }
+
     const directory = yield* tempDirectory("vibest-b-checkout-")
     yield* (yield* run(FakeGit)).repository(directory, { ...REPOSITORY, origin: remote })
     const project = yield* db.project.createProject(directory, [{ path: directory, remote }])

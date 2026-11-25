@@ -1,9 +1,9 @@
 import { Harness } from "@vibest/core/harness"
-import { Harnesses } from "@vibest/core/harnesses"
-import { normalizeModels } from "@vibest/core/models"
+import { normalizeModels } from "@vibest/core/harness/models"
+import { Harnesses } from "@vibest/core/harness/registry"
+import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import type { HarnessDefinition, HarnessesDomain } from "@vibest/core/plugin/domains"
-import { Runtimes } from "@vibest/core/runtimes"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { HarnessUnavailable } from "@vibest/schema/session"
 import { Effect, Layer, Predicate, type Scope } from "effect"
 

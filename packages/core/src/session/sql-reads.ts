@@ -1,18 +1,18 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 
-export const make = Effect.gen(function* () {
+export const sessionReads = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
 
   return {
-    sessionDirectory: Effect.fn("Db.session.sessionDirectory")((id: string) =>
+    sessionDirectory: Effect.fn("SessionStore.sessionDirectory")((id: string) =>
       sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${id}`.pipe(
         Effect.map((rows) => rows[0]?.directory),
         Effect.orDie,
       ),
     ),
 
-    worktreeSessions: Effect.fn("Db.session.worktreeSessions")(() =>
+    worktreeSessions: Effect.fn("SessionStore.worktreeSessions")(() =>
       sql<{
         id: string
         projectId: string
@@ -22,14 +22,14 @@ export const make = Effect.gen(function* () {
       }>`SELECT id, project_id, name, directory, ended_at FROM session WHERE directory != ''`.pipe(Effect.orDie),
     ),
 
-    startedByRemote: Effect.fn("Db.session.startedByRemote")((id: string) =>
+    startedByRemote: Effect.fn("SessionStore.startedByRemote")((id: string) =>
       sql`SELECT 1 FROM session WHERE id = ${id} AND origin_remote IS NOT NULL`.pipe(
         Effect.map((rows) => rows.length > 0),
         Effect.orDie,
       ),
     ),
 
-    liveSharers: Effect.fn("Db.session.liveSharers")((id: string) =>
+    liveSharers: Effect.fn("SessionStore.liveSharers")((id: string) =>
       sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
         WHERE o.id != s.id AND o.directory = s.directory AND s.directory != '' AND o.ended_at IS NULL
         ORDER BY o.id`.pipe(
@@ -38,7 +38,7 @@ export const make = Effect.gen(function* () {
       ),
     ),
 
-    earlierSharer: Effect.fn("Db.session.earlierSharer")((id: string) =>
+    earlierSharer: Effect.fn("SessionStore.earlierSharer")((id: string) =>
       sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
         WHERE o.id != s.id AND o.directory = s.directory AND s.directory != ''
           AND (o.created_at, o.rowid) < (s.created_at, s.rowid)
@@ -48,7 +48,7 @@ export const make = Effect.gen(function* () {
       ),
     ),
 
-    sessionIdentity: Effect.fn("Db.session.sessionIdentity")((id: string) =>
+    sessionIdentity: Effect.fn("SessionStore.sessionIdentity")((id: string) =>
       sql<{
         id: string
         projectId: string

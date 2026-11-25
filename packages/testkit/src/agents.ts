@@ -1,4 +1,4 @@
-import { Agents } from "@vibest/core/agents"
+import { Agents } from "@vibest/core/agent/registry"
 import { coordinator, general } from "@vibest/plugin-builtins/agent"
 import { Effect, Layer } from "effect"
 

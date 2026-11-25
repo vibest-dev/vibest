@@ -1,13 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Bus, TerminalExited } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import { harnessIdOf, placedTerminal, runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
-import { Processes } from "@vibest/core/processes"
+import { harnessIdOf, placedTerminal, runtimeOf, terminalOf } from "@vibest/core/database/rows"
+import { InboxStore } from "@vibest/core/inbox/store"
 import { Project } from "@vibest/core/project"
-import { unwrapped } from "@vibest/core/replies"
+import { Processes } from "@vibest/core/runtime/processes"
 import { SessionLive } from "@vibest/core/session/live"
 import { HARNESS_EXIT_WAIT } from "@vibest/core/session/release"
+import { unwrapped } from "@vibest/core/session/replies"
+import { SessionStore } from "@vibest/core/session/store"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
 import {
@@ -64,7 +65,8 @@ const HARNESS = 4242
 
 const workingPiRoot = Effect.gen(function* () {
   yield* refuseRealKills
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
+  const inboxStore = yield* InboxStore.Service
   const herdr = yield* FakeRuntime
   const processes = yield* FakeProcesses
   const repo = yield* makeRepository
@@ -85,11 +87,11 @@ const workingPiRoot = Effect.gen(function* () {
     },
   })
 
-  yield* db.session.noteConversation(started.sessionId, "conversation-1")
+  yield* sessionStore.noteConversation(started.sessionId, "conversation-1")
   const projectId = yield* projectOf(repo)
-  const root = (yield* db.session.latestRoot(projectId))!
+  const root = (yield* sessionStore.latestRoot(projectId))!
   const origin = { runtime: runtimeOf(root), target: terminalOf(root)!.target }
-  yield* db.session.insertSession(
+  yield* sessionStore.insertSession(
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       agent: "general",
@@ -111,7 +113,7 @@ const workingPiRoot = Effect.gen(function* () {
     projectId,
     { parentSessionId: root.id },
   )
-  yield* db.inbox.insertInbox({
+  yield* inboxStore.insertInbox({
     sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     message: "waiting for the root session",
   })
@@ -142,9 +144,11 @@ const workingPiRoot = Effect.gen(function* () {
       },
     })
 
-  const pending = Effect.map(entryPending(db, projectId), (rows) => rows.map((r) => unwrapped(r.message)))
+  const pending = Effect.map(entryPending(sessionStore, inboxStore, projectId), (rows) =>
+    rows.map((r) => unwrapped(r.message)),
+  )
 
-  return { db, herdr, processes, c, paneId, origin, projectId, started, moveTo, startAt, pending }
+  return { sessionStore, inboxStore, herdr, processes, c, paneId, origin, projectId, started, moveTo, startAt, pending }
 })
 
 describe("Session.Claim move: SIGTERM to the recorded harness PID only, never a group or the terminal; what waits is kept for the next launch", () => {
@@ -191,14 +195,14 @@ describe("Session.Claim move: SIGTERM to the recorded harness PID only, never a 
     Effect.gen(function* () {
       const s = yield* workingPiRoot
       yield* s.processes.set(7777, "alive")
-      yield* s.db.session.patchLive(s.started.sessionId, { pid: 7777 })
+      yield* s.sessionStore.patchLive(s.started.sessionId, { pid: 7777 })
       const moved = yield* s.moveTo("test/p2")
       assert.deepStrictEqual(yield* s.processes.signaled, [7777])
       assert.deepStrictEqual(yield* s.herdr.callsTo("close"), [])
       assert.deepStrictEqual(yield* s.herdr.callsTo("send"), [])
       assert.isTrue(HashMap.has(yield* s.herdr.panes, s.paneId))
       assert.deepInclude(moved, { sessionId: s.started.sessionId, harnessSessionId: "conversation-1" })
-      const row = (yield* s.db.session.latestRoot(s.projectId))!
+      const row = (yield* s.sessionStore.latestRoot(s.projectId))!
       assert.strictEqual(terminalOf(row)?.target["id"], "test/p2")
       assert.strictEqual(row.process?.pid, 5151)
       assert.deepStrictEqual(yield* s.pending, ["waiting for the root session"])
@@ -214,7 +218,7 @@ describe("Session.Claim move: SIGTERM to the recorded harness PID only, never a 
         sessionId: s.started.sessionId,
         harnessSessionId: null,
       })
-      assert.strictEqual(harnessIdOf((yield* s.db.session.latestRoot(s.projectId))!), "claude")
+      assert.strictEqual(harnessIdOf((yield* s.sessionStore.latestRoot(s.projectId))!), "claude")
     }),
   )
 
@@ -231,7 +235,7 @@ describe("Session.Claim move: SIGTERM to the recorded harness PID only, never a 
       assert.isTrue(Exit.isFailure(moved))
       assert.include(String(Cause.squash((moved as Exit.Failure<unknown, unknown>).cause)), "cannot be moved")
       assert.deepStrictEqual(yield* s.processes.signaled, [])
-      assert.strictEqual(terminalOf((yield* s.db.session.latestRoot(s.projectId))!)?.target["id"], s.paneId)
+      assert.strictEqual(terminalOf((yield* s.sessionStore.latestRoot(s.projectId))!)?.target["id"], s.paneId)
     }),
   )
 
@@ -249,7 +253,7 @@ describe("Session.Claim move: SIGTERM to the recorded harness PID only, never a 
       assert.isTrue(Exit.isFailure(result))
       assert.include(String(Cause.squash((result as Exit.Failure<unknown, unknown>).cause)), "did not exit")
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
-      const row = (yield* s.db.session.latestRoot(s.projectId))!
+      const row = (yield* s.sessionStore.latestRoot(s.projectId))!
       assert.strictEqual(terminalOf(row)?.target["id"], s.paneId)
       assert.strictEqual(row.process?.harnessSessionId ?? null, "conversation-1")
       assert.deepStrictEqual(yield* s.pending, ["waiting for the root session"])
@@ -267,7 +271,7 @@ describe("Session.Claim move: SIGTERM to the recorded harness PID only, never a 
       yield* (yield* Bus.Service).publish(TerminalExited, {
         runtime: s.origin.runtime,
         terminal,
-        processes: yield* (yield* Db.Service).session.processesAt(s.origin.runtime, terminal),
+        processes: yield* (yield* SessionStore.Service).processesAt(s.origin.runtime, terminal),
       })
       const moved = yield* Fiber.join(moving)
       assert.strictEqual(moved.sessionId, s.started.sessionId)
@@ -295,12 +299,12 @@ describe("Session.Claim move: SIGTERM to the recorded harness PID only, never a 
       yield* s.processes.setSignalIgnored(true)
       const moving = yield* Effect.forkChild(s.moveTo("test/p2"))
       yield* untilVirtual(
-        s.db.session.latestRoot(s.projectId),
+        s.sessionStore.latestRoot(s.projectId),
         (row) => row !== undefined && placedTerminal(row) === undefined,
       )
       yield* Fiber.interrupt(moving)
       yield* untilVirtual(
-        s.db.session.latestRoot(s.projectId),
+        s.sessionStore.latestRoot(s.projectId),
         (row) => row !== undefined && placedTerminal(row)?.target["id"] === s.paneId,
       )
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])

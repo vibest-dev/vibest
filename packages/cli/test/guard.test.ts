@@ -3,10 +3,10 @@ import http from "node:http"
 import { assert, describe, it } from "@effect/vitest"
 import { HttpConnector } from "@vibest/client/client"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
-import { Db } from "@vibest/core/database/db"
-import { check } from "@vibest/core/guard"
+import { check } from "@vibest/core/agent/guard"
 import { Plugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
+import { SessionStore } from "@vibest/core/session/store"
 import { SocketConnector } from "@vibest/herdr-sdk"
 import { Plugin as PromisePlugin, ToolRefused as PromiseToolRefused } from "@vibest/plugin"
 import { Plugin, ToolRefused } from "@vibest/plugin/effect"
@@ -522,7 +522,7 @@ describe("HTTP guard through vibestd", () => {
         const layout = yield* Layout
         const repo = yield* makeRepository
         const { id } = yield* spawnWorking(repo, "cursor")
-        const identity = (yield* (yield* Db.Service).session.sessionIdentity(id))!
+        const identity = (yield* (yield* SessionStore.Service).sessionIdentity(id))!
 
         const guard = (command: string) =>
           Effect.promise(

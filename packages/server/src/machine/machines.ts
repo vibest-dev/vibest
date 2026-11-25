@@ -1,10 +1,10 @@
 import { withHeaders } from "@vibest/client/client"
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
-import { Db } from "@vibest/core/database/db"
-import type { MachineRow } from "@vibest/core/database/remote"
 import { Identity } from "@vibest/core/identity"
 import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibest/core/plugin"
-import { Runtimes } from "@vibest/core/runtimes"
+import type { MachineRow } from "@vibest/core/remote/sql"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { type Runtime } from "@vibest/plugin/effect"
 import { Host } from "@vibest/plugin/host"
 import type { DaemonStopping, InvalidCaller, InvalidRequestError, ProtocolRejected } from "@vibest/protocol/errors"
@@ -212,7 +212,7 @@ type Entry = {
 }
 
 const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const remoteStore = yield* RemoteStore.Service
   const self = yield* Identity.Service
   const transport = yield* MachineTransport
   const scope = yield* Effect.scope
@@ -265,7 +265,7 @@ const make = Effect.gen(function* () {
     (name: string, kind: string, sessions: ReadonlyMap<string, TerminalTarget>, always = false) =>
       lock.withLock(name)(
         Effect.gen(function* (): Effect.fn.Return<View> {
-          const row = yield* db.remote.machineNamed(name)
+          const row = yield* remoteStore.machineNamed(name)
           const here = yield* runtimes.all
           const locate = here.find((r) => r.id === kind)?.locate
           const label = shownKind(here, kind)
@@ -459,7 +459,7 @@ const make = Effect.gen(function* () {
 
   const receive = (row: MachineRow, link: Link, item: OutboxItem) =>
     Effect.gen(function* () {
-      const name = (yield* db.remote.nameForRemote(row.remoteId)) ?? row.name
+      const name = (yield* remoteStore.nameForRemote(row.remoteId)) ?? row.name
       const sender = shortId(item.session)
       const content = `${item.content}${item.cut ? `… (full text: vibest result ${sender} --machine ${name})` : ""}`
       const from = { machine: name, ...(item.from ?? { session: item.session }) }
@@ -468,7 +468,7 @@ const make = Effect.gen(function* () {
       if (sep > 0) {
         const targetRemoteId = item.recipient.slice(0, sep)
         const targetSessionId = item.recipient.slice(sep + 1)
-        const targetMachine = yield* db.remote.machineWithRemote(targetRemoteId)
+        const targetMachine = yield* remoteStore.machineWithRemote(targetRemoteId)
         const targetEntry = targetMachine === undefined ? undefined : entries.get(targetMachine.name)
         const targetLink = targetEntry?.state === "connected" ? targetEntry.link : undefined
 
@@ -523,7 +523,7 @@ const make = Effect.gen(function* () {
         return
       }
 
-      const outcome = yield* db.remote.receiveRemoteItem({
+      const outcome = yield* remoteStore.receiveRemoteItem({
         id: item.id,
         recipient: item.recipient,
         kind: item.kind,
@@ -560,7 +560,7 @@ const make = Effect.gen(function* () {
           stop: "different",
           answered: opened.hello.id,
         })
-      yield* db.remote.machineConnected(row.name)
+      yield* remoteStore.machineConnected(row.name)
       yield* heard(row.name, opened.hello.runtimes)
       yield* set(row.name, {
         state: "connected",
@@ -608,7 +608,7 @@ const make = Effect.gen(function* () {
       let given = first
 
       while (true) {
-        const row = given?.row ?? (yield* db.remote.machineNamed(name))
+        const row = given?.row ?? (yield* remoteStore.machineNamed(name))
 
         if (row === undefined) return
         const down = yield* connection(row, given).pipe(Effect.flip)
@@ -644,7 +644,7 @@ const make = Effect.gen(function* () {
 
   yield* runtimes.added.pipe(
     Stream.runForEach((started) =>
-      Effect.flatMap(db.remote.machines, (rows) =>
+      Effect.flatMap(remoteStore.machines, (rows) =>
         Effect.forEach(
           rows.filter((row) => entries.get(row.name)?.state === "connected"),
           (row) => Effect.forEach(started, (runtime) => lock.withLock(row.name)(fire(row, "connect", runtime))),
@@ -655,7 +655,7 @@ const make = Effect.gen(function* () {
     Effect.forkIn(scope, { startImmediately: true }),
   )
 
-  for (const row of yield* db.remote.machines) yield* start(row.name)
+  for (const row of yield* remoteStore.machines) yield* start(row.name)
 
   const failed = (message: string) => new MachineFailed({ message })
 
@@ -670,7 +670,7 @@ const make = Effect.gen(function* () {
               : `${name} is ${entry.state}${entry.reason ? `: ${entry.reason}` : ""}`,
         })
 
-  const states = Effect.map(db.remote.machines, (rows) =>
+  const states = Effect.map(remoteStore.machines, (rows) =>
     rows.map((row) => {
       const entry = entries.get(row.name) ?? { state: "connecting" as const, since: row.connectedAt }
       const connected = entry.state === "connected"
@@ -741,7 +741,7 @@ const make = Effect.gen(function* () {
 
       if (problem !== undefined) return yield* failed(problem)
 
-      if ((yield* db.remote.machineNamed(name)) !== undefined) return yield* failed(alreadyNamed(name))
+      if ((yield* remoteStore.machineNamed(name)) !== undefined) return yield* failed(alreadyNamed(name))
       const pipe = yield* Scope.make()
 
       const opened = yield* open(name, target).pipe(
@@ -757,13 +757,13 @@ const make = Effect.gen(function* () {
       )
 
       const id = opened.hello.id
-      const added = id === self.id ? undefined : yield* db.remote.addMachine({ name, target, remoteId: id })
+      const added = id === self.id ? undefined : yield* remoteStore.addMachine({ name, target, remoteId: id })
 
       if (added === undefined) {
         yield* Scope.close(pipe, Exit.void)
 
         if (id === self.id) return yield* failed(`${name} is this vibestd`)
-        const same = yield* db.remote.machineWithRemote(id)
+        const same = yield* remoteStore.machineWithRemote(id)
 
         if (same !== undefined) return yield* new AlreadyAdded({ machine: same.name, id })
 
@@ -844,17 +844,17 @@ const make = Effect.gen(function* () {
     }),
 
     remove: Effect.fn("Machines.remove")(function* (name: string) {
-      const row = yield* db.remote.machineNamed(name)
+      const row = yield* remoteStore.machineNamed(name)
       const fiber = fibers.get(name)
       fibers.delete(name)
 
       if (fiber !== undefined) yield* Fiber.interrupt(fiber)
       entries.delete(name)
 
-      if (row === undefined || !(yield* db.remote.removeMachine(name)))
+      if (row === undefined || !(yield* remoteStore.removeMachine(name)))
         return yield* new UnknownMachine({
           machine: name,
-          machines: (yield* db.remote.machines).map((row) => row.name),
+          machines: (yield* remoteStore.machines).map((row) => row.name),
         })
       yield* PubSub.publish(changes, MachineChanges.Removed({ name }))
       const notes = yield* lock.withLock(name)(fire(row, "remove"))
@@ -867,12 +867,12 @@ const make = Effect.gen(function* () {
     }),
 
     reading: Effect.fn("Machines.reading")(function* (name: string) {
-      const row = yield* db.remote.machineNamed(name)
+      const row = yield* remoteStore.machineNamed(name)
 
       if (row === undefined)
         return yield* new UnknownMachine({
           machine: name,
-          machines: (yield* db.remote.machines).map((known) => known.name),
+          machines: (yield* remoteStore.machines).map((known) => known.name),
         })
       const entry = entries.get(name)
       const link = entry?.state === "connected" ? entry.link : undefined
@@ -900,10 +900,10 @@ const make = Effect.gen(function* () {
     }),
 
     link: Effect.fn("Machines.link")(function* (name: string) {
-      if ((yield* db.remote.machineNamed(name)) === undefined)
+      if ((yield* remoteStore.machineNamed(name)) === undefined)
         return yield* new UnknownMachine({
           machine: name,
-          machines: (yield* db.remote.machines).map((row) => row.name),
+          machines: (yield* remoteStore.machines).map((row) => row.name),
         })
       const entry = entries.get(name)
 
@@ -923,5 +923,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Db.node, machineTransportNode, Plugins.node, Runtimes.node, Identity.node],
+  deps: [RemoteStore.node, machineTransportNode, Plugins.node, Runtimes.node, Identity.node],
 })

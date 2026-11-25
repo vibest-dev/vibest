@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Agents } from "@vibest/core/agents"
+import { Agents } from "@vibest/core/agent/registry"
 import { type Candidate, makeHost } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
 import { type SessionStartBefore, Plugin } from "@vibest/plugin/effect"

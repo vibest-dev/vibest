@@ -3,9 +3,9 @@ import os from "node:os"
 import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
-import { terminalOf } from "@vibest/core/database/db-rows"
+import { terminalOf } from "@vibest/core/database/rows"
 import { Project } from "@vibest/core/project"
+import { SessionStore } from "@vibest/core/session/store"
 import { VERBS } from "@vibest/runtime-herdr/commands"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
@@ -117,7 +117,7 @@ describe("herdr open-entry", () => {
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout
-        const db = yield* Db.Service
+        const sessionStore = yield* SessionStore.Service
         const herdr = yield* FakeRuntime
         const repo = yield* makeRepository
 
@@ -132,7 +132,7 @@ describe("herdr open-entry", () => {
         assert.match(never.stderr, /no harness to inherit/)
         assert.strictEqual((yield* herdr.callsTo("open")).length, 0)
         const projectId = yield* projectOf(repo)
-        yield* db.session.startRoot(
+        yield* sessionStore.startRoot(
           projectId,
           "pi",
           false,
@@ -147,7 +147,7 @@ describe("herdr open-entry", () => {
         assert.match(stopped.stdout, /^opened /)
         const opensBefore = (yield* herdr.callsTo("open")).length
         assert.ok(opensBefore > 0)
-        const entryId = terminalOf((yield* db.session.latestRoot(projectId))!)!.target["id"]!
+        const entryId = terminalOf((yield* sessionStore.latestRoot(projectId))!)!.target["id"]!
         yield* herdr.seedAgent(entryId)
         const again = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.strictEqual(again.code, 0, again.stderr)
