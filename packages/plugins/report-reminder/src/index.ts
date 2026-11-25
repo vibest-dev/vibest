@@ -29,10 +29,10 @@ export default Plugin.define({
 
     return Effect.gen(function* () {
       yield* ctx.event.subscribe({ types: ["session.execution.succeeded"] }).pipe(
-        Stream.runForEach((fact) =>
-          fact.type !== "session.execution.succeeded" || fact.sessionId === undefined
+        Stream.runForEach((event) =>
+          event.type !== "session.execution.succeeded"
             ? Effect.void
-            : ended(fact.sessionId, fact.data.executionId),
+            : ended(event.data.sessionId, event.data.executionId),
         ),
         Effect.forkScoped,
       )

@@ -1,15 +1,7 @@
-import {
-  ProcessEnded,
-  type ProcessEndReason,
-  ProcessReady,
-  ProcessUpdated,
-  SessionCreated,
-  SessionDirectoryChanged,
-  SessionLinked,
-  type Sender,
-} from "@vibest/schema/event"
+import { type ProcessEndReason, type Sender } from "@vibest/schema/event"
 import { entryLabel } from "@vibest/schema/id"
 import type { Routing } from "@vibest/schema/plugin"
+import { ProcessEvent } from "@vibest/schema/process-event"
 import {
   type AgentStatus,
   AmbiguousSession,
@@ -17,6 +9,7 @@ import {
   NoSuchSession,
   type HarnessId,
 } from "@vibest/schema/session"
+import { SessionEvent } from "@vibest/schema/session-event"
 import type { TerminalTarget } from "@vibest/schema/terminal"
 import { Clock, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
@@ -197,10 +190,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       at: row.createdAt,
                     })
 
-              yield* publish(SessionCreated, {
-                sessionId: row.id,
-                at: row.createdAt,
-                data: {
+              yield* publish(
+                SessionEvent.Created,
+                {
+                  sessionId: row.id,
                   project,
                   agent: row.agent,
                   name: row.name,
@@ -213,9 +206,10 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                       ...(origin.reportTo !== undefined && { session: origin.reportTo }),
                     },
                   }),
-                  ...(message !== undefined && { message }),
+                  ...(message !== undefined && { messageId: message }),
                 },
-              })
+                { at: row.createdAt },
+              )
 
               const seen = new Set<string>()
 
@@ -226,11 +220,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 if (seen.has(key)) return Effect.void
                 seen.add(key)
 
-                return publish(SessionLinked, {
-                  sessionId: from,
-                  at: row.createdAt,
-                  data: { to, ...(remoteId !== undefined && { remote: remoteId }) },
-                }).pipe(Effect.asVoid)
+                return publish(
+                  SessionEvent.Linked,
+                  { sessionId: from, to, ...(remoteId !== undefined && { remote: remoteId }) },
+                  { at: row.createdAt },
+                ).pipe(Effect.asVoid)
               }
 
               if (parentSessionId !== undefined) {
@@ -269,11 +263,11 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                   )
 
               if (row.exitedAt !== null && process !== undefined)
-                yield* publish(ProcessEnded, {
-                  sessionId: row.id,
-                  at: row.exitedAt,
-                  data: { process, reason: "exited" },
-                })
+                yield* publish(
+                  ProcessEvent.Ended,
+                  { sessionId: row.id, processId: process, reason: "exited" },
+                  { at: row.exitedAt },
+                )
 
               if (row.executionState !== "none") {
                 const execution = yield* allocateExecution(row.id, row.executionPromptedAt)
@@ -401,28 +395,29 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                     : undefined
 
                 if (creating) {
-                  yield* publish(SessionCreated, {
-                    sessionId: targetId,
-                    at,
-                    data: {
+                  yield* publish(
+                    SessionEvent.Created,
+                    {
+                      sessionId: targetId,
                       project,
                       agent: start.agent,
                       name: entryLabel(start.projectDirectory ?? ""),
                       directory: start.projectDirectory ?? "",
-                      ...(message !== undefined && { message }),
+                      ...(message !== undefined && { messageId: message }),
                     },
-                  })
+                    { at },
+                  )
                 }
 
                 if (start.projectDirectory) {
                   const [own] = yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${targetId}`
 
                   if (own?.directory === "")
-                    yield* publish(SessionDirectoryChanged, {
-                      sessionId: targetId,
-                      at,
-                      data: { directory: start.projectDirectory },
-                    })
+                    yield* publish(
+                      SessionEvent.DirectoryChanged,
+                      { sessionId: targetId, directory: start.projectDirectory },
+                      { at },
+                    )
                 }
 
                 const current = yield* currentProcess(targetId)
@@ -544,7 +539,7 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
                 const current = yield* currentProcess(id)
 
                 if (current === undefined) return undefined
-                yield* publish(ProcessUpdated, { sessionId: id, data: { process: current.id, pid } })
+                yield* publish(ProcessEvent.Updated, { sessionId: id, processId: current.id, pid })
 
                 return current.id
               }
@@ -560,15 +555,16 @@ export const make = (session: Session.Statements, inbox: Inbox.Statements, remot
 
               if ((yield* openExecution(id)) === undefined && (yield* sessionLive.status(id)) === "unknown")
                 yield* setStatus(id, "idle")
-              yield* publish(ProcessReady, {
-                sessionId: id,
-                at: ready,
-                data: {
-                  process: current.id,
+              yield* publish(
+                ProcessEvent.Ready,
+                {
+                  sessionId: id,
+                  processId: current.id,
                   ...(Predicate.isNumber(pid) && { pid }),
                   ...(integration !== undefined && { integration }),
                 },
-              })
+                { at: ready },
+              )
 
               return current.id
             }),

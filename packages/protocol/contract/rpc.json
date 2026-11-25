@@ -1,5 +1,5 @@
 {
-  "protocol": 14,
+  "protocol": 15,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -2024,49 +2024,50 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
-          "aggregate": {
-            "type": "string"
-          },
-          "seq": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "enum": [
-                  "Infinity",
-                  "-Infinity",
-                  "NaN"
-                ]
-              }
-            ]
-          },
-          "at": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string",
-                "enum": [
-                  "Infinity",
-                  "-Infinity",
-                  "NaN"
-                ]
-              }
-            ]
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
           },
           "type": {
             "type": "string"
           },
+          "created": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "aggregateId",
+              "seq",
+              "version"
+            ],
+            "additionalProperties": true
+          },
           "data": {}
         },
         "required": [
-          "aggregate",
-          "seq",
-          "at",
+          "id",
           "type",
+          "created",
+          "durable",
           "data"
         ],
         "additionalProperties": true
@@ -2908,6 +2909,9 @@
                           "-Infinity",
                           "NaN"
                         ]
+                      },
+                      {
+                        "type": "null"
                       }
                     ]
                   }

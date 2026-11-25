@@ -161,7 +161,7 @@ describe("vibest.sock", () => {
       )
 
       const queued = (request: string) =>
-        sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'session.inbox.enqueued'
+        sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'session.inbox.enqueued.1'
           AND json_extract(data, '$.requestId') = ${request}`.pipe(Effect.map((rows) => rows[0]!.n))
 
       const sends = sql<{ n: number }>`SELECT count(*) AS n FROM inbox i WHERE i.sender_type != 'vibest'
@@ -765,6 +765,26 @@ describe("vibest.sock", () => {
       assert.strictEqual(got.id, id)
       assert.strictEqual(failureTag(stranger), "NoSuchSession")
       assert.match((yield* db.inbox.latestInbox(entry, "send"))!.message, /second/)
+    }),
+  )
+
+  test(
+    "Get succeeds with reply.endedAt === null after an unresolved execution",
+    Effect.gen(function* () {
+      const db = yield* Db.Service
+      const repo = yield* makeRepository
+      const raw = yield* client
+      const cli = asCli(raw, repo)
+      const spawner = yield* asEntry(raw, repo)
+      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      yield* until(
+        db.session.getSession(id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.openExecution !== null,
+      )
+      yield* db.session.endExecution(id, { outcome: "lost" }, undefined)
+      const got = yield* cli.Get({ id })
+      assert.strictEqual(got.reply?.status, "lost")
+      assert.strictEqual(got.reply?.endedAt, null)
     }),
   )
 

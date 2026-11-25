@@ -52,7 +52,7 @@ describe("observed execution end", () => {
       assert.strictEqual(yield* db.session.openExecution(id), execution)
       yield* db.session.acceptExecution(id, execution)
       yield* writeEnd(id, "pi", { type: "agent_settled", text: "mine" })
-      assert.deepStrictEqual((yield* ends(id)).at(-1), { executionId: execution, reply: "mine" })
+      assert.deepStrictEqual((yield* ends(id)).at(-1), { sessionId: id, executionId: execution, reply: "mine" })
     }),
     { hooked: ["pi"] },
   )
@@ -223,7 +223,7 @@ describe("observed execution end", () => {
       yield* db.session.acceptExecution(id, b)
       yield* db.session.setStatus(id, "working")
       const before = yield* db.session.getSession(id)
-      const facts = (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id}`)[0]?.n
+      const facts = (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate_id = ${id}`)[0]?.n
       yield* integration.executionEnd(who, report(a, "reply A"))
       yield* integration.executionEnd(
         { ...who, process: who.process! - 1 },
@@ -236,7 +236,7 @@ describe("observed execution end", () => {
       )
       assert.deepStrictEqual(yield* db.session.getSession(id), before)
       assert.strictEqual(
-        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate = ${id}`)[0]?.n,
+        (yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE aggregate_id = ${id}`)[0]?.n,
         facts,
       )
       assert.deepStrictEqual(yield* db.session.openExecution(id), b)

@@ -20,8 +20,8 @@ describe("Reactor", () => {
         return Effect.sync(() => void seen.push(calls))
       })
       yield* Effect.yieldNow
-      yield* bus.observe({ type: "terminal.exited", runtime: "r", terminal: "t" } as never)
-      yield* bus.observe({ type: "terminal.exited", runtime: "r", terminal: "t" } as never)
+      yield* bus.publish(TerminalExited, { runtime: "r", terminal: { id: "t" }, processes: [] })
+      yield* bus.publish(TerminalExited, { runtime: "r", terminal: { id: "t" }, processes: [] })
       yield* Effect.sleep("20 millis")
       assert.deepStrictEqual(seen, [2])
     }).pipe(Effect.provide(Layer.fresh(memoryBus)), Effect.scoped),

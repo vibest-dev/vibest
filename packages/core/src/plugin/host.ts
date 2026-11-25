@@ -1,5 +1,11 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
-import { PublicCatalog, type PublicFactOf, type PublicFactType } from "@vibest/schema/event"
+import {
+  isPublicEventType,
+  type PublicDurableEvent,
+  type PublicEventOf,
+  PublicEvents,
+  type PublicEventType,
+} from "@vibest/schema/durable-event-manifest"
 import { Effect, Predicate, type Scope, Stream } from "effect"
 
 import { Agents } from "../agents.ts"
@@ -20,17 +26,19 @@ type SessionRegistrations = {
   ) => Effect.Effect<VibestPlugin.Registration, never, Scope.Scope>
 }
 
-export const factsFor =
-  (bus: Bus.Interface, plugin: string): VibestPlugin.EventDomain["subscribe"] =>
-  <T extends PublicFactType>(input?: { readonly types?: ReadonlyArray<T> }) => {
-    const asked: ReadonlyArray<T> = input?.types ?? []
-    const known = new Set(asked.filter((type) => Object.hasOwn(PublicCatalog, type)))
+export const factsFor = (bus: Bus.Interface, plugin: string): VibestPlugin.EventDomain["subscribe"] => {
+  function subscribe<T extends PublicEventType = PublicEventType>(input?: {
+    readonly types?: ReadonlyArray<T>
+  }): Stream.Stream<PublicEventOf<T>>
+  function subscribe(input?: { readonly types?: ReadonlyArray<PublicEventType> }): Stream.Stream<PublicDurableEvent> {
+    const asked = input?.types ?? []
+    const known = new Set(asked.filter((type) => isPublicEventType(type)))
     const unknown = asked.filter((type) => !known.has(type))
 
     const warned =
       unknown.length === 0
         ? Effect.void
-        : Effect.logWarning(`plugin ${plugin} event.subscribe: ignoring unknown fact types ${unknown.join(", ")}`)
+        : Effect.logWarning(`plugin ${plugin} event.subscribe: ignoring unknown event types ${unknown.join(", ")}`)
 
     if (asked.length > 0 && known.size === 0) return Stream.unwrap(Effect.as(warned, Stream.never))
 
@@ -42,12 +50,11 @@ export const factsFor =
         ),
       )
 
-    return Stream.unwrap(
-      Effect.map(bus.subscribe(Object.values(PublicCatalog)), (subscription) =>
-        Stream.fromSubscription(subscription).pipe(Stream.filter((_event): _event is PublicFactOf<T> => true)),
-      ),
-    )
+    return Stream.unwrap(Effect.map(bus.subscribe(PublicEvents), Stream.fromSubscription))
   }
+
+  return subscribe
+}
 
 const sessionsFor = (
   summaries: Summaries.Interface,

@@ -12,7 +12,7 @@ import { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
 import { SQL_NAMES } from "@vibest/core/database/db"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/db-schema"
-import { checkLedger } from "@vibest/core/database/migration"
+import { checkLedger, migrations } from "@vibest/core/database/migration"
 import * as Projectors from "@vibest/core/database/projectors"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
@@ -124,8 +124,8 @@ const privateDatabase = (filename: string) =>
     catch: (e) => new DatabaseOpenFailed({ file: filename, message: messageOf(e) }),
   })
 
-const inspectFile = (filename: string) =>
-  inspectSchema.pipe(
+const inspectFile = (filename: string, known: ReadonlySet<string> = new Set(migrations.map((m) => m.id))) =>
+  inspectSchema(known).pipe(
     Effect.provide(sqliteLayer(filename, true)),
     Effect.scoped,
     Effect.mapError((e) =>
@@ -135,22 +135,21 @@ const inspectFile = (filename: string) =>
             applicationId: e.applicationId,
             ...(e.detail !== undefined && { detail: e.detail }),
             ...(e.older !== undefined && { older: e.older }),
-            ...(e.catalog !== undefined && { catalog: e.catalog }),
-            ...(e.oldEvents !== undefined && { oldEvents: e.oldEvents }),
+            ...(e.unknownMigration !== undefined && { unknownMigration: e.unknownMigration }),
             file: filename,
           })
         : new DatabaseOpenFailed({ file: filename, message: e.message }),
     ),
   )
 
-export const sqlite = (filename: string) =>
+export const sqlite = (filename: string, known?: ReadonlySet<string>) =>
   Layer.unwrap(
     Effect.gen(function* () {
       if (filename !== ":memory:") {
         const existed = yield* Effect.promise(() => Bun.file(filename).exists())
         yield* privateDatabase(filename)
 
-        if (existed) yield* inspectFile(filename)
+        if (existed) yield* inspectFile(filename, known)
       }
 
       return sqliteLayer(filename, false)

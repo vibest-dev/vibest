@@ -1,12 +1,6 @@
-import {
-  InboxDelivered,
-  InboxDelivering,
-  InboxDropped,
-  InboxEnqueued,
-  InboxFailed,
-  type Sender,
-} from "@vibest/schema/event"
+import { type Sender } from "@vibest/schema/event"
 import { InboxStatus } from "@vibest/schema/session"
+import { SessionEvent } from "@vibest/schema/session-event"
 import { Clock, Effect } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
@@ -54,11 +48,15 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
           for (const r of moved) {
             if (to === "delivering") {
-              yield* publish(InboxDelivering, {
-                sessionId: r.session,
-                at,
-                data: { messageId: r.id, ...(detail?.execution !== undefined && { execution: detail.execution }) },
-              })
+              yield* publish(
+                SessionEvent.InboxDelivering,
+                {
+                  sessionId: r.session,
+                  messageId: r.id,
+                  ...(detail?.execution !== undefined && { execution: detail.execution }),
+                },
+                { at },
+              )
               continue
             }
 
@@ -67,11 +65,11 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
               if (execution === undefined)
                 return yield* Effect.die(new Error(`inbox ${r.session} ${r.id} delivered without an execution`))
-              yield* publish(InboxDelivered, {
-                sessionId: r.session,
-                at,
-                data: { messageId: r.id, recipientExecutionId: execution },
-              })
+              yield* publish(
+                SessionEvent.InboxDelivered,
+                { sessionId: r.session, messageId: r.id, recipientExecutionId: execution },
+                { at },
+              )
               continue
             }
 
@@ -79,16 +77,20 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
 
             if (reason === undefined)
               return yield* Effect.die(new Error(`inbox ${r.session} ${r.id} ${to} without a reason`))
-            yield* publish(to === "failed" ? InboxFailed : InboxDropped, {
-              sessionId: r.session,
-              at,
-              data: { messageId: r.id, reason },
-            })
+            yield* publish(
+              to === "failed" ? SessionEvent.InboxFailed : SessionEvent.InboxDropped,
+              { sessionId: r.session, messageId: r.id, reason },
+              { at },
+            )
           }
 
           return moved.map((r): InboxKey => ({ session: r.session, id: r.id }))
         }),
       )
+
+    const nextMessageId = (sessionId: string) =>
+      sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM inbox
+        WHERE recipient_session_id = ${sessionId}`.pipe(Effect.map((rows) => rows[0]?.id ?? 1))
 
     const queueInbox = (row: {
       readonly recipient: string
@@ -100,17 +102,24 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
       readonly senderExecution?: number | undefined
       readonly at?: number | undefined
     }) =>
-      publish(InboxEnqueued, {
-        sessionId: row.recipient,
-        ...(row.at !== undefined && { at: row.at }),
-        data: {
-          sender: row.sender,
-          content: row.content,
-          ...(row.about !== undefined && { aboutSessionId: row.about }),
-          ...(row.request !== undefined && { requestId: row.request }),
-          ...(row.transfer !== undefined && { transferId: row.transfer }),
-          ...(row.senderExecution !== undefined && { senderExecutionId: row.senderExecution }),
-        },
+      Effect.gen(function* () {
+        const messageId = yield* nextMessageId(row.recipient)
+        yield* publish(
+          SessionEvent.InboxEnqueued,
+          {
+            sessionId: row.recipient,
+            messageId,
+            sender: row.sender,
+            content: row.content,
+            ...(row.about !== undefined && { aboutSessionId: row.about }),
+            ...(row.request !== undefined && { requestId: row.request }),
+            ...(row.transfer !== undefined && { transferId: row.transfer }),
+            ...(row.senderExecution !== undefined && { senderExecutionId: row.senderExecution }),
+          },
+          row.at === undefined ? undefined : { at: row.at },
+        )
+
+        return messageId
       })
 
     const linkTask = (sessionId: string, execution: number, at: number) =>
@@ -120,11 +129,7 @@ export const statements = (session: Session.Statements, remote: Remote.Statement
           WHERE i.recipient_session_id = ${sessionId} AND i.status = 'pending' AND i.recipient_execution_id IS NULL`
 
         if (task !== undefined)
-          yield* publish(InboxDelivering, {
-            sessionId,
-            at,
-            data: { messageId: task.id, execution },
-          })
+          yield* publish(SessionEvent.InboxDelivering, { sessionId, messageId: task.id, execution }, { at })
       })
 
     const liveRecipient = (id: string) =>

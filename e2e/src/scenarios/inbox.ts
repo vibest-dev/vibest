@@ -654,14 +654,14 @@ const checks: ReadonlyArray<Check> = [
         const fact = (sql: string) =>
           row<{ n: number }>(
             w,
-            `SELECT count(*) AS n FROM event WHERE aggregate = ? AND ${sql}`,
+            `SELECT count(*) AS n FROM event WHERE aggregate_id = ? AND ${sql}`,
             entryId,
             sent()[0]!.id,
           )?.n
 
         expect(
-          fact("type = 'session.inbox.enqueued' AND seq = ?") === 1 &&
-            fact("type = 'session.inbox.delivered' AND json_extract(data, '$.messageId') = ?") === 1,
+          fact("type = 'session.inbox.enqueued.1' AND json_extract(data, '$.messageId') = ?") === 1 &&
+            fact("type = 'session.inbox.delivered.1' AND json_extract(data, '$.messageId') = ?") === 1,
           `the send ${sent()[0]!.id} has not exactly one session.inbox.enqueued and one session.inbox.delivered`,
         )
         const line = `Message from @General · Send probe (${sub.slice(0, 8)})\nhello-claude`

@@ -549,12 +549,12 @@ export const make = Effect.gen(function* () {
                   )
 
           return bus.log({ aggregate: id, after, follow: follow === true }).pipe(
-            Stream.map(({ aggregate, seq, at, type, data }) => ({
-              aggregate,
-              seq,
-              at,
+            Stream.map(({ id, type, created, durable, data }) => ({
+              id,
               type,
-              data: JSON.parse(data),
+              created,
+              durable,
+              data,
             })),
           )
         }),

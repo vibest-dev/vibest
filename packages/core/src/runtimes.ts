@@ -5,7 +5,7 @@ import { NoRuntime } from "@vibest/schema/session"
 import { formatTerminalTarget, type TerminalTarget } from "@vibest/schema/terminal"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, PubSub, type Scope, Stream } from "effect"
 
-import { type BoundProcess, Bus, type Signal } from "./bus.ts"
+import { type BoundProcess, Bus, RuntimeReset, TerminalExited, TerminalSeen, TerminalState } from "./bus.ts"
 import { Db } from "./database/db.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import type { HostEnv as PluginHostEnv, RuntimesDomain } from "./plugin/domains.ts"
@@ -30,23 +30,25 @@ export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 export const formatTerminal = (runtime: Pick<Runtime, "format"> | undefined, terminal: Terminal): string =>
   runtime?.format ? runtime.format(terminal) : formatTerminalTarget(terminal)
 
-const bound = (processesAt: ProcessesAt, runtime: string, terminal: Terminal, state?: AgentState) =>
-  Effect.map(processesAt(runtime, terminal), (processes): Signal =>
-    state === undefined
-      ? { type: "terminal.exited", runtime, terminal, processes }
-      : { type: "terminal.state", runtime, terminal, state, processes },
-  )
-
-const live = (processesAt: ProcessesAt, runtime: string, event: RuntimeEvent): Effect.Effect<Signal> => {
+const publishRuntimeEvent = (
+  bus: Bus.Interface,
+  processesAt: ProcessesAt,
+  runtime: string,
+  event: RuntimeEvent,
+): Effect.Effect<void> => {
   switch (event.type) {
     case "state":
-      return bound(processesAt, runtime, event.terminal, event.state)
+      return Effect.flatMap(processesAt(runtime, event.terminal), (processes) =>
+        Effect.asVoid(bus.publish(TerminalState, { runtime, terminal: event.terminal, state: event.state, processes })),
+      )
     case "exited":
-      return bound(processesAt, runtime, event.terminal)
+      return Effect.flatMap(processesAt(runtime, event.terminal), (processes) =>
+        Effect.asVoid(bus.publish(TerminalExited, { runtime, terminal: event.terminal, processes })),
+      )
     case "seen":
-      return Effect.succeed({ type: "terminal.seen", runtime, terminal: event.terminal })
+      return Effect.asVoid(bus.publish(TerminalSeen, { runtime, terminal: event.terminal }))
     case "reset":
-      return Effect.succeed({ type: "runtime.reset", runtime })
+      return Effect.asVoid(bus.publish(RuntimeReset, { runtime }))
   }
 }
 
@@ -92,7 +94,7 @@ export const make: Effect.Effect<RuntimesDomain, never, Bus.Service | TerminalPr
 
     const follow = (runtime: Runtime) =>
       runtime.events.pipe(
-        Stream.tap((event) => Effect.flatMap(live(processesAt, runtime.id, event), bus.observe)),
+        Stream.tap((event) => publishRuntimeEvent(bus, processesAt, runtime.id, event)),
         Stream.filter((event) => event.type === "reset"),
         Stream.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)

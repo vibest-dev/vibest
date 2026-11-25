@@ -4,13 +4,13 @@ import url from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
-import { APPLICATION_ID, PROJECTION_VERSION } from "@vibest/core/database/db-schema"
+import { APPLICATION_ID } from "@vibest/core/database/db-schema"
 import { checkLedger, type Migration, migrations, open } from "@vibest/core/database/migration"
 import * as Projectors from "@vibest/core/database/projectors"
 import { SessionLive } from "@vibest/core/session/live"
 import { tempDirectory, projectOf } from "@vibest/platform-bun/test/lib/fakes"
 import { database, session, place } from "@vibest/platform-bun/test/lib/unit-helpers"
-import { CATALOG_VERSION } from "@vibest/schema/event"
+import { Event } from "@vibest/schema/event"
 import { ID } from "@vibest/schema/id"
 import { Cause, Effect, Exit, FileSystem, Layer, Path } from "effect"
 import { SqlClient } from "effect/sql"
@@ -104,47 +104,9 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect(
-    "a database with another read-model version is rebuilt at open and keeps its migration rows; it opens again",
-    () =>
-      Effect.gen(function* () {
-        const file = yield* fileAt(yield* tempDirectory("vibest-projection-"), "vibest.db")
-
-        const sessions = Effect.flatMap(Db.Service, (db) => db.session.listSessions({ stopped: true })).pipe(
-          Effect.map((rows) => rows.map((row) => row.id)),
-          Effect.provide(database(file)),
-        )
-
-        yield* Effect.gen(function* () {
-          const db = yield* Db.Service
-          yield* db.session.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
-        }).pipe(Effect.provide(database(file)))
-        yield* writeSql(file, [
-          "INSERT INTO migration (id, time_completed) VALUES ('20270101000000_kept', 1)",
-          "UPDATE meta SET value = '0' WHERE key = 'projection'",
-        ])
-        assert.deepStrictEqual(yield* sessions, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"])
-        assert.deepStrictEqual(yield* sessions, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"])
-
-        const kept = yield* Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-
-          return {
-            ids: (yield* sql<{ id: string }>`SELECT id FROM migration`).map((row) => row.id),
-            projection: (yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'projection'`)[0]?.value,
-          }
-        }).pipe(Effect.provide(Platform.sqlite(file)))
-
-        assert.deepStrictEqual(kept, {
-          ids: [...builtIn, "20270101000000_kept"],
-          projection: String(PROJECTION_VERSION),
-        })
-      }).pipe(Effect.provide(Platform.services)),
-  )
-
-  it.effect("reopening projection 22 replays a known harness session id and a null one", () =>
+  it.effect("reopening an existing database does not drop operational tables and preserves its data", () =>
     Effect.gen(function* () {
-      const file = yield* fileAt(yield* tempDirectory("vibest-projection-harness-session-"), "vibest.db")
+      const file = yield* fileAt(yield* tempDirectory("vibest-reopen-o1-"), "vibest.db")
       const quietPlace = { ...place, target: { id: "test/p2" } }
 
       const ids = yield* Effect.gen(function* () {
@@ -156,52 +118,40 @@ describe("Db", () => {
         return { reported: reported.sessionId, quiet: quiet.sessionId }
       }).pipe(Effect.provide(database(file)))
 
-      const ledger = Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-
-        return yield* sql<{ type: string; data: string }>`SELECT type, data FROM event ORDER BY position`
-      }).pipe(Effect.provide(Platform.sqlite(file)))
-
-      const before = yield* ledger
-      yield* writeSql(file, [
-        "ALTER TABLE process RENAME COLUMN harness_session_id TO conversation",
-        "UPDATE meta SET value = '22' WHERE key = 'projection'",
-      ])
       yield* Effect.void.pipe(Effect.provide(database(file)))
 
-      const rebuilt = yield* Effect.gen(function* () {
+      const rows = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
 
-        return {
-          rows: yield* sql<{
-            sessionId: string
-            harnessSessionId: string | null
-          }>`SELECT session_id, harness_session_id FROM process`,
-          events: yield* sql<{ type: string; data: string }>`SELECT type, data FROM event ORDER BY position`,
-        }
+        return yield* sql<{
+          sessionId: string
+          harnessSessionId: string | null
+        }>`SELECT session_id, harness_session_id FROM process`
       }).pipe(Effect.provide(Platform.sqlite(file)))
 
-      assert.strictEqual(rebuilt.rows.find((row) => row.sessionId === ids.reported)?.harnessSessionId, "conv-known")
-      assert.strictEqual(rebuilt.rows.find((row) => row.sessionId === ids.quiet)?.harnessSessionId, null)
-      assert.deepStrictEqual(rebuilt.events, before)
+      assert.strictEqual(rows.find((row) => row.sessionId === ids.reported)?.harnessSessionId, "conv-known")
+      assert.strictEqual(rows.find((row) => row.sessionId === ids.quiet)?.harnessSessionId, null)
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  const runner = (file: string) => Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file)))
+  const knownOf = (steps: ReadonlyArray<Migration>) => new Set([...builtIn, ...steps.map((m) => m.id)])
 
-  const ledgerOf = (file: string) =>
+  const runner = (file: string, steps: ReadonlyArray<Migration> = []) =>
+    Projectors.replay.pipe(Layer.provideMerge(Platform.sqlite(file, knownOf(steps))))
+
+  const ledgerOf = (file: string, steps: ReadonlyArray<Migration> = []) =>
     Effect.flatMap(SqlClient.SqlClient, (sql) =>
       Effect.all([
         sql`SELECT * FROM event ORDER BY position`,
-        sql`SELECT * FROM meta ORDER BY key`,
+        sql`SELECT * FROM kv ORDER BY key`,
         sql`SELECT id FROM migration ORDER BY id`,
         sql`SELECT * FROM project ORDER BY id`,
       ]),
-    ).pipe(Effect.provide(Platform.sqlite(file)))
+    ).pipe(Effect.provide(Platform.sqlite(file, knownOf(steps))))
 
   const checkOn = (file: string, steps: ReadonlyArray<Migration>) =>
     Effect.gen(function* () {
-      const stored = yield* Layer.build(Platform.sqlite(file)).pipe(
+      const stored = yield* Layer.build(Platform.sqlite(file, knownOf(steps))).pipe(
         Effect.flatMap((context) => SqlClient.SqlClient.pipe(Effect.provide(context))),
       )
 
@@ -223,7 +173,7 @@ describe("Db", () => {
       const marking = (id: string, key: string, fails = false): Migration => ({
         id,
         up: (tx) =>
-          tx`INSERT INTO meta (key, value) VALUES (${key}, ${id})`.pipe(
+          tx`INSERT INTO kv (key, value) VALUES (${key}, ${id})`.pipe(
             Effect.tap(() => Effect.sync(() => ran.push(id))),
             Effect.andThen(fails ? Effect.die("injected migration failure") : Effect.void),
           ),
@@ -234,116 +184,128 @@ describe("Db", () => {
 
         return {
           ids: (yield* sql<{ id: string }>`SELECT id FROM migration ORDER BY id`).map((row) => row.id),
-          marks: (yield* sql<{ key: string }>`SELECT key FROM meta WHERE key LIKE 'later_%' ORDER BY key`).map(
+          marks: (yield* sql<{ key: string }>`SELECT key FROM kv WHERE key LIKE 'later_%' ORDER BY key`).map(
             (row) => row.key,
           ),
         }
       })
 
       const steps = [marking("20270101000000_a", "later_a"), marking("20270102000000_b", "later_b")]
-      yield* open(steps).pipe(Effect.provide(runner(file)))
-      yield* open(steps).pipe(Effect.provide(runner(file)))
+      yield* open(steps).pipe(Effect.provide(runner(file, steps)))
+      yield* open(steps).pipe(Effect.provide(runner(file, steps)))
       assert.deepStrictEqual(ran, ["20270101000000_a", "20270102000000_b"])
-      const before = yield* ledgerOf(file)
-      const failing = open([...steps, marking("20270103000000_c", "later_c", true)])
-      assert.isTrue(Exit.isFailure(yield* Effect.exit(failing.pipe(Effect.provide(runner(file))))))
-      assert.deepStrictEqual(yield* ledgerOf(file), before, "the failed open rolled everything back")
-      assert.deepStrictEqual(yield* state.pipe(Effect.provide(Platform.sqlite(file))), {
+      const before = yield* ledgerOf(file, steps)
+      const failingSteps = [...steps, marking("20270103000000_c", "later_c", true)]
+      const failing = open(failingSteps)
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(failing.pipe(Effect.provide(runner(file, failingSteps))))))
+      assert.deepStrictEqual(yield* ledgerOf(file, steps), before, "the failed open rolled everything back")
+      assert.deepStrictEqual(yield* state.pipe(Effect.provide(Platform.sqlite(file, knownOf(steps)))), {
         ids: [...builtIn, "20270101000000_a", "20270102000000_b"],
         marks: ["later_a", "later_b"],
       })
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("import-check runs a migration against the file's meta as open does, so a collision fails both", () =>
+  it.effect("import-check runs a migration against the file's kv as open does, so a collision fails both", () =>
     Effect.gen(function* () {
-      const file = yield* fileAt(yield* tempDirectory("vibest-migration-meta-"), "vibest.db")
+      const file = yield* fileAt(yield* tempDirectory("vibest-migration-kv-"), "vibest.db")
       yield* Effect.void.pipe(Effect.provide(database(file)))
 
       const colliding: Migration = {
         id: "20270101000000_ledger_again",
-        up: (tx) => tx`INSERT INTO meta (key, value) VALUES ('ledger', 'again')`,
+        up: (tx) => tx`INSERT INTO kv (key, value) VALUES ('ledger', 'again')`,
       }
 
-      assert.include(failureOf(yield* checkOn(file, [colliding])), "meta.key")
-      assert.include(failureOf(yield* Effect.exit(open([colliding]).pipe(Effect.provide(runner(file))))), "meta.key")
+      assert.include(failureOf(yield* checkOn(file, [colliding])), "kv.key")
+      assert.include(failureOf(yield* Effect.exit(open([colliding]).pipe(Effect.provide(runner(file))))), "kv.key")
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("a fact whose projector fails at open is named by its aggregate and seq", () =>
+  it.effect("an event whose projector fails during replay is named by its aggregate and seq", () =>
     Effect.gen(function* () {
       const file = yield* fileAt(yield* tempDirectory("vibest-replay-projector-"), "vibest.db")
       const twice = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
       yield* Effect.void.pipe(Effect.provide(database(file)))
-      yield* writeSql(
-        file,
-        [1, 2].map(
-          (seq) =>
-            `INSERT INTO event (aggregate, seq, at, type, data) VALUES ('${twice}', ${seq}, 5, 'project.created', '{"directory":"/twice-${seq}","repositories":[]}')`,
-        ),
-      )
+      yield* writeSql(file, [
+        `INSERT INTO event_sequence (aggregate_id, seq) VALUES ('${twice}', 2)`,
+        `INSERT INTO event (id, aggregate_id, seq, created, type, data) VALUES ('${Event.createId()}', '${twice}', 1, 5, 'project.created.1', '{"projectId":"${twice}","directory":"/twice-1","repositories":[]}')`,
+        `INSERT INTO event (id, aggregate_id, seq, created, type, data) VALUES ('${Event.createId()}', '${twice}', 2, 5, 'project.created.1', '{"projectId":"${twice}","directory":"/twice-2","repositories":[]}')`,
+      ])
       const nothing: Migration = { id: "20270101000000_nothing", up: () => Effect.void }
 
       assert.include(
-        failureOf(yield* Effect.exit(open([nothing]).pipe(Effect.provide(runner(file))))),
+        failureOf(yield* checkOn(file, [nothing])),
         `event ${twice} 2: project.created cannot be projected`,
       )
     }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect(
-    "a migration rewrites an old-shape fact in place at open and import-check runs it on a copy; without it both refuse the fact by its aggregate and seq",
+    "a migration rewrites an old-shape event in place at open and import-check runs it on a copy; without it import-check refuses the event by its aggregate and seq",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
-        const file = yield* fileAt(yield* tempDirectory("vibest-migrate-fact-"), "vibest.db")
+        const file = yield* fileAt(yield* tempDirectory("vibest-migrate-event-"), "vibest.db")
         const old = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
         yield* Effect.void.pipe(Effect.provide(database(file)))
         yield* writeSql(file, [
-          `INSERT INTO event (aggregate, seq, at, type, data) VALUES ('${old}', 1, 5, 'project.created', '{"directory":"/old"}')`,
+          `INSERT INTO event_sequence (aggregate_id, seq) VALUES ('${old}', 1)`,
+          `INSERT INTO event (id, aggregate_id, seq, created, type, data) VALUES ('${Event.createId()}', '${old}', 1, 5, 'project.created.1', '{"projectId":"${old}","directory":"/old"}')`,
         ])
 
         const fill: Migration = {
           id: "20270101000000_repositories",
           up: (tx) =>
             tx`UPDATE event SET data = json_set(data, '$.repositories', json('[]'))
-              WHERE type = 'project.created' AND json_extract(data, '$.repositories') IS NULL`,
+              WHERE type = 'project.created.1' AND json_extract(data, '$.repositories') IS NULL`,
         }
 
         const check = (steps: ReadonlyArray<Migration>) => checkOn(file, steps)
 
-        const directories = Effect.flatMap(
-          SqlClient.SqlClient,
-          (sql) => sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${old}`,
-        ).pipe(Effect.provide(Platform.sqlite(file)))
-
-        const nothing: Migration = { id: "20270101000000_nothing", up: () => Effect.void }
-        const ledger = yield* ledgerOf(file)
         assert.include(failureOf(yield* check([])), `event ${old} 1`)
-        assert.include(
-          failureOf(yield* Effect.exit(open([nothing]).pipe(Effect.provide(runner(file))))),
-          `event ${old} 1`,
-        )
-        assert.deepStrictEqual(yield* ledgerOf(file), ledger, "a refused open rolled everything back")
 
         const before = yield* fs.readFile(file)
         assert.isTrue(Exit.isSuccess(yield* check([fill])))
         assert.deepStrictEqual(yield* fs.readFile(file), before, "import-check migrates only its copy")
 
-        yield* open([fill]).pipe(Effect.provide(runner(file)))
-        yield* open([fill]).pipe(Effect.provide(runner(file)))
-        assert.deepStrictEqual(yield* directories, [{ directory: "/old" }])
+        yield* open([fill]).pipe(Effect.provide(runner(file, [fill])))
+        yield* open([fill]).pipe(Effect.provide(runner(file, [fill])))
         assert.deepStrictEqual(
           yield* Effect.flatMap(
             SqlClient.SqlClient,
             (sql) =>
               sql<{ data: string; applied: number }>`SELECT data,
               (SELECT count(*) FROM migration WHERE id = ${fill.id}) AS applied
-              FROM event WHERE aggregate = ${old}`,
-          ).pipe(Effect.provide(Platform.sqlite(file))),
-          [{ data: '{"directory":"/old","repositories":[]}', applied: 1 }],
+              FROM event WHERE aggregate_id = ${old}`,
+          ).pipe(Effect.provide(Platform.sqlite(file, knownOf([fill])))),
+          [{ data: `{"projectId":"${old}","directory":"/old","repositories":[]}`, applied: 1 }],
         )
       }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("import-check succeeds on an empty database and runs pending ALTER TABLE migrations on a copy", () =>
+    Effect.gen(function* () {
+      const dir = yield* tempDirectory("vibest-check-empty-and-ddl-")
+      const emptyFile = yield* fileAt(dir, "empty.db")
+      assert.isTrue(Exit.isSuccess(yield* checkOn(emptyFile, [])))
+
+      const file = yield* fileAt(dir, "ddl.db")
+      yield* Effect.void.pipe(Effect.provide(database(file)))
+
+      const addColumn: Migration = {
+        id: "20270101000000_add_session_note",
+        up: (tx) => tx.unsafe("ALTER TABLE session ADD COLUMN note TEXT"),
+      }
+
+      assert.isTrue(Exit.isSuccess(yield* checkOn(file, [addColumn])))
+
+      const columns = yield* Effect.flatMap(
+        SqlClient.SqlClient,
+        (sql) => sql<{ name: string }>`SELECT name FROM pragma_table_info('session')`,
+      ).pipe(Effect.provide(Platform.sqlite(file)))
+
+      assert.isFalse(columns.some((col) => col.name === "note"))
+    }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect("an incomplete file is rejected and left byte-identical", () =>
@@ -382,7 +344,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "import-check replays the log: it passes on a ledger, names the first row a changed read model differs in, and only replays an older read model",
+    "import-check replays the log: it passes on a ledger and names the first row a changed read model differs in",
     () =>
       Effect.gen(function* () {
         const file = yield* fileAt(yield* tempDirectory("vibest-import-check-"), "vibest.db")
@@ -395,13 +357,11 @@ describe("Db", () => {
         const differs = yield* Effect.flip(Platform.daemon.checkDatabase(file))
         assert.strictEqual(differs._tag, "ReplayDiffers")
         assert.match(differs.message, /^the read model differs from a replay of its log: session row 1/)
-        yield* writeSql(file, ["UPDATE meta SET value = '0' WHERE key = 'projection'"])
-        yield* Platform.daemon.checkDatabase(file)
       }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect(
-    "a foreign database with user_version 1, or ours written by a newer event catalog, is refused without changing its bytes",
+    "a foreign database with user_version 1, or ours migrated by a newer vibest, is refused without changing its bytes",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -428,37 +388,44 @@ describe("Db", () => {
 
         const newer = yield* fileAt(yield* tempDirectory("vibest-schema-newer-"), "vibest.db")
         yield* Effect.void.pipe(Effect.provide(database(newer)))
-        yield* writeSql(newer, [`UPDATE meta SET value = '${CATALOG_VERSION + 1}' WHERE key = 'catalog'`])
+        yield* writeSql(newer, [
+          "INSERT INTO migration (id, time_completed) VALUES ('20990101000000_future_feature', 1)",
+        ])
         const newerBytes = yield* fs.readFile(newer)
         const newerSaid = yield* refusal(newer)
         assert.match(newerSaid, /SchemaMismatch/)
         assert.include(
           newerSaid,
-          `${newer} was written by a newer vibest (event catalog ${CATALOG_VERSION + 1}, this vibest knows ${CATALOG_VERSION}): run vibest update`,
+          `${newer} was migrated by a newer vibest (migration 20990101000000_future_feature): run vibest update`,
         )
         assert.deepStrictEqual(yield* fs.readFile(newer), newerBytes)
       }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("vibestd and import-check refuse a database in the old event shape and point to the CHANGELOG", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const file = yield* fileAt(yield* tempDirectory("vibest-schema-old-shape-"), "vibest.db")
-      yield* writeSql(file, [
-        `PRAGMA application_id = ${0x76696265}`,
-        "CREATE TABLE event (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, type TEXT NOT NULL, project_id TEXT, session_id TEXT, data TEXT NOT NULL) STRICT",
-        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT",
-        "CREATE TABLE migration (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL) STRICT",
-        "INSERT INTO meta VALUES ('catalog', '1'), ('projection', '4')",
-      ])
-      const before = yield* fs.readFile(file)
-      const said = `${file} is from an older vibest (its event log is the shape from before per-aggregate events): see "The event log is per aggregate" in the vibest CHANGELOG.`
-      assert.include(yield* refusal(file), said)
-      const checked = (yield* Effect.flip(Platform.daemon.checkDatabase(file))).message
-      assert.include(checked, said)
-      assert.notInclude(checked, "tools/")
-      assert.deepStrictEqual(yield* fs.readFile(file), before)
-    }).pipe(Effect.provide(Platform.services)),
+  it.effect(
+    "vibestd and import-check refuse a pre-v2 database without modifying it or naming any migration script",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const file = yield* fileAt(yield* tempDirectory("vibest-schema-old-shape-"), "vibest.db")
+        yield* writeSql(file, [
+          `PRAGMA application_id = ${APPLICATION_ID}`,
+          "CREATE TABLE event (position INTEGER PRIMARY KEY AUTOINCREMENT, aggregate TEXT NOT NULL, seq INTEGER NOT NULL, at INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL) STRICT",
+          "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT",
+          "CREATE TABLE migration (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL) STRICT",
+          "INSERT INTO meta VALUES ('catalog', '16'), ('projection', '26')",
+        ])
+        const before = yield* fs.readFile(file)
+        const refused = yield* refusal(file)
+        assert.include(refused, `${file} is from an older vibest`)
+        assert.notInclude(refused, "migration script")
+        assert.notInclude(refused, "tools/")
+        const checked = (yield* Effect.flip(Platform.daemon.checkDatabase(file))).message
+        assert.include(checked, `${file} is from an older vibest`)
+        assert.notInclude(checked, "migration script")
+        assert.notInclude(checked, "tools/")
+        assert.deepStrictEqual(yield* fs.readFile(file), before)
+      }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect(

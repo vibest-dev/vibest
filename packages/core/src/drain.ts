@@ -1,6 +1,6 @@
 import { Context, Deferred, Effect, Layer } from "effect"
 
-import { Bus } from "./bus.ts"
+import { Bus, DrainReleased } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 
 export * as Drain from "./drain.ts"
@@ -15,7 +15,7 @@ const make = Effect.gen(function* () {
     const token = {}
     active.set(token, label)
 
-    return Effect.suspend(() => (active.delete(token) ? bus.observe({ type: "drain.released" }) : Effect.void))
+    return Effect.suspend(() => (active.delete(token) ? Effect.asVoid(bus.publish(DrainReleased, {})) : Effect.void))
   }
 
   const enter = (label: string, settlement: boolean): Effect.Effect<Effect.Effect<void>> =>

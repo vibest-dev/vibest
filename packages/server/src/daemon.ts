@@ -6,7 +6,7 @@ import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/d
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Identity } from "@vibest/core/identity"
-import type { UnknownFact } from "@vibest/schema/event"
+import type { InvalidDurableEvent } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Option, Schedule, type Scope, Schema } from "effect"
@@ -48,7 +48,7 @@ export interface Host extends ShutdownHost {
   ) => Effect.Effect<((text: string) => Effect.Effect<void, LockFailed>) | undefined, LockFailed, Scope.Scope>
   readonly checkDatabase: (
     filename: string,
-  ) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch | UnknownFact | ReplayDiffers>
+  ) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch | InvalidDurableEvent | ReplayDiffers>
   readonly trimLog: (file: string) => Effect.Effect<void>
 }
 

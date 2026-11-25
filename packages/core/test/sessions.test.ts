@@ -1,5 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { Bus } from "@vibest/core/bus"
+import { Bus, TerminalExited } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { executionStateOf, exitedAt, startOf } from "@vibest/core/database/db-rows"
 import { Integration } from "@vibest/core/integration"
@@ -165,7 +165,7 @@ describe.concurrent("Session", () => {
       const next = yield* db.session.restartProcess(entryId)
       const processes = yield* db.session.processesAt(RUNTIME, address)
       assert.deepStrictEqual(processes, [{ sessionId: entryId, process: next! }])
-      yield* bus.observe({ type: "terminal.exited", runtime: RUNTIME, terminal: address, processes })
+      yield* bus.publish(TerminalExited, { runtime: RUNTIME, terminal: address, processes })
       yield* settled
 
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow

@@ -43,15 +43,16 @@ export class Service extends Context.Service<Service, Interface>()("vibest/Db") 
 
 export const layer = Layer.effect(
   Service,
-  SqlClient.SqlClient.pipe(
-    Effect.andThen(open()),
-    Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA journal_mode = WAL")))),
-    Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
-    Effect.andThen(
-      SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE meta SET value = value WHERE key = ''`)),
-    ),
-    Effect.andThen(make),
-  ),
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* open()
+    yield* sql.unsafe("PRAGMA foreign_keys = ON")
+    yield* sql.unsafe("PRAGMA journal_mode = WAL")
+    yield* sql.unsafe("PRAGMA synchronous = NORMAL")
+    yield* sql`UPDATE kv SET value = value WHERE key = ''`
+
+    return yield* make
+  }),
 )
 
 export const node = LayerNode.make({

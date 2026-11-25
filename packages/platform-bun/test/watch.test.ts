@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Bus } from "@vibest/core/bus"
+import { Bus, ProjectChanged, SessionChanged } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { Project } from "@vibest/core/project"
 import { sessionHeaders } from "@vibest/protocol/protocol"
@@ -324,13 +324,13 @@ describe("Watch", () => {
       Object.assign(db.project, {
         watchProjects: (id?: string) => (failing ? Effect.die("unreadable") : read(id)),
       })
-      yield* bus.observe({ type: "project.changed", projectId: project })
+      yield* bus.publish(ProjectChanged, { projectId: project })
       const ended = yield* Effect.flip(Stream.runDrain(before))
       assert.strictEqual(ended._tag, "WatchLagged")
       failing = false
       const after = yield* feed.subscribe
       const next = yield* Effect.forkScoped(Stream.runHead(after))
-      yield* bus.observe({ type: "project.changed", projectId: project })
+      yield* bus.publish(ProjectChanged, { projectId: project })
       const event = yield* Fiber.join(next)
       assert.strictEqual(Option.isSome(event) && event.value._tag, "Project")
     }).pipe(Effect.provide(WatchFeed.layer.pipe(Layer.provide(Listing.layer)))),
@@ -369,8 +369,8 @@ describe("Watch", () => {
         sessionIdentity: (id: string) => (idSet.has(id) ? Effect.succeed({ projectId: project }) : read(id)),
       })
 
-      for (const id of ids) yield* bus.observe({ type: "session.changed", sessionId: id })
-      yield* bus.observe({ type: "session.changed", sessionId: entryId })
+      for (const id of ids) yield* bus.publish(SessionChanged, { sessionId: id })
+      yield* bus.publish(SessionChanged, { sessionId: entryId })
       const ack = { jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: 1 } }
 
       for (;;) {
@@ -429,7 +429,7 @@ describe("Watch", () => {
       assert.strictEqual(remoteReads, 0)
 
       yield* fakeGit.update(repo, { origin: "git@github.com:Org/Updated.git" })
-      yield* bus.observe({ type: "project.changed", projectId: project })
+      yield* bus.publish(ProjectChanged, { projectId: project })
 
       const refreshed = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
@@ -490,7 +490,7 @@ describe("Watch", () => {
       assert.deepStrictEqual(multiRow?.repositories, expectedMulti)
 
       yield* fakeGit.update(repoC, { origin: "git@gitlab.com:team/newly-added.git" })
-      yield* bus.observe({ type: "project.changed", projectId: openedMulti.projectId })
+      yield* bus.publish(ProjectChanged, { projectId: openedMulti.projectId })
 
       const updated = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Project" }> =>

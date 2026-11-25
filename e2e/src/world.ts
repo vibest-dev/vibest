@@ -726,7 +726,9 @@ export const rows = <A>(w: World, sql: string, ...args: Array<string | number>) 
 }
 
 export const factsOf = (w: World, sessionId: string) =>
-  rows<{ type: string }>(w, "SELECT type FROM event WHERE aggregate = ? ORDER BY seq", sessionId).map((r) => r.type)
+  rows<{ type: string }>(w, "SELECT type FROM event WHERE aggregate_id = ? ORDER BY seq", sessionId).map((r) =>
+    r.type.replace(/\.\d+$/, ""),
+  )
 
 export const expectFacts = (w: World, sessionId: string, expected: ReadonlyArray<string>) => {
   const recorded = factsOf(w, sessionId)

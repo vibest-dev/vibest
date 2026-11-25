@@ -1,5 +1,5 @@
-import { ExecutionInterrupted, ExecutionSucceeded, ExecutionUnresolved, InboxEnqueued } from "@vibest/schema/event"
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
+import { SessionEvent } from "@vibest/schema/session-event"
 import { Cause, Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
 import { nextBatch } from "../batch.ts"
@@ -353,7 +353,7 @@ export const make = Effect.gen(function* () {
                     event.type === "session.execution.succeeded" ||
                     event.type === "session.execution.failed" ||
                     event.type === "session.execution.unresolved") &&
-                  event.sessionId === id
+                  event.data.sessionId === id
                     ? Effect.map(settled, (done) => (done ? Option.some(true) : Option.none()))
                     : Effect.succeed(Option.none()),
                 HOOK_GRACE,
@@ -405,11 +405,12 @@ export const make = Effect.gen(function* () {
     )
   })
 
-  yield* reactor.on([ExecutionSucceeded, ExecutionInterrupted, ExecutionUnresolved], (event) =>
-    wakes.wake(event.sessionId!, { rows: new Set(), ended: true }),
+  yield* reactor.on(
+    [SessionEvent.ExecutionSucceeded, SessionEvent.ExecutionInterrupted, SessionEvent.ExecutionUnresolved],
+    (event) => wakes.wake(event.data.sessionId, { rows: new Set(), ended: true }),
   )
-  yield* reactor.on([InboxEnqueued], (event) =>
-    wakes.wake(event.sessionId!, { rows: new Set([event.seq]), ended: false }),
+  yield* reactor.on([SessionEvent.InboxEnqueued], (event) =>
+    wakes.wake(event.data.sessionId, { rows: new Set([event.data.messageId]), ended: false }),
   )
 
   for (const id of yield* db.session.unstartedRuns()) {

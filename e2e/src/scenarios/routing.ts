@@ -123,7 +123,7 @@ export default Plugin.define({
   id: "observer",
   effect: (ctx) =>
     ctx.event.subscribe(${types}).pipe(
-      Stream.runForEach((fact) => Effect.sync(() => fs.appendFileSync(${JSON.stringify(file)}, \`\${fact.type} \${fact.sessionId ?? "-"}\\n\`))),
+      Stream.runForEach((fact) => Effect.sync(() => fs.appendFileSync(${JSON.stringify(file)}, \`\${fact.type} \${"sessionId" in fact.data ? fact.data.sessionId : "-"}\\n\`))),
       Effect.forkScoped,
       Effect.asVoid,
     ),
@@ -140,7 +140,7 @@ export default Plugin.define({
     })
     void (async () => {
       for await (const fact of ctx.event.subscribe({ types: ["session.execution.succeeded"] }))
-        fs.appendFileSync(${JSON.stringify(facts)}, \`\${fact.type} \${fact.sessionId}\\n\`)
+        fs.appendFileSync(${JSON.stringify(facts)}, \`\${fact.type} \${fact.data.sessionId}\\n\`)
     })()
     return () => fs.appendFileSync(${JSON.stringify(cleanup)}, "cleanup\\n")
   },

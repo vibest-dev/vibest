@@ -3,7 +3,7 @@ import { NotReady } from "@vibest/schema/session"
 import { canonicalTarget } from "@vibest/schema/terminal"
 import { Clock, Context, Data, Duration, Effect, Layer, Option, Predicate, Ref, Schedule, Schema } from "effect"
 
-import { awaitEvent, awaitOn, Bus, type BusEvent } from "../bus.ts"
+import { awaitEvent, awaitOn, Bus, type BusEvent, TerminalExited } from "../bus.ts"
 import { type SessionRow, harnessIdOf } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
@@ -135,13 +135,13 @@ export const make = Effect.gen(function* () {
       (event) =>
         Effect.succeed(
           (event.type === "terminal.state" &&
-            sameTerminal(event.terminal, terminal) &&
-            event.state !== "working" &&
-            event.state !== "blocked") ||
+            sameTerminal(event.data.terminal, terminal) &&
+            event.data.state !== "working" &&
+            event.data.state !== "blocked") ||
             ((event.type === "session.execution.succeeded" ||
               event.type === "session.execution.failed" ||
               event.type === "session.execution.interrupted") &&
-              event.sessionId === session.id)
+              event.data.sessionId === session.id)
             ? Option.some(true)
             : Option.none(),
         ),
@@ -294,10 +294,10 @@ export const make = Effect.gen(function* () {
     })
 
     const exitedHere = (event: BusEvent) =>
-      event.type === "terminal.exited" && event.runtime === h.id && sameTerminal(event.terminal, terminal)
+      event.type === "terminal.exited" && event.data.runtime === h.id && sameTerminal(event.data.terminal, terminal)
 
     const signalExit = Effect.flatMap(db.session.processesAt(h.id, terminal), (processes) =>
-      bus.observe({ type: "terminal.exited", runtime: h.id, terminal, processes }),
+      Effect.asVoid(bus.publish(TerminalExited, { runtime: h.id, terminal, processes })),
     )
 
     const exited = Effect.flatMap(bus.subscribe(), (subscription) =>
