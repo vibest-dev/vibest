@@ -5,8 +5,8 @@ file, `vibest.db`. Events are defined with `Event.durable` and `Event.ephemeral`
 modules `project-event.ts`, `session-event.ts`, `process-event.ts`, `machine-event.ts`, plus the durable manifest in
 `durable-event-manifest.ts`); `packages/core/src/bus.ts` appends durable facts and the projectors of
 `packages/core/src/project/projector.ts`, `session/projector.ts` and `remote/projector.ts`, each registered with
-`bus.project`, turn each into its read-model rows; a replay reaching a fact type with no registered projector fails. The `Db` service
-(`packages/core/src/database/db.ts` and its domain modules) answers its callers from the read model and changes nothing but by
+`bus.project`, turn each into its read-model rows; a replay reaching a fact type with no registered projector fails. The domain stores
+(`ProjectStore`, `SessionStore`, `InboxStore`, `RemoteStore`, built on top of `packages/core/src/database/database.ts`) answer their callers from the read model and change nothing but by
 appending facts.
 
 - `event`: the log. Each row is one durable fact of one aggregate: `id` (`evt_<12-hex-ms><16-hex-rand>` from `Event.createId`),
@@ -336,14 +336,10 @@ the schema backward-compatible. Adding a table, column, or index uses an increme
 `packages/core/src/database/migration/`. `packages/schema/test/event.test.ts` covers event encoding, decoding, and
 manifest round-trips.
 
-## The Db service
+## Database engine and domain stores
 
-- All SQL is in `packages/core/src/database/`, over one SQLite connection. `Db` is the one transaction owner; its interface
-  groups its methods by domain (`db.project`, `db.session`, `db.inbox`, `db.remote`), each built by its module
-  (`project.ts`, `session.ts`, `inbox.ts`, `remote.ts`) from the in-transaction statements of `session-statements.ts`,
-  `inbox.ts` and `remote.ts`. The session row
-  callers read (`SessionRow`) is built from the read model plus the memory listed below (`database/ledger-read.ts` holds the
-  reads the import's referee shares). It carries `endedAt`, `parentId`, the current `process`, the `openExecution` (outcome null) and the `lastExecution` (the most recently ended one); a
+- `packages/core/src/database/` holds the pure domain-agnostic SQLite/ledger engine (`Database.Service` in `database.ts`, `schema.sql.ts`, `rows.ts`, `ledger.ts`, and `migration.ts` + `migration/`). Domain read-model queries and mutations live in independent `Context.Service` stores (`ProjectStore`, `SessionStore`, `InboxStore`, `RemoteStore`) inside `packages/core/src/<domain>/{sql*.ts,store.ts}`, sharing one SQLite connection via `Database.Service` and running writes inside `bus.transaction`. The session row
+  callers read (`SessionRow`) is built from the read model plus live in-memory state (`SessionLive`). It carries `endedAt`, `parentId`, the current `process`, the `openExecution` (outcome null) and the `lastExecution` (the most recently ended one); a
   session with neither never ran an execution.
 - Writes go through intent methods, one per fact: `startProcess` opens a process, except that it reuses a live process
   that has no terminal yet when the harness, provider, model, runtime and routing are identical; `placeProcess` only
@@ -368,7 +364,7 @@ manifest round-trips.
 
 ## Opening and migrations
 
-`packages/core/src/database/migration.ts` and `packages/core/src/database/db-schema.ts` open the file, as OpenCode does:
+`packages/core/src/database/migration.ts` and `packages/core/src/database/schema.sql.ts` open the file, as OpenCode does:
 
 1. `inspectSchema` reads the file on a read-only connection before it is opened writable. A wrong `application_id`, a
    non-empty file with an older pre-v2 layout (missing `kv`, `event_sequence`, or `event.aggregate_id`), or one missing

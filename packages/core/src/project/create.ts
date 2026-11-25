@@ -2,6 +2,7 @@ import { ProjectCreateFailed } from "@vibest/schema/project"
 import { Effect, Exit, FileSystem, Option, Path, type PlatformError } from "effect"
 
 import { safeRepositoryDirectory, sameWorktreeBucket } from "../paths.ts"
+import { Git, type GitState } from "../worktree/git.ts"
 import {
   addWorktree,
   copyIncluded,
@@ -9,8 +10,7 @@ import {
   mainCheckout,
   removeWorktree,
   repositoryDirectoryName,
-} from "../worktree.ts"
-import { Git, type GitState } from "../worktree/git.ts"
+} from "../worktree/service.ts"
 
 export interface ProjectFolder {
   readonly name: string

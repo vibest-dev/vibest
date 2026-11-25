@@ -170,9 +170,9 @@ export const sqlite = (filename: string, known?: ReadonlySet<string>) =>
     Effect.gen(function* () {
       if (filename !== ":memory:") {
         const existed = yield* Effect.promise(() => Bun.file(filename).exists())
-        yield* privateDatabase(filename)
 
         if (existed) yield* inspectFile(filename, known)
+        yield* privateDatabase(filename)
       }
 
       return sqliteLayer(filename, false)

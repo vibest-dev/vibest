@@ -12,9 +12,9 @@ import { type AgentStatus } from "@vibest/schema/session"
 import { SessionEvent } from "@vibest/schema/session-event"
 import { canonicalTarget, TerminalTarget } from "@vibest/schema/terminal"
 import { Effect, Schema } from "effect"
-import { SqlClient, type Statement } from "effect/sql"
+import type { SqlClient, Statement } from "effect/sql"
 
-import { Bus, SessionChanged } from "../bus.ts"
+import { type Bus, SessionChanged } from "../bus.ts"
 import {
   archived,
   decodeRoutingJson,
@@ -200,13 +200,99 @@ const currentOf = (row: ProcessColumns): Current => {
 const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, terminal, pid, harness_session_id,
   integration_version, integration_protocol, ready_at, ended_at`
 
-export const sessionSql = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient
-  const bus = yield* Bus.Service
-  const sessionLive = yield* SessionLive.Service
+export const openExecution = (sql: SqlClient.SqlClient, sessionId: string) =>
+  sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${sessionId} AND owner = 1`.pipe(
+    Effect.map((rows) => rows[0]?.id),
+  )
+
+export const startedAt = (sql: SqlClient.SqlClient, id: string, execution: number) =>
+  sql<{ at: number | null }>`SELECT started_at AS at FROM execution
+    WHERE session_id = ${id} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]?.at ?? null))
+
+export const currentProcessId = (sql: SqlClient.SqlClient, sessionId: string) =>
+  sql<{ id: number | null }>`SELECT process_id AS id FROM session WHERE id = ${sessionId}`.pipe(
+    Effect.map((rows) => rows[0]?.id ?? undefined),
+  )
+
+export const nextExecutionId = (sql: SqlClient.SqlClient, sessionId: string) =>
+  sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM execution WHERE session_id = ${sessionId}`.pipe(
+    Effect.map((rows) => rows[0]?.id ?? 1),
+  )
+
+export const allocateExecution = (
+  sql: SqlClient.SqlClient,
+  publish: Bus.Interface["publish"],
+  sessionId: string,
+  at: number,
+  typed?: string,
+) =>
+  Effect.gen(function* () {
+    const executionId = yield* nextExecutionId(sql, sessionId)
+    const process = yield* currentProcessId(sql, sessionId)
+    yield* publish(
+      SessionEvent.ExecutionAllocated,
+      {
+        sessionId,
+        executionId,
+        ...(process !== undefined && { processId: process }),
+        ...(typed !== undefined && typed !== "" && { typed }),
+      },
+      { at },
+    )
+
+    return executionId
+  })
+
+export const observable = (sql: SqlClient.SqlClient, id: string) =>
+  sql<{ ok: number }>`SELECT 1 AS ok FROM session s WHERE s.id = ${id} AND s.ended_at IS NULL`.pipe(
+    Effect.map((rows) => rows.length > 0),
+  )
+
+export const isLiveSession = (sql: SqlClient.SqlClient, id: string) =>
+  sql`SELECT 1 FROM session WHERE id = ${id} AND ended_at IS NULL`.pipe(Effect.map((rows) => rows.length > 0))
+
+export const fromOldProcess = (sql: SqlClient.SqlClient, id: string, process: number | undefined) =>
+  Effect.map(currentProcessId(sql, id), (current) => process !== undefined && process !== current)
+
+export const creatorOf = (sql: SqlClient.SqlClient, id: string): Effect.Effect<Creator> =>
+  sql<{ parent: string | null; remote: string | null; session: string | null }>`SELECT
+      parent_session_id AS parent, origin_remote AS remote, origin_session AS session
+    FROM session WHERE id = ${id}`.pipe(
+    Effect.map(([row]): Creator => {
+      if (row === undefined) return undefined
+
+      if (row.remote !== null && row.session !== null) return { remote: row.remote, session: row.session }
+
+      if (row.parent !== null) return { local: row.parent }
+
+      return undefined
+    }),
+    Effect.orDie,
+  )
+
+export const nearestAlive = (sql: SqlClient.SqlClient, id: string): Effect.Effect<Creator> =>
+  Effect.gen(function* () {
+    let current = id
+
+    for (;;) {
+      const creator = yield* creatorOf(sql, current)
+
+      if (creator === undefined || "remote" in creator) return creator
+
+      if ((yield* sql`SELECT 1 FROM session WHERE id = ${creator.local} AND ended_at IS NULL`).length > 0)
+        return creator
+      current = creator.local
+    }
+  }).pipe(Effect.orDie)
+
+export const sessionSql = (
+  sql: SqlClient.SqlClient,
+  bus: Bus.Interface,
+  sessionLive: SessionLive.Interface,
+  moving: ReadonlySet<string>,
+) => {
   const { publish } = bus
   const afterCommitLive = (effect: Effect.Effect<void>) => bus.afterCommit(() => Effect.runSync(effect))
-  const moving = new Set<string>()
 
   const remember = (row: Pick<SessionRow, "id" | "status" | "endedAt">) =>
     archived(row) ? sessionLive.ended(row.id) : sessionLive.setStatus(row.id, row.status)
@@ -340,28 +426,13 @@ export const sessionSql = Effect.gen(function* () {
       Effect.flatMap((rows) => (rows[0] === undefined ? Effect.succeed(undefined) : findSession(rows[0].id))),
     )
 
-  const openExecution = (sessionId: string) =>
-    sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${sessionId} AND owner = 1`.pipe(
-      Effect.map((rows) => rows[0]?.id),
-    )
-
   const workingExecutions = sql<{
     n: number
   }>`SELECT count(*) AS n FROM execution e JOIN session s ON s.id = e.session_id
       WHERE e.owner = 1 AND s.ended_at IS NULL`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
 
-  const currentProcessId = (sessionId: string) =>
-    sql<{ id: number | null }>`SELECT process_id AS id FROM session WHERE id = ${sessionId}`.pipe(
-      Effect.map((rows) => rows[0]?.id ?? undefined),
-    )
-
   const nextProcessId = (sessionId: string) =>
     sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM process WHERE session_id = ${sessionId}`.pipe(
-      Effect.map((rows) => rows[0]?.id ?? 1),
-    )
-
-  const nextExecutionId = (sessionId: string) =>
-    sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM execution WHERE session_id = ${sessionId}`.pipe(
       Effect.map((rows) => rows[0]?.id ?? 1),
     )
 
@@ -370,34 +441,12 @@ export const sessionSql = Effect.gen(function* () {
         outcome, started_at AS started, booked_at AS booked, process_id AS process FROM execution
       WHERE session_id = ${sessionId} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]))
 
-  const allocateExecution = (sessionId: string, at: number, typed?: string) =>
-    Effect.gen(function* () {
-      const executionId = yield* nextExecutionId(sessionId)
-      const process = yield* currentProcessId(sessionId)
-      yield* publish(
-        SessionEvent.ExecutionAllocated,
-        {
-          sessionId,
-          executionId,
-          ...(process !== undefined && { processId: process }),
-          ...(typed !== undefined && typed !== "" && { typed }),
-        },
-        { at },
-      )
-
-      return executionId
-    })
-
-  const startedAt = (id: string, execution: number) =>
-    sql<{ at: number | null }>`SELECT started_at AS at FROM execution
-      WHERE session_id = ${id} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]?.at ?? null))
-
   const accept = (id: string, execution: number) =>
     Effect.gen(function* () {
-      if ((yield* openExecution(id)) !== execution) return false
+      if ((yield* openExecution(sql, id)) !== execution) return false
 
-      if ((yield* startedAt(id, execution)) !== null) return true
-      const process = yield* currentProcessId(id)
+      if ((yield* startedAt(sql, id, execution)) !== null) return true
+      const process = yield* currentProcessId(sql, id)
       yield* publish(SessionEvent.ExecutionStarted, {
         sessionId: id,
         executionId: execution,
@@ -424,18 +473,10 @@ export const sessionSql = Effect.gen(function* () {
       return true
     })
 
-  const observable = (id: string) =>
-    sql<{ ok: number }>`SELECT 1 AS ok FROM session s WHERE s.id = ${id} AND s.ended_at IS NULL`.pipe(
-      Effect.map((rows) => rows.length > 0),
-    )
-
   const isRoot = (id: string) =>
     sql`SELECT 1 FROM session WHERE id = ${id} AND parent_session_id IS NULL AND origin_remote IS NULL`.pipe(
       Effect.map((rows) => rows.length > 0),
     )
-
-  const fromOldProcess = (id: string, process: number | undefined) =>
-    Effect.map(currentProcessId(id), (current) => process !== undefined && process !== current)
 
   const endProcess = (id: string, reason: ProcessEndReason, at?: number, process?: number, by?: Sender) =>
     Effect.gen(function* () {
@@ -445,7 +486,7 @@ export const sessionSql = Effect.gen(function* () {
         return false
 
       if (reason === "launch_failed") {
-        const execution = yield* openExecution(id)
+        const execution = yield* openExecution(sql, id)
         const open = execution === undefined ? undefined : yield* executionOutcome(id, execution)
 
         if (execution !== undefined && open?.process === current.id && open.started === null)
@@ -773,37 +814,6 @@ export const sessionSql = Effect.gen(function* () {
 
   const unusedId = newId(sessionPrefixTaken)
 
-  const creatorOf = (id: string): Effect.Effect<Creator> =>
-    sql<{ parent: string | null; remote: string | null; session: string | null }>`SELECT
-        parent_session_id AS parent, origin_remote AS remote, origin_session AS session
-      FROM session WHERE id = ${id}`.pipe(
-      Effect.map(([row]): Creator => {
-        if (row === undefined) return undefined
-
-        if (row.remote !== null && row.session !== null) return { remote: row.remote, session: row.session }
-
-        if (row.parent !== null) return { local: row.parent }
-
-        return undefined
-      }),
-      Effect.orDie,
-    )
-
-  const nearestAlive = (id: string): Effect.Effect<Creator> =>
-    Effect.gen(function* () {
-      let current = id
-
-      for (;;) {
-        const creator = yield* creatorOf(current)
-
-        if (creator === undefined || "remote" in creator) return creator
-
-        if ((yield* sql`SELECT 1 FROM session WHERE id = ${creator.local} AND ended_at IS NULL`).length > 0)
-          return creator
-        current = creator.local
-      }
-    }).pipe(Effect.orDie)
-
   const fromCurrentHarness = (sessionId: string, current: number, reporter?: number, pid?: number) =>
     Effect.gen(function* () {
       const processes = yield* sql<{
@@ -854,26 +864,19 @@ export const sessionSql = Effect.gen(function* () {
     hadTerminal,
     spawnedBy,
     afterCommitLive,
-    moving,
     running,
     selectRaw,
     selectSessions,
     findSession,
     currentProcess,
-    currentProcessId,
     latestRoot,
-    openExecution,
     workingExecutions,
-    allocateExecution,
     noteInput,
-    startedAt,
     releaseExecution,
     finishExecution,
     recordObservedEnd,
     accept,
-    observable,
     isRoot,
-    fromOldProcess,
     endProcess,
     placeProcess,
     startProcess,
@@ -888,12 +891,10 @@ export const sessionSql = Effect.gen(function* () {
     lastSessionAt,
     lastProjectTerminal,
     unusedId,
-    creatorOf,
-    nearestAlive,
     fromCurrentHarness,
     canResumeConversation,
     latestReply,
   }
-})
+}
 
-export type SessionSql = Effect.Success<typeof sessionSql>
+export type SessionSql = ReturnType<typeof sessionSql>

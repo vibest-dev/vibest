@@ -154,7 +154,7 @@ started, an entry session) cannot answer results with results (rule 4), and that
 ## 2. Layers
 
 **Packages.** Every workspace package lives directly under `packages/<name>` with package name `@vibest/<name>`. Most workspace packages export `./*` → `./src/*.ts`, so an import names the module
-(`@vibest/core/database/db`); `plugin`, `plugin-builtins`, the herdr SDKs and `harness-cursor` export named entries
+(`@vibest/core/database/database`); `plugin`, `plugin-builtins`, the herdr SDKs and `harness-cursor` export named entries
 (`@vibest/plugin/effect`, `@vibest/plugin/testing`; host-side helpers that vibestd and the builtin plugins share, such as `capture` and `isLimited`, are on `@vibest/plugin/host`, off the plugin API). A module imports a name from the module that defines it (no re-exports of other
 modules' names, except a domain facade re-exporting its own domain, see below).
 
@@ -438,7 +438,7 @@ How these modules keep the rules:
   event only wakes a check, a check woken by a bound event checks only that process, and an exit a check records passes
   the process its session snapshot read. An entry session's exit goes the same way, through the check, which ends its
   process only on the runtime's current state or the harness-reported pid and, in the same transaction, drops the
-  messages queued for that session (`Db.session.endExited`), never ones queued after a newer process started; the
+  messages queued for that session (`SessionStore`), never ones queued after a newer process started; the
   check leaves an entry session alone while it moves. The event or the check is handled later, and by then `vibest`
   typed in the same pane may have started the entry session again, whose new process must keep running. A late exit bound to a
   process an in-place restart or move just started there only wakes that check, which finds the new harness running. An execution counts
@@ -694,8 +694,8 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
   refused before any writable open (`SchemaMismatch`), leaving it untouched. Pending migrations run in order when it
   opens (schema.md, Opening and migrations).
 - The check runs on a read-only connection, which sees committed WAL frames and does not checkpoint, so a refused
-  database and its WAL keep their bytes (the WAL index, `-shm`, may still change). WAL mode stays off until `Db`
-  accepts the file. A missing database is created mode 0600, and each open forces 0600 on the database and any
+  database and its WAL keep their bytes (the WAL index, `-shm`, may still change). WAL mode stays off until `Database.Service`
+  accepts the file. A missing database is created mode 0600, and each accepted open forces 0600 on the database and any
   existing `-wal` / `-shm` (SQLite copies the database's mode onto those it creates later). Closing the last
   connection may delete `-wal` / `-shm` (SQLite's default, as on Linux) or keep them (Apple's system SQLite), and two
   first opens of a missing file at once fail with `SQLITE_CANTOPEN`. A writable transaction

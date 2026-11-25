@@ -6,63 +6,64 @@ import { Clock, Context, Effect, Layer } from "effect"
 import { Bus } from "../bus.ts"
 import { Database } from "../database/database.ts"
 import { type NewInboxRow } from "../database/rows.ts"
-import { PlatformNode } from "../effect/platform.ts"
 import { Projectors } from "../reactor.ts"
-import { remoteSql } from "../remote/sql.ts"
 import { nextBatch } from "../runtime/batch.ts"
-import { SessionLive } from "../session/live.ts"
-import { sessionSql } from "../session/sql.ts"
-import { inboxSql } from "./sql.ts"
+import {
+  allocateExecution,
+  fromOldProcess,
+  isLiveSession,
+  observable,
+  openExecution,
+  startedAt,
+} from "../session/sql.ts"
+import {
+  confirm,
+  confirmBatch,
+  confirmTask,
+  dropUnsent,
+  findSend,
+  inboxIn,
+  inboxWhere,
+  insertInboxRow,
+  linkTask,
+  moveInbox,
+  queuedFrom,
+  queueSend,
+  tellSender,
+  untakenTask,
+  waitingOn,
+} from "./sql.ts"
 
 export * as InboxStore from "./store.ts"
 
 export const make = Effect.gen(function* () {
   const { sql } = yield* Database.Service
-  const { transaction: tx } = yield* Bus.Service
+  const bus = yield* Bus.Service
+  const { publish, transaction: tx } = bus
   const now = Clock.currentTimeMillis
-  const session = yield* sessionSql
-  const remote = yield* remoteSql
-  const inbox = yield* inboxSql(session, remote)
-  const { openExecution, startedAt, observable, fromOldProcess, allocateExecution } = session
-
-  const {
-    inbox: inboxWhere,
-    inboxIn,
-    findSend,
-    untakenTask,
-    moveInbox,
-    confirm,
-    confirmBatch,
-    confirmTask,
-    dropUnsent,
-    queueSend,
-    queuedFrom,
-    liveRecipient,
-    tellSender,
-    insertInboxRow,
-    waitingOn,
-  } = inbox
 
   return {
-    insertInbox: Effect.fn("InboxStore.insertInbox")((row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie)),
+    insertInbox: Effect.fn("InboxStore.insertInbox")((row: NewInboxRow) =>
+      tx(insertInboxRow(sql, publish, row)).pipe(Effect.orDie),
+    ),
 
     insertSend: Effect.fn("InboxStore.insertSend")(
       (recipient: string, message: string, sender: Sender = { type: "user" }, request?: string) =>
         tx(
           Effect.gen(function* () {
-            const before = request === undefined ? undefined : yield* queuedFrom(sender, request)
+            const before = request === undefined ? undefined : yield* queuedFrom(sql, sender, request)
 
-            if (before !== undefined) return (yield* inboxIn(before.session, [before.id]))[0]
+            if (before !== undefined) return (yield* inboxIn(sql, before.session, [before.id]))[0]
 
-            if (!(yield* liveRecipient(recipient))) return undefined
+            if (!(yield* isLiveSession(sql, recipient))) return undefined
 
-            return yield* queueSend(recipient, sender, message, request)
+            return yield* queueSend(sql, publish, recipient, sender, message, request)
           }),
         ).pipe(Effect.orDie),
     ),
 
     insertNoticeTo: Effect.fn("InboxStore.insertNoticeTo")((recipient: string, message: string) =>
-      tx(tellSender(recipient, message)).pipe(Effect.orDie),
+      tx(tellSender(sql, publish, recipient, message)).pipe(Effect.orDie),
     ),
 
     sentIn: Effect.fn("InboxStore.sentIn")((sessionId: string, execution: number) =>
@@ -79,7 +80,7 @@ export const make = Effect.gen(function* () {
     ),
 
     queuedFrom: Effect.fn("InboxStore.queuedFrom")((sender: Sender, request: string) =>
-      queuedFrom(sender, request).pipe(
+      queuedFrom(sql, sender, request).pipe(
         Effect.map((row) => row !== undefined),
         Effect.orDie,
       ),
@@ -100,16 +101,16 @@ export const make = Effect.gen(function* () {
     linkTask: Effect.fn("InboxStore.linkTask")((id: string) =>
       tx(
         Effect.gen(function* () {
-          const execution = yield* openExecution(id)
+          const execution = yield* openExecution(sql, id)
 
-          if (execution !== undefined) yield* inbox.linkTask(id, execution, yield* now)
+          if (execution !== undefined) yield* linkTask(sql, publish, id, execution, yield* now)
         }),
       ).pipe(Effect.orDie),
     ),
 
-    untakenTask: Effect.fn("InboxStore.untakenTask")((id: string) => untakenTask(id).pipe(Effect.orDie)),
+    untakenTask: Effect.fn("InboxStore.untakenTask")((id: string) => untakenTask(sql, id).pipe(Effect.orDie)),
 
-    waitingOn: Effect.fn("InboxStore.waitingOn")((id: string) => waitingOn(id).pipe(Effect.orDie)),
+    waitingOn: Effect.fn("InboxStore.waitingOn")((id: string) => waitingOn(sql, id).pipe(Effect.orDie)),
 
     hasQueued: Effect.fn("InboxStore.hasQueued")((id: string) =>
       sql<{
@@ -128,14 +129,14 @@ export const make = Effect.gen(function* () {
     ),
 
     pendingInbox: Effect.fn("InboxStore.pendingInbox")((sessionId: string) =>
-      findSend(sessionId, "pending").pipe(Effect.orDie),
+      findSend(sql, sessionId, "pending").pipe(Effect.orDie),
     ),
 
     inboxWithStatus: Effect.fn("InboxStore.inboxWithStatus")((sessionId: string, status: InboxStatus) =>
-      findSend(sessionId, status).pipe(Effect.orDie),
+      findSend(sql, sessionId, status).pipe(Effect.orDie),
     ),
 
-    deliveringInbox: inboxWhere(sql`m.status = 'delivering'`).pipe(
+    deliveringInbox: inboxWhere(sql, sql`m.status = 'delivering'`).pipe(
       Effect.map((rows) => rows.map((r) => ({ id: r.id, sessionId: r.recipient ?? "" }))),
       Effect.orDie,
     ),
@@ -145,6 +146,8 @@ export const make = Effect.gen(function* () {
         if (ids.length === 0) return []
 
         const claimed = yield* moveInbox(
+          sql,
+          bus,
           sql`recipient_session_id = ${sessionId} AND ${sql.in("id", ids)} AND status = 'pending'`,
           "delivering",
           execution === undefined ? undefined : { execution },
@@ -155,24 +158,25 @@ export const make = Effect.gen(function* () {
     ),
 
     confirm: Effect.fn("InboxStore.confirm")((sessionId: string, execution: number) =>
-      confirm(sessionId, execution).pipe(Effect.asVoid, Effect.orDie),
+      confirm(sql, bus, sessionId, execution).pipe(Effect.asVoid, Effect.orDie),
     ),
 
     confirmBatch: Effect.fn("InboxStore.confirmBatch")(
       (sessionId: string, execution: number, ids: ReadonlyArray<number>) =>
-        confirmBatch(sessionId, execution, ids).pipe(Effect.asVoid, Effect.orDie),
+        confirmBatch(sql, bus, sessionId, execution, ids).pipe(Effect.asVoid, Effect.orDie),
     ),
 
     confirmTask: Effect.fn("InboxStore.confirmTask")((sessionId: string, execution: number) =>
-      confirmTask(sessionId, execution).pipe(Effect.asVoid, Effect.orDie),
+      confirmTask(sql, bus, sessionId, execution).pipe(Effect.asVoid, Effect.orDie),
     ),
 
     dropUnsent: Effect.fn("InboxStore.dropUnsent")((sessionId: string, reason: string) =>
-      dropUnsent(sessionId, reason).pipe(Effect.asVoid, Effect.orDie),
+      dropUnsent(sql, bus, sessionId, reason).pipe(Effect.asVoid, Effect.orDie),
     ),
 
     unsentDelegation: Effect.fn("InboxStore.unsentDelegation")((sessionId: string) =>
       inboxWhere(
+        sql,
         sql`m.recipient_session_id = ${sessionId} AND m.status IN ('pending', 'delivering')
           AND m.id = (SELECT message_id FROM session WHERE id = ${sessionId})`,
       ).pipe(Effect.orDie),
@@ -181,10 +185,14 @@ export const make = Effect.gen(function* () {
     unacceptedBatch: Effect.fn("InboxStore.unacceptedBatch")((sessionId: string, execution: number) =>
       tx(
         Effect.gen(function* () {
-          if ((yield* openExecution(sessionId)) !== execution || (yield* startedAt(sessionId, execution)) !== null)
+          if (
+            (yield* openExecution(sql, sessionId)) !== execution ||
+            (yield* startedAt(sql, sessionId, execution)) !== null
+          )
             return undefined
 
           return yield* inboxWhere(
+            sql,
             sql`m.recipient_session_id = ${sessionId} AND m.status = 'delivering' AND m.recipient_execution_id = ${execution}`,
           )
         }),
@@ -204,6 +212,7 @@ export const make = Effect.gen(function* () {
 
     deliveredIn: Effect.fn("InboxStore.deliveredIn")((sessionId: string, execution: number) =>
       inboxWhere(
+        sql,
         sql`m.recipient_session_id = ${sessionId} AND m.status = 'delivered' AND m.recipient_execution_id = ${execution}
           AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)`,
       ).pipe(Effect.orDie),
@@ -212,15 +221,17 @@ export const make = Effect.gen(function* () {
     takeInbox: Effect.fn("InboxStore.takeInbox")((sessionId: string, process: number | undefined) =>
       tx(
         Effect.gen(function* () {
-          if (!(yield* observable(sessionId)) || (yield* fromOldProcess(sessionId, process))) return undefined
+          if (!(yield* observable(sql, sessionId)) || (yield* fromOldProcess(sql, sessionId, process))) return undefined
 
-          if ((yield* openExecution(sessionId)) !== undefined) return undefined
-          const pending = yield* findSend(sessionId, "pending")
+          if ((yield* openExecution(sql, sessionId)) !== undefined) return undefined
+          const pending = yield* findSend(sql, sessionId, "pending")
 
           if (pending.length === 0) return undefined
           const batch = nextBatch(pending)
-          const execution = yield* allocateExecution(sessionId, yield* now)
+          const execution = yield* allocateExecution(sql, publish, sessionId, yield* now)
           yield* moveInbox(
+            sql,
+            bus,
             sql`recipient_session_id = ${sessionId} AND ${sql.in(
               "id",
               batch.map((r) => r.id),
@@ -247,6 +258,8 @@ export const make = Effect.gen(function* () {
           if (ids.length === 0) return []
 
           const moved = yield* moveInbox(
+            sql,
+            bus,
             sql`recipient_session_id = ${sessionId} AND ${sql.in("id", ids)}${from ? sql` AND status = ${from}` : sql``}`,
             status,
             { ...(into !== undefined && { execution: into }), ...(reason !== undefined && { reason }) },
@@ -255,6 +268,7 @@ export const make = Effect.gen(function* () {
           return moved.length === 0
             ? []
             : yield* inboxIn(
+                sql,
                 sessionId,
                 moved.map((k) => k.id),
               )
@@ -264,10 +278,11 @@ export const make = Effect.gen(function* () {
     latestInbox: Effect.fn("InboxStore.latestInbox")((sessionId: string, which: "send" | "notice") =>
       (which === "send"
         ? inboxWhere(
+            sql,
             sql`m.recipient_session_id = ${sessionId} AND m.sender_type != 'vibest' AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)`,
             sql`m.id DESC LIMIT 1`,
           )
-        : inboxWhere(sql`m.sender_type = 'vibest' AND m.about_session_id = ${sessionId}`, sql`m.id DESC LIMIT 1`)
+        : inboxWhere(sql, sql`m.sender_type = 'vibest' AND m.about_session_id = ${sessionId}`, sql`m.id DESC LIMIT 1`)
       ).pipe(
         Effect.map((rows) => rows[0]),
         Effect.orDie,
@@ -285,5 +300,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Database.node, Bus.node, Projectors.node, SessionLive.node, PlatformNode.sqlClient],
+  deps: [Database.node, Bus.node, Projectors.node],
 })

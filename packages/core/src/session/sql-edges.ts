@@ -2,9 +2,9 @@ import { shortId } from "@vibest/schema/id"
 import { SessionEvent } from "@vibest/schema/session-event"
 import type { SessionRef } from "@vibest/schema/terminal"
 import { Effect, Predicate } from "effect"
-import { SqlClient } from "effect/sql"
+import type { SqlClient } from "effect/sql"
 
-import { Bus } from "../bus.ts"
+import type { Bus } from "../bus.ts"
 
 export const SESSION_PREFIX = /^[0-9a-f-]{8,36}$/
 
@@ -129,9 +129,8 @@ export const queryRemoteEdges = (
     ORDER BY to_session_id LIMIT 11`
 }
 
-export const sessionEdges = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient
-  const { publish, transaction: tx } = yield* Bus.Service
+export const sessionEdges = (sql: SqlClient.SqlClient, bus: Bus.Interface) => {
+  const { publish, transaction: tx } = bus
 
   const mutateEdges = (edges: ReadonlyArray<SessionEdge>, add: boolean) =>
     tx(
@@ -255,4 +254,4 @@ export const sessionEdges = Effect.gen(function* () {
       mutateEdges(edges, false),
     ),
   }
-})
+}

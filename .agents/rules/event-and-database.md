@@ -7,7 +7,7 @@
    - Rely on `@effect/sql-sqlite-bun`'s native `PRAGMA busy_timeout = 5000` and `sql.withTransaction` (`BEGIN IMMEDIATE` + semaphore + `SAVEPOINT`).
    - Explicitly retry `PRAGMA journal_mode = WAL` and pre-open `inspectSchema` on `LockTimeoutError` / `ConnectionError` (SQLite's `PRAGMA journal_mode = WAL` bypasses `busy_timeout`).
    - Enforce `PRAGMA foreign_keys = ON`.
-   - Restrict on-disk `vibest.db`, `vibest.db-wal`, and `vibest.db-shm` to owner-only `0o600` permissions on POSIX (`restrictToOwner` / `PRIVATE_FILE`).
+   - Restrict on-disk `vibest.db`, `vibest.db-wal`, and `vibest.db-shm` to owner-only `0o600` permissions on POSIX (`PRIVATE_FILE` in `database/database.ts`, applied in `platform-bun/src/bun.ts` after `inspectFile` accepts an existing database).
    - Maintain monotonic `event_sequence` and store `versionedType` (`<type>.<version>`) in the `event` ledger.
    - Start up in O(1) without dropping or replaying projections on every boot; schema changes use strictly append-only incremental migrations (`packages/core/src/database/migration.ts`, recorded in the `migration` table).
 

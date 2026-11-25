@@ -37,11 +37,7 @@ const approvedOperations = (file, operations) => {
 const eventTable = /\b(FROM|JOIN) event\b/
 const position = /\bposition\b/
 
-const ledgerFiles = [
-  "/packages/core/src/bus.ts",
-  "/packages/core/src/database/schema.sql.ts",
-  "/packages/core/src/database/ledger.ts",
-]
+const ledgerFiles = ["/packages/core/src/bus.ts", "/packages/core/src/database/schema.sql.ts"]
 
 const migrationFolder = "/packages/core/src/database/migration/"
 
@@ -78,7 +74,6 @@ const writers = [
   "/packages/core/src/session/projector.ts",
   "/packages/core/src/remote/projector.ts",
   "/packages/core/src/database/schema.sql.ts",
-  "/packages/core/src/database/ledger.ts",
   "/packages/core/src/import/",
   "/packages/core/src/database/migration",
 ]
