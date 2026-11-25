@@ -1,4 +1,5 @@
 import fs from "node:fs/promises"
+import http from "node:http"
 
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
@@ -6,7 +7,7 @@ import { Bus, ProjectChanged, SessionChanged } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { Project } from "@vibest/core/project"
 import { sessionHeaders } from "@vibest/protocol/protocol"
-import { EdgeDirected, type WatchEvent } from "@vibest/protocol/rpc"
+import { EdgeDirected, type WatchEvent } from "@vibest/protocol/schemas"
 import { Layout } from "@vibest/schema/layout"
 import * as Listing from "@vibest/server/listing"
 import * as Server from "@vibest/server/server"
@@ -25,11 +26,10 @@ import {
   testLayer,
   until,
   type TestServices,
-  wire,
 } from "./lib/fakes.ts"
 
 const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
   Layer.provideMerge(testLayer({ sshHosts: { work: "Git.Internal.Example" } })),
 )
@@ -64,8 +64,8 @@ const watching = (repo: string) =>
   Effect.gen(function* () {
     const events = yield* Queue.unbounded<WatchEvent>()
     const c = authed(yield* client, cliHeaders(repo))
-    yield* c.Watch(undefined).pipe(
-      Stream.runForEach((event) => Queue.offer(events, event)),
+    yield* c["server.watch"]["watch.subscribe"]({}).pipe(
+      Effect.flatMap((stream) => stream.pipe(Stream.runForEach((event) => Queue.offer(events, event)))),
       Effect.forkScoped,
     )
 
@@ -103,7 +103,9 @@ describe("Watch", () => {
         [[entryId, "coordinator", null]],
       )
 
-      const { id } = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* entryClient["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
 
       const spawned = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
@@ -115,7 +117,7 @@ describe("Watch", () => {
       assert.strictEqual(spawned.session.task, "do it")
 
       const other = yield* makeRepository
-      const opened = yield* authed(yield* client, cliHeaders(other))["Project.Open"]({})
+      const opened = yield* authed(yield* client, cliHeaders(other))["server.project"]["project.open"]({ payload: {} })
 
       const seen = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
@@ -129,7 +131,7 @@ describe("Watch", () => {
         repositories: [{ path: other, identity: null }],
       })
 
-      yield* c.Archive({ id })
+      yield* c["server.session"]["session.archive"]({ params: { id }, payload: {} })
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "SessionEnded" }> =>
           Predicate.isTagged(e, "SessionEnded") && e.id === id && e.projectId === project,
@@ -145,7 +147,10 @@ describe("Watch", () => {
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
 
-      const { id } = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* entryClient["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
+
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
           Predicate.isTagged(e, "Session") && e.session.id === id && e.session.startedAt !== null,
@@ -163,7 +168,7 @@ describe("Watch", () => {
       const snapshotAfterExit = yield* (yield* watching(repo)).next(isSnapshot)
       assert.isTrue(snapshotAfterExit.sessions.some((s) => s.id === id && s.exitedAt !== null))
 
-      yield* c.Archive({ id })
+      yield* c["server.session"]["session.archive"]({ params: { id }, payload: {} })
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "SessionEnded" }> =>
           Predicate.isTagged(e, "SessionEnded") && e.id === id && e.projectId === project,
@@ -193,8 +198,10 @@ describe("Watch", () => {
     Effect.gen(function* () {
       const { repo, entryClient } = yield* withEntry
 
-      const spawn = yield* entryClient
-        .Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "race" })
+      const spawn = yield* entryClient["server.session"]
+        ["session.spawn"]({
+          payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "race" },
+        })
         .pipe(Effect.forkScoped)
 
       const { next } = yield* watching(repo)
@@ -216,7 +223,10 @@ describe("Watch", () => {
       const { repo, project, entryClient } = yield* withEntry
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
-      const { id } = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+
+      const { id } = yield* entryClient["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
 
       const isSession = (status: string, finished: number) => (e: WatchEvent) =>
         Predicate.isTagged(e, "Session") &&
@@ -237,15 +247,17 @@ describe("Watch", () => {
       yield* next((e): e is WatchEvent => isSession("done", 1)(e))
       yield* next((e): e is WatchEvent => isProject("done")(e))
 
-      yield* c["Session.Seen"]({ id, finished: 2 })
-      yield* c["Session.Seen"]({ id, finished: 0 })
+      yield* c["server.session"]["session.seen"]({ params: { id }, payload: { finished: 2 } })
+      yield* c["server.session"]["session.seen"]({ params: { id }, payload: { finished: 0 } })
       assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { finished: 1, seen: 0 })
-      yield* c["Session.Seen"]({ id, finished: 1 })
+      yield* c["server.session"]["session.seen"]({ params: { id }, payload: { finished: 1 } })
       yield* next((e): e is WatchEvent => isSession("idle", 1)(e))
       yield* next((e): e is WatchEvent => isProject("idle")(e))
       assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { finished: 1, seen: 1 })
       assert.strictEqual(
-        (yield* Effect.flip(entryClient["Session.Seen"]({ id, finished: 1 })))._tag,
+        (yield* Effect.flip(
+          entryClient["server.session"]["session.seen"]({ params: { id }, payload: { finished: 1 } }),
+        ))._tag,
         "Forbidden",
         "only the user marks what they saw",
       )
@@ -259,7 +271,11 @@ describe("Watch", () => {
       const { repo, entryClient } = yield* withEntry
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
-      const { id } = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+
+      const { id } = yield* entryClient["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
+
       yield* next(
         (e): e is WatchEvent =>
           Predicate.isTagged(e, "Session") && e.session.id === id && e.session.status === "working",
@@ -267,9 +283,17 @@ describe("Watch", () => {
       const terminal = (yield* herdr.terminalOf(id))!
       yield* Effect.repeat(herdr.countFinished(terminal["id"]!), { times: 5 })
       const held = yield* herdr.hold("see", terminal["id"]!)
-      const five = yield* c["Session.Seen"]({ id, finished: 5 }).pipe(Effect.forkScoped)
+
+      const five = yield* c["server.session"]
+        ["session.seen"]({ params: { id }, payload: { finished: 5 } })
+        .pipe(Effect.forkScoped)
+
       yield* held.reached
-      const six = yield* c["Session.Seen"]({ id, finished: 6 }).pipe(Effect.forkScoped)
+
+      const six = yield* c["server.session"]
+        ["session.seen"]({ params: { id }, payload: { finished: 6 } })
+        .pipe(Effect.forkScoped)
+
       yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 200)))
       yield* held.release()
       yield* Fiber.join(five)
@@ -340,21 +364,45 @@ describe("Watch", () => {
     "Watch is the user's: an entry session is refused",
     Effect.gen(function* () {
       const { entryClient } = yield* withEntry
-      const refused = yield* Effect.flip(Stream.runDrain(entryClient.Watch(undefined)))
+
+      const refused = yield* Effect.flip(
+        entryClient["server.watch"]["watch.subscribe"]({}).pipe(Effect.flatMap(Stream.runDrain)),
+      )
+
       assert.strictEqual(refused._tag, "Forbidden")
     }),
   )
 
   test(
-    "a client that stops acknowledging falls behind, and the stream fails with WatchLagged instead of growing",
+    "a client that stops reading falls behind, and the stream fails with WatchLagged instead of growing",
     Effect.gen(function* () {
       const { repo, project, entryId } = yield* withEntry
+      const layout = yield* Layout
       const db = yield* Db.Service
       const bus = yield* Bus.Service
-      const w = yield* wire
-      yield* w.send({ jsonrpc: "2.0", id: 1, method: "Watch", params: null, headers: Object.entries(cliHeaders(repo)) })
-      const first = yield* w.recv
-      assert.strictEqual((first["result"] as Array<WatchEvent>)[0]!._tag, "Snapshot")
+
+      const res = yield* Effect.acquireRelease(
+        Effect.callback<http.IncomingMessage>((resume) => {
+          const req = http.request(
+            {
+              socketPath: layout.socket,
+              path: "/api/watch",
+              method: "GET",
+              headers: cliHeaders(repo),
+            },
+            (response) => {
+              response.once("data", (chunk: Buffer) => {
+                response.pause()
+                assert.include(chunk.toString("utf8"), "Snapshot")
+                resume(Effect.succeed(response))
+              })
+            },
+          )
+
+          req.end()
+        }),
+        (response) => Effect.sync(() => response.destroy()),
+      )
 
       const read = db.session.sessionIdentity
 
@@ -371,16 +419,15 @@ describe("Watch", () => {
 
       for (const id of ids) yield* bus.publish(SessionChanged, { sessionId: id })
       yield* bus.publish(SessionChanged, { sessionId: entryId })
-      const ack = { jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: 1 } }
 
-      for (;;) {
-        yield* w.send(ack)
-        const line = yield* w.recv
+      const rest = yield* Effect.callback<string>((resume) => {
+        const chunks: Array<Buffer> = []
+        res.on("data", (chunk: Buffer) => chunks.push(chunk))
+        res.on("end", () => resume(Effect.succeed(Buffer.concat(chunks).toString("utf8"))))
+        res.resume()
+      }).pipe(Effect.timeout("20 seconds"), Effect.orDie)
 
-        if (line["chunk"] === true) continue
-        assert.include(JSON.stringify(line["error"]), "WatchLagged")
-        break
-      }
+      assert.include(rest, "WatchLagged")
     }),
   )
 
@@ -450,7 +497,10 @@ describe("Watch", () => {
       const fakeGit = yield* FakeGit
       const single = yield* makeRepository
       yield* fakeGit.update(single, { origin: "git@github.com:Org/App.git" })
-      const openedSingle = yield* authed(yield* client, cliHeaders(single))["Project.Open"]({})
+
+      const openedSingle = yield* authed(yield* client, cliHeaders(single))["server.project"]["project.open"]({
+        payload: {},
+      })
 
       const parent = yield* tempDirectory("vibest-multi-")
       const repoA = `${parent}/a-origin`
@@ -469,7 +519,9 @@ describe("Watch", () => {
 
       assert.deepStrictEqual(singleRow?.repositories, [{ path: single, identity: "github.com/Org/App" }])
 
-      const openedMulti = yield* authed(yield* client, cliHeaders(parent))["Project.Open"]({})
+      const openedMulti = yield* authed(yield* client, cliHeaders(parent))["server.project"]["project.open"]({
+        payload: {},
+      })
 
       const multiEvent = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Project" }> =>
@@ -513,8 +565,13 @@ describe("Watch", () => {
       const { repo, entryId, entryClient } = yield* withEntry
       const cli = authed(yield* client, cliHeaders(repo))
 
-      const a = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "a" })
-      const b = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "b" })
+      const a = yield* entryClient["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "a" },
+      })
+
+      const b = yield* entryClient["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "b" },
+      })
 
       const { next } = yield* watching(repo)
       const snapshot = yield* next(isSnapshot)
@@ -524,7 +581,9 @@ describe("Watch", () => {
       assert.deepStrictEqual(snapA?.to, [{ id: entryId }])
       assert.deepStrictEqual(snapB?.to, [{ id: entryId }])
 
-      yield* cli["Session.Link"]({ spec: EdgeDirected.make({ from: [{ id: a.id }], to: [{ id: b.id }] }) })
+      yield* cli["server.session"]["session.link"]({
+        payload: { spec: EdgeDirected.make({ from: [{ id: a.id }], to: [{ id: b.id }] }) },
+      })
 
       const linked = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
@@ -533,7 +592,9 @@ describe("Watch", () => {
 
       assert.deepStrictEqual(linked.session.to.map((t) => t.id).sort(), [b.id, entryId].sort())
 
-      yield* cli["Session.Unlink"]({ spec: EdgeDirected.make({ from: [{ id: a.id }], to: [{ id: b.id }] }) })
+      yield* cli["server.session"]["session.unlink"]({
+        payload: { spec: EdgeDirected.make({ from: [{ id: a.id }], to: [{ id: b.id }] }) },
+      })
 
       const unlinked = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
@@ -550,11 +611,13 @@ describe("Watch", () => {
       const db = yield* Db.Service
       const { repo, entryId, entryClient } = yield* withEntry
 
-      const { id: childId } = yield* entryClient.Spawn({
-        agent: "general",
-        callerEnv: {},
-        harness: "pi",
-        prompt: "work",
+      const { id: childId } = yield* entryClient["server.session"]["session.spawn"]({
+        payload: {
+          agent: "general",
+          callerEnv: {},
+          harness: "pi",
+          prompt: "work",
+        },
       })
 
       yield* until(

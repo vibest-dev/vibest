@@ -13,7 +13,7 @@ import { authed, projectOf, testLayer, type TestOptions, type TestServices } fro
 
 export const served = (options?: TestOptions) =>
   Server.layer.pipe(
-    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(testLayer(options)),
   )

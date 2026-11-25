@@ -66,8 +66,8 @@ const Handlers = Runtime.handlers(Commands, {
   connect: () => import("./commands/handlers/connect.ts"),
   machine: {
     add: () => import("./commands/handlers/machine/add.ts"),
-    ls: () => import("./commands/handlers/machine/ls.ts"),
-    rm: () => import("./commands/handlers/machine/rm.ts"),
+    list: () => import("./commands/handlers/machine/ls.ts"),
+    remove: () => import("./commands/handlers/machine/rm.ts"),
   },
 })
 

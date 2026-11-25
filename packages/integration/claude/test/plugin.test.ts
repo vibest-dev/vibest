@@ -186,10 +186,10 @@ describe("Claude plugin requests", () => {
     await h.prompt("next", { kind: "composer" })
     await settle()
     assert.deepStrictEqual(h.paths(), [
-      "/session/ready",
-      "/inbox/take",
-      "/hooks/claude/execution-end",
-      "/hooks/claude/prompt",
+      "/api/hook/ready",
+      "/api/inbox/take",
+      "/api/hook/claude/execution-end",
+      "/api/hook/claude/prompt",
     ])
     assert.deepStrictEqual(h.requests[2]!.body, {
       hook_event_name: "ExecutionComplete",
@@ -208,7 +208,7 @@ describe("Claude plugin requests", () => {
     await settle()
     down = false
     await h.fire(1000)
-    assert.deepStrictEqual(h.paths(), ["/hooks/claude/execution-end", "/hooks/claude/execution-end"])
+    assert.deepStrictEqual(h.paths(), ["/api/hook/claude/execution-end", "/api/hook/claude/execution-end"])
     await h.fire(2000)
     assert.lengthOf(h.requests, 2, "taken: no more tries")
   })
@@ -225,7 +225,7 @@ describe("Claude plugin requests", () => {
       "never polls /inbox/take while Turn 1 is running",
     )
     assert.deepStrictEqual(
-      h.requests.filter((r) => r.url.endsWith("/hooks/claude/prompt")).map((r) => r.body),
+      h.requests.filter((r) => r.url.endsWith("/api/hook/claude/prompt")).map((r) => r.body),
       [{ hook_event_name: "PromptSubmit", origin: "vibest", execution: 7 }],
     )
     await h.executionComplete({ reason: "answer", answer: "first" })
@@ -265,7 +265,7 @@ describe("Claude plugin requests", () => {
     await launchArgv.executionComplete({ reason: "answer", answer: "turn 1 answer" })
     await settle()
     assert.deepStrictEqual(
-      launchArgv.requests.filter((r) => r.url.endsWith("/hooks/claude/prompt")).map((r) => r.body),
+      launchArgv.requests.filter((r) => r.url.endsWith("/api/hook/claude/prompt")).map((r) => r.body),
       [{ hook_event_name: "PromptSubmit", origin: "vibest", execution: 9 }],
     )
     assert.deepStrictEqual(
@@ -389,7 +389,7 @@ describe("Claude plugin inbox", () => {
     await h.draw()
     await settle()
     assert.deepStrictEqual(h.submitted, ["Message from Vibest\nsame"])
-    const refusals = h.requests.filter((r) => r.url.endsWith("/hooks/claude/prompt"))
+    const refusals = h.requests.filter((r) => r.url.endsWith("/api/hook/claude/prompt"))
     assert.deepStrictEqual(
       refusals.map((r) => r.body),
       [{ hook_event_name: "PromptSubmit", origin: "vibest", execution: 1, refused: true }],

@@ -264,7 +264,7 @@ export const curl = async (
     "-w",
     "\n%{http_code}",
     "--unix-socket",
-    path.join(w.vibestHome, "vibest-http.sock"),
+    path.join(w.vibestHome, "vibest.sock"),
     "-X",
     "POST",
     ...Object.entries(headers).flatMap(([k, v]) => ["-H", `${k}: ${v}`]),
@@ -485,7 +485,7 @@ const checks: ReadonlyArray<Check> = [
         await until(
           "a curl take hands the result out",
           async () => {
-            const r = await curl(w, "/inbox/take", who)
+            const r = await curl(w, "/api/inbox/take", who)
             expect(r.status === 200 || r.status === 204, `take answered ${r.status}: ${JSON.stringify(r.body)}`)
 
             if (r.status === 200) taken = r.body as typeof taken
@@ -497,11 +497,11 @@ const checks: ReadonlyArray<Check> = [
         expect(taken.content.includes("done-cmcurl"), `the taken text: ${taken.content}`)
         const id = taken.ids[0]!
         expect(status(id) === "delivering", `after the take the row is ${status(id)}`)
-        const again = await curl(w, "/inbox/take", who)
+        const again = await curl(w, "/api/inbox/take", who)
         expect(again.status === 204, `a second take answered ${again.status}: ${JSON.stringify(again.body)}`)
-        const other = await curl(w, "/inbox/take", { ...who, projectId: "00000000-0000-4000-8000-000000000000" })
+        const other = await curl(w, "/api/inbox/take", { ...who, projectId: "00000000-0000-4000-8000-000000000000" })
         expect(other.status === 403, `another project's take answered ${other.status}`)
-        const old = await curl(w, "/inbox/take", { ...who, protocol: "3" })
+        const old = await curl(w, "/api/inbox/take", { ...who, protocol: "3" })
         expect(
           old.status === 409 && (old.body as { action?: string }).action === "vibest update",
           `an older protocol's take answered ${old.status}: ${JSON.stringify(old.body)}`,

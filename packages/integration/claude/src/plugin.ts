@@ -1,4 +1,4 @@
-import { hookRoute, isTaken, sessionHeaders, TAKE_ROUTE } from "@vibest/protocol/protocol"
+import { hookRoute, isTaken, READY_ROUTE, sessionHeaders, TAKE_ROUTE } from "@vibest/protocol/protocol"
 import { formatDelivery, type Taken } from "@vibest/schema/session"
 import type { EngineInterface, On, Register, ToolCallInput } from "claude-code"
 import * as Predicate from "effect/Predicate"
@@ -106,6 +106,9 @@ const isFields = (value: Json | undefined): value is { readonly [key: string]: J
 const member = (body: Json | undefined, name: string) => (isFields(body) ? body[name] : undefined)
 
 const errorOf = (body: Json | undefined) => {
+  const message = member(body, "message")
+
+  if (Predicate.isString(message)) return message
   const error = member(body, "error")
 
   return Predicate.isString(error) ? error : undefined
@@ -149,7 +152,7 @@ export function register(on: On) {
     if (!sessionId) return undefined
     const home = (await host.env("VIBEST_HOME")) || `${(await host.env("HOME")) ?? ""}/.vibest`
 
-    return { sessionId, socket: `${home}/vibest-http.sock` }
+    return { sessionId, socket: `${home}/vibest.sock` }
   }
 
   const post = async <Body>(host: Host, path: string, body: Body, ms: number): Promise<Reply> => {
@@ -258,7 +261,7 @@ export function register(on: On) {
 
     if (await identity(host).catch(() => undefined)) {
       const pid = await host.claudeCodePid().catch(() => undefined)
-      void report(host, "/session/ready", pid === undefined ? {} : { pid }, (body) => {
+      void report(host, READY_ROUTE, pid === undefined ? {} : { pid }, (body) => {
         const current = member(body, "process")
 
         if (Predicate.isNumber(current)) processId = String(current)

@@ -1,31 +1,36 @@
 import { Inbox } from "@vibest/core/inbox"
-import { Caller, Forbidden } from "@vibest/protocol/rpc"
-import { Effect, Predicate, Stream } from "effect"
+import { VibestApi } from "@vibest/protocol/api"
+import { Forbidden } from "@vibest/protocol/errors"
+import { Caller } from "@vibest/protocol/middleware"
+import { Effect, Predicate } from "effect"
+import { HttpServerRequest } from "effect/http"
+import { HttpApiBuilder } from "effect/http-api"
 
 import { processOf, reader } from "../gates.ts"
-import type { Handlers } from "./caller.ts"
-import { group } from "./group.ts"
 
-export const make = Effect.gen(function* () {
-  const inbox = yield* Inbox.Service
+export const InboxHandler = HttpApiBuilder.group(VibestApi, "server.inbox", (handlers) =>
+  Effect.gen(function* () {
+    const inbox = yield* Inbox.Service
 
-  const pullingSession = (method: "Inbox.Subscribe" | "Inbox.Take") =>
-    Effect.gen(function* () {
-      const c = yield* Caller
+    const pullingSession = (method: "inbox.subscribe" | "inbox.take") =>
+      Effect.gen(function* () {
+        const c = yield* Caller
 
-      if (!Predicate.isTagged(c, "Session"))
-        return yield* new Forbidden({ method, message: `${method} is a session's own` })
+        if (!Predicate.isTagged(c, "Session"))
+          return yield* new Forbidden({ method, message: `${method} is a session's own` })
 
-      return c.sessionId
-    })
+        return c.sessionId
+      })
 
-  return {
-    "Inbox.Subscribe": () => Stream.unwrap(Effect.map(pullingSession("Inbox.Subscribe"), inbox.stream)),
-    "Inbox.Take": (_payload, { headers }) =>
-      Effect.flatMap(pullingSession("Inbox.Take"), (sessionId) =>
-        inbox.take(sessionId, processOf(reader(headers))).pipe(Effect.map((taken) => taken ?? null)),
-      ),
-  } satisfies Handlers
-})
+    return handlers
+      .handle("inbox.take", () =>
+        Effect.gen(function* () {
+          const sessionId = yield* pullingSession("inbox.take")
+          const request = yield* HttpServerRequest.HttpServerRequest
 
-export const layer = group(["Inbox.Subscribe", "Inbox.Take"]).toLayer(make)
+          return yield* inbox.take(sessionId, processOf(reader(request.headers)))
+        }),
+      )
+      .handle("inbox.subscribe", () => Effect.map(pullingSession("inbox.subscribe"), inbox.stream))
+  }),
+)

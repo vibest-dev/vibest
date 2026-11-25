@@ -16,14 +16,16 @@ export default Runtime.handler(Commands.commands.events, (o) =>
           return yield* new LaunchFailed({
             message: "this vibestd does not serve events; run vibest daemon restart",
           })
-        yield* Stream.runForEach(
-          client.Events({
+
+        const stream = yield* client["server.event"]["event.subscribe"]({
+          query: {
             session: Option.getOrUndefined(o.session),
             after: Option.getOrUndefined(o.after),
             follow: o.follow,
-          }),
-          json,
-        )
+          },
+        })
+
+        yield* Stream.runForEach(stream, json)
       }),
     )
   }),

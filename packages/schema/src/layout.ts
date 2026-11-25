@@ -14,7 +14,6 @@ export class Layout extends Context.Service<
     readonly home: string
     readonly database: string
     readonly socket: string
-    readonly httpSocket: string
     readonly daemonInfo: string
     readonly log: string
     readonly identity: string
@@ -46,7 +45,6 @@ export class Layout extends Context.Service<
         home,
         database: path.join(home, "vibest.db"),
         socket: path.join(home, "vibest.sock"),
-        httpSocket: path.join(home, "vibest-http.sock"),
         daemonInfo: path.join(home, "vibestd.pid"),
         log: path.join(home, "vibestd.log"),
         identity: path.join(home, "identity.json"),

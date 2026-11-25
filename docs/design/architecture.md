@@ -124,7 +124,7 @@ manages it. Items marked planned are not built.
   HTTP socket, `POST /events` with `ready`, `conversation`, `execution.start` (origin typed or inbox, and the inbox
   row ids the execution consumed), `execution.end` (outcome completed, failed or interrupted; text; failure `{ kind: limited
   | auth | other, message }`) and `blocked`; `POST /guard` with a neutral `ToolCall { kind, name, command?,
-  paths }`. Today Claude, Cursor and agy talk directly to vibestd over `$VIBEST_HOME/vibest-http.sock` and Pi talks over `vibest.sock` RPC, while each harness adapter decodes the raw event in vibestd.
+  paths }`. Today Claude, Cursor, agy and Pi all talk directly to vibestd over `$VIBEST_HOME/vibest.sock` (`HttpApi`), while each harness adapter decodes the raw event in vibestd.
 
 ### 1.1 Orchestration
 
@@ -158,25 +158,25 @@ started, an entry session) cannot answer results with results (rule 4), and that
 (`@vibest/plugin/effect`, `@vibest/plugin/testing`; host-side helpers that vibestd and the builtin plugins share, such as `capture` and `isLimited`, are on `@vibest/plugin/host`, off the plugin API). A module imports a name from the module that defines it (no re-exports of other
 modules' names, except a domain facade re-exporting its own domain, see below).
 
-| Package                 | Role                                                                                                                                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`                | Browser-safe contracts: branded ids, domain structs and errors, unified `Event` definitions (`event.ts` and domain `*-event.ts` modules), the layout, `PROTOCOL` and `VERSION` (`version.ts`).    |
-| `plugin`                | The plugin authoring API, as an Effect plugin (`effect/`) or a Promise plugin (`promise/`).                                                                                                       |
-| `protocol`              | The single `RpcGroup` (effect/rpc, one JSON object per line), caller and peer headers, tagged errors, the contract in `contract/`.                                                                |
-| `client`                | The Effect RPC client with the per-command preflight and auto-start, the socket connector, the release lookup (`release.ts`).                                                                     |
-| `core`                  | The agent engine: persistence and the ledger, the Bus, sessions and their executions, the inbox, the plugin host, harness, runtime and agent catalogs.                                            |
-| `server`                | vibestd: the RPC handlers, admission, the service graph roots (`services.ts`, `app.ts`), the socket and HTTP listeners, other machines (`machine/`), the hourly update check (`update-check.ts`). |
-| `platform-bun`          | The Bun platform of the binary (`bun.ts`: the daemon `Host` and its `replacements`; `plugin-source.ts`). `packages/cli` maps `#platform` to it.                                                   |
-| `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `vibest.harness-default`, `vibest.agent-files`.         |
-| `cli`                   | The `vibest` command: command specs (`commands/commands.ts`), one handler per command (`commands/handlers/`), the build. A vibestd client, plus `vibest daemon` through `@vibest/server/daemon`.  |
-| `plugin-harnesses`      | The builtin harness plugins `pi`, `claude`, `cursor` and `agy`: one `HarnessDefinition` per CLI.                                                                                                  |
-| `runtime-herdr`         | The Runtime port on herdr (`terminal-runtime.ts`, `pool.ts`), herdr's saved machines, runtime choice.                                                                                             |
-| `runtime-herdr-core`    | The Runtime port on herdr-core (hc).                                                                                                                                                              |
-| `effect-herdr-sdk`      | Effect client for the herdr socket API.                                                                                                                                                           |
-| `effect-herdr-core-sdk` | Effect client for the herdr-core socket API.                                                                                                                                                      |
-| `integration/claude`    | The vibest Claude Code plugin (one hooks module), loaded with `claude --plugin-dir`.                                                                                                              |
-| `integration/pi`        | The vibest Pi extension, loaded with `pi -e`.                                                                                                                                                     |
-| `integration/cursor`    | The vibest Cursor CLI plugin (hooks posting to `vibest-http.sock`), loaded with `cursor-agent --plugin-dir`.                                                                                      |
+| Package                 | Role                                                                                                                                                                                                                                         |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`                | Browser-safe contracts: branded ids, domain structs and errors, unified `Event` definitions (`event.ts` and domain `*-event.ts` modules), the layout, `PROTOCOL` and `VERSION` (`version.ts`).                                               |
+| `plugin`                | The plugin authoring API, as an Effect plugin (`effect/`) or a Promise plugin (`promise/`).                                                                                                                                                  |
+| `protocol`              | The single `HttpApi` (`effect/http-api` in `api.ts` and `groups/<domain>.ts`), caller and peer headers, tagged errors, the OpenAPI contract in `contract/openapi.json`.                                                                      |
+| `client`                | The Effect `HttpApiClient` with the per-command preflight and auto-start, the Unix HTTP connector, the release lookup (`release.ts`).                                                                                                        |
+| `core`                  | The agent engine: persistence and the ledger, the Bus, sessions and their executions, the inbox, the plugin host, harness, runtime and agent catalogs.                                                                                       |
+| `server`                | vibestd: the `HttpApi` handlers (`handlers/<domain>.ts`), admission, the service graph roots (`services.ts`, `app.ts`), the Unix socket and loopback UI listeners, other machines (`machine/`), the hourly update check (`update-check.ts`). |
+| `platform-bun`          | The Bun platform of the binary (`bun.ts`: the daemon `Host` and its `replacements`; `plugin-source.ts`). `packages/cli` maps `#platform` to it.                                                                                              |
+| `builtins`              | The builtin plugins in load order (`pre`): the agent definitions, the Pi and Claude harnesses, the hc and herdr runtimes, runtime choice, `vibest.harness-default`, `vibest.agent-files`.                                                    |
+| `cli`                   | The `vibest` command: command specs (`commands/commands.ts`), one handler per command (`commands/handlers/`), the build. A vibestd client, plus `vibest daemon` through `@vibest/server/daemon`.                                             |
+| `plugin-harnesses`      | The builtin harness plugins `pi`, `claude`, `cursor` and `agy`: one `HarnessDefinition` per CLI.                                                                                                                                             |
+| `runtime-herdr`         | The Runtime port on herdr (`terminal-runtime.ts`, `pool.ts`), herdr's saved machines, runtime choice.                                                                                                                                        |
+| `runtime-herdr-core`    | The Runtime port on herdr-core (hc).                                                                                                                                                                                                         |
+| `effect-herdr-sdk`      | Effect client for the herdr socket API.                                                                                                                                                                                                      |
+| `effect-herdr-core-sdk` | Effect client for the herdr-core socket API.                                                                                                                                                                                                 |
+| `integration/claude`    | The vibest Claude Code plugin (one hooks module), loaded with `claude --plugin-dir`.                                                                                                                                                         |
+| `integration/pi`        | The vibest Pi extension, loaded with `pi -e`.                                                                                                                                                                                                |
+| `integration/cursor`    | The vibest Cursor CLI plugin (hooks posting to `vibest.sock`), loaded with `cursor-agent --plugin-dir`.                                                                                                                                      |
 
 `packages/skills` holds the builtin Agent Skills (`delegate`, `pipeline`); platform packages (`@vibest/cli-<os>-<cpu>[-musl]`) are generated dynamically at pack time by `packages/cli/scripts/pack.ts`.
 
@@ -328,7 +328,7 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
   reconcile tick, daemon start. A `blocked` receiver gets nothing.
 - **Pull or type is a property of the harness.** Every harness definition declares `delivery`: `pull` (Claude, Pi) or
   `typed` (Cursor, agy). Core reads only that field. How a pulling adapter fetches is its own business (the Claude
-  plugin polls over HTTP on `vibest-http.sock`, the Pi extension follows its subscription stream); the integration asks
+  plugin polls over HTTP on `vibest.sock`, the Pi extension follows its SSE stream); the integration asks
   for the next batch with `take` only while its session is idle, and the subscription stream carries only a wake-up.
   Any other harness is typed through herdr `agent.prompt`. Entry sessions and spawned sessions follow the same rule.
   `take` runs in one transaction: with an execution open it answers empty; otherwise it opens the execution, marks the
@@ -783,7 +783,7 @@ The trace attributes each field to the plugin that changed it
 last. On `session.start.before`, `Effect.fail(new SessionRefused({ reason }))` stops the chain at
 once, nothing is inserted and nothing starts; a defect or a timeout there is also a refusal (`plugin <id>
 crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. On `session.tool.execute.before`,
-each callback gets a frozen deep clone of `{ session, tool, input, cwd }` and runs sequentially in load order; `Effect.fail(new ToolRefused({ reason }))` (or throwing `new ToolRefused({ reason })` in a Promise plugin) stops immediately and returns `reason` to the harness pre-tool hook, while a crash or timeout is logged, counted, and skipped so a broken plugin does not brick tool calls. The builtin `vibest.guard` enforces only protocol self-protection (`VIBEST_SESSION_ID` tampering and direct `vibest-http.sock` requests).
+each callback gets a frozen deep clone of `{ session, tool, input, cwd }` and runs sequentially in load order; `Effect.fail(new ToolRefused({ reason }))` (or throwing `new ToolRefused({ reason })` in a Promise plugin) stops immediately and returns `reason` to the harness pre-tool hook, while a crash or timeout is logged, counted, and skipped so a broken plugin does not brick tool calls. The builtin `vibest.guard` enforces only protocol self-protection (`VIBEST_SESSION_ID` tampering and direct `vibest.sock` requests).
 
 **Default harness.** No builtin chooses or refuses a harness by quota. A new agent without a harness inherits its
 caller's harness, provider and model in core, before `session.start.before` (§9); subscriptions are data in the hook
@@ -1111,26 +1111,22 @@ Plugins add subcommands through the `command` catalog.
 `<Tag>: <message>` on stderr; exit codes 0, 1 failure, 2 usage, 130 interrupted; text is a literal argument or
 `-` for stdin, empty text is `EmptyInput`, `@file` is not expanded.
 
-**Protocol** (omac `rpc.ts`, `protocol.ts`, `server.ts`, `client.ts`, copied): effect/rpc over the unix socket,
-one JSON-RPC 2.0 object per line, transport-agnostic so a WebSocket or HTTP transport can be added for another
-host. Every method but `Ping` needs the `vibest-protocol` header; each command Pings once first and stops with
-`IncompatibleDaemon` on a mismatch; the package version is informational. `PROTOCOL` is the only version, for RPC
-and the HTTP API alike (HTTP paths carry none); old versions are not served. An additive feature does not bump it:
+**Protocol** (`packages/protocol/src/api.ts`, `groups/*.ts`, `protocol.ts`, `server.ts`, `client.ts`): unified `effect/http-api` over the Unix socket (`vibest.sock`), with SSE (`text/event-stream`) for streaming endpoints (`watch`, `event.stream`, `inbox.subscribe`) and a loopback HTTP UI listener (`127.0.0.1:<port>` with `vibest-token`). Every endpoint except `daemon.ping`, `daemon.stop`, and `daemon.handoff` checks the `vibest-protocol` header; each command pings once first and stops with `IncompatibleDaemon` on a mismatch; the package version is informational. `PROTOCOL` is the only version (HTTP paths carry none); old versions are not served. An additive feature does not bump it:
 Ping's `capabilities` gets a boolean flag, and a client uses the feature only when the flag is there. Flags: `http`,
 `handoff`, `requests` (`Send` and `Spawn` take an optional `request` id: `vibest send` and `vibest run` make one per
 invocation and send a call whose connection dropped once more with it, and vibestd answers a repeat as the first;
 only to a vibestd that has the flag, since an older one would act on a repeat twice, and never after an answer, a
 refusal included). A mismatch is
-answered with what vibestd speaks (protocol, package version), a message and the command to run (`protocol.ts`
+answered with HTTP 409 and what vibestd speaks (protocol, package version), a message and the command to run (`protocol.ts`
 `protocolMismatch`, the command in `MISMATCH_ACTION`): both ways it is `vibest update`, which restarts the agents on
-the new version; an older caller is told vibest was updated, a newer one that vibestd is older. RPC fails with `ProtocolRejected`, HTTP answers 409. Scoped methods need caller headers
-(`user` with a Project directory, or `agent` with `VIBEST_AGENT_ID`); the role comes from the stored row, and
-missing or mixed headers are `InvalidCaller`, never the user. The ACCESS table lists every method, checked at
+the new version; an older caller is told vibest was updated, a newer one that vibestd is older. Scoped endpoints need caller headers
+(`user` with a Project directory, or `agent` with `VIBEST_SESSION_ID`); the role comes from the stored row, and
+missing or mixed headers are `InvalidCaller`, never the user. The ACCESS table lists every endpoint, checked at
 compile time: open (integration notifications), subagent (`Report`), entry session or user (`Run`, `Send`,
 `Interrupt`, `Stop`, …, only on Runs of its Project), user only (daemon, update). Socket mode 0600 is
 the authentication; roles prevent mistakes, not attackers.
 
-**RPC methods** (`packages/protocol/src/rpc.ts`). Three middlewares: `ProtocolGate` (every method but `Ping`),
+**HttpApi endpoints** (`packages/protocol/src/api.ts` and `groups/<domain>.ts`). Three middlewares: `ProtocolGate` (every endpoint except `daemon.ping`, `daemon.stop`, `daemon.handoff`),
 `CallerGate` on scoped methods (resolves the caller for that request only, from its headers and the stored row; a
 session never declares itself entry session), and `Admission` on methods that change something (see
 [drain admission](daemon.md#admission-while-draining)). Protocol-only methods take no caller: `Plugins`,
@@ -1212,22 +1208,20 @@ See [drain admission](daemon.md#admission-while-draining).
 **Session requests:** each request is checked against its session and Project; entry session starts are serialized
 per Project. See [session requests](daemon.md#session-requests).
 
-**HTTP API** (`vibest-http.sock`, `packages/server/src/http.ts`): what an integration that can only make HTTP requests
-calls (the Claude plugin's `$.http.fetch`). Every route is `POST /<route>` with a JSON body, answered at once; the
-caller is named by the shared session headers.
+**Integration hook and inbox routes** (on the same `vibest.sock` `HttpApi`, `packages/protocol/src/groups/hook.ts` and `inbox.ts`): what harness integrations call directly (`$.http.fetch`, `curl --unix-socket`, or in-process HTTP/SSE). Every route uses the shared protocol and session headers.
 
-| Route                            | Answer                                  | What                                                                      |
-| -------------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
-| `/inbox/take`                    | `{ execution, ids, line, text }` or 204 | the session's next batch when idle and no execution is open (Inbox.take)  |
-| `/hooks/<harness>/execution-end` | 204                                     | the adapter's `executionEnd`, kept as the execution's reply; a settlement |
-| `/hooks/<harness>/prompt`        | 204                                     | the adapter's `userPrompt`: the execution starts; a settlement            |
-| `/hooks/<harness>/guard`         | `{ deny? }`                             | Guard.check with the session's own agent and project folder               |
+| Route                                   | Answer                                  | What                                                                      |
+| --------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
+| `POST /api/inbox/take`                  | `{ execution, ids, line, text }` or 204 | the session's next batch when idle and no execution is open (Inbox.take)  |
+| `POST /api/hook/:harness/execution-end` | 204                                     | the adapter's `executionEnd`, kept as the execution's reply; a settlement |
+| `POST /api/hook/:harness/prompt`        | 204                                     | the adapter's `userPrompt`: the execution starts; a settlement            |
+| `POST /api/hook/:harness/guard`         | `{ deny? }`                             | Guard.check with the session's own agent and project folder               |
 
-Errors are `{ error }`: 409 another protocol (with `ProtocolMismatch`), 404 no such session or route, 403 another
+Errors are structured tagged JSON errors with explicit HTTP status codes: 409 protocol mismatch, 404 no such session or route, 403 another
 project, another harness than the session's, or a poll from what is not an entry session whose harness polls, 503 vibestd
-is stopping. Routes match on the path alone, whether the server reports it with or without scheme and host. The guard
+is stopping. The guard
 reads the session's project folder as its terminal's `VIBEST_PROJECT_DIR`, which vibestd itself has none of.
-`Session.Ready`, sent once at the harness's start with the harness's own pid (which a restart signals), says it takes
+`session.ready`, sent once at the harness's start with the harness's own pid (which a restart signals), says it takes
 input now; vibestd waits for it before handing the harness an execution.
 
 **Distribution:** install.sh and npm ship the same compiled binary; updates use the original install method.
@@ -1245,7 +1239,7 @@ npm in its prefix. Its own entries:
   plugins/                   plugin files and directories (§7), read only
   vibest.db                  the ledger and read model (with its -wal and -shm files)
   identity.json              this machine's id, name and machine_id; created or rewritten at every vibestd start
-  vibest.sock  vibest-http.sock   vibestd's RPC socket, and the HTTP socket the Claude plugin reports to
+  vibest.sock                vibestd's unified HttpApi Unix socket (0600)
   vibestd.pid  vibestd.log   vibestd's start lock and record, and its log (trimmed at startup; see daemon.md)
   projects/<project id>/     the project folder: preferences.md, docs/, memories/, artifacts/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
@@ -1278,26 +1272,26 @@ is left alone (git check-ignore fails on a path beyond a symlink). Nothing is re
 Source paths are in `iamdin/pi-orchestrator` (`packages/cli/src` unless shown). The omac tests named come along
 and are the acceptance for each part.
 
-| Part                                       | omac source                                                                                                                                      | Refactor                                                                        | omac tests                                                                                                 |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| herdr client                               | `packages/effect-herdr-sdk`                                                                                                                      | regenerate for herdr 0.9.5, pin its protocol                                    | —                                                                                                          |
-| herdr connections                          | `herdr-pool.ts`                                                                                                                                  | moved to `runtime-herdr/pool.ts`                                                | `live.test.ts`                                                                                             |
-| Protocol, caller, ACCESS, admission        | `rpc.ts`, `protocol.ts`, `server.ts`, `client.ts`                                                                                                | methods for Run, Agent, Message, knowledge; roles main / subagent / user / open | `rpc.test.ts`                                                                                              |
-| Daemon lock, instance, replacement, update | `daemon.ts`, `core/drain.ts`, `replace.ts`, `commands/handlers/daemon/`, `update.ts`                                                             | blockers are unfinished daemon operations, never Agents                         | `daemon.test.ts`, `stop.test.ts`                                                                           |
-| Distribution                               | `packages/cli/bin`, `packages/cli-*`, `scripts/build.ts`                                                                                         | names                                                                           | `release-smoke.test.ts`                                                                                    |
-| Database                                   | `db.ts`, `platform-bun/src/bun.ts`                                                                                                               | tables of §6                                                                    | —                                                                                                          |
-| Starting an Agent                          | `session/spawn.ts`, `session/placement.ts`, `worktree.ts`, `harness.ts` (the `Harnesses` registry; the adapters are `packages/plugin-harnesses`) | session → Agent in a Run; Workspace types                                       | `sessions.test.ts`, `worktree-group.test.ts`                                                               |
-| Delivery and outcomes                      | `session/executions.ts` (prompt), `session/delivery.ts`, `inbox.ts`                                                                              | execution state → Message `outcome`; coordinator → entry session                | `sessions.test.ts`, `self-heal.test.ts`                                                                    |
-| Results                                    | `replies.ts`                                                                                                                                     | add Run id                                                                      | —                                                                                                          |
-| Interrupt and stop                         | `session/delivery.ts`, `session/archive.ts`, `session/release.ts`, `processes.ts`                                                                | archive → `stop`                                                                | `archive.test.ts`, `stop-entry.test.ts`                                                                    |
-| Entry session launch and resume            | `launch.ts`, `session/entry.ts`, `session/restart.ts`                                                                                            | coordinator → entry session of a Project                                        | `stop-entry.test.ts`                                                                                       |
-| Rules                                      | `rules.ts`                                                                                                                                       | subagent rules; entry session rules become builtin skills                       | —                                                                                                          |
-| Knowledge                                  | `project.ts`                                                                                                                                     | directory realpath → Project id                                                 | `project.test.ts`                                                                                          |
-| Models                                     | `models.ts`                                                                                                                                      | Availability capability                                                         | —                                                                                                          |
-| Integrations                               | `integration.ts`, `packages/claude`, `claude-inbox.ts`, `packages/pi-omac`                                                                       | forward the §8 events; agent instead of session                                 | `integration.test.ts`, `claude-inbox-*.test.ts`, `claude-integration-stop.test.ts`, `cursor-allow.test.ts` |
-| Guard                                      | `guard.ts`                                                                                                                                       | `plugin-guard` on `agent.tool`; roles main / subagent                           | `guard.test.ts`                                                                                            |
-| Plugin loading                             | `plugins.ts`, `plugin-sources.ts`, `platform-bun/src/plugin-source.ts`                                                                           | V2 API and the §7 kinds; keep counters, traces, reload                          | `plugins.test.ts`, `plugin-reload.test.ts`, `plugin-binary.test.ts`                                        |
-| Test fakes                                 | `packages/cli/test/fakes.ts`                                                                                                                     | fake herdr Layer for the new services                                           | —                                                                                                          |
+| Part                                       | omac source                                                                                                                                      | Refactor                                                         | omac tests                                                                                                 |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| herdr client                               | `packages/effect-herdr-sdk`                                                                                                                      | regenerate for herdr 0.9.5, pin its protocol                     | —                                                                                                          |
+| herdr connections                          | `herdr-pool.ts`                                                                                                                                  | moved to `runtime-herdr/pool.ts`                                 | `live.test.ts`                                                                                             |
+| Protocol, caller, ACCESS, admission        | `api.ts`, `groups/*.ts`, `protocol.ts`, `server.ts`, `client.ts`                                                                                 | unified `HttpApi` endpoints; roles main / subagent / user / open | `rpc.test.ts`                                                                                              |
+| Daemon lock, instance, replacement, update | `daemon.ts`, `core/drain.ts`, `replace.ts`, `commands/handlers/daemon/`, `update.ts`                                                             | blockers are unfinished daemon operations, never Agents          | `daemon.test.ts`, `stop.test.ts`                                                                           |
+| Distribution                               | `packages/cli/bin`, `packages/cli-*`, `scripts/build.ts`                                                                                         | names                                                            | `release-smoke.test.ts`                                                                                    |
+| Database                                   | `db.ts`, `platform-bun/src/bun.ts`                                                                                                               | tables of §6                                                     | —                                                                                                          |
+| Starting an Agent                          | `session/spawn.ts`, `session/placement.ts`, `worktree.ts`, `harness.ts` (the `Harnesses` registry; the adapters are `packages/plugin-harnesses`) | session → Agent in a Run; Workspace types                        | `sessions.test.ts`, `worktree-group.test.ts`                                                               |
+| Delivery and outcomes                      | `session/executions.ts` (prompt), `session/delivery.ts`, `inbox.ts`                                                                              | execution state → Message `outcome`; coordinator → entry session | `sessions.test.ts`, `self-heal.test.ts`                                                                    |
+| Results                                    | `replies.ts`                                                                                                                                     | add Run id                                                       | —                                                                                                          |
+| Interrupt and stop                         | `session/delivery.ts`, `session/archive.ts`, `session/release.ts`, `processes.ts`                                                                | archive → `stop`                                                 | `archive.test.ts`, `stop-entry.test.ts`                                                                    |
+| Entry session launch and resume            | `launch.ts`, `session/entry.ts`, `session/restart.ts`                                                                                            | coordinator → entry session of a Project                         | `stop-entry.test.ts`                                                                                       |
+| Rules                                      | `rules.ts`                                                                                                                                       | subagent rules; entry session rules become builtin skills        | —                                                                                                          |
+| Knowledge                                  | `project.ts`                                                                                                                                     | directory realpath → Project id                                  | `project.test.ts`                                                                                          |
+| Models                                     | `models.ts`                                                                                                                                      | Availability capability                                          | —                                                                                                          |
+| Integrations                               | `integration.ts`, `packages/claude`, `claude-inbox.ts`, `packages/pi-omac`                                                                       | forward the §8 events; agent instead of session                  | `integration.test.ts`, `claude-inbox-*.test.ts`, `claude-integration-stop.test.ts`, `cursor-allow.test.ts` |
+| Guard                                      | `guard.ts`                                                                                                                                       | `plugin-guard` on `agent.tool`; roles main / subagent            | `guard.test.ts`                                                                                            |
+| Plugin loading                             | `plugins.ts`, `plugin-sources.ts`, `platform-bun/src/plugin-source.ts`                                                                           | V2 API and the §7 kinds; keep counters, traces, reload           | `plugins.test.ts`, `plugin-reload.test.ts`, `plugin-binary.test.ts`                                        |
+| Test fakes                                 | `packages/cli/test/fakes.ts`                                                                                                                     | fake herdr Layer for the new services                            | —                                                                                                          |
 
 Every omac feature is kept, the Pi coordinator TUI included; the harnesses are Claude Code, Pi,
 and Cursor. Replaced only as the refactor lands:

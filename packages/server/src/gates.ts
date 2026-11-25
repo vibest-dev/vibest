@@ -3,6 +3,14 @@ import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
 import { NoSuchSession } from "@vibest/core/session"
 import { FORWARDED_CALLS, REMOTE_CALLS } from "@vibest/protocol/access"
+import { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/errors"
+import {
+  AdmissionMiddleware,
+  Caller,
+  CallerMiddleware,
+  ProtocolMiddleware,
+  type CallerIdentity,
+} from "@vibest/protocol/middleware"
 import {
   CALLER_HEADER,
   CWD_HEADER,
@@ -21,22 +29,13 @@ import {
   RUNTIME_HEADER,
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
-import {
-  Admission,
-  Caller,
-  CallerGate,
-  DaemonStopping,
-  InvalidCaller,
-  ProtocolGate,
-  ProtocolRejected,
-  type CallerIdentity,
-} from "@vibest/protocol/rpc"
 import { ID } from "@vibest/schema/id"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Data, Effect, Layer, Option, Predicate } from "effect"
 import * as Headers from "effect/http/Headers"
+import * as HttpServerRequest from "effect/http/HttpServerRequest"
 
-const SETTLEMENTS: ReadonlySet<string> = new Set(["ExecutionEnd", "Prompt"])
+const SETTLEMENTS: ReadonlySet<string> = new Set(["hook.executionEnd", "hook.prompt"])
 
 export type Read = (name: string) => string | undefined
 
@@ -65,12 +64,18 @@ export const admit = <A, E, R, A2, E2>(
   )
 
 export const AdmissionLive = Layer.effect(
-  Admission,
+  AdmissionMiddleware,
   Effect.gen(function* () {
     const drain = yield* Drain.Service
 
-    return Admission.of((effect, { rpc }) =>
-      admit(drain, rpc._tag, SETTLEMENTS.has(rpc._tag), effect, Effect.fail(new DaemonStopping({ method: rpc._tag }))),
+    return AdmissionMiddleware.of((effect, { endpoint }) =>
+      admit(
+        drain,
+        endpoint.identifier,
+        SETTLEMENTS.has(endpoint.identifier),
+        effect,
+        Effect.fail(new DaemonStopping({ method: endpoint.identifier })),
+      ),
     )
   }),
 )
@@ -156,8 +161,8 @@ export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method
 
       if (!REMOTE_CALLS.has(method)) return yield* bad(`a remote vibestd may not call ${method}`)
 
-      if (method !== "Remote.Hello" && !(yield* db.remote.remoteKnown(remote)))
-        return yield* bad(`remote ${remote} has not said Remote.Hello; call it first`)
+      if (method !== "remote.hello" && !(yield* db.remote.remoteKnown(remote)))
+        return yield* bad(`remote ${remote} has not said remote.hello; call it first`)
       const by = read(REMOTE_BY_HEADER)
 
       if (
@@ -221,6 +226,14 @@ export const integrationOf = (read: Read) => {
   return { version, protocol: Number.isFinite(protocol) ? protocol : 0 }
 }
 
+const safeDecodeUri = (value: string) => {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 const noteIntegration = (db: Db.Interface, read: Read): Effect.Effect<void> =>
   Effect.gen(function* () {
     const sessionId = read(SESSION_HEADER)
@@ -234,24 +247,29 @@ const noteIntegration = (db: Db.Interface, read: Read): Effect.Effect<void> =>
       ).pipe(
         Effect.annotateLogs({
           harness: read(HARNESS_HEADER) ?? "",
-          cwd: decodeURIComponent(read(CWD_HEADER) ?? ""),
+          cwd: safeDecodeUri(read(CWD_HEADER) ?? ""),
           runtime: read(RUNTIME_HEADER) ?? "",
         }),
       )
   })
 
-export const ProtocolGateLive = Layer.effect(
-  ProtocolGate,
+export const ProtocolMiddlewareLive = Layer.effect(
+  ProtocolMiddleware,
   Effect.gen(function* () {
     const db = yield* Db.Service
     const { version } = yield* App.Service
 
-    return ProtocolGate.of((effect, { headers, rpc }) =>
+    return ProtocolMiddleware.of((effect, { endpoint }) =>
       Effect.gen(function* () {
-        const rejected = yield* checkProtocol(db, reader(headers), version)
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const rejected = yield* checkProtocol(db, reader(request.headers), version)
 
         if (rejected)
-          return yield* new ProtocolRejected({ method: rpc._tag, protocol: rejected.sent, mismatch: rejected.mismatch })
+          return yield* new ProtocolRejected({
+            ...rejected.mismatch,
+            method: endpoint.identifier,
+            callerProtocol: rejected.sent,
+          })
 
         return yield* effect
       }),
@@ -259,15 +277,18 @@ export const ProtocolGateLive = Layer.effect(
   }),
 )
 
-export const CallerGateLive = Layer.effect(
-  CallerGate,
+export const CallerMiddlewareLive = Layer.effect(
+  CallerMiddleware,
   Effect.gen(function* () {
     const db = yield* Db.Service
 
-    return CallerGate.of((effect, { headers, rpc }) =>
-      resolveCaller(db, headers, rpc._tag).pipe(
-        Effect.flatMap((caller) => Effect.provideService(effect, Caller, caller)),
-      ),
+    return CallerMiddleware.of((effect, { endpoint }) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const caller = yield* resolveCaller(db, request.headers, endpoint.identifier)
+
+        return yield* Effect.provideService(effect, Caller, caller)
+      }),
     )
   }),
 )

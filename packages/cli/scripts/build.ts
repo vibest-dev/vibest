@@ -30,30 +30,32 @@ const SIGNALS: ReadonlyArray<readonly [NodeJS.Signals, number]> = [
 
 const EXEC_ARGV = ["--smol", "--use-system-ca", "--no-warnings", "--"]
 
-export const prepareAssetsArchive = (): string => {
-  const harnessesDir = path.join(cliDir, "harnesses")
+export const prepareAssetsArchive = (harnessesDir?: string) => {
+  const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-assets-"))
+  const targetHarnessesDir = harnessesDir ?? path.join(stageDir, "harnesses")
 
   const buildHarnesses = Bun.spawnSync(
-    [process.execPath, path.join(cliDir, "scripts/build-harnesses.ts"), harnessesDir],
+    [process.execPath, path.join(cliDir, "scripts/build-harnesses.ts"), targetHarnessesDir],
     {
       cwd: cliDir,
       stdio: ["inherit", "inherit", "inherit"],
     },
   )
 
-  if (buildHarnesses.exitCode !== 0) process.exit(buildHarnesses.exitCode)
+  if (buildHarnesses.exitCode !== 0) {
+    fs.rmSync(stageDir, { recursive: true, force: true })
+    process.exit(buildHarnesses.exitCode)
+  }
 
   const archive = packDirectoryArchive([
-    { prefix: "harnesses", dir: harnessesDir },
+    { prefix: "harnesses", dir: targetHarnessesDir },
     { prefix: "herdr-plugin", dir: path.join(cliDir, "herdr-plugin") },
   ])
 
-  const cacheDir = path.join(cliDir, ".cache")
-  fs.mkdirSync(cacheDir, { recursive: true })
-  const archivePath = path.join(cacheDir, "vibest-assets.bin")
+  const archivePath = path.join(stageDir, "vibest-assets.bin")
   fs.writeFileSync(archivePath, archive)
 
-  return archivePath
+  return { archivePath, cleanup: () => fs.rmSync(stageDir, { recursive: true, force: true }) }
 }
 
 const embeddedAssetsPlugin = (archivePath: string): BunPlugin => ({
@@ -180,131 +182,139 @@ const stopTempDaemon = (pgoHome: string) => {
 
 export const buildBinaries = async (
   jobs: ReadonlyArray<BuildJob>,
-  options: { readonly noBytecode?: boolean; readonly archivePath?: string } = {},
+  options: { readonly noBytecode?: boolean; readonly archivePath?: string; readonly harnessesDir?: string } = {},
 ): Promise<number> => {
-  const archivePath = options.archivePath ?? prepareAssetsArchive()
-
-  if (options.noBytecode) {
-    for (const job of jobs) {
-      const code = await compileBinary({
-        out: path.resolve(cliDir, job.outfile),
-        archivePath,
-        bytecode: false,
-        target: job.target,
-      })
-
-      if (code !== 0) return code
-    }
-
-    return 0
-  }
-
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vpgo-"))
-  const pgoHome = path.join(tempDir, "h")
-  fs.mkdirSync(pgoHome, { recursive: true })
-
-  let activeChild: Bun.Subprocess | undefined
-  let cleaned = false
-
-  const cleanup = () => {
-    if (cleaned) return
-    cleaned = true
-    stopTempDaemon(pgoHome)
-    fs.rmSync(tempDir, { recursive: true, force: true })
-  }
-
-  const runProbe = async (
-    probeBin: string,
-    args: ReadonlyArray<string>,
-    env: Record<string, string>,
-  ): Promise<{ readonly exitCode: number; readonly stderr: string }> => {
-    const proc = Bun.spawn([probeBin, ...args], {
-      cwd: tempDir,
-      env,
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr: "pipe",
-    })
-
-    activeChild = proc
-
-    try {
-      const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()])
-
-      return { exitCode, stderr }
-    } finally {
-      activeChild = undefined
-    }
-  }
-
-  const handlers = SIGNALS.map(([signal, code]) => {
-    const handler = () => {
-      try {
-        activeChild?.kill(signal)
-      } catch {}
-
-      cleanup()
-      process.exit(128 + code)
-    }
-
-    process.on(signal, handler)
-
-    return [signal, handler] as const
-  })
+  const prepared = options.archivePath ? undefined : prepareAssetsArchive(options.harnessesDir)
+  const archivePath = options.archivePath ?? prepared!.archivePath
 
   try {
-    const probeBin = path.join(tempDir, "vibest-probe")
+    if (options.noBytecode) {
+      for (const job of jobs) {
+        const code = await compileBinary({
+          out: path.resolve(cliDir, job.outfile),
+          archivePath,
+          bytecode: false,
+          target: job.target,
+        })
 
-    const probeExit = await compileBinary({
-      out: probeBin,
-      archivePath,
-      bytecode: true,
-    })
+        if (code !== 0) return code
+      }
 
-    if (probeExit !== 0) return probeExit
+      return 0
+    }
 
-    const baseEnv = isolatedEnv(pgoHome)
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vpgo-"))
+    const pgoHome = path.join(tempDir, "h")
+    fs.mkdirSync(pgoHome, { recursive: true })
 
-    for (const step of PGO_STEPS) {
-      const orderFile = path.join(tempDir, `order-${step.name}.txt`)
+    let activeChild: Bun.Subprocess | undefined
+    let cleaned = false
 
-      const result = await runProbe(probeBin, step.args, {
-        ...baseEnv,
-        BUN_BYTECODE_ORDER_OUT: orderFile,
+    const cleanup = () => {
+      if (cleaned) return
+      cleaned = true
+      stopTempDaemon(pgoHome)
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    }
+
+    const runProbe = async (
+      probeBin: string,
+      args: ReadonlyArray<string>,
+      env: Record<string, string>,
+    ): Promise<{ readonly exitCode: number; readonly stderr: string }> => {
+      const proc = Bun.spawn([probeBin, ...args], {
+        cwd: tempDir,
+        env,
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "pipe",
       })
 
-      if (result.exitCode !== 0) {
-        process.stderr.write(`PGO probe \`vibest ${step.args.join(" ")}\` exited ${result.exitCode}:\n${result.stderr}`)
+      activeChild = proc
 
-        return result.exitCode
+      try {
+        const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()])
+
+        return { exitCode, stderr }
+      } finally {
+        activeChild = undefined
       }
     }
 
-    stopTempDaemon(pgoHome)
+    const handlers = SIGNALS.map(([signal, code]) => {
+      const handler = () => {
+        try {
+          activeChild?.kill(signal)
+        } catch {}
 
-    const orderFiles = PGO_PRIORITY.flatMap((name) => {
-      const orderFile = path.join(tempDir, `order-${name}.txt`)
+        cleanup()
+        prepared?.cleanup()
+        process.exit(128 + code)
+      }
 
-      return fs.existsSync(orderFile) && fs.statSync(orderFile).size > 0 ? [orderFile] : []
+      process.on(signal, handler)
+
+      return [signal, handler] as const
     })
 
-    for (const job of jobs) {
-      const code = await compileBinary({
-        out: path.resolve(cliDir, job.outfile),
+    try {
+      const probeBin = path.join(tempDir, "vibest-probe")
+
+      const probeExit = await compileBinary({
+        out: probeBin,
         archivePath,
         bytecode: true,
-        bytecodeOrder: orderFiles,
-        jitPolicy: 100,
-        target: job.target,
       })
 
-      if (code !== 0) return code
-    }
+      if (probeExit !== 0) return probeExit
 
-    return 0
+      const baseEnv = isolatedEnv(pgoHome)
+
+      for (const step of PGO_STEPS) {
+        const orderFile = path.join(tempDir, `order-${step.name}.txt`)
+
+        const result = await runProbe(probeBin, step.args, {
+          ...baseEnv,
+          BUN_BYTECODE_ORDER_OUT: orderFile,
+        })
+
+        if (result.exitCode !== 0) {
+          process.stderr.write(
+            `PGO probe \`vibest ${step.args.join(" ")}\` exited ${result.exitCode}:\n${result.stderr}`,
+          )
+
+          return result.exitCode
+        }
+      }
+
+      stopTempDaemon(pgoHome)
+
+      const orderFiles = PGO_PRIORITY.flatMap((name) => {
+        const orderFile = path.join(tempDir, `order-${name}.txt`)
+
+        return fs.existsSync(orderFile) && fs.statSync(orderFile).size > 0 ? [orderFile] : []
+      })
+
+      for (const job of jobs) {
+        const code = await compileBinary({
+          out: path.resolve(cliDir, job.outfile),
+          archivePath,
+          bytecode: true,
+          bytecodeOrder: orderFiles,
+          jitPolicy: 100,
+          target: job.target,
+        })
+
+        if (code !== 0) return code
+      }
+
+      return 0
+    } finally {
+      for (const [signal, handler] of handlers) process.off(signal, handler)
+      cleanup()
+    }
   } finally {
-    for (const [signal, handler] of handlers) process.off(signal, handler)
-    cleanup()
+    prepared?.cleanup()
   }
 }
 
@@ -320,6 +330,10 @@ if (import.meta.main) {
     process.exit(1)
   }
 
-  const exitCode = await buildBinaries([{ outfile, target: matched?.bunTarget }], { noBytecode })
+  const exitCode = await buildBinaries([{ outfile, target: matched?.bunTarget }], {
+    noBytecode,
+    harnessesDir: path.join(cliDir, "harnesses"),
+  })
+
   process.exit(exitCode)
 }

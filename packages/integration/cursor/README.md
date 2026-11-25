@@ -2,18 +2,18 @@
 
 vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`):
 
-- **the tool guard**: before each tool call of a vibest agent, `hooks/vibest.sh guard` posts to `POST /hooks/cursor/guard`
-  on `$VIBEST_HOME/vibest-http.sock`, which runs the guard rules and answers in Cursor's shape (the `cursor` definition's
-  `guardAnswer`); `vibest.guard` refuses `VIBEST_SESSION_ID` tampering and direct `vibest-http.sock` requests, and user `session.tool.execute.before` plugins may refuse other tool calls. It runs
+- **the tool guard**: before each tool call of a vibest agent, `hooks/vibest.sh guard` posts to `POST /api/hook/cursor/guard`
+  on `$VIBEST_HOME/vibest.sock`, which runs the guard rules and answers in Cursor's shape (the `cursor` definition's
+  `guardAnswer`); `vibest.guard` refuses `VIBEST_SESSION_ID` tampering and direct `vibest.sock` requests, and user `session.tool.execute.before` plugins may refuse other tool calls. It runs
   fail-closed.
-- **readiness**: `sessionStart` posts both to `POST /hooks/cursor/prompt`, which records the session's
-  conversation id, and to `POST /session/ready` (Cursor runs the two at once). A starting Cursor
+- **readiness**: `sessionStart` posts both to `POST /api/hook/cursor/prompt`, which records the session's
+  conversation id, and to `POST /api/hook/ready` (Cursor runs the two at once). A starting Cursor
   takes its first message in its launch argv (after `--`), so no start waits for a ready report; a message to a running
   Cursor is typed once the runtime shows it settled (herdr), or at once (herdr-core, which shows no state for Cursor).
 - **an execution at work**: `afterAgentThought`, `postToolUse` and `beforeSubmitPrompt` post to
-  `POST /hooks/cursor/prompt`; vibestd shows the session working, and opens an execution for a prompt the
+  `POST /api/hook/cursor/prompt`; vibestd shows the session working, and opens an execution for a prompt the
   user typed. Cursor runs a plugin's `beforeSubmitPrompt` only when user or project hooks also have one.
-- **the execution end**: `afterAgentResponse` posts to `POST /hooks/cursor/execution-end`; vibestd writes the session's
+- **the execution end**: `afterAgentResponse` posts to `POST /api/hook/cursor/execution-end`; vibestd writes the session's
   result and shows it idle. Cursor does not run a plugin's `stop` hook.
 
 - **typed messages**: Cursor cannot take messages through its hooks, so vibestd types them, and empties the input box
@@ -45,4 +45,4 @@ Nothing to install. The plugin ships inside `@vibest/cli` (`harnesses/cursor`, w
 `src/plugin.ts`), and vibest starts each Cursor session with `cursor-agent --plugin-dir <that directory>`: loaded for that
 session only, beside your own hooks and plugins. Your `~/.cursor` is not changed.
 
-The hooks talk directly to `$VIBEST_HOME/vibest-http.sock` with `curl --unix-socket`.
+The hooks talk directly to `$VIBEST_HOME/vibest.sock` with `curl --unix-socket`.

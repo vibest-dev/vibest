@@ -3,7 +3,9 @@ import process from "node:process"
 
 import { BunServices, BunSocket } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
+import { nodeUnixHttpClient } from "@vibest/client/node-unix-http"
 import { SocketConnector } from "@vibest/client/socket-connector"
+import { HttpConnector } from "@vibest/client/unix-http"
 import { Bus } from "@vibest/core/bus"
 import { SQL_NAMES } from "@vibest/core/database/db"
 import { Archive } from "@vibest/core/session/archive"
@@ -30,6 +32,7 @@ export const services = Layer.mergeAll(
   FetchHttpClient.layer,
   user,
   Layer.succeed(SocketConnector.Service, (endpoint: string) => BunSocket.makeNet({ path: endpoint })),
+  Layer.succeed(HttpConnector.Service, nodeUnixHttpClient),
 )
 
 export const memorySqlite = SqliteClient.layer({ filename: ":memory:", disableWAL: true, ...SQL_NAMES })

@@ -1,15 +1,18 @@
 import { formatTerminalTarget } from "@vibest/schema/terminal"
 import { Console, Effect, Option } from "effect"
 
-import { toSessionRef, vibest } from "../../caller.ts"
+import { vibest } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.peek, (o) =>
   vibest((client) =>
-    client.Peek({
-      ...toSessionRef(o.id, o.machine),
-      lines: Option.getOrUndefined(o.lines),
+    client["server.session"]["session.peek"]({
+      params: { id: o.id },
+      query: {
+        ...(Option.isSome(o.machine) && { machine: o.machine.value }),
+        ...(Option.isSome(o.lines) && { lines: o.lines.value }),
+      },
     }),
   ).pipe(
     Effect.flatMap((r) =>

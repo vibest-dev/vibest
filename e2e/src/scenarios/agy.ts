@@ -366,14 +366,14 @@ const checks: ReadonlyArray<Check> = [
     id: "H14",
     tier: "agent",
     title:
-      "agy (real): a tool call vibest's guard refuses does not run (curl targeting vibest-http.sock); the session goes on and writes its marker",
+      "agy (real): a tool call vibest's guard refuses does not run (curl targeting vibest.sock); the session goes on and writes its marker",
     run: async (w, evidence) => {
       const binary = await signedIn(w)
       await w.stopDaemon()
       await useAgyBinary(w, binary)
       const ran = path.join(w.root, "h14-ran.txt")
       const marker = path.join(w.root, "h14-marker.txt")
-      const task = `Run exactly this shell command with your command tool: curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready > ${ran}. Whatever happens, then run exactly this shell command: echo done > ${marker}. Then reply with exactly: H14-DONE`
+      const task = `Run exactly this shell command with your command tool: curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready > ${ran}. Whatever happens, then run exactly this shell command: echo done > ${marker}. Then reply with exactly: H14-DONE`
       await withSession(w, "agy", [], task, async ({ id }) => {
         await untilShown(w, id, evidence, "the execution completed", () => completed(w, id) === 1)
 
@@ -383,7 +383,7 @@ const checks: ReadonlyArray<Check> = [
             () => false,
           )
 
-        expect(!(await exists(ran)), "the refused vibest-http.sock command ran")
+        expect(!(await exists(ran)), "the refused vibest.sock command ran")
         expect(await exists(marker), "the session did not go on to write its marker")
       })
     },

@@ -14,14 +14,17 @@ import {
   type UnknownAgent,
   HarnessUnavailable,
 } from "@vibest/schema/session"
+import { canonicalTarget } from "@vibest/schema/terminal"
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { type SessionRow, terminalOf, exitedAt } from "./database/db-rows.ts"
 import { Db, type SessionFilter } from "./database/db.ts"
+import { KeyedMutex } from "./effect/keyed-mutex.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 import { Git, type GitState } from "./git.ts"
+import { raisesSeen } from "./project/activity.ts"
 import { projectRoot, workspaceGit } from "./project/create.ts"
 import { Runtimes, RuntimeError } from "./runtimes.ts"
 import { Archive } from "./session/archive.ts"
@@ -137,6 +140,7 @@ export interface Interface {
   >
   readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
   readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
+  readonly seen: (id: string, finished: number) => Effect.Effect<void, NoSuchSession | RuntimeUnreachable>
   readonly list: (filter?: SessionFilter) => Effect.Effect<ReadonlyArray<SessionView>>
   readonly check: (id: string, bound?: number) => Effect.Effect<void>
   readonly userPrompt: (id: string, text: string, at?: number, process?: number) => Effect.Effect<void>
@@ -169,6 +173,31 @@ export const make = Effect.gen(function* () {
   const { spawn } = yield* Spawn.Service
   const { archive, stop } = yield* Archive.Service
   const { outdated, restart, restartLater } = yield* Restart.Service
+  const seenLocked = yield* KeyedMutex.make<string>()
+
+  const seen = Effect.fn("Session.seen")(function* (id: string, finished: number) {
+    const identity = yield* db.session.sessionIdentity(id)
+
+    if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
+    const at = yield* db.session.getSession(id)
+    const terminal = at === undefined ? null : terminalOf(at)
+
+    if (terminal === null) return
+    const rt = runtimes.find(terminal.runtime)
+
+    if (rt === undefined || rt.seen === undefined || rt.see === undefined) return
+    const see = rt.see
+    const readSeen = rt.seen
+
+    const unreachableSeen = (e: { readonly message: string }) =>
+      new RuntimeUnreachable({ session: id, message: e.message })
+
+    yield* Effect.gen(function* () {
+      const now = yield* readSeen(terminal.target).pipe(Effect.mapError(unreachableSeen))
+
+      if (raisesSeen(now, finished)) yield* see(terminal.target, finished).pipe(Effect.mapError(unreachableSeen))
+    }).pipe(seenLocked.withLock(`${terminal.runtime}\n${canonicalTarget(terminal.target)}`))
+  })
 
   const getRow = (id: string) =>
     db.session
@@ -276,6 +305,7 @@ export const make = Effect.gen(function* () {
     admit,
     interrupt,
     peek,
+    seen,
     archive,
     stop,
     get,

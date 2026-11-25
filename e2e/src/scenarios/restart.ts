@@ -269,16 +269,21 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(kept?.version === old, `the kept agent's integration: ${kept?.version}`)
 
-        const refused = await fetch("http://vibestd/inbox/take", {
-          unix: path.join(w.vibestHome, "vibest-http.sock"),
+        const refused = await fetch("http://vibestd/api/inbox/take", {
+          unix: path.join(w.vibestHome, "vibest.sock"),
           method: "POST",
-          headers: { "vibest-protocol": "2", "vibest-session-id": before.id },
+          headers: {
+            "vibest-protocol": "2",
+            "vibest-caller": "session",
+            "vibest-session-id": before.id,
+            "content-type": "application/json",
+          },
           body: "{}",
         } as RequestInit)
 
-        const answer = (await refused.json()) as { error?: string; action?: string }
+        const answer = (await refused.json()) as { message?: string; action?: string }
         expect(
-          refused.status === 409 && answer.action === "vibest update" && /vibest update/.test(answer.error ?? ""),
+          refused.status === 409 && answer.action === "vibest update" && /vibest update/.test(answer.message ?? ""),
           `an old protocol's call got ${refused.status} ${JSON.stringify(answer)}`,
         )
 
@@ -466,7 +471,7 @@ const checks: ReadonlyArray<Check> = [
           "-w",
           "\n%{http_code}",
           "--unix-socket",
-          path.join(w.vibestHome, "vibest-http.sock"),
+          path.join(w.vibestHome, "vibest.sock"),
           "-X",
           "POST",
           "-H",
@@ -479,9 +484,11 @@ const checks: ReadonlyArray<Check> = [
           "vibest-harness: pi",
           "-H",
           `vibest-process: ${oldProcess}`,
+          "-H",
+          "content-type: text/plain",
           "--data-binary",
           JSON.stringify({ type: "agent_settled", text: LATE, error: "", aborted: false }),
-          "http://vibest/hooks/pi/execution-end",
+          "http://vibest/api/hook/pi/execution-end",
         ])
 
         const lateStatus = Number(late.stdout.slice(late.stdout.lastIndexOf("\n") + 1))

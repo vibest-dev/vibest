@@ -1,10 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
+import { withHeaders } from "@vibest/client/unix-http"
 import { Inbox } from "@vibest/core/inbox"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import { Inbound } from "@vibest/server/machine/inbound"
 import { Effect, Stream } from "effect"
-import { RpcClient } from "effect/rpc"
 import { SqlClient, Statement } from "effect/sql"
 
 import * as Platform from "#platform"
@@ -25,7 +25,13 @@ describe("a Send retried with the same request across machines", () => {
   it.effect("reaches A once, to the creator and past an ended session, also after the ack", () =>
     Effect.gen(function* () {
       const { a, b, entryId, asEntry } = yield* twoMachines()
-      const spawned = yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "ask me", callerEnv: {} }))
+
+      const spawned = yield* asEntry(
+        a.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", machine: "mb", prompt: "ask me", callerEnv: {} },
+        }),
+      )
+
       const middle = onB(spawned.id)
       const child = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
       yield* b.db.session.insertSession(
@@ -39,15 +45,14 @@ describe("a Send retried with the same request across machines", () => {
       const asB =
         (sessionId: string) =>
         <A, E>(effect: Effect.Effect<A, E>) =>
-          RpcClient.withHeaders(
-            effect,
-            sessionHeaders({ sessionId, projectId: b.project, repositoryRoot: b.directory }),
-          )
+          withHeaders(effect, sessionHeaders({ sessionId, projectId: b.project, repositoryRoot: b.directory }))
 
       const sendTwice = (from: string, to: string, request: string) =>
         Effect.gen(function* () {
           for (let attempt = 0; attempt < 2; attempt++)
-            yield* asB(from)(b.raw.Send({ id: to, message: request, request }))
+            yield* asB(from)(
+              b.raw["server.session"]["session.send"]({ params: { id: to }, payload: { message: request, request } }),
+            )
         })
 
       const arrived = (count: number) =>
@@ -113,18 +118,24 @@ describe("a Send retried with the same request across machines", () => {
       const { net, a, b, entryId, asEntry } = yield* twoMachines()
       const c = yield* repoStack(net)
       net.route("c-host", c.layout.socket)
-      yield* b.cli(b.raw["Machine.Add"]({ name: "mc", target: "c-host" }))
-      yield* until(b.cli(b.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
+      yield* b.cli(b.raw["server.machine"]["machine.add"]({ payload: { name: "mc", target: "c-host" } }))
+      yield* until(b.cli(b.raw["server.machine"]["machine.list"]({})), (rows) => rows[0]?.state === "connected")
 
-      const midOnB = (yield* asEntry(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "mid", callerEnv: {} }))).id
+      const midOnB = (yield* asEntry(
+        a.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", machine: "mb", prompt: "mid", callerEnv: {} },
+        }),
+      )).id
 
       const asMid = <A, E>(effect: Effect.Effect<A, E>) =>
-        RpcClient.withHeaders(
-          effect,
-          sessionHeaders({ sessionId: midOnB, projectId: b.project, repositoryRoot: b.directory }),
-        )
+        withHeaders(effect, sessionHeaders({ sessionId: midOnB, projectId: b.project, repositoryRoot: b.directory }))
 
-      const leafOnC = (yield* asMid(b.raw.Spawn({ agent: "general", machine: "mc", prompt: "leaf", callerEnv: {} }))).id
+      const leafOnC = (yield* asMid(
+        b.raw["server.session"]["session.spawn"]({
+          payload: { agent: "general", machine: "mc", prompt: "leaf", callerEnv: {} },
+        }),
+      )).id
+
       yield* b.db.session.archive(midOnB)
 
       yield* c.run(

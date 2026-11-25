@@ -9,6 +9,6 @@ export const agentListing = (machine: string | undefined) =>
       if (ping.capabilities?.agents !== true)
         return yield* new LaunchFailed({ message: "this vibestd does not list agent definitions; run vibest update" })
 
-      return yield* client["Agents.List"]({ machine })
+      return yield* client["server.agent"]["agent.list"]({ query: { machine } })
     }),
   )

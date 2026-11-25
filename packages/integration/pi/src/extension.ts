@@ -6,7 +6,17 @@ import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChild
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
-import { Claim, claimHeaders, type ClientServices, connect, hookCall, makeClient } from "@vibest/client/client"
+import {
+  Claim,
+  claimHeaders,
+  type ClientServices,
+  connect,
+  hookCall,
+  HttpConnector,
+  makeClient,
+  withHeaders,
+} from "@vibest/client/client"
+import { nodeUnixHttpClient } from "@vibest/client/node-unix-http"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import {
@@ -34,7 +44,7 @@ export const skillsDir = path.join(path.dirname(url.fileURLToPath(import.meta.ur
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
-const decodeRefusal = Schema.decodeUnknownOption(Schema.String)
+const decodeGuardDeny = Schema.decodeUnknownOption(Schema.Struct({ deny: Schema.String }))
 
 const decodeVibestDetails = Schema.decodeUnknownOption(
   Schema.Struct({ execution: Schema.Number, ids: Schema.optional(Schema.Array(Schema.Number)) }),
@@ -57,7 +67,7 @@ const guarded = (sessionId: string) =>
         const input = encodeJson({ tool_name: e.toolName, tool_input: e.input, cwd: ctx.cwd })
 
         const exit = yield* hookCall(layout.socket, headers, (client) =>
-          client["Integration.Guard"]({ harness: "pi", input }),
+          client["server.hook"]["hook.guard"]({ params: { harness: "pi" }, payload: input }),
         )
 
         if (Exit.isFailure(exit))
@@ -65,9 +75,9 @@ const guarded = (sessionId: string) =>
             block: true,
             reason: `vibest could not check this tool call (${Cause.pretty(exit.cause)}); it is refused.`,
           }
-        const reason = decodeRefusal(exit.value.answer)
+        const denied = decodeGuardDeny(exit.value)
 
-        return Option.isSome(reason) && reason.value ? { block: true, reason: reason.value } : undefined
+        return Option.isSome(denied) && denied.value.deny ? { block: true, reason: denied.value.deny } : undefined
       }),
     )
   })
@@ -128,7 +138,9 @@ const session = (
             ...(details.value.ids !== undefined && { ids: details.value.ids }),
           })
 
-          yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
+          yield* hookCall(layout.socket, headers, (client) =>
+            client["server.hook"]["hook.prompt"]({ params: { harness: "pi" }, payload: event }),
+          )
         }),
       )
       yield* pi.handle("input", (e, ctx) =>
@@ -139,14 +151,18 @@ const session = (
 
           if (initial !== undefined) {
             const event = encodeJson({ type: "accepted", execution: initial })
-            yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
+            yield* hookCall(layout.socket, headers, (client) =>
+              client["server.hook"]["hook.prompt"]({ params: { harness: "pi" }, payload: event }),
+            )
 
             return
           }
 
           yield* Ref.set(bound, undefined)
           const event = encodeJson({ type: "input", text: e.text, source: e.source })
-          yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
+          yield* hookCall(layout.socket, headers, (client) =>
+            client["server.hook"]["hook.prompt"]({ params: { harness: "pi" }, payload: event }),
+          )
         }),
       )
       yield* pi.handle("agent_settled", (e, ctx) =>
@@ -165,7 +181,9 @@ const session = (
             ...(execution !== undefined && { execution }),
           })
 
-          yield* hookCall(layout.socket, headers, (client) => client.ExecutionEnd({ sessionId, harness: "pi", event }))
+          yield* hookCall(layout.socket, headers, (client) =>
+            client["server.hook"]["hook.executionEnd"]({ params: { harness: "pi" }, payload: event }),
+          )
         }),
       )
     }),
@@ -183,14 +201,16 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
 
       if (ctx.mode !== "tui" || (yield* Ref.get(reported)) === harnessSessionId) return
       const headers = yield* piHeaders(sessionId, ctx)
-      yield* connect(layout.socket).pipe(
-        Effect.flatMap((client) =>
-          client["Session.Ready"](
-            { id: sessionId, conversation: { harness: "pi", id: harnessSessionId } },
-            { headers },
+      yield* withHeaders(
+        connect(layout.socket).pipe(
+          Effect.flatMap((client) =>
+            client["server.hook"]["hook.ready"]({
+              payload: { conversation: { harness: "pi", id: harnessSessionId } },
+            }),
           ),
         ),
-        Effect.scoped,
+        headers,
+      ).pipe(
         Effect.timeout("1 second"),
         Effect.andThen(Ref.set(reported, harnessSessionId)),
         Effect.catchCause((cause) =>
@@ -245,11 +265,11 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
         Effect.gen(function* () {
           if (!ctx.isIdle()) return
 
-          const taken = yield* withVibest(yield* identity(ctx), (client) => client["Inbox.Take"](undefined), {
+          const taken = yield* withVibest(yield* identity(ctx), (client) => client["server.inbox"]["inbox.take"](), {
             start: false,
           })
 
-          if (taken === null) return
+          if (taken === undefined) return
           yield* pi.sendMessage(
             {
               customType: "vibest",
@@ -268,15 +288,15 @@ const inbox = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
           withVibest(
             who,
             (client) =>
-              client["Inbox.Subscribe"](undefined).pipe(
-                Stream.runForEach(() => takeNext(ctx)),
+              client["server.inbox"]["inbox.subscribe"]().pipe(
+                Effect.flatMap((stream) => Stream.runForEach(stream, () => takeNext(ctx))),
                 Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.failCause(cause))),
               ),
             { start: false },
           ),
         ).pipe(
           Effect.retry({
-            while: (e) => Predicate.isTagged(e, "RpcClientError") || Predicate.isTagged(e, "DaemonUnavailable"),
+            while: (e) => Predicate.isTagged(e, "HttpClientError") || Predicate.isTagged(e, "DaemonUnavailable"),
             schedule: Schedule.spaced("2 seconds"),
           }),
           Effect.repeat(Schedule.spaced("2 seconds")),
@@ -313,7 +333,7 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
                     pluginVersion: VERSION,
                     ...(current !== undefined && { process: current }),
                   }),
-                  (client) => client["Session.Ready"]({ id: sessionId, pid: process.pid }),
+                  (client) => client["server.hook"]["hook.ready"]({ payload: { pid: process.pid } }),
                   { start: false },
                 ),
               ),
@@ -324,7 +344,7 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
               Effect.retry({
                 while: (e) =>
                   Predicate.isTagged(e, "DaemonUnavailable") ||
-                  Predicate.isTagged(e, "RpcClientError") ||
+                  Predicate.isTagged(e, "HttpClientError") ||
                   Predicate.isTagged(e, "TimeoutError"),
                 schedule: Schedule.spaced("1 second"),
               }),
@@ -372,6 +392,7 @@ export const services = Layer.mergeAll(
   NodeChildProcessSpawner.layer.pipe(Layer.provide(NodeFileSystem.layer)),
   NodeFileSystem.layer,
   Layer.succeed(SocketConnector.Service, (endpoint) => NodeSocket.makeNet({ path: endpoint })),
+  Layer.succeed(HttpConnector.Service, nodeUnixHttpClient),
   vibestCommand,
 ).pipe(Layer.provideMerge(NodePath.layer))
 

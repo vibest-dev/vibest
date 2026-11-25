@@ -16,28 +16,34 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
 
       const first = yield* Effect.flip(
-        c["Session.Claim"]({ agent: "general", runtime: "herdr", fresh: false, terminal: { id: "test/p1" } }),
+        c["server.session"]["session.claim"]({
+          payload: { agent: "general", runtime: "herdr", fresh: false, terminal: { id: "test/p1" } },
+        }),
       )
 
       assert.strictEqual(first._tag, "LaunchFailed")
       assert.match(first.message, /no harness to inherit/)
 
-      const claimed = yield* c["Session.Claim"]({
-        agent: "coordinator",
-        runtime: "herdr",
-        harness: "claude",
-        fresh: false,
-        terminal: { id: "test/p1" },
+      const claimed = yield* c["server.session"]["session.claim"]({
+        payload: {
+          agent: "coordinator",
+          runtime: "herdr",
+          harness: "claude",
+          fresh: false,
+          terminal: { id: "test/p1" },
+        },
       })
 
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
       assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
 
-      const resumed = yield* c["Session.Claim"]({
-        agent: "coordinator",
-        runtime: "herdr",
-        fresh: false,
-        terminal: { id: "test/p1" },
+      const resumed = yield* c["server.session"]["session.claim"]({
+        payload: {
+          agent: "coordinator",
+          runtime: "herdr",
+          fresh: false,
+          terminal: { id: "test/p1" },
+        },
       })
 
       assert.strictEqual(resumed.sessionId, claimed.sessionId)
@@ -65,13 +71,21 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const pane = "w1:coord"
       yield* herdr.seedAgent(pane)
-      yield* c["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: { id: pane } })
+      yield* c["server.session"]["session.claim"]({
+        payload: { agent: "coordinator", harness: "pi", fresh: false, terminal: { id: pane } },
+      })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "working" }))
-      yield* until(c.List({}), (list) => list.sessions[0]?.status === "working")
-      assert.deepInclude((yield* c.List({})).sessions[0], { agent: "coordinator", status: "working" })
+      yield* until(c["server.session"]["session.list"]({ query: {} }), (list) => list.sessions[0]?.status === "working")
+      assert.deepInclude((yield* c["server.session"]["session.list"]({ query: {} })).sessions[0], {
+        agent: "coordinator",
+        status: "working",
+      })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "idle" }))
-      yield* until(c.List({}), (list) => list.sessions[0]?.status === "idle")
-      assert.deepInclude((yield* c.List({})).sessions[0], { agent: "coordinator", status: "idle" })
+      yield* until(c["server.session"]["session.list"]({ query: {} }), (list) => list.sessions[0]?.status === "idle")
+      assert.deepInclude((yield* c["server.session"]["session.list"]({ query: {} })).sessions[0], {
+        agent: "coordinator",
+        status: "idle",
+      })
     }),
     { statusEvents: true },
   )
@@ -84,13 +98,21 @@ describe("vibest.sock", () => {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const spawner = yield* asEntry(yield* client, repo)
-      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+
+      const { id } = yield* spawner["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
+
       yield* until(
         db.session.getSession(id),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
       )
       yield* Ref.set(herdr.reachable, false)
-      const failed = yield* Effect.flip(c.Archive({ id: id.slice(0, 8) }))
+
+      const failed = yield* Effect.flip(
+        c["server.session"]["session.archive"]({ params: { id: id.slice(0, 8) }, payload: {} }),
+      )
+
       assert.strictEqual(failed._tag, "RuntimeUnreachable")
       assert.strictEqual("session" in failed ? failed.session : failed._tag, id)
     }),
@@ -115,7 +137,11 @@ describe("vibest.sock", () => {
         { agent: "coordinator", projectDirectory: repo },
       )
 
-      const outcome = yield* asCli(yield* client, repo).Archive({ id: started.sessionId })
+      const outcome = yield* asCli(yield* client, repo)["server.session"]["session.archive"]({
+        params: { id: started.sessionId },
+        payload: {},
+      })
+
       assert.isNotNull(outcome)
       assert.strictEqual(outcome?.worktree, "kept")
       assert.isTrue(yield* fs.exists(repo))
@@ -142,13 +168,15 @@ describe("vibest.sock", () => {
       const before = (yield* db.session.latestRoot(projectId))!.id
 
       const failed = yield* Effect.flip(
-        asCli(yield* client, repo).Launch({
-          agent: "coordinator",
-          callerEnv: {},
-          harness: "cursor",
-          fresh: true,
-          focus: false,
-          runtime: "herdr",
+        asCli(yield* client, repo)["server.session"]["session.launch"]({
+          payload: {
+            agent: "coordinator",
+            callerEnv: {},
+            harness: "cursor",
+            fresh: true,
+            focus: false,
+            runtime: "herdr",
+          },
         }),
       )
 
@@ -168,12 +196,14 @@ describe("vibest.sock", () => {
       const projectId = yield* projectOf(repo)
 
       const launch = Effect.flatMap(client, (c) =>
-        asCli(c, repo).Launch({
-          agent: "coordinator",
-          callerEnv: {},
-          harness: "cursor",
-          focus: false,
-          runtime: "herdr",
+        asCli(c, repo)["server.session"]["session.launch"]({
+          payload: {
+            agent: "coordinator",
+            callerEnv: {},
+            harness: "cursor",
+            focus: false,
+            runtime: "herdr",
+          },
         }),
       )
 
@@ -203,13 +233,15 @@ describe("vibest.sock", () => {
       const projectId = yield* projectOf(repo)
       const c = asCli(yield* client, repo)
 
-      const opened = yield* c.Launch({
-        projectId,
-        agent: "coordinator",
-        harness: "pi",
-        focus: false,
-        runtime: "herdr",
-        callerEnv: {},
+      const opened = yield* c["server.session"]["session.launch"]({
+        payload: {
+          projectId,
+          agent: "coordinator",
+          harness: "pi",
+          focus: false,
+          runtime: "herdr",
+          callerEnv: {},
+        },
       })
 
       const opens = yield* herdr.callsTo("open")
@@ -235,7 +267,11 @@ describe("vibest.sock", () => {
       const projectId = yield* projectOf(repo)
       const raw = yield* client
       const spawner = yield* asEntry(raw, repo)
-      const { id: childId } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+
+      const { id: childId } = yield* spawner["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
+
       yield* until(
         db.session.getSession(childId),
         (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
@@ -247,12 +283,14 @@ describe("vibest.sock", () => {
       yield* db.session.endProcess(childId, "exited")
 
       const c = asCli(raw, repo)
-      yield* c.Launch({
-        projectId,
-        sessionId: childId,
-        focus: false,
-        runtime: "herdr",
-        callerEnv: {},
+      yield* c["server.session"]["session.launch"]({
+        payload: {
+          projectId,
+          sessionId: childId,
+          focus: false,
+          runtime: "herdr",
+          callerEnv: {},
+        },
       })
 
       const opens = yield* herdr.callsTo("open")
@@ -277,37 +315,43 @@ describe("vibest.sock", () => {
       const projectId = yield* projectOf(repo)
       const c = asCli(yield* client, repo)
 
-      const first = yield* c.Launch({
-        projectId,
-        agent: "coordinator",
-        harness: "pi",
-        focus: false,
-        runtime: "herdr",
-        callerEnv: {},
-      })
-
-      const refused = yield* Effect.flip(
-        c.Launch({
+      const first = yield* c["server.session"]["session.launch"]({
+        payload: {
           projectId,
           agent: "coordinator",
           harness: "pi",
           focus: false,
           runtime: "herdr",
           callerEnv: {},
+        },
+      })
+
+      const refused = yield* Effect.flip(
+        c["server.session"]["session.launch"]({
+          payload: {
+            projectId,
+            agent: "coordinator",
+            harness: "pi",
+            focus: false,
+            runtime: "herdr",
+            callerEnv: {},
+          },
         }),
       )
 
       assert.strictEqual(refused._tag, "Forbidden")
 
-      const moved = yield* c.Launch({
-        projectId,
-        sessionId: first.sessionId,
-        move: true,
-        agent: "coordinator",
-        harness: "pi",
-        focus: false,
-        runtime: "herdr",
-        callerEnv: {},
+      const moved = yield* c["server.session"]["session.launch"]({
+        payload: {
+          projectId,
+          sessionId: first.sessionId,
+          move: true,
+          agent: "coordinator",
+          harness: "pi",
+          focus: false,
+          runtime: "herdr",
+          callerEnv: {},
+        },
       })
 
       assert.strictEqual(moved.sessionId, first.sessionId)
@@ -317,11 +361,13 @@ describe("vibest.sock", () => {
       yield* herdr.seedAgent(moved.terminal["id"]!)
 
       const wrongAgent = yield* Effect.flip(
-        c["Session.Attach"]({
-          callerEnv: {},
-          runtime: "herdr",
-          agent: "general",
-          agentNamed: true,
+        c["server.session"]["session.attach"]({
+          payload: {
+            callerEnv: {},
+            runtime: "herdr",
+            agent: "general",
+            agentNamed: true,
+          },
         }),
       )
 

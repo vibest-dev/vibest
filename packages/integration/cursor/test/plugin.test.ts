@@ -25,7 +25,7 @@ describe("@vibest/cursor", () => {
     fs.writeFileSync(path.join(dir, name), text)
   }
 
-  const sockPath = path.join(dir, "vibest-http.sock")
+  const sockPath = path.join(dir, "vibest.sock")
   const recorded: Array<Recorded> = []
 
   let responder: (req: Recorded) => { readonly status: number; readonly body?: string } = () => ({
@@ -94,7 +94,7 @@ describe("@vibest/cursor", () => {
     VIBEST_PROCESS: "7",
   }
 
-  it("posts preToolUse to /hooks/cursor/guard with full headers and returns allow or deny", async () => {
+  it("posts preToolUse to /api/hook/cursor/guard with full headers and returns allow or deny", async () => {
     recorded.length = 0
     responder = () => ({ status: 200, body: '{"permission":"allow"}' })
     const allowBody = '{"tool_name":"Shell","tool_input":{"command":"git status"}}'
@@ -102,7 +102,7 @@ describe("@vibest/cursor", () => {
     assert.deepStrictEqual(allowed, { code: 0, stdout: '{"permission":"allow"}', stderr: "" })
     assert.strictEqual(recorded.length, 1)
     assert.strictEqual(recorded[0]!.method, "POST")
-    assert.strictEqual(recorded[0]!.path, "/hooks/cursor/guard")
+    assert.strictEqual(recorded[0]!.path, "/api/hook/cursor/guard")
     assert.strictEqual(recorded[0]!.body, allowBody)
     assert.strictEqual(recorded[0]!.headers["vibest-protocol"], String(PROTOCOL))
     assert.strictEqual(recorded[0]!.headers["vibest-plugin-version"], pkg.version)
@@ -171,9 +171,9 @@ describe("@vibest/cursor", () => {
     assert.deepStrictEqual(
       recorded.map((r) => [r.path, r.body]),
       [
-        ["/hooks/cursor/prompt", start],
-        ["/session/ready", "{}"],
-        ["/hooks/cursor/execution-end", stop],
+        ["/api/hook/cursor/prompt", start],
+        ["/api/hook/ready", "{}"],
+        ["/api/hook/cursor/execution-end", stop],
       ],
     )
   })

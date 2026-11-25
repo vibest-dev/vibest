@@ -62,7 +62,7 @@ class UserMessageComponent {
 const pulling = () => testLayer({ harnesses: [{ ...PI, delivery: "pull" as const }, CLAUDE, CURSOR] })
 
 const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
   Layer.provideMerge(pulling()),
 )
@@ -256,7 +256,7 @@ describe("pi-vibest", () => {
         assert.isFalse(yield* fs.exists((yield* Path.Path).join(layout.home, "vibestd.log")))
         assert.deepStrictEqual(notes, [])
         yield* Layer.build(
-          Server.layer.pipe(Layer.provide(Platform.socketServer(layout.socket)), Layer.provide(Project.layer)),
+          Server.layer.pipe(Layer.provide(Platform.httpServer(layout.socket)), Layer.provide(Project.layer)),
         )
         yield* TestClock.adjust("2 seconds")
         yield* until(
@@ -300,7 +300,7 @@ describe("pi-vibest", () => {
         yield* TestClock.withLive(Effect.sleep("200 millis"))
         assert.isUndefined(yield* db.session.readyAt(id))
         yield* Layer.build(
-          Server.layer.pipe(Layer.provide(Platform.socketServer(layout.socket)), Layer.provide(Project.layer)),
+          Server.layer.pipe(Layer.provide(Platform.httpServer(layout.socket)), Layer.provide(Project.layer)),
         )
         yield* untilVirtual(db.session.readyAt(id), (at) => at !== undefined)
       }).pipe(Effect.scoped, Effect.provide(pulling())),
@@ -330,7 +330,7 @@ describe("pi-vibest", () => {
         )
 
         const vibestd = Server.layer.pipe(
-          Layer.provide(Platform.socketServer(layout.socket)),
+          Layer.provide(Platform.httpServer(layout.socket)),
           Layer.provide(Project.layer),
         )
 
@@ -493,11 +493,11 @@ describe("pi-vibest", () => {
         },
       ])
       assert.deepStrictEqual(
-        yield* bash('curl --unix-socket "$VIBEST_HOME/vibest-http.sock" http://vibest/session/ready'),
+        yield* bash('curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready'),
         [
           {
             block: true,
-            reason: "vibest-http.sock is the harness's hook socket, not for agent commands.",
+            reason: "vibest.sock is the vibestd daemon socket, not for agent commands.",
           },
         ],
       )
@@ -723,11 +723,13 @@ describe("pi-vibest", () => {
       const db = yield* Db.Service
       const c = yield* cli
 
-      const launched = yield* c["Session.Claim"]({
-        agent: "coordinator",
-        harness: "pi",
-        fresh: false,
-        terminal: { id: "test/p1" },
+      const launched = yield* c["server.session"]["session.claim"]({
+        payload: {
+          agent: "coordinator",
+          harness: "pi",
+          fresh: false,
+          terminal: { id: "test/p1" },
+        },
       })
 
       assert.isNull(launched.harnessSessionId)
@@ -766,11 +768,13 @@ describe("pi-vibest", () => {
       yield* until(saved, (id) => id === "s-fork")
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(
-        (yield* c["Session.Claim"]({
-          agent: "coordinator",
-          harness: "pi",
-          fresh: false,
-          terminal: { id: "test/p1" },
+        (yield* c["server.session"]["session.claim"]({
+          payload: {
+            agent: "coordinator",
+            harness: "pi",
+            fresh: false,
+            terminal: { id: "test/p1" },
+          },
         })).harnessSessionId,
         "s-fork",
       )
@@ -778,11 +782,13 @@ describe("pi-vibest", () => {
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
 
-      const renewed = yield* c["Session.Claim"]({
-        agent: "coordinator",
-        harness: "pi",
-        fresh: true,
-        terminal: { id: "test/p1" },
+      const renewed = yield* c["server.session"]["session.claim"]({
+        payload: {
+          agent: "coordinator",
+          harness: "pi",
+          fresh: true,
+          terminal: { id: "test/p1" },
+        },
       })
 
       assert.notStrictEqual(renewed.sessionId, launched.sessionId)
@@ -799,11 +805,13 @@ describe("pi-vibest", () => {
       const path = yield* Path.Path
       const c = yield* cli
 
-      const launched = yield* c["Session.Claim"]({
-        agent: "coordinator",
-        harness: "pi",
-        fresh: false,
-        terminal: { id: "test/p1" },
+      const launched = yield* c["server.session"]["session.claim"]({
+        payload: {
+          agent: "coordinator",
+          harness: "pi",
+          fresh: false,
+          terminal: { id: "test/p1" },
+        },
       })
 
       const saved = savedSession(launched.sessionId)

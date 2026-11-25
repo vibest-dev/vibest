@@ -1,6 +1,6 @@
 # HttpApi, Transport, and Naming
 
-1. **Single Contract and Transport**: one `HttpApi.make("server")` (`effect/http-api`) in `@vibest/protocol`, served on `~/.vibest/vibest.sock` (`0600`) for all local CLI commands, `@vibest/client`, harness integrations (`claude`, `pi`, `cursor`, `agy`), and `vibest connect` SSH tunnels, plus the `vibest-token`-authenticated loopback `127.0.0.1:<port>` listener for local UI (`Origin` rejected with `403`, `UI_CALLS` gated). Zero second Unix socket and zero custom JSON-RPC / NDJSON-RPC server once the cutover lands.
+1. **Single Contract and Transport**: one `HttpApi.make("server")` (`effect/http-api`) in `@vibest/protocol`, served on `~/.vibest/vibest.sock` (`0600`) for all local CLI commands, `@vibest/client`, harness integrations (`claude`, `pi`, `cursor`, `agy`), and `vibest connect` SSH tunnels, plus the `vibest-token`-authenticated loopback `127.0.0.1:<port>` listener for local UI (`Origin` rejected with `403`, `UI_CALLS` gated). Zero second Unix socket and zero custom JSON-RPC / NDJSON-RPC server.
 2. **One-Domain-One-File Decomposition**: `packages/protocol/src/groups/<domain>.ts` pairs 1:1 with `packages/server/src/handlers/<domain>.ts` (`daemon`, `project`, `session`, `inbox`, `hook`, `worktree`, `agent`, `harness`, `runtime`, `plugin`, `subscription`, `machine`, `remote`, `event`, `watch`).
 3. **Naming Convention**:
    - Group identifier: `"server.<domain>"` (singular lowercase noun).
@@ -15,4 +15,4 @@
    - Top-level `vibest ls` is preserved. Subcommands use canonical full verbs `list` and `remove` (`vibest machine list`, `vibest machine remove`, `vibest agent list`, `vibest harness list`, `vibest worktree list`) with `ls` and `rm` as convenience aliases.
    - Human and prompt surfaces display 8-char short session IDs and accept `--machine <name>` (never `<machine>/<id>`). JSON outputs always carry full canonical UUIDs alongside `machine`.
 
-Status: CLI short session IDs and `--machine` are in force on `main` (PR #653); `HttpApi` unification onto single `vibest.sock` is decided and landing on `refactor/opencode-httpapi-unification`.
+Status: in force on `main` (PR #653 CLI short session IDs and `--machine`; PR #658 unified `HttpApi` over single `vibest.sock`).

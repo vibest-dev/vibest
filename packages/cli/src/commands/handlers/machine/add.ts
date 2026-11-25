@@ -18,7 +18,9 @@ const printNotes = (notes: ReadonlyArray<MachineNote>) =>
 
 export default Runtime.handler(Commands.commands.machine.commands.add, (o) =>
   userOnly("machine add").pipe(
-    Effect.andThen(vibest((client) => client["Machine.Add"]({ name: o.name, target: o.target }))),
+    Effect.andThen(
+      vibest((client) => client["server.machine"]["machine.add"]({ payload: { name: o.name, target: o.target } })),
+    ),
     Effect.flatMap((added) =>
       Console.log(
         `added ${added.name}: vibestd ${added.vibestd} (${shortId(added.id)}), vibest ${added.version}; connected`,

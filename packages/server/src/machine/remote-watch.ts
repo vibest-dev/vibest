@@ -1,8 +1,9 @@
+import { withHeaders } from "@vibest/client/client"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
 import { Host } from "@vibest/plugin/host"
 import { remoteHeaders } from "@vibest/protocol/protocol"
-import { type ProjectRow, type WatchEvent, type WatchSession } from "@vibest/protocol/rpc"
+import { type ProjectRow, type WatchEvent, type WatchSession } from "@vibest/protocol/schemas"
 import type { ListedMachine } from "@vibest/schema/machine"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, Stream } from "effect"
 
@@ -113,17 +114,19 @@ const make = Effect.gen(function* () {
     )
 
   const watchRemote = (name: string, mirror: Mirror, link: Machines.Link) =>
-    link.stream(link.client.Watch(undefined, { headers: remoteHeaders(self.id) })).pipe(
-      Stream.runForEach((event) => applyRemoteEvent(name, mirror, event)),
-      Effect.tap(() => Effect.logWarning("remote watch stream ended; reconnecting", { machine: name })),
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.failCause(cause)
-          : Effect.logWarning("remote watch stream failed; reconnecting", { machine: name, cause }),
-      ),
-      Effect.repeat({ schedule: WATCH_RETRY, while: () => mirror.link === link }),
-      Effect.asVoid,
-    )
+    link
+      .stream(Stream.unwrap(withHeaders(link.client["server.watch"]["watch.subscribe"](), remoteHeaders(self.id))))
+      .pipe(
+        Stream.runForEach((event) => applyRemoteEvent(name, mirror, event)),
+        Effect.tap(() => Effect.logWarning("remote watch stream ended; reconnecting", { machine: name })),
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("remote watch stream failed; reconnecting", { machine: name, cause }),
+        ),
+        Effect.repeat({ schedule: WATCH_RETRY, while: () => mirror.link === link }),
+        Effect.asVoid,
+      )
 
   const syncMachine = (rawMachine: ListedMachine, link: Machines.Link | undefined) =>
     Effect.gen(function* () {

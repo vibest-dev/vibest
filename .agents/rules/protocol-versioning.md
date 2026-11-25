@@ -6,4 +6,4 @@
 4. `daemon.ping`, `daemon.stop`, and `daemon.handoff` are exempt from the `vibest-protocol` match check so `vibest daemon restart` and `vibest update` can inspect, stop, or hand off a running vibestd of another protocol without spoofing headers. A newer vibestd keeps both payloads and `vibest daemon import-check` / `vibest daemon --foreground --import` compatible with older callers. `daemon.ping` answers without headers, and every field it adds is optional.
 5. All local CLI, client, harness integration, and SSH tunnel traffic shares `${VIBEST_HOME}/vibest.sock` (`HttpApi`, see [http-api-and-naming.md](http-api-and-naming.md)).
 
-Status: 1–4 are in force on `main`; 5 (`HttpApi` single-socket cutover removing `vibest-http.sock`) is landing on `refactor/opencode-httpapi-unification`.
+Status: in force on `main` (PR #658 unified all traffic onto `HttpApi` over `vibest.sock`).

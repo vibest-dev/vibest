@@ -1,13 +1,9 @@
 import fs from "node:fs/promises"
-import net from "node:net"
 import path from "node:path"
 
-import type { Schema } from "effect"
-
-import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { ask, heldModel, piDir } from "../fake-model.ts"
-import { expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { expect, herdr, row, SESSIONS, Skip, until, vibestd, type World } from "../world.ts"
 import { curl, dropHerdrSession, project } from "./inbox.ts"
 
 export const piProject = async (w: World, name: string) => {
@@ -168,28 +164,6 @@ const killedMidExecution = async (
   }
 }
 
-const rpc = (socket: string, method: string, params: Schema.JsonObject, headers: ReadonlyArray<[string, string]>) =>
-  new Promise<unknown>((resolve, reject) => {
-    let buf = ""
-
-    const sock = net.createConnection(socket, () =>
-      sock.write(JSON.stringify({ jsonrpc: "2.0", id: "1", method, params, headers }) + "\n"),
-    )
-
-    sock.on("data", (chunk) => {
-      buf += chunk.toString()
-      const nl = buf.indexOf("\n")
-
-      if (nl < 0) return
-      const reply = JSON.parse(buf.slice(0, nl)) as { result?: unknown; error?: unknown }
-      sock.destroy()
-
-      if ("error" in reply) reject(new Error(`${method}: ${JSON.stringify(reply.error)}`))
-      else resolve(reply.result)
-    })
-    sock.on("error", reject)
-  })
-
 const nothingMoreComesWithin = (ms: number) => Bun.sleep(ms)
 
 const killWindowTries = 5
@@ -342,7 +316,7 @@ const checks: ReadonlyArray<Check> = [
         const message = ask("cut")
         await p.vibestSend(sub, message)
         const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, sub)!.p
-        const taken = await curl(w, "/inbox/take", { entryId: sub, projectId }, "pi")
+        const taken = await curl(w, "/api/inbox/take", { entryId: sub, projectId }, "pi")
         expect(taken.status === 200, `take answered ${taken.status}: ${JSON.stringify(taken.body)}`)
         expect(p.sendRow(sub, message)?.status === "delivering", "the taken row is not delivering")
 
@@ -616,17 +590,16 @@ const checks: ReadonlyArray<Check> = [
         await until("idle", () => p.idle(sub), 60_000)
         const message = ask("again")
 
-        const send = () =>
-          rpc(
-            path.join(w.vibestHome, "vibest.sock"),
-            "Send",
-            { id: sub, message, request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" },
-            [
-              ["vibest-protocol", String(PROTOCOL)],
-              ["vibest-caller", "cli"],
-              ["vibest-repository", p.repo],
-            ],
-          )
+        const send = async () => {
+          const reply = await vibestd(w, p.repo, "POST", `/api/session/${sub}/send`, {
+            message,
+            request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d",
+          })
+
+          if ("error" in reply) throw new Error(`/api/session/${sub}/send: ${JSON.stringify(reply.error)}`)
+
+          return reply.result
+        }
 
         const first = await send()
         const second = await send()

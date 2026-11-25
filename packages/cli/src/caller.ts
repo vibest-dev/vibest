@@ -1,5 +1,5 @@
 import { Claim, type VibestClient } from "@vibest/client/client"
-import { Forbidden } from "@vibest/protocol/rpc"
+import { Forbidden } from "@vibest/protocol/errors"
 import type { SessionRef } from "@vibest/schema/terminal"
 import { Config, Console, Effect, Option, Path, Schema } from "effect"
 

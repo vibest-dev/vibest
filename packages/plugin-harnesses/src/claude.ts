@@ -181,4 +181,5 @@ export const claude: Harness.HarnessDefinition = {
 
     return { reply, ...(failure !== undefined && { failure }), ...named }
   },
+  guardAnswer: (reason) => (reason ? { deny: reason } : {}),
 }
