@@ -608,6 +608,7 @@ describe("vibest.sock", () => {
         ["Project.Open", c["Project.Open"]({})],
         ["Project.Move", c["Project.Move"]({ from: "x" })],
         ["Session.Attach", c["Session.Attach"]({ callerEnv: {} })],
+        ["Session.Focus", c["Session.Focus"]()],
         ["List", c.List({ stopped: true })],
         ["Session.Link", c["Session.Link"]({ spec: EdgeMutual.make({ ids: [{ id }, { id }] }) })],
         ["Session.Unlink", c["Session.Unlink"]({ spec: EdgeMutual.make({ ids: [{ id }, { id }] }) })],
@@ -669,6 +670,7 @@ describe("vibest.sock", () => {
       const entryCalls: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
         w["Session.Claim"]({ agent: "coordinator", harness: "pi", fresh: true, terminal: { id: "test/p1" } }),
         w["Session.Attach"]({ callerEnv: {} }),
+        w["Session.Focus"](),
         w.Launch({ agent: "coordinator", callerEnv: {}, focus: false }),
       ]
 

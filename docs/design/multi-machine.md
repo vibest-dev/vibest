@@ -62,7 +62,7 @@ guard refuses them in an agent's shell.
 ## Machines: A dials B
 
 `vibest machine add <name> <ssh target>` (user only) connects once, with a 30 s limit: `Ping` (the protocol must be
-this one, else `MachineIncompatible` "<name> runs vibest <v> (protocol <n>); run vibest update there"), then
+this one, else `MachineIncompatible` "<name> runs vibest <v> (protocol <n>); run vibest update on <name>"), then
 `Remote.Hello`. Only then is the `machine` row inserted, with B's identity id, and that first connection becomes the
 supervised one (add dials once); a failure records nothing. It is refused when B answers this vibestd's
 own id ("<name> is this vibestd") or an id another row already has (`AlreadyAdded`: "this is the vibestd already
@@ -204,7 +204,7 @@ Errors follow hc. An error from B reaches A's caller unchanged, with B's type an
 (`NoSuchSession`, `AmbiguousSession`, `PromptTooLarge`, `NoProject`, `NoCommit` and the rest the method declares).
 A adds only its own line errors: `UnknownMachine` (`unknown machine "x"; machines: mb`), `MachineUnavailable` (`mb
 is unreachable: <why>`, `still connecting to mb`, or `lost the line to mb during the call (…); it may have happened
-there; check, then retry`) and `MachineIncompatible` (B speaks another protocol; run vibest update there). A call to
+there; check, then retry`) and `MachineIncompatible` (B speaks another protocol; run vibest update on <name>). A call to
 a machine that is not connected fails at once; nothing is queued. The 1 MiB prompt limit is B's: A sends the prompt
 and passes `PromptTooLarge` through.
 
