@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { answerFolderTrust, typeAndEnter } from "../drivers/claude.ts"
 import {
@@ -456,12 +457,38 @@ const checks: ReadonlyArray<Check> = [
         expect(processOf() !== oldProcess, `the restarted subagent is still process ${oldProcess}`)
         const LATE = "a late reply from the harness the restart replaced"
 
-        const late = await w.run(repo, [wrapper, "integration", "stop", "--harness", "pi"], {
-          env: { ...env, VIBEST_SESSION_ID: id, VIBEST_PROCESS: String(oldProcess) },
-          stdin: JSON.stringify({ type: "agent_settled", text: LATE, error: "", aborted: false }),
-        })
+        const projectId = rows<{ project_id: string }>(w, "SELECT project_id FROM session WHERE id = ?", id)[0]!
+          .project_id
 
-        expect(late.code === 0, `the old process's execution end was not taken: ${late.stderr}`)
+        const late = await w.run(repo, [
+          "curl",
+          "-sS",
+          "-w",
+          "\n%{http_code}",
+          "--unix-socket",
+          path.join(w.vibestHome, "vibest-http.sock"),
+          "-X",
+          "POST",
+          "-H",
+          `vibest-protocol: ${PROTOCOL}`,
+          "-H",
+          `vibest-session-id: ${id}`,
+          "-H",
+          `vibest-project-id: ${projectId}`,
+          "-H",
+          "vibest-harness: pi",
+          "-H",
+          `vibest-process: ${oldProcess}`,
+          "--data-binary",
+          JSON.stringify({ type: "agent_settled", text: LATE, error: "", aborted: false }),
+          "http://vibest/hooks/pi/execution-end",
+        ])
+
+        const lateStatus = Number(late.stdout.slice(late.stdout.lastIndexOf("\n") + 1))
+        expect(
+          late.code === 0 && lateStatus === 204,
+          `the old process's execution end was not taken: ${late.stdout}${late.stderr}`,
+        )
         expect(
           rows(w, "SELECT id FROM execution WHERE session_id = ? AND reply = ?", id, LATE).length === 0,
           "the old process's late execution end was recorded",

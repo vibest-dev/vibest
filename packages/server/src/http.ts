@@ -5,6 +5,7 @@ import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Harnesses } from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
+import { guardInputOf } from "@vibest/core/replies"
 import { HARNESS_HEADER, parseHookRoute, PROJECT_HEADER, TAKE_ROUTE } from "@vibest/protocol/protocol"
 import { Context, Effect, Layer, Predicate, Result, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
@@ -133,10 +134,17 @@ export const make = Effect.gen(function* () {
       if (hook.hook === "prompt")
         return yield* admitted("hook prompt", true, integration.prompt(who, request.body).pipe(Effect.as(ok())))
 
-      return yield* integration.guard(who.id, request.body).pipe(
-        Effect.map((reason) => ok(reason === undefined ? {} : { deny: reason })),
+      const formatGuard = (reason: string | undefined) =>
+        adapter.guardAnswer === undefined ? (reason === undefined ? {} : { deny: reason }) : adapter.guardAnswer(reason)
+
+      const call = guardInputOf(adapter, request.body)
+
+      if (call === undefined) return ok(formatGuard(undefined))
+
+      return yield* integration.guard(who.id, call).pipe(
+        Effect.map((reason) => ok(formatGuard(reason))),
         Effect.catch((e) =>
-          Effect.succeed(ok({ deny: `vibest could not check this tool call (${String(e)}); it is refused.` })),
+          Effect.succeed(ok(formatGuard(`vibest could not check this tool call (${String(e)}); it is refused.`))),
         ),
       )
     })

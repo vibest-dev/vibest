@@ -135,4 +135,4 @@ plugin keeps no state of its own: it reads each session's last activity, so a vi
 
 ## G21. A plugin guards tool calls with `session.tool.execute.before`
 
-Both an Effect plugin and a Promise plugin can register `ctx.session.hook("tool.execute.before", ...)`. Each receives `{ session, tool, input, cwd }`, can refuse a tool call with `ToolRefused({ reason })` (surfacing that exact reason to the harness pre-tool hook), and increments `calls` and `refused` in `vibest plugins`. The builtin `vibest.guard` enforces only `VIBEST_SESSION_ID` tampering and `vibest integration stop|prompt|ready`; other commands are allowed by default unless a plugin refuses them.
+Both an Effect plugin and a Promise plugin can register `ctx.session.hook("tool.execute.before", ...)`. Each receives `{ session, tool, input, cwd }`, can refuse a tool call with `ToolRefused({ reason })` (surfacing that exact reason to the harness pre-tool hook), and increments `calls` and `refused` in `vibest plugins`. The builtin `vibest.guard` enforces only `VIBEST_SESSION_ID` tampering and direct `vibest-http.sock` requests; other commands are allowed by default unless a plugin refuses them.

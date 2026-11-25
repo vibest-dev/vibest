@@ -9,4 +9,4 @@
 5. No recovery commands for the user to type (no `/vibest-reattach`). Delivery recovers by itself: a pulling integration takes its next batch whenever it is idle, and a batch it never took up is settled by the execution's confirmation timeout.
 6. Per-harness differences (launch arguments, resume, `canResume`, models, subscription reading, the guard's answer shape) live in the harness definition (`HarnessDefinition` in `@vibest/plugin`), which a plugin adds; the builtin ones are in `packages/plugin-harnesses`. Core and the CLI never branch on a harness id; they read definition fields from the `Harnesses` registry.
 
-Status: 1, 2 and 6 are in force on main (1 and 2 since #306). 3, 4 and 5 are decided and being built on `feat/claude-http-transport`; main still runs `vibest inbox` and `vibest integration …` through `$.process.run` and registers `/vibest-reattach`.
+Status: 1–6 are in force on main; Claude, Cursor and agy talk directly to `vibest-http.sock` and Pi talks in-process over `vibest.sock`.

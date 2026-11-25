@@ -124,9 +124,7 @@ manages it. Items marked planned are not built.
   HTTP socket, `POST /events` with `ready`, `conversation`, `execution.start` (origin typed or inbox, and the inbox
   row ids the execution consumed), `execution.end` (outcome completed, failed or interrupted; text; failure `{ kind: limited
   | auth | other, message }`) and `blocked`; `POST /guard` with a neutral `ToolCall { kind, name, command?,
-  paths }`. vibestd parses no harness's own payload; a CLI with only shell hooks (Cursor) decodes in its own
-  process through `vibest integration event <hook>`. Today each harness reaches vibestd its own way (Claude over
-  HTTP, Pi and Cursor over RPC `ExecutionEnd` and `Prompt`) and the adapter decodes the raw event in vibestd.
+  paths }`. Today Claude, Cursor and agy talk directly to vibestd over `$VIBEST_HOME/vibest-http.sock` and Pi talks over `vibest.sock` RPC, while each harness adapter decodes the raw event in vibestd.
 
 ### 1.1 Orchestration
 
@@ -178,7 +176,7 @@ modules' names, except a domain facade re-exporting its own domain, see below).
 | `effect-herdr-core-sdk` | Effect client for the herdr-core socket API.                                                                                                                                                      |
 | `integration/claude`    | The vibest Claude Code plugin (one hooks module), loaded with `claude --plugin-dir`.                                                                                                              |
 | `integration/pi`        | The vibest Pi extension, loaded with `pi -e`.                                                                                                                                                     |
-| `integration/cursor`    | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`), loaded with `cursor-agent --plugin-dir`.                                                                        |
+| `integration/cursor`    | The vibest Cursor CLI plugin (hooks posting to `vibest-http.sock`), loaded with `cursor-agent --plugin-dir`.                                                                                      |
 
 `packages/skills` holds the builtin Agent Skills (`delegate`, `pipeline`); `cli-darwin-arm64` and `cli-linux-x64` carry
 the compiled binary.
@@ -200,7 +198,8 @@ runtime-herdr-core   plugin, schema, effect-herdr-core-sdk
 runtime-herdr        plugin, schema, protocol, client, effect-herdr-sdk
 integration/claude   schema, protocol
 integration/pi       schema, protocol, client
-integration/cursor   nothing
+integration/cursor   schema
+integration/agy      schema
 effect-herdr-*-sdk   nothing
 ```
 
@@ -784,7 +783,7 @@ The trace attributes each field to the plugin that changed it
 last. On `session.start.before`, `Effect.fail(new SessionRefused({ reason }))` stops the chain at
 once, nothing is inserted and nothing starts; a defect or a timeout there is also a refusal (`plugin <id>
 crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. On `session.tool.execute.before`,
-each callback gets a frozen deep clone of `{ session, tool, input, cwd }` and runs sequentially in load order; `Effect.fail(new ToolRefused({ reason }))` (or throwing `new ToolRefused({ reason })` in a Promise plugin) stops immediately and returns `reason` to the harness pre-tool hook, while a crash or timeout is logged, counted, and skipped so a broken plugin does not brick tool calls. The builtin `vibest.guard` enforces only protocol self-protection (`VIBEST_SESSION_ID` tampering and `vibest integration stop|prompt|ready`).
+each callback gets a frozen deep clone of `{ session, tool, input, cwd }` and runs sequentially in load order; `Effect.fail(new ToolRefused({ reason }))` (or throwing `new ToolRefused({ reason })` in a Promise plugin) stops immediately and returns `reason` to the harness pre-tool hook, while a crash or timeout is logged, counted, and skipped so a broken plugin does not brick tool calls. The builtin `vibest.guard` enforces only protocol self-protection (`VIBEST_SESSION_ID` tampering and direct `vibest-http.sock` requests).
 
 **Default harness.** No builtin chooses or refuses a harness by quota. A new agent without a harness inherits its
 caller's harness, provider and model in core, before `session.start.before` (§9); subscriptions are data in the hook
@@ -1110,7 +1109,6 @@ vibest send <agent> -- <text|->             from the user, the entry session or 
 vibest project info | search                                                     the project folder's paths, text search
 vibest daemon [--foreground] · daemon restart · status · update · doctor · plugins · models [<harness>]
 vibest harness list | models <harness>
-vibest integration guard | stop --harness <h>   internal: what the harness plugins call
 vibest project | workspace | definition | subscription | machine …
 ```
 
