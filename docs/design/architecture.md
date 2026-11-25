@@ -252,9 +252,9 @@ AgentDefinition    Harness    Subscription    Machine
   keeps the earlier ones (their CLI session ids) so they can be resumed. Knowledge belongs to the Project, so
   every conversation and every subagent sees the same preferences and memory index.
 - **Project folder** (`VIBEST_PROJECT_DIR`, `projects/<project id>/`): `preferences.md` (how the user likes work done), `docs/`,
-  `memories/` and `artifacts/`, read and written by every Agent of the Project with its own file tools; the guard
-  keeps each Agent to its own project's folder. `preferences.md` is added to every agent's system prompt (16,000 characters).
+  `memories/`, and `artifacts/` (reserved strictly for human-facing deliverables: agreed `pipeline` plans, UI mockups/playgrounds, diagrams, acceptance reports, explicit user-requested reports), read and written by every Agent of the Project with its own file tools. `preferences.md` is added to every agent's system prompt (16,000 characters).
   `memories/MEMORY.md` is the curated memory index loaded into every session's system prompt (capped at 100 lines and 8,000 bytes on a line boundary, with a truncation warning to compact under 70 lines; when `MEMORY.md` is missing and `memories/` holds `.md` topic files, vibest bootstraps `MEMORY.md` once newest-first up to 70 lines and 5,600 bytes). Topic files `memories/<name>.md` are not enumerated into the prompt; they are read on demand or searched with `vibest project search <query> --kind memories`. A subagent's `## Remember` section is a proposal: saving or updating a memory maintains both `memories/<name>.md` and its one-line entry in `memories/MEMORY.md`, updating or removing stale entries instead of only appending.
+- **Session scratchpad** (`VIBEST_SCRATCHPAD_DIR`, `<os.tmpdir()>/vibest-<uid>/<project-id>/<session-id>/scratchpad`, `0700` parent): isolated per-session temporary folder granted in harness directory permissions alongside `VIBEST_PROJECT_DIR`. Holds all temporary agent-to-agent handoffs, `--file` task briefs, repro scripts, and scratch notes. `vibest archive` leaves the scratchpad intact in OS temp so parent agents and users can still inspect it after archiving (cleaned naturally by OS reboot).
 - **Labels** are free key/value pairs for references outside vibest; grouping uses `runID`.
 - **Conventions (borrowed):** branded IDs with a type prefix and a sortable body (`prj_`, `wsp_`, `run_`,
   `agt_`, `msg_`, `evt_`), each exposing `ID.create()`; one `time` struct per entity; archiving is a
@@ -603,9 +603,10 @@ entry session's integration delivers it as new input     ← back in the main co
 - **What the entry session knows.** `vibest ls` gives every live subagent's task text, status, and latest result
   summary, so the entry session recovers the whole picture after compaction or a restart without relying on its
   context.
-- **Subagent rules** (omac `rules.ts`, copied): work on a detached HEAD, then branch, commit, and push when done;
-  destructive git or file actions need the user's quoted consent; never control herdr; shared files go to the
-  project folder's `artifacts/` prefixed with the Agent id; the final reply format of §3.1.
+- **Subagent rules**: work on a detached HEAD, then branch, commit, and push when done;
+  destructive git or file actions need the user's quoted consent; never control terminal runtimes; temporary handoffs,
+  repro scripts, and scratch notes go to `VIBEST_SCRATCHPAD_DIR` (left in OS temp after archive), while
+  `$VIBEST_PROJECT_DIR/artifacts/` is reserved strictly for human-facing deliverables; the final reply format of §3.1.
 
 ### 4.2 Skills
 

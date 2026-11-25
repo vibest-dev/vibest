@@ -23,7 +23,7 @@ vibest run [<harness>] [--agent <id>] --title '<Title>' -- '<self-contained task
 - Each session gets its own new worktree.
 - Several `vibest run` commands in one message start in parallel.
 - A subagent cannot see this conversation. Say what to achieve, where (paths, lines), what done means, and how to verify it. For code: run the tests and typecheck, commit, and send the branch and hash.
-- Long material: write it with your file tool to `$VIBEST_SCRATCH_DIR/<name>.md` (a new file name if that one exists) and attach it with `--file <absolute path>` (repeat the flag for each file): vibest copies each file into the child session's private folder and ends its task with a line naming the copies, which the agent reads itself. Keep the prompt short; the material goes in the file. Reserve `$VIBEST_PROJECT_DIR/artifacts/` strictly for human-facing deliverables (agreed `pipeline` plans, UI mockups, diagrams, acceptance reports, explicit user-requested reports).
+- Long material: write it with your file tool to `$VIBEST_SCRATCHPAD_DIR/<name>.md` (a new file name if that one exists) and attach it with `--file <absolute path>` (repeat the flag for each file): vibest copies each file into the child session's private folder and ends its task with a line naming the copies, which the agent reads itself. Keep the prompt short; the material goes in the file. Reserve `$VIBEST_PROJECT_DIR/artifacts/` strictly for human-facing deliverables (agreed `pipeline` plans, UI mockups, diagrams, acceptance reports, explicit user-requested reports).
 - If the user approved a specific action, quote their exact words.
 
 ## After you start

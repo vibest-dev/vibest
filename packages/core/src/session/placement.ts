@@ -115,7 +115,7 @@ export const make = Effect.gen(function* () {
     VIBEST_SESSION_ID: session.id,
     VIBEST_PROJECT_ID: session.projectId,
     VIBEST_PROJECT_DIR: layout.project(session.projectId),
-    VIBEST_SCRATCH_DIR: layout.scratchDir(session.projectId, session.id),
+    VIBEST_SCRATCHPAD_DIR: layout.scratchpadDir(session.projectId, session.id),
     VIBEST_HARNESS: harnessIdOf(session),
     VIBEST_RUNTIME: runtimeEnv(runtimeOf(session)),
     VIBEST_HOME: layout.home,
@@ -144,7 +144,7 @@ export const make = Effect.gen(function* () {
       creator: creator === undefined ? undefined : { id: creator.id, label: creator.label, linked: creatorLinked },
       linkedTo: yield* db.session.linkedTargets(session.id, creator?.id),
       projectDir: layout.project(session.projectId),
-      scratchDir: layout.scratchDir(session.projectId, session.id),
+      scratchpadDir: layout.scratchpadDir(session.projectId, session.id),
       agents: agents.all,
       ...(yield* projectText(layout.project(session.projectId))),
     })
@@ -166,9 +166,9 @@ export const make = Effect.gen(function* () {
       ),
     )
 
-    const scratchDir = layout.scratchDir(session.projectId, session.id)
+    const scratchpadDir = layout.scratchpadDir(session.projectId, session.id)
     yield* fs.makeDirectory(layout.scratchRoot, { recursive: true, mode: 0o700 }).pipe(Effect.ignore)
-    yield* fs.makeDirectory(scratchDir, { recursive: true, mode: 0o700 }).pipe(Effect.ignore)
+    yield* fs.makeDirectory(scratchpadDir, { recursive: true, mode: 0o700 }).pipe(Effect.ignore)
 
     return {
       harness: adapter.id,
@@ -177,7 +177,7 @@ export const make = Effect.gen(function* () {
         {
           worktree,
           projectDir: layout.project(session.projectId),
-          scratchDir,
+          scratchpadDir,
           systemPromptFile: yield* writeSystemPrompt(session.id, system),
           provider: session.process?.provider ?? null,
           model: session.process?.model ?? null,

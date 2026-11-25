@@ -117,7 +117,7 @@ export const claude: Harness.HarnessDefinition = {
   ready: "integration",
   checkProvider: noProvider("claude"),
   launchArgs: (i) => {
-    const dirs = [i.projectDir, ...(i.scratchDir ? [i.scratchDir] : [])]
+    const dirs = [i.projectDir, ...(i.scratchpadDir ? [i.scratchpadDir] : [])]
 
     return [
       ...(i.sessionId === null ? [] : [i.resume ? "--resume" : "--session-id", i.sessionId]),

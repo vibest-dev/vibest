@@ -53,7 +53,7 @@ export const cursor: Harness.HarnessDefinition = {
     ...(i.resume && i.sessionId ? [`--resume=${i.sessionId}`] : []),
     "--add-dir",
     i.projectDir,
-    ...(i.scratchDir ? ["--add-dir", i.scratchDir] : []),
+    ...(i.scratchpadDir ? ["--add-dir", i.scratchpadDir] : []),
     "--trust",
     "--force",
     "--plugin-dir",
