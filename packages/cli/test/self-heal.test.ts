@@ -359,7 +359,7 @@ layer(Platform.services)(
             const stop = (instance: string, headers: Record<string, string>) =>
               withHeaders(raw["server.daemon"]["daemon.stop"]({ payload: { instance } }), headers)
 
-            assert.strictEqual(yield* tag(stop(old.instance!, {})), "ProtocolRejected")
+            assert.strictEqual(yield* tag(stop(old.instance!, {})), "InvalidCaller")
             assert.strictEqual(yield* tag(stop(old.instance!, protocolHeaders())), "InvalidCaller")
             assert.strictEqual(
               yield* tag(stop(old.instance!, sessionHeaders({ sessionId: "05c00000-05c0-405c-805c-05c0000005c0" }))),
@@ -437,7 +437,7 @@ layer(Platform.services)(
     )
 
     it.effect(
-      "an vibestd of an older protocol is asked to stop in its own protocol, so an upgrade replaces it with no manual steps",
+      "an vibestd of an older protocol can be asked to stop with normal CLI headers, so an upgrade replaces it with no manual steps",
       () =>
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
@@ -464,7 +464,7 @@ layer(Platform.services)(
           )
 
           assert.strictEqual(failed.outcome, "busy")
-          assert.deepInclude(headers[0] as Array<[string, string]>, ["vibest-protocol", String(PROTOCOL - 1)])
+          assert.deepInclude(headers[0] as Array<[string, string]>, ["vibest-protocol", String(PROTOCOL)])
         }).pipe(Effect.scoped),
       60_000,
     )

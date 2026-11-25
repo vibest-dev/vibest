@@ -1,6 +1,5 @@
 import { Claim, cliHeaders, connect, type VibestClient, readPing, withHeaders } from "@vibest/client/client"
 import { compareVersions, UpdateError } from "@vibest/client/release"
-import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import type { Ping } from "@vibest/protocol/schemas"
 import { messageOf } from "@vibest/schema/error"
 import { shortId } from "@vibest/schema/id"
@@ -260,7 +259,7 @@ export const handoffDaemon = (
           c["server.daemon"]["daemon.handoff"]({ payload: { instance: old.instance!, command: target.command } }),
         ),
       ),
-      { ...cliHeaders((yield* Path.Path).resolve(".")), [PROTOCOL_HEADER]: String(old.protocol) },
+      cliHeaders((yield* Path.Path).resolve(".")),
     ).pipe(Effect.scoped, Effect.exit)
 
     if (Exit.isFailure(reply)) {

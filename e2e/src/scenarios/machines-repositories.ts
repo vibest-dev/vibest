@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask } from "../fake-model.ts"
-import { binary, compiled, expect, harnesses, until, type World } from "../world.ts"
+import { binary, checkout, expect, harnesses, until, type World } from "../world.ts"
 import { fakeSsh, setup, sh, stopVibestd, type Setup } from "./machines.ts"
 
 const git = async (w: World, cwd: string, ...args: ReadonlyArray<string>) => {
@@ -43,7 +43,17 @@ const beforeRepositoryLists = async (w: World) => {
   const dir = path.join(w.root, `before-repo-lists-${crypto.randomUUID().slice(0, 8)}`)
   const bin = path.join(dir, "bin", "vibest")
   await fs.mkdir(path.dirname(bin), { recursive: true })
-  const bytes = Buffer.from(await fs.readFile(compiled))
+
+  const built = await w.run(path.join(checkout, "packages", "cli"), [
+    process.execPath,
+    "scripts/build.ts",
+    bin,
+    `bun-${process.platform}-${process.arch}`,
+    "--no-bytecode",
+  ])
+
+  expect(built.code === 0, `beforeRepositoryLists build exited ${built.code}: ${built.stdout}${built.stderr}`)
+  const bytes = Buffer.from(await fs.readFile(bin))
   disableCapability(bytes, "remoteSpawnRepositories")
   disableCapability(bytes, "remoteSpawnProject")
   disableCapability(bytes, "projectClone")

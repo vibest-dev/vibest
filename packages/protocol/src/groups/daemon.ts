@@ -37,7 +37,6 @@ export const DaemonGroup = HttpApiGroup.make("server.daemon")
       error: [Forbidden, WrongInstance, DaemonBusy, DaemonStopping],
     })
       .middleware(CallerMiddleware)
-      .middleware(ProtocolMiddleware)
       .annotateMerge(OpenApi.annotations({ identifier: "daemon.stop", summary: "Stop daemon" })),
   )
   .add(
@@ -47,7 +46,6 @@ export const DaemonGroup = HttpApiGroup.make("server.daemon")
       error: [Forbidden, WrongInstance, DaemonBusy, DaemonStopping, LaunchFailed],
     })
       .middleware(CallerMiddleware)
-      .middleware(ProtocolMiddleware)
       .annotateMerge(OpenApi.annotations({ identifier: "daemon.handoff", summary: "Hand off daemon" })),
   )
   .annotateMerge(OpenApi.annotations({ title: "daemon" }))

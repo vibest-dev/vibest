@@ -1,8 +1,9 @@
 import http from "node:http"
 
-import { encodeBody, buildStreamResponse, requestHeadersRecord } from "@vibest/client/unix-http"
 import { Cause, Effect, Predicate, Queue, Stream } from "effect"
 import { HttpClient, HttpClientError } from "effect/http"
+
+import { encodeBody, buildStreamResponse, requestHeadersRecord } from "./unix-http.ts"
 
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304])
 

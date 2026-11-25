@@ -3,6 +3,7 @@ import process from "node:process"
 
 import { BunServices, BunSocket } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
+import { nodeUnixHttpClient } from "@vibest/client/node-unix-http"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { HttpConnector } from "@vibest/client/unix-http"
 import { Bus } from "@vibest/core/bus"
@@ -14,8 +15,6 @@ import { UserPlatform } from "@vibest/core/system-prompt"
 import { Effect, Layer } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient } from "effect/http"
-
-import { nodeUnixHttpClient } from "../../../platform-bun/src/unix-http.ts"
 
 const user = Layer.succeed(UserPlatform, {
   uid: process.getuid?.(),

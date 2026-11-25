@@ -11,7 +11,7 @@ import { PROTOCOL } from "@vibest/schema/version"
 import { Config, Context, Data, Effect, FileSystem, Layer, Option, Schema } from "effect"
 import { Hex } from "effect/encoding"
 import { Etag, Headers, HttpPlatform, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http"
-import { HttpApiBuilder } from "effect/http-api"
+import { HttpApi, HttpApiBuilder } from "effect/http-api"
 import type { ServeError } from "effect/http/HttpServerError"
 import * as NetAddress from "effect/net/NetAddress"
 
@@ -98,32 +98,33 @@ const uiEnabled = Effect.gen(function* () {
   return true
 })
 
+const pathPattern = (routePath: string) =>
+  new RegExp(
+    `^${routePath
+      .split("/")
+      .map((segment) => (segment.startsWith(":") ? "[^/]+" : segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+      .join("/")}$`,
+  )
+
+const allowedUiRoutes: ReadonlyArray<{ readonly method: string; readonly pattern: RegExp }> = (() => {
+  const routes: Array<{ readonly method: string; readonly pattern: RegExp }> = []
+
+  HttpApi.reflect(VibestApi, {
+    onGroup() {},
+    onEndpoint({ endpoint }) {
+      if (UI_CALLS.has(endpoint.identifier)) {
+        routes.push({ method: endpoint.method, pattern: pathPattern(endpoint.path) })
+      }
+    },
+  })
+
+  return routes
+})()
+
 const isAllowedUiRoute = (method: string, url: string) => {
   const path = url.split("?")[0] ?? ""
 
-  if (path === "/api/watch" && method === "GET") return true
-
-  if (path === "/api/harness" && method === "GET") return true
-
-  if (path === "/api/agent" && method === "GET") return true
-
-  if (path === "/api/machine" && method === "GET") return true
-
-  if ((path === "/api/project/open" || path === "/api/project/create") && method === "POST") return true
-
-  if (
-    (path === "/api/session/launch" || path === "/api/session/link" || path === "/api/session/unlink") &&
-    method === "POST"
-  )
-    return true
-
-  if (/^\/api\/session\/[^/]+$/.test(path) && method === "GET") return true
-
-  if (/^\/api\/session\/[^/]+\/peek$/.test(path) && method === "GET") return true
-
-  if (/^\/api\/session\/[^/]+\/(send|interrupt|stop|archive|seen)$/.test(path) && method === "POST") return true
-
-  return false
+  return allowedUiRoutes.some((route) => route.method === method && route.pattern.test(path))
 }
 
 export const UiProtocolMiddlewareLive = Layer.effect(
@@ -139,9 +140,9 @@ export const UiProtocolMiddlewareLive = Layer.effect(
         if (sent === String(PROTOCOL)) return yield* effect
 
         return yield* new ProtocolRejected({
+          ...protocolMismatch(sent === undefined ? undefined : Number(sent), PROTOCOL, version, undefined),
           method: endpoint.identifier,
-          protocol: sent ?? null,
-          mismatch: protocolMismatch(sent === undefined ? undefined : Number(sent), PROTOCOL, version, undefined),
+          callerProtocol: sent ?? null,
         })
       }),
     )

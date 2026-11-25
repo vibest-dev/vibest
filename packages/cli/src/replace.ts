@@ -20,7 +20,6 @@ import {
   ProtocolRejected,
   WrongInstance,
 } from "@vibest/protocol/errors"
-import { PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import type { Ping } from "@vibest/protocol/schemas"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 import { NoSuchSession } from "@vibest/schema/session"
@@ -159,7 +158,7 @@ export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
       connect(layout.socket).pipe(
         Effect.flatMap((c) => c["server.daemon"]["daemon.stop"]({ payload: { instance: old.instance! } })),
       ),
-      { ...cliHeaders(path.resolve(".")), [PROTOCOL_HEADER]: String(old.protocol) },
+      cliHeaders(path.resolve(".")),
     ).pipe(Effect.scoped, Effect.exit, Effect.timeoutOption(timing.reply))
 
     if (Option.isNone(reply))

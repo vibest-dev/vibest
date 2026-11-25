@@ -175,7 +175,7 @@ const isLineError = (e: unknown): e is LineError =>
   Predicate.hasProperty(e, "_tag") && Predicate.isString(e._tag) && Object.hasOwn(LINE_TAGS, e._tag)
 
 const alreadyNamed = (name: string) =>
-  `a machine named ${name} is already added; remove it first (vibest machine rm ${name})`
+  `a machine named ${name} is already added; remove it first (vibest machine remove ${name})`
 
 export interface Link {
   readonly client: PipeClient

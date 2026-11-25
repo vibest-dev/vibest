@@ -336,7 +336,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I5",
     tier: "agent",
     title:
-      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks, which run with the session's process id; asked to curl vibest-http.sock, it does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the execution's reply",
+      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks, which run with the session's process id; asked to curl vibest.sock, it does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the execution's reply",
     run: async (w, evidence) => {
       for (const bin of ["cursor-agent", "herdr"])
         if (!Bun.which(bin, { PATH: w.env().PATH! })) throw new Skip(`${bin} not on PATH`)

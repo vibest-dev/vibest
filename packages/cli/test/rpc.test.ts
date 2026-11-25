@@ -832,7 +832,11 @@ describe("vibest.sock", () => {
       const bare = yield* client
 
       for (const [method, call] of protectedCalls(bare))
-        assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected", method)
+        assert.strictEqual(
+          failureTag(yield* Effect.exit(call)),
+          method === "daemon.stop" || method === "daemon.handoff" ? "InvalidCaller" : "ProtocolRejected",
+          method,
+        )
       const w = yield* asSession(yield* client, id)
 
       for (const [method, call] of protectedCalls(w).filter(

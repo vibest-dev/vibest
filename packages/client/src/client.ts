@@ -197,11 +197,7 @@ const pinged = (socket: string) =>
     Effect.flatMap((client) => Effect.map(client["server.daemon"]["daemon.ping"](), (ping) => ({ client, ping }))),
     Effect.timeout("1 second"),
     Effect.option,
-    Effect.catchCause((cause) =>
-      Cause.hasInterruptsOnly(cause)
-        ? Effect.succeed(Option.none<{ readonly client: VibestClient; readonly ping: Ping }>())
-        : Effect.succeed(Option.none<{ readonly client: VibestClient; readonly ping: Ping }>()),
-    ),
+    Effect.catchDefect(() => Effect.succeed(Option.none<{ readonly client: VibestClient; readonly ping: Ping }>())),
   )
 
 export const readPing = (socket: string) => pinged(socket).pipe(Effect.map(Option.map(({ ping }) => ping)))

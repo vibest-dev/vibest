@@ -7,21 +7,15 @@ export type Blocker = typeof Blocker.Type
 export class ProtocolRejected extends Schema.TaggedError<ProtocolRejected>()(
   "ProtocolRejected",
   {
+    protocol: Schema.Number,
+    version: Schema.String,
+    message: Schema.String,
+    action: Schema.String,
     method: Schema.String,
-    protocol: Schema.NullOr(Schema.String),
-    mismatch: Schema.Struct({
-      protocol: Schema.Number,
-      version: Schema.String,
-      message: Schema.String,
-      action: Schema.String,
-    }),
+    callerProtocol: Schema.NullOr(Schema.String),
   },
   { httpApiStatus: 409 },
-) {
-  override get message() {
-    return `${this.method} refused: ${this.mismatch.message}`
-  }
-}
+) {}
 
 export class InvalidRequestError extends Schema.TaggedError<InvalidRequestError>()(
   "InvalidRequestError",

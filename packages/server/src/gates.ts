@@ -266,9 +266,9 @@ export const ProtocolMiddlewareLive = Layer.effect(
 
         if (rejected)
           return yield* new ProtocolRejected({
+            ...rejected.mismatch,
             method: endpoint.identifier,
-            protocol: rejected.sent,
-            mismatch: rejected.mismatch,
+            callerProtocol: rejected.sent,
           })
 
         return yield* effect

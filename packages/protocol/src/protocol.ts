@@ -61,13 +61,6 @@ export type HookKind = (typeof HOOK_KINDS)[number]
 
 export const hookRoute = (harness: string, hook: HookKind) => `/api/hook/${harness}/${hook}`
 
-export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
-  const m = /^\/api\/hook\/([a-z]+)\/(execution-end|prompt|guard)$/.exec(path)
-  const hook = HOOK_KINDS.find((kind) => kind === m?.[2])
-
-  return m && hook ? { harness: m[1]!, hook } : undefined
-}
-
 const decodeTaken = Schema.decodeUnknownOption(Taken)
 
 export const isTaken = (body: unknown): body is Taken => Option.isSome(decodeTaken(body))

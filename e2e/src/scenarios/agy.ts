@@ -383,7 +383,7 @@ const checks: ReadonlyArray<Check> = [
             () => false,
           )
 
-        expect(!(await exists(ran)), "the refused vibest-http.sock command ran")
+        expect(!(await exists(ran)), "the refused vibest.sock command ran")
         expect(await exists(marker), "the session did not go on to write its marker")
       })
     },

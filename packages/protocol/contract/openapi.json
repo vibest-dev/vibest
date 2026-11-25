@@ -548,7 +548,7 @@
               }
             },
             "409": {
-              "description": "WrongInstance | DaemonBusy | ProtocolRejected",
+              "description": "WrongInstance | DaemonBusy",
               "content": {
                 "application/json": {
                   "schema": {
@@ -558,9 +558,6 @@
                       },
                       {
                         "$ref": "#/components/schemas/DaemonBusyEncoded"
-                      },
-                      {
-                        "$ref": "#/components/schemas/ProtocolRejectedEncoded"
                       }
                     ]
                   }
@@ -666,7 +663,7 @@
               }
             },
             "409": {
-              "description": "WrongInstance | DaemonBusy | ProtocolRejected",
+              "description": "WrongInstance | DaemonBusy",
               "content": {
                 "application/json": {
                   "schema": {
@@ -676,9 +673,6 @@
                       },
                       {
                         "$ref": "#/components/schemas/DaemonBusyEncoded"
-                      },
-                      {
-                        "$ref": "#/components/schemas/ProtocolRejectedEncoded"
                       }
                     ]
                   }
@@ -12909,10 +12903,34 @@
                 "ProtocolRejected"
               ]
             },
+            "protocol": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            },
+            "version": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
             "method": {
               "type": "string"
             },
-            "protocol": {
+            "callerProtocol": {
               "anyOf": [
                 {
                   "type": "string"
@@ -12921,49 +12939,16 @@
                   "type": "null"
                 }
               ]
-            },
-            "mismatch": {
-              "type": "object",
-              "properties": {
-                "protocol": {
-                  "anyOf": [
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "string",
-                      "enum": [
-                        "Infinity",
-                        "-Infinity",
-                        "NaN"
-                      ]
-                    }
-                  ]
-                },
-                "version": {
-                  "type": "string"
-                },
-                "message": {
-                  "type": "string"
-                },
-                "action": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "protocol",
-                "version",
-                "message",
-                "action"
-              ],
-              "additionalProperties": false
             }
           },
           "required": [
             "_tag",
-            "method",
             "protocol",
-            "mismatch"
+            "version",
+            "message",
+            "action",
+            "method",
+            "callerProtocol"
           ],
           "additionalProperties": false
         },

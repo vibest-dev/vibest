@@ -16,6 +16,7 @@ import {
   makeClient,
   withHeaders,
 } from "@vibest/client/client"
+import { nodeUnixHttpClient } from "@vibest/client/node-unix-http"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import {
@@ -35,7 +36,6 @@ import {
 } from "effect"
 
 import { Pi } from "./pi.ts"
-import { nodeUnixHttpClient } from "./unix-http.ts"
 import { VERSION } from "./version.ts"
 
 const { withVibest } = makeClient({ version: VERSION })

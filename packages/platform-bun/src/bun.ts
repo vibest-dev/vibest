@@ -8,6 +8,7 @@ import { BunHttpServer, BunRuntime, BunServices, BunSocket } from "@effect/platf
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { pre } from "@vibest/builtins"
 import { HttpConnector } from "@vibest/client/client"
+import { nodeUnixHttpClient } from "@vibest/client/node-unix-http"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
@@ -45,7 +46,6 @@ import { SqlClient, SqlError } from "effect/sql"
 import { layer as hostSample } from "./host-sample.ts"
 import { trimLog } from "./log-file.ts"
 import { graph, pluginLoads, packageName, watch } from "./plugin-source.ts"
-import { nodeUnixHttpClient } from "./unix-http.ts"
 
 const readOnDemand = (handle: fsPromises.FileHandle) =>
   Effect.flatMap(

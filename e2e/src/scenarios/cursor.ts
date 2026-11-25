@@ -359,7 +359,7 @@ const noApprovalDialog: Check = {
   id: "I12",
   tier: "agent",
   title:
-    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to curl vibest-http.sock, it does not run",
+    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to curl vibest.sock, it does not run",
   run: async (w) => {
     const c = await cursorWorld(w, "herdr", "i12")
     await fs.writeFile(
