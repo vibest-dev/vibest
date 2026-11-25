@@ -1,0 +1,50 @@
+{
+  "name": "@vibest/harness-pi",
+  "version": "0.0.2-dev",
+  "private": true,
+  "description": "vibest's Pi integration: a session's execution-end report, the entry session's inbox delivery and TUI, and both agents' guard.",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vibest-dev/vibest.git",
+    "directory": "packages/harness-pi"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "bun script/build.ts",
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/harness-pi"
+  },
+  "dependencies": {
+    "@effect/platform-node-shared": "catalog:",
+    "@vibest/client": "workspace:*",
+    "@vibest/protocol": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "catalog:",
+    "@earendil-works/pi-tui": "1.2.0",
+    "@vibest/cli": "workspace:*",
+    "@vibest/core": "workspace:*",
+    "@vibest/platform-bun": "workspace:*",
+    "@vibest/server": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/extension.ts"
+    ]
+  }
+}

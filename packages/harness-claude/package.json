@@ -1,0 +1,31 @@
+{
+  "name": "@vibest/harness-claude",
+  "version": "0.0.2-dev",
+  "private": true,
+  "description": "VIBEST for Claude Code: native execution-end reports, the tool guard, and the entry session inbox.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vibest-dev/vibest.git",
+    "directory": "packages/harness-claude"
+  },
+  "files": [
+    ".claude-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/register.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "bun script/build.ts",
+    "prepack": "bun run build",
+    "typecheck": "bun script/prepare-claude-types.ts && tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.plugin.json",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/harness-claude"
+  },
+  "devDependencies": {
+    "@vibest/protocol": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "effect": "catalog:"
+  }
+}

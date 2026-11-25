@@ -84,7 +84,7 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
 
   const built = await w.run(path.join(checkout, "packages", "cli"), [
     process.execPath,
-    "scripts/build.ts",
+    "script/build.ts",
     bin,
     `bun-${process.platform}-${process.arch}`,
     "--no-bytecode",

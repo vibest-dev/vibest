@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 
-import { harnessDefaultPlugin } from "../../builtins/src/harness-default.ts"
+import { harnessDefaultPlugin } from "../../plugin-builtins/src/harness-default.ts"
 import { Agents } from "../src/agents.ts"
 import { makePlugins } from "../src/plugin.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"

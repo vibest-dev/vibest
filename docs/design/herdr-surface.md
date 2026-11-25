@@ -291,7 +291,7 @@ fragile.
   loads in any host that runs the plugin API; its pool lives in the plugin's scope and closes with it. `doctor`
   asserts the type of the spawner's output, since `spawner` is typed by its tag.
 
-## 7. effect-herdr-sdk
+## 7. @vibest/herdr-sdk
 
 - **Wire** (protocol 22): newline-delimited JSON, `{id, method, params}` → `{id, result}` or `{id, error}`; the
   server closes after one response, so every call is its own connection. A response with `id: ""` means the server
@@ -313,5 +313,5 @@ fragile.
   `--check` fails when it differs. Each schema namespace is its own module: several type names (`PaneInfo`,
   `TabInfo`, `WorkspaceInfo`, …) differ between the event and response namespaces. `AgentStatus` and `PaneScrollInfo`
   are defined identically in the session and subscription event namespaces, so the events module emits them once. The schema has no method →
-  result map (`ResponseResult` is one flat union), so `scripts/gen/method-result-map.ts` was found empirically
+  result map (`ResponseResult` is one flat union), so `script/gen/method-result-map.ts` was found empirically
   against herdr 0.8.2; a method missing there is typed as the loose union, a typing gap and never a runtime bug.

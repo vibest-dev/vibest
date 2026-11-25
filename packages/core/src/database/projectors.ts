@@ -1,7 +1,7 @@
+import { LayerNode } from "@vibest/util/layer-node"
 import { Layer } from "effect"
 
 import { Bus } from "../bus.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import * as Project from "../project/projector.ts"
 import * as Remote from "../remote/projector.ts"

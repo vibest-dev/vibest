@@ -2,10 +2,9 @@ import type { Plugin as PromisePlugin } from "@vibest/plugin"
 import type { Plugin as EffectPlugin } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Duration, Effect, FileSystem, Option, Path, Predicate, Result, Schema } from "effect"
 import { Digest } from "effect/crypto"
-
-import { LayerNode } from "../effect/layer-node.ts"
 
 export class PluginLoader extends Context.Service<
   PluginLoader,

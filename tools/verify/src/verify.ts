@@ -132,7 +132,7 @@ const archiveSteps: Array<Step> =
     ? [
         [
           "build the release archive",
-          ["bun", "scripts/build-archive.ts", target, release],
+          ["bun", "script/build-archive.ts", target, release],
           { cwd: path.join(root, "packages/cli") },
         ],
       ]
@@ -170,7 +170,7 @@ await all([
     if (has("pack") && !alreadyPacked) {
       const cliPackArgs = [
         "bun",
-        "scripts/pack.ts",
+        "script/pack.ts",
         "--packs",
         packs,
         ...(releasePack ? ["--all"] : ["--target", target]),
@@ -182,7 +182,7 @@ await all([
 
       if (
         releasePack &&
-        !(await run("pack @vibest/plugin", ["bun", "scripts/pack.ts", "--packs", packs], {
+        !(await run("pack @vibest/plugin", ["bun", "script/pack.ts", "--packs", packs], {
           cwd: path.join(root, "packages/plugin"),
         }))
       )

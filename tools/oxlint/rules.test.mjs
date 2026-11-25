@@ -181,25 +181,25 @@ export const one = 1
 
 describe("import policy", () => {
   const importing = (specifier) => `import * as m from "${specifier}"\nexport const v = m\n`
-  const herdr = importing("effect-herdr-sdk")
+  const herdr = importing("@vibest/herdr-sdk")
   const bun = importing("bun:sqlite")
   const core = importing("@vibest/core/x")
   const scopedFindings = (source, file) => oxlintFindings(source, file, { scoped: true })
   const refused = ["1 eslint(no-restricted-imports)"]
   const outside = ["1 vibest(package-imports)"]
 
-  it("neutral packages refuse herdr and Bun; bun.ts and platform/ accept Bun but not herdr", () => {
-    for (const file of ["a.ts", "bun.ts", "platform/a.ts"]) {
+  it("neutral packages refuse herdr and Bun; bun.ts, *.bun.ts and platform/ accept Bun but not herdr", () => {
+    for (const file of ["a.ts", "bun.ts", "a.bun.ts", "platform/a.ts"]) {
       const path = `packages/core/src/${file}`
       expect(scopedFindings(herdr, path)).toEqual(outside)
       expect(scopedFindings(bun, path)).toEqual(file === "a.ts" ? refused : [])
     }
   })
 
-  it.each(["integration/claude", "plugin-harnesses", "runtime-herdr", "runtime-herdr-core"])(
-    "%s refuses @vibest/core and Bun; bun.ts and platform/ accept only Bun",
+  it.each(["harness-claude", "plugin-harnesses", "runtime-herdr", "runtime-herdr-core"])(
+    "%s refuses @vibest/core and Bun; bun.ts, *.bun.ts and platform/ accept only Bun",
     (root) => {
-      for (const file of ["a.ts", "bun.ts", "platform/a.ts"]) {
+      for (const file of ["a.ts", "bun.ts", "a.bun.ts", "platform/a.ts"]) {
         const path = `packages/${root}/src/${file}`
         expect(scopedFindings(core, path)).toEqual(outside)
         expect(scopedFindings(bun, path)).toEqual(file === "a.ts" ? refused : [])
@@ -207,12 +207,21 @@ describe("import policy", () => {
     },
   )
 
-  it("the herdr SDKs and tools/verify refuse Bun outside bun.ts and platform/", () => {
-    for (const file of ["packages/effect-herdr-sdk/src/bun.ts", "packages/effect-herdr-core-sdk/src/platform/a.ts"])
+  it("the herdr SDKs and tools/verify refuse Bun outside bun.ts, *.bun.ts and platform/", () => {
+    for (const file of ["packages/herdr-sdk/src/bun.ts", "packages/herdr-core-sdk/src/platform/a.ts"])
       expect(scopedFindings(bun, file)).toEqual([])
 
-    for (const file of ["packages/effect-herdr-sdk/src/a.ts", "tools/verify/src/a.ts"])
+    for (const file of ["packages/herdr-sdk/src/a.ts", "tools/verify/src/a.ts"])
       expect(scopedFindings(bun, file)).toEqual(refused)
+  })
+
+  it("platform-bun accepts Bun in any source file", () => {
+    expect(scopedFindings(bun, "packages/platform-bun/src/helper.ts")).toEqual([])
+  })
+
+  it("util refuses every workspace package and Bun", () => {
+    expect(scopedFindings(importing("@vibest/schema/id"), "packages/util/src/a.ts")).toEqual(outside)
+    expect(scopedFindings(bun, "packages/util/src/a.ts")).toEqual(refused)
   })
 
   it("the CLI refuses @vibest/core and herdr in every source file", () => {

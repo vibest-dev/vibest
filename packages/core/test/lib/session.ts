@@ -3,7 +3,6 @@ import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/database/db"
 import { Drain } from "@vibest/core/drain"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
 import { Harness } from "@vibest/core/harness"
@@ -26,6 +25,7 @@ import * as VibestPlugin from "@vibest/plugin/effect"
 import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/schemas"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
+import { LayerNode } from "@vibest/util/layer-node"
 import {
   Clock,
   ConfigProvider,
@@ -43,9 +43,9 @@ import {
 import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 
-import { agentPlugin } from "../../../builtins/src/agent.ts"
-import { guardPlugin } from "../../../builtins/src/guard.ts"
-import { runtimeChoicePlugin } from "../../../builtins/src/runtime-choice.ts"
+import { agentPlugin } from "../../../plugin-builtins/src/agent.ts"
+import { guardPlugin } from "../../../plugin-builtins/src/guard.ts"
+import { runtimeChoicePlugin } from "../../../plugin-builtins/src/runtime-choice.ts"
 import { DaemonHandlers } from "../../../server/src/handlers/daemon.ts"
 import { Load } from "../../../server/src/machine/load.ts"
 import { Machines } from "../../../server/src/machine/machines.ts"

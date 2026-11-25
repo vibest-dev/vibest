@@ -1,6 +1,6 @@
+import type { api, HcFailure, HcClient } from "@vibest/herdr-core-sdk"
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Duration, Effect, Predicate, type Scope, Stream } from "effect"
-import type { api, HcFailure, HcClient } from "effect-herdr-core-sdk"
 
 import { type HcTerminal, KIND, LABEL } from "./terminal-runtime.ts"
 

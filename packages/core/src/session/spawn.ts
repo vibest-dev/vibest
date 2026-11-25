@@ -12,6 +12,7 @@ import {
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Clock, Context, Deferred, Effect, FileSystem, Layer, Option, Path, Predicate, Ref, Schema } from "effect"
 import { SecureRandom } from "effect/crypto"
 import { Hex } from "effect/encoding"
@@ -29,7 +30,6 @@ import {
 import { Db } from "../database/db.ts"
 import type { RemoteStart } from "../database/remote.ts"
 import { Drain } from "../drain.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
 import { harnessCatalog, harnessOptions, Harness, preflight } from "../harness.ts"

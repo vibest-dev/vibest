@@ -1,0 +1,8 @@
+{
+  "extends": "./base.json",
+  "compilerOptions": {
+    "types": [],
+    "customConditions": []
+  },
+  "files": ["web-globals.d.ts"]
+}

@@ -1,6 +1,5 @@
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context } from "effect"
-
-import { LayerNode } from "./effect/layer-node.ts"
 
 export * as App from "./app.ts"
 

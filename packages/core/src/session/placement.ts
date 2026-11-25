@@ -3,6 +3,7 @@ import { messageOf } from "@vibest/schema/error"
 import { sessionLabel } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { NoSuchSession } from "@vibest/schema/session"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Cause, Clock, Context, Effect, Exit, FileSystem, Layer, Path, Ref } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -21,7 +22,6 @@ import {
   type LimitAbout,
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Git } from "../git.ts"
 import { cliEnv, Harness } from "../harness.ts"

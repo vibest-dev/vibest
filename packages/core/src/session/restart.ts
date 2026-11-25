@@ -1,5 +1,6 @@
 import type { HarnessId } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Duration, Effect, Exit, Layer, Option, Predicate, Schedule } from "effect"
 
 import { App } from "../app.ts"
@@ -16,7 +17,6 @@ import {
   terminalOf,
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harnesses.ts"
 import { withExecution, type Launch } from "../launch.ts"
 import { errorMessage } from "../plugin.ts"

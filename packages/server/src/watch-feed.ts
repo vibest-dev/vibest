@@ -8,9 +8,9 @@ import {
   TerminalSeen,
   TerminalState,
 } from "@vibest/core/bus"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { WatchLagged } from "@vibest/protocol/errors"
 import type { WatchEvent } from "@vibest/protocol/schemas"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Cause, Context, Effect, Layer, PubSub, Queue, type Scope, Stream } from "effect"
 
 import * as Listing from "./listing.ts"

@@ -6,24 +6,24 @@ import path from "node:path"
 
 import { BunHttpServer, BunRuntime, BunServices, BunSocket } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { pre } from "@vibest/builtins"
 import { HttpConnector } from "@vibest/client/client"
-import { nodeUnixHttpClient } from "@vibest/client/node-unix-http"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
+import { nodeUnixHttpClient } from "@vibest/client/unix-http.node"
 import { App } from "@vibest/core/app"
 import { SQL_NAMES } from "@vibest/core/database/db"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/db-schema"
 import { checkLedger, migrations } from "@vibest/core/database/migration"
 import * as Projectors from "@vibest/core/database/projectors"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Identity, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { Builtins, builtinsNode, PluginLoader, pluginLoaderNode } from "@vibest/core/plugin"
 import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/processes"
 import { Runtimes } from "@vibest/core/runtimes"
 import { UserPlatform } from "@vibest/core/system-prompt"
+import * as HerdrBun from "@vibest/herdr-sdk/bun"
 import * as VibestPlugin from "@vibest/plugin"
+import { pre } from "@vibest/plugin-builtins"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
 import * as VibestPluginHost from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
@@ -34,6 +34,7 @@ import { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
 import * as Ui from "@vibest/server/ui"
 import { UpdateCheck } from "@vibest/server/update-check"
+import { LayerNode } from "@vibest/util/layer-node"
 import * as effect from "effect"
 import {
   Cause,
@@ -48,7 +49,6 @@ import {
   Stdio,
   Stream,
 } from "effect"
-import * as HerdrBun from "effect-herdr-sdk/bun"
 import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, type HttpClient } from "effect/http"
 import * as ChildProcess from "effect/process/ChildProcess"
@@ -500,16 +500,7 @@ export const replacements: LayerNode.Replacements = [
     LayerNode.make({
       name: "vibest/HttpServer/unix",
       layer: Layer.unwrap(
-        Effect.map(Layout, (layout) =>
-          Layer.succeed(
-            Server.HttpServerLayer,
-            BunHttpServer.layerServer({
-              unix: layout.socket,
-              idleTimeout: 0,
-              gracefulShutdownTimeout: Duration.zero,
-            }),
-          ),
-        ),
+        Effect.map(Layout, (layout) => Layer.succeed(Server.HttpServerLayer, httpServer(layout.socket))),
       ),
       deps: [PlatformNode.layout],
     }),

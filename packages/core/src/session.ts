@@ -15,13 +15,13 @@ import {
   HarnessUnavailable,
 } from "@vibest/schema/session"
 import { canonicalTarget } from "@vibest/schema/terminal"
+import { KeyedMutex } from "@vibest/util/keyed-mutex"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { type SessionRow, terminalOf, exitedAt } from "./database/db-rows.ts"
 import { Db, type SessionFilter } from "./database/db.ts"
-import { KeyedMutex } from "./effect/keyed-mutex.ts"
-import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 import { Git, type GitState } from "./git.ts"
 import { raisesSeen } from "./project/activity.ts"

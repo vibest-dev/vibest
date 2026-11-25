@@ -3,22 +3,24 @@ import path from "node:path"
 import { Predicate } from "effect"
 
 const allowed = {
+  util: [],
   schema: [],
   plugin: ["@vibest/schema"],
   protocol: ["@vibest/schema"],
   client: ["@vibest/schema", "@vibest/protocol"],
-  core: ["@vibest/schema", "@vibest/plugin"],
-  server: ["@vibest/schema", "@vibest/plugin", "@vibest/core", "@vibest/protocol", "@vibest/client"],
+  core: ["@vibest/util", "@vibest/schema", "@vibest/plugin"],
+  server: ["@vibest/util", "@vibest/schema", "@vibest/plugin", "@vibest/core", "@vibest/protocol", "@vibest/client"],
   "platform-bun": [
+    "@vibest/util",
     "@vibest/schema",
     "@vibest/plugin",
     "@vibest/core",
     "@vibest/client",
     "@vibest/server",
-    "@vibest/builtins",
-    "effect-herdr-sdk",
+    "@vibest/plugin-builtins",
+    "@vibest/herdr-sdk",
   ],
-  builtins: [
+  "plugin-builtins": [
     "@vibest/plugin",
     "@vibest/plugin-harnesses",
     "@vibest/plugin-idle-stop",
@@ -27,26 +29,26 @@ const allowed = {
     "@vibest/runtime-herdr-core",
     "@vibest/runtime-rex",
   ],
-  "plugins/report-reminder": ["@vibest/plugin"],
-  "plugins/idle-stop": ["@vibest/plugin"],
+  "plugin-report-reminder": ["@vibest/plugin"],
+  "plugin-idle-stop": ["@vibest/plugin"],
   cli: [
     "@vibest/schema",
     "@vibest/protocol",
     "@vibest/client",
-    "@vibest/builtins",
+    "@vibest/plugin-builtins",
     "=@vibest/server/daemon",
     "#platform",
   ],
   "plugin-harnesses": ["@vibest/plugin", "@vibest/schema"],
-  "runtime-herdr-core": ["@vibest/plugin", "@vibest/schema", "effect-herdr-core-sdk"],
+  "runtime-herdr-core": ["@vibest/plugin", "@vibest/schema", "@vibest/herdr-core-sdk"],
   "runtime-rex": ["@vibest/plugin"],
-  "runtime-herdr": ["@vibest/plugin", "@vibest/schema", "@vibest/protocol", "@vibest/client", "effect-herdr-sdk"],
-  "integration/claude": ["@vibest/schema", "@vibest/protocol"],
-  "integration/pi": ["@vibest/schema", "@vibest/protocol", "@vibest/client"],
-  "integration/cursor": ["@vibest/schema"],
-  "integration/agy": ["@vibest/schema"],
-  "effect-herdr-sdk": [],
-  "effect-herdr-core-sdk": [],
+  "runtime-herdr": ["@vibest/plugin", "@vibest/schema", "@vibest/protocol", "@vibest/client", "@vibest/herdr-sdk"],
+  "harness-claude": ["@vibest/schema", "@vibest/protocol"],
+  "harness-pi": ["@vibest/schema", "@vibest/protocol", "@vibest/client"],
+  "harness-cursor": ["@vibest/schema"],
+  "harness-agy": ["@vibest/schema"],
+  "herdr-sdk": [],
+  "herdr-core-sdk": [],
   "tools/verify": ["@vibest/cli"],
 }
 
@@ -56,7 +58,7 @@ const handoff = {
   name: "HANDOFF_ENV",
 }
 
-const isWorkspace = (source) => /^(@vibest\/|effect-herdr-|#)/.test(source)
+const isWorkspace = (source) => /^(@vibest\/|#)/.test(source)
 
 const permits = (entry, source) =>
   entry.startsWith("=") ? source === entry.slice(1) : source === entry || source.startsWith(`${entry}/`)
@@ -81,7 +83,7 @@ const specifierOf = (source) => {
 export const packageImports = {
   create(context) {
     const file = context.filename.replaceAll("\\", "/")
-    const match = /^(.*\/(?:packages\/((?:integration\/|plugins\/)?[^/]+)|(tools\/verify)))\/src\//.exec(file)
+    const match = /^(.*\/(?:packages\/([^/]+)|(tools\/verify)))\/src\//.exec(file)
 
     if (match === null) return {}
     const [, root, packageName, tool] = match

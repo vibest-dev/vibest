@@ -1,0 +1,17 @@
+{
+  "name": "@vibest/util",
+  "version": "0.0.2-dev",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/util"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  }
+}

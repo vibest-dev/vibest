@@ -3,11 +3,11 @@ import { Host } from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
 import { NoRuntime } from "@vibest/schema/session"
 import { formatTerminalTarget, type TerminalTarget } from "@vibest/schema/terminal"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Cause, Context, Duration, Effect, FiberMap, Layer, Match, PubSub, type Scope, Stream } from "effect"
 
 import { type BoundProcess, Bus, RuntimeReset, TerminalExited, TerminalSeen, TerminalState } from "./bus.ts"
 import { Db } from "./database/db.ts"
-import { LayerNode } from "./effect/layer-node.ts"
 import type { HostEnv as PluginHostEnv, RuntimesDomain } from "./plugin/domains.ts"
 import * as Registry from "./plugin/registry.ts"
 

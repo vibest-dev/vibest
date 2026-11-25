@@ -1,10 +1,10 @@
 import { equalToReplay } from "@vibest/core/bus"
 import * as Projectors from "@vibest/core/database/projectors"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
 import { PluginLoader, pluginLoaderNode } from "@vibest/core/plugin/sources"
 import { Processes } from "@vibest/core/processes"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 

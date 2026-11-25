@@ -1,9 +1,9 @@
 import { Layout } from "@vibest/schema/layout"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Clock, Context, Effect, Layer, Option, Path } from "effect"
 
 import { terminalOf } from "./database/db-rows.ts"
 import { Db } from "./database/db.ts"
-import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
 import * as Guard from "./guard.ts"
 import { Harnesses } from "./harnesses.ts"

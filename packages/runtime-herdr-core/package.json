@@ -13,10 +13,10 @@
   },
   "dependencies": {
     "@effect/platform-node-shared": "catalog:",
+    "@vibest/herdr-core-sdk": "workspace:*",
     "@vibest/plugin": "workspace:*",
     "@vibest/schema": "workspace:*",
-    "effect": "catalog:",
-    "effect-herdr-core-sdk": "workspace:*"
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:"

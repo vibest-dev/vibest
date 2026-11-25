@@ -1,8 +1,8 @@
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer, Predicate, Schedule, String as Str } from "effect"
 import { SqlClient, SqlError } from "effect/sql"
 
 import { Bus } from "../bus.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { SessionLive } from "../session/live.ts"
 import * as Inbox from "./inbox.ts"

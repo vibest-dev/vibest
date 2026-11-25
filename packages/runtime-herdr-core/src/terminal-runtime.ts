@@ -1,4 +1,5 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
+import { api, type HcFailure, type HcClient, HcTransportError, type Notice } from "@vibest/herdr-core-sdk"
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
 import { isShellHandoff, launchLine, typedLine } from "@vibest/plugin/effect/launch"
@@ -20,7 +21,6 @@ import {
   Schema,
   Stream,
 } from "effect"
-import { api, type HcFailure, type HcClient, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
 export const HcTerminal = Schema.Struct({
   address: Schema.NonEmptyString,

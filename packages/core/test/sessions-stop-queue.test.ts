@@ -5,7 +5,7 @@ import { Effect, Fiber } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import idleStop from "../../plugins/idle-stop/src/index.ts"
+import idleStop from "../../plugin-idle-stop/src/index.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { until } from "./lib/observe.ts"
 import { makeRepository, PluginHost } from "./lib/session.ts"

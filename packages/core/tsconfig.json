@@ -1,5 +1,4 @@
 {
-  "extends": "@vibest/tsconfig/base.json",
-  "compilerOptions": { "types": [], "customConditions": [] },
-  "include": ["src", "test", "types"]
+  "extends": "@vibest/tsconfig/neutral.json",
+  "include": ["src", "test"]
 }

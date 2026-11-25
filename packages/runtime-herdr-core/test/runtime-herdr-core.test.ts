@@ -4,10 +4,10 @@ import path from "node:path"
 
 import { NodeFileSystem, NodePath } from "@effect/platform-node-shared"
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
+import { Hc, SocketConnector } from "@vibest/herdr-core-sdk"
+import * as HcBun from "@vibest/herdr-core-sdk/bun"
 import { runtimeContract } from "@vibest/plugin/testing"
 import { Effect, Predicate, Ref, Stream } from "effect"
-import { Hc, SocketConnector } from "effect-herdr-core-sdk"
-import * as HcBun from "effect-herdr-core-sdk/bun"
 
 import { commandOf, note } from "../../../tools/reap.ts"
 import { KIND, LABEL, make, PRESENT_SESSION, PRESENT_PROJECT_ID } from "../src/terminal-runtime.ts"

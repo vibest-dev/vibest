@@ -1,7 +1,7 @@
 import { Agents } from "@vibest/core/agents"
 import { Effect, Layer } from "effect"
 
-import { coordinator, general } from "../../../builtins/src/agent.ts"
+import { coordinator, general } from "../../../plugin-builtins/src/agent.ts"
 
 export const agentsLayer = Layer.effect(
   Agents.Service,

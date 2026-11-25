@@ -1,10 +1,10 @@
 import type { SessionRef } from "@vibest/schema/terminal"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
 
 import type { SessionRow } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
 import { resolveEdgeRefs } from "../database/session-edges.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 
 export * as Summaries from "./summaries.ts"
 

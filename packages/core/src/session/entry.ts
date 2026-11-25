@@ -11,6 +11,8 @@ import {
   type HarnessId,
 } from "@vibest/schema/session"
 import { canonicalTarget, type TerminalTarget } from "@vibest/schema/terminal"
+import { KeyedMutex } from "@vibest/util/keyed-mutex"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 
 import { definitionLaunch } from "../agent-launch.ts"
@@ -18,8 +20,6 @@ import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
 import { archived, harnessIdOf, pidOf, placedTerminal, type SessionRow } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
-import { KeyedMutex } from "../effect/keyed-mutex.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Harness, startableOptions } from "../harness.ts"
 import { Harnesses } from "../harnesses.ts"

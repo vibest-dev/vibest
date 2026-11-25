@@ -1,5 +1,6 @@
 import { NoSuchSession, RuntimeUnreachable, SessionBusy } from "@vibest/schema/session"
 import { SessionEvent } from "@vibest/schema/session-event"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Cause, Clock, Context, Duration, Effect, Layer, Option, Predicate, Ref } from "effect"
 
 import { nextBatch } from "../batch.ts"
@@ -16,7 +17,6 @@ import {
   startOf,
 } from "../database/db-rows.ts"
 import { Db } from "../database/db.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 import { Harnesses } from "../harnesses.ts"
 import { Inbox, content as inboxContent } from "../inbox.ts"
 import { errorMessage } from "../plugin.ts"
