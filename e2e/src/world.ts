@@ -8,18 +8,18 @@ import { Predicate, type Schema } from "effect"
 
 import { commandOf, note } from "../../tools/reap.ts"
 import { entryModel, entryRunMessage, nextEntryRun } from "./fake-model.ts"
-import {
-  herdrConfigSessions,
-  pathsNamed,
-  removeStoppedSession,
-  sessionNamesForWorld,
-  worldTmpBase,
-} from "./runner/cleanup.ts"
+import { herdrConfigSessions, removeStoppedSession, sessionNamesForWorld, worldTmpBase } from "./runner/cleanup.ts"
 import { alive } from "./world/alive.ts"
 import { entrySessionId, foreignTerminalsIn, herdrPane, readDb } from "./world/db.ts"
 import { copyEvidence, privateValues, redactor } from "./world/redact.ts"
 import { claudeShadow, cursorShadow, piShadow, type Profile } from "./world/shadow.ts"
-import { endHerdrSocket, stopOwners, stopRecordedDaemon, stopSocketsUnder } from "./world/teardown.ts"
+import {
+  endHerdrSocket,
+  stopHcSocketsUnder,
+  stopOwners,
+  stopRecordedDaemon,
+  stopSocketsUnder,
+} from "./world/teardown.ts"
 
 export const checkout = path.resolve(import.meta.dirname, "../..")
 
@@ -681,12 +681,11 @@ export class World {
 
       for (const name of names) await step(() => endHerdrSocket(path.join(sessionsDir, name, "herdr.sock"), name))
 
-      for (const sock of await pathsNamed(this.root, "hc.sock"))
-        await step(() =>
-          this.run(this.root, ["hc", "server", "stop"], { timeoutMs: 15_000, env: { HC_SOCKET: sock } }).then(
-            () => undefined,
-          ),
-        )
+      await step(() =>
+        stopHcSocketsUnder(this.root, (args, extra) =>
+          this.run(this.root, ["hc", ...args], { timeoutMs: 15_000, env: extra }).then(() => undefined),
+        ),
+      )
       await step(() => this.killStarted())
       await step(() => stopOwners(this.root))
 

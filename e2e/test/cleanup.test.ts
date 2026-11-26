@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test"
+import childProcess from "node:child_process"
 import fs from "node:fs/promises"
 import net from "node:net"
 import os from "node:os"
 import path from "node:path"
 
 import { DAY_MS, pathsNamed, sweepTargets } from "../src/runner/cleanup.ts"
-import { removeExpiredWorlds } from "../src/world.ts"
+import { alive, removeExpiredWorlds } from "../src/world.ts"
+import { stopOwners } from "../src/world/teardown.ts"
 
 test("a kept world and its sessions are swept only once they are a day old", () => {
   const now = 10 * DAY_MS
@@ -130,3 +132,84 @@ test("the sweep removes an old world with its herdr sessions, and leaves a live 
     await fs.rm(tmp, { recursive: true, force: true })
   }
 }, 30_000)
+
+test("stopOwners terminates a detached process with zero open fds under root when its argv references root", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-owners-test-"))
+
+  const child = childProcess.spawn("/bin/sh", ["-c", `VIBEST_HOME=${root}/vibest sleep 60; :`], {
+    cwd: os.tmpdir(),
+    detached: true,
+    stdio: "ignore",
+  })
+
+  const killGroup = (pid: number) => {
+    try {
+      process.kill(-pid, "SIGKILL")
+    } catch (e) {
+      if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+    }
+  }
+
+  try {
+    expect(child.pid).toBeDefined()
+    expect(alive(child.pid!)).toBe(true)
+
+    await stopOwners(root)
+
+    expect(alive(child.pid!)).toBe(false)
+  } finally {
+    if (child.pid !== undefined && alive(child.pid)) killGroup(child.pid)
+
+    await fs.rm(root, { recursive: true, force: true })
+  }
+}, 15_000)
+
+test("removeExpiredWorlds stops hc.sock inside expired worlds", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vbe-hc-cleanup-"))
+  const sessions = path.join(tmp, "sessions")
+  await fs.mkdir(sessions)
+  const now = Date.now()
+  const oldAt = new Date(now - 2 * DAY_MS)
+  const world = path.join(tmp, "vbe-HcOld1")
+  await fs.mkdir(world, { recursive: true })
+  const hcSock = path.join(world, "hc.sock")
+  const hcServer = net.createServer()
+  hcServer.unref()
+  let closed = false
+
+  const closeServer = () =>
+    closed
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          closed = true
+          hcServer.close(() => resolve())
+        })
+
+  try {
+    await new Promise<void>((resolve) => hcServer.listen(hcSock, () => resolve()))
+    await fs.utimes(world, oldAt, oldAt)
+
+    const hcCalls: Array<{ args: ReadonlyArray<string>; socket: string | undefined }> = []
+    await removeExpiredWorlds({
+      tmpBase: tmp,
+      sessionsDir: sessions,
+      now,
+      run: async () => undefined,
+      runHc: async (args, env) => {
+        hcCalls.push({ args, socket: env.HC_SOCKET })
+        await closeServer()
+      },
+    })
+
+    expect(hcCalls).toEqual([{ args: ["server", "stop"], socket: hcSock }])
+    expect(
+      await fs.stat(world).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false)
+  } finally {
+    await closeServer()
+    await fs.rm(tmp, { recursive: true, force: true })
+  }
+}, 15_000)
