@@ -73,6 +73,7 @@ const writers = [
   "/packages/core/src/project/projector.ts",
   "/packages/core/src/session/projector.ts",
   "/packages/core/src/remote/projector.ts",
+  "/packages/core/src/automation/projector.ts",
   "/packages/core/src/database/schema.sql.ts",
   "/packages/core/src/import/",
   "/packages/core/src/database/migration",

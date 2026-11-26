@@ -79,6 +79,15 @@ export const ACCESS = {
   "remote.unlink": "remote",
   "event.subscribe": "cli",
   "watch.subscribe": ["cli", "remote"],
+  "automation.create": "agent",
+  "automation.list": "agent",
+  "automation.get": "agent",
+  "automation.pause": "agent",
+  "automation.resume": "agent",
+  "automation.remove": "agent",
+  "automation.tick": "agent",
+  "automation.runNow": "agent",
+  "automation.webhook": "open",
 } as const satisfies Record<EndpointId, Access | readonly Access[]>
 
 export const UI_CALLS: ReadonlySet<string> = new Set([

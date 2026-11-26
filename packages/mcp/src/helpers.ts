@@ -1,13 +1,56 @@
 import crypto from "node:crypto"
 
+import { PrivateFile } from "@vibest/core/effect/private-file"
 import { Mcp as McpSchema } from "@vibest/schema/mcp"
 import { SchemaType } from "@vibest/util/schema-type"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Option, Schema, type FileSystem, type Path } from "effect"
 
 import type { McpClient } from "./client.ts"
 
 export const decodeConfigFile = Schema.decodeUnknownOption(McpSchema.ConfigFile)
 export const decodeServerName = Schema.decodeUnknownOption(McpSchema.ServerName)
+
+export const readConfigFile = (
+  fs: FileSystem.FileSystem,
+  filePath: string,
+): Effect.Effect<Record<string, McpSchema.ServerConfig>> =>
+  fs.readFileString(filePath).pipe(
+    Effect.map((raw) => {
+      try {
+        const decoded = decodeConfigFile(JSON.parse(raw))
+
+        return Option.isSome(decoded) ? { ...decoded.value.mcpServers } : {}
+      } catch {
+        return {}
+      }
+    }),
+    Effect.orElseSucceed(() => ({})),
+  )
+
+export const writeGlobalConfig = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  configPath: string,
+  configured: Readonly<Record<string, McpSchema.ServerConfig>>,
+): Effect.Effect<void, McpSchema.ConfigError> =>
+  PrivateFile.writeAtomic(fs, path, configPath, JSON.stringify({ mcpServers: configured }, null, 2)).pipe(
+    Effect.mapError((error) => new McpSchema.ConfigError({ message: error.message })),
+  )
+
+export const loadConfiguredServers = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  configPath: string,
+  directory?: string,
+): Effect.Effect<Record<string, McpSchema.ServerConfig>> =>
+  Effect.gen(function* () {
+    const globalServers = yield* readConfigFile(fs, configPath)
+
+    if (!directory) return globalServers
+    const projectServers = yield* readConfigFile(fs, path.join(directory, ".mcp.json"))
+
+    return { ...globalServers, ...projectServers }
+  })
 
 export const parseServerName = (raw: string): Effect.Effect<McpSchema.ServerName, McpSchema.ConfigError> => {
   const decoded = decodeServerName(raw)

@@ -149,6 +149,23 @@ describe("vibest.sock access and endpoint coverage", () => {
         ["mcp.authLogout", c["server.mcp"]["mcp.authLogout"]({ params: { server: "demo" } })],
         ["codemode.execute", c["server.codemode"]["codemode.execute"]({ payload: { code: "return 1;" } })],
         ["codemode.declarations", c["server.codemode"]["codemode.declarations"]({ query: {} })],
+        [
+          "automation.create",
+          c["server.automation"]["automation.create"]({
+            payload: {
+              name: "a",
+              trigger: { type: "every", every: "5 minutes" },
+              action: { type: "code", code: "return null;" },
+            },
+          }),
+        ],
+        ["automation.list", c["server.automation"]["automation.list"]({ query: {} })],
+        ["automation.get", c["server.automation"]["automation.get"]({ params: { id: "a" } })],
+        ["automation.pause", c["server.automation"]["automation.pause"]({ params: { id: "a" } })],
+        ["automation.resume", c["server.automation"]["automation.resume"]({ params: { id: "a" } })],
+        ["automation.remove", c["server.automation"]["automation.remove"]({ params: { id: "a" } })],
+        ["automation.tick", c["server.automation"]["automation.tick"]({})],
+        ["automation.runNow", c["server.automation"]["automation.runNow"]({ params: { id: "a" } })],
       ]
 
       const bare = yield* client
@@ -199,6 +216,7 @@ describe("vibest.sock access and endpoint coverage", () => {
       yield* withHeaders(bare["server.plugin"]["plugin.list"]({}), protocolHeaders())
       assert.isArray(yield* w["server.mcp"]["mcp.list"]({ query: {} }))
       assert.isString((yield* w["server.codemode"]["codemode.declarations"]({ query: {} })).declarations)
+      assert.isArray(yield* w["server.automation"]["automation.list"]({ query: {} }))
       yield* withHeaders(bare["server.daemon"]["daemon.concurrency"]({}), protocolHeaders())
       assert.isArray(
         yield* withHeaders(
@@ -229,6 +247,7 @@ describe("vibest.sock access and endpoint coverage", () => {
         ...protectedCalls(bare).map(([method]) => method),
         "daemon.ping",
         "plugin.list",
+        "automation.webhook",
         "daemon.concurrency",
         "harness.list",
         "agent.list",

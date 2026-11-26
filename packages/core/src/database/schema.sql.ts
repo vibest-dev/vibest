@@ -6,6 +6,10 @@ export const APPLICATION_ID = 0x76696265
 
 export const MIGRATION_TABLE = "migration"
 
+export const AUTOMATION_MIGRATION_ID = "20261125000000_automation"
+
+export const KNOWN_MIGRATIONS: ReadonlySet<string> = new Set([AUTOMATION_MIGRATION_ID])
+
 export const APPEND_ONLY_TRIGGER = `CREATE TRIGGER event_no_update BEFORE UPDATE ON event
     BEGIN SELECT RAISE(ABORT, 'event is append-only'); END`
 
@@ -70,7 +74,7 @@ export const mismatch = (version: number, applicationId: number, detail?: string
 export const ledgerOf = (sql: SqlClient.SqlClient) =>
   sql<{ value: string }>`SELECT value FROM kv WHERE key = 'ledger'`.pipe(Effect.map((rows) => rows[0]?.value))
 
-export const inspectSchema = (knownMigrations: ReadonlySet<string> = new Set()) =>
+export const inspectSchema = (knownMigrations: ReadonlySet<string> = KNOWN_MIGRATIONS) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql.unsafe<{ type: string; name: string }>("SELECT type, name FROM sqlite_master")
@@ -88,15 +92,23 @@ export const inspectSchema = (knownMigrations: ReadonlySet<string> = new Set()) 
     if (has("table", "meta") || !has("table", "event_sequence") || !has("table", "kv"))
       return yield* new SchemaMismatch({ version: userVersion, applicationId, older: true })
 
-    const absent = objectsOf([...LOG_SCHEMA, ...PROJECTION_SCHEMA]).find((object) => !has(object.type, object.name))
-
-    if (absent !== undefined) return yield* mismatch(userVersion, applicationId, `missing ${absent.name}`)
-
     const applied = yield* sql<{ id: string }>`SELECT id FROM migration`
     const unknown = applied.find((row) => !knownMigrations.has(row.id))
 
     if (unknown !== undefined)
       return yield* new SchemaMismatch({ version: userVersion, applicationId, unknownMigration: unknown.id })
+
+    const appliedSet = new Set(applied.map((row) => row.id))
+
+    const expected = [
+      ...LOG_SCHEMA,
+      ...BASELINE_PROJECTION_SCHEMA,
+      ...(appliedSet.has(AUTOMATION_MIGRATION_ID) ? AUTOMATION_SCHEMA : []),
+    ]
+
+    const absent = objectsOf(expected).find((object) => !has(object.type, object.name))
+
+    if (absent !== undefined) return yield* mismatch(userVersion, applicationId, `missing ${absent.name}`)
 
     return "ready" as const
   })
@@ -106,7 +118,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const PROJECTION_SCHEMA = [
+export const BASELINE_PROJECTION_SCHEMA = [
   `CREATE TABLE project (
     id        TEXT PRIMARY KEY CHECK (length(id) = 36),
     directory TEXT UNIQUE
@@ -239,6 +251,46 @@ export const PROJECTION_SCHEMA = [
   `CREATE INDEX outbox_session ON outbox (session_id)`,
 ]
 
+export const AUTOMATION_SCHEMA = [
+  `CREATE TABLE automation (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    project_id      TEXT NOT NULL,
+    session_id      TEXT,
+    directory       TEXT NOT NULL,
+    trigger_json    TEXT NOT NULL,
+    tz              TEXT NOT NULL,
+    action_json     TEXT NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('active', 'paused', 'done')),
+    next_due_at     INTEGER,
+    expires_at      INTEGER,
+    run_count       INTEGER NOT NULL DEFAULT 0 CHECK (run_count >= 0),
+    failures        INTEGER NOT NULL DEFAULT 0 CHECK (failures >= 0),
+    last_run_at     INTEGER,
+    last_outcome    TEXT CHECK (last_outcome IN ('fired', 'late', 'skipped', 'disabled', 'failed', 'expired')),
+    last_output     TEXT,
+    retry_at        INTEGER,
+    state_json      TEXT,
+    event_cursor    TEXT,
+    last_event_id   TEXT,
+    has_cursor      INTEGER NOT NULL DEFAULT 0 CHECK (has_cursor IN (0, 1)),
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX automation_project ON automation (project_id)`,
+  `CREATE INDEX automation_session ON automation (session_id) WHERE session_id IS NOT NULL`,
+  `CREATE INDEX automation_active_due ON automation (next_due_at) WHERE status = 'active'`,
+  `CREATE TABLE automation_dedup (
+    automation_id TEXT NOT NULL REFERENCES automation(id) ON DELETE CASCADE,
+    dedup_key     TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    PRIMARY KEY (automation_id, dedup_key)
+  ) STRICT`,
+  `CREATE INDEX automation_dedup_created ON automation_dedup (automation_id, created_at)`,
+]
+
+export const PROJECTION_SCHEMA = [...BASELINE_PROJECTION_SCHEMA, ...AUTOMATION_SCHEMA]
+
 export const PROJECTION_TABLES = {
   project: "id",
   project_repository: "path",
@@ -250,4 +302,6 @@ export const PROJECTION_TABLES = {
   machine: "name",
   remote: "id",
   outbox: "id",
+  automation: "id",
+  automation_dedup: "automation_id, dedup_key",
 } as const

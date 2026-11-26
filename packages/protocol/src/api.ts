@@ -2,6 +2,7 @@ import { PROTOCOL } from "@vibest/schema/version"
 import { HttpApi, OpenApi } from "effect/http-api"
 
 import { AgentGroup } from "./groups/agent.ts"
+import { AutomationGroup } from "./groups/automation.ts"
 import { CodeModeGroup } from "./groups/codemode.ts"
 import { DaemonGroup } from "./groups/daemon.ts"
 import { EventGroup } from "./groups/event.ts"
@@ -33,6 +34,7 @@ export const VibestApi = HttpApi.make("server")
   .add(PluginGroup)
   .add(McpGroup)
   .add(CodeModeGroup)
+  .add(AutomationGroup)
   .add(SubscriptionGroup)
   .add(MachineGroup)
   .add(RemoteGroup)
