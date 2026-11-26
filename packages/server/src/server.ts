@@ -1,5 +1,6 @@
 import { Agents } from "@vibest/core/agent/registry"
 import { App } from "@vibest/core/app"
+import { Automation, AutomationSecretStore, AutomationStore } from "@vibest/core/automation"
 import { Bus } from "@vibest/core/bus"
 import { CodeMode } from "@vibest/core/codemode"
 import { Database } from "@vibest/core/database/database"
@@ -35,6 +36,7 @@ import type { ServeError } from "effect/http/HttpServerError"
 
 import { AdmissionLive, CallerMiddlewareLive, ProtocolMiddlewareLive } from "./gates.ts"
 import { AgentHandler } from "./handlers/agent.ts"
+import { AutomationHandler } from "./handlers/automation.ts"
 import * as CallerChecks from "./handlers/caller.ts"
 import { CodeModeHandler } from "./handlers/codemode.ts"
 import { DaemonHandler, DaemonHandlers } from "./handlers/daemon.ts"
@@ -81,6 +83,7 @@ export const handlersCore = Layer.mergeAll(
   PluginHandler,
   McpHandler,
   CodeModeHandler,
+  AutomationHandler,
   SubscriptionHandler,
   MachineHandler,
   RemoteHandler,
@@ -146,6 +149,9 @@ export const handlerDeps = [
   Plugins.node,
   Mcp.node,
   CodeMode.node,
+  AutomationStore.node,
+  AutomationSecretStore.node,
+  Automation.node,
   Processes.node,
   Project.node,
   Remote.node,

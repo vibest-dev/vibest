@@ -1,11 +1,10 @@
+import { Json } from "@vibest/schema/json"
 import { Mcp } from "@vibest/schema/mcp"
-import { Effect, Option, Path, Schema } from "effect"
+import { Effect, Option, Path, type Schema } from "effect"
 
 import { json, vibest } from "../../../caller.ts"
 import { Runtime } from "../../../framework/runtime.ts"
 import { Commands } from "../../commands.ts"
-
-const decodeArgs = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))
 
 const parseTarget = (
   rawServer: string,
@@ -40,17 +39,9 @@ export default Runtime.handler(Commands.commands.mcp.commands.call, (o) =>
     let args: Schema.JsonObject | undefined
 
     if (target.jsonText !== undefined && target.jsonText.trim().length > 0) {
-      const parsed = yield* Effect.try({
-        try: () => JSON.parse(target.jsonText!),
-        catch: (error) =>
-          new Mcp.ConfigError({
-            message: `Invalid JSON arguments: ${error instanceof Error ? error.message : String(error)}`,
-          }),
-      })
+      const decoded = Json.parseJsonOption(target.jsonText)
 
-      const decoded = decodeArgs(parsed)
-
-      if (Option.isNone(decoded)) {
+      if (Option.isNone(decoded) || !Json.isJsonObject(decoded.value)) {
         return yield* new Mcp.ConfigError({ message: "Tool arguments must be a JSON object" })
       }
 

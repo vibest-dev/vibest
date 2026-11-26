@@ -3,14 +3,22 @@ import { Clock, Effect, String as Str } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
 import { Bus, checkReplay } from "../bus.ts"
-import { APPEND_ONLY_TRIGGER, inspectSchema, LOG_SCHEMA, objectCount, PROJECTION_SCHEMA } from "./schema.sql.ts"
+import { automationMigration } from "./migration/20261125000000-automation.ts"
+import {
+  APPEND_ONLY_TRIGGER,
+  inspectSchema,
+  KNOWN_MIGRATIONS,
+  LOG_SCHEMA,
+  objectCount,
+  PROJECTION_SCHEMA,
+} from "./schema.sql.ts"
 
 export type Migration = {
   readonly id: string
   readonly up: (tx: SqlClient.SqlClient) => Effect.Effect<void, SqlError.SqlError>
 }
 
-export const migrations: ReadonlyArray<Migration> = []
+export const migrations: ReadonlyArray<Migration> = [automationMigration]
 
 const appliedIds = (sql: SqlClient.SqlClient) =>
   sql<{ id: string }>`SELECT id FROM migration`.pipe(Effect.map((rows) => new Set(rows.map((row) => row.id))))
@@ -61,7 +69,7 @@ export const runMigrations = (
 export const open = (input: ReadonlyArray<Migration> = migrations) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const known = new Set(input.map((m) => m.id))
+    const known = new Set([...KNOWN_MIGRATIONS, ...input.map((m) => m.id)])
 
     if ((yield* inspectSchema(known)) === "empty") {
       yield* bootstrap(sql, input)
@@ -124,7 +132,7 @@ const copyDatabase = (from: SqlClient.SqlClient, to: SqlClient.SqlClient) =>
 
 export const checkLedger = (stored: SqlClient.SqlClient, input: ReadonlyArray<Migration> = migrations) =>
   Effect.gen(function* () {
-    const known = new Set(input.map((m) => m.id))
+    const known = new Set([...KNOWN_MIGRATIONS, ...input.map((m) => m.id)])
     const state = yield* inspectSchema(known).pipe(Effect.provideService(SqlClient.SqlClient, stored))
 
     if (state === "empty") return
