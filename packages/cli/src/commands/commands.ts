@@ -537,6 +537,13 @@ const mcp = Spec.make("mcp", {
       description: "Add or update a local or remote MCP server in ~/.vibest/mcp.json",
       params: {
         server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+        args: Argument.String("command").pipe(
+          Argument.withDescription(
+            "Local MCP server command and arguments after -- (for example: vibest mcp add fs -- npx -y @modelcontextprotocol/server-filesystem /dir)",
+          ),
+          Argument.withMetavar("[-- <command> <args...>]"),
+          Argument.atLeast(0),
+        ),
         url: Flag.String("url").pipe(Flag.withDescription("Remote MCP server URL"), Flag.optional),
         command: Flag.String("command").pipe(
           Flag.withDescription("Local MCP server command and arguments (repeat for each arg)"),

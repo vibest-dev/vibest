@@ -9,6 +9,7 @@ Use `vibest mcp` to discover and invoke MCP servers (configured in `mcp.json` / 
 
 ## Inspect & Discover
 
+- `vibest mcp add <name> -- npx -y @modelcontextprotocol/server-filesystem /dir` — add a local stdio MCP server (use `--` before command arguments like `-y`), or `vibest mcp add <name> --url <url>` for a remote HTTP MCP server.
 - `vibest mcp list` — list configured MCP servers and their status.
 - `vibest mcp list <server>` — list tools (with compact TypeScript input signatures), remote skills, and events on `<server>`.
 - `vibest mcp list <server> <tool>` — full JSON Schema and details for a single tool.
