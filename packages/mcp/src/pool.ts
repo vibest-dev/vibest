@@ -1,7 +1,24 @@
 import type { AuthProvider, FetchLike, Implementation } from "@modelcontextprotocol/client"
+import { PlatformNode } from "@vibest/core/effect/platform"
 import type { Mcp } from "@vibest/schema/mcp"
 import { KeyedMutex } from "@vibest/util/keyed-mutex"
-import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, FiberSet, Layer, Scope, Semaphore } from "effect"
+import { LayerNode } from "@vibest/util/layer-node"
+import {
+  Cause,
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  FiberSet,
+  FileSystem,
+  Layer,
+  Path,
+  Scope,
+  Semaphore,
+} from "effect"
+import { FetchHttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 
 import { McpConnection } from "./connection.ts"
@@ -17,7 +34,7 @@ export interface Selection {
   readonly authProvider: Effect.Effect<AuthProvider | undefined>
 }
 
-export interface Input extends Omit<McpConnection.Input, "spawner" | "endpointLocks"> {
+export interface Input extends Omit<McpConnection.Input, "spawner" | "fs" | "path" | "fetch" | "endpointLocks"> {
   readonly select: Effect.Effect<Selection>
 }
 
@@ -33,7 +50,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@vibest/McpPool") {}
 
-export const poolKey = (input: {
+export const key = (input: {
   readonly config: Mcp.ServerConfig
   readonly cwd?: string | undefined
   readonly credentialId?: string | undefined
@@ -66,6 +83,8 @@ export const poolKey = (input: {
     ...common,
   ])
 }
+
+export const poolKey = key
 
 export const defaultIdleTimeoutMs = (config: Mcp.ServerConfig): number => {
   if (config.idleTimeoutMs !== undefined) return config.idleTimeoutMs
@@ -108,6 +127,9 @@ export const make = Effect.fn("McpPool.make")(function* (options?: { readonly ba
   const scope = yield* Effect.scope
   const run = yield* FiberSet.makeRuntime<never, void, never>()
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const fetch = yield* FetchHttpClient.Fetch
   const endpointLocks = KeyedMutex.makeUnsafe<string>()
   const slots = new Map<string, Slot>()
   const unpoolable = new Set<string>()
@@ -200,6 +222,9 @@ export const make = Effect.fn("McpPool.make")(function* (options?: { readonly ba
         eventStreamIdleTimeout: input.eventStreamIdleTimeout,
         authProvider: Effect.suspend(() => slot.holders.values().next().value?.authProvider ?? Effect.undefined),
         baseFetch: input.baseFetch ?? options?.baseFetch,
+        fetch,
+        fs,
+        path,
         spawner,
         scope,
         lock: (effect) => slot.lock.withPermit(effect),
@@ -332,6 +357,9 @@ export const make = Effect.fn("McpPool.make")(function* (options?: { readonly ba
         ...input,
         config,
         spawner,
+        fs,
+        path,
+        fetch,
         endpointLocks,
         baseFetch: input.baseFetch ?? options?.baseFetch,
         authProvider: Effect.suspend(() => state.selected?.authProvider ?? input.authProvider),
@@ -467,3 +495,9 @@ export const make = Effect.fn("McpPool.make")(function* (options?: { readonly ba
 })
 
 export const layer = (options?: { readonly baseFetch?: FetchLike }) => Layer.effect(Service, make(options))
+
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer(),
+  deps: [PlatformNode.childProcessSpawner, PlatformNode.fileSystem, PlatformNode.path, PlatformNode.fetch],
+})

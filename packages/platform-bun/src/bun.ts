@@ -16,14 +16,14 @@ import { checkLedger, migrations } from "@vibest/core/database/migration"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/schema.sql"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Identity, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
-import { Mcp } from "@vibest/core/mcp"
+import { Mcp as CoreMcp } from "@vibest/core/mcp"
 import { Builtins, builtinsNode, PluginLoader, pluginLoaderNode } from "@vibest/core/plugin"
 import { Projectors } from "@vibest/core/reactor"
 import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/runtime/processes"
 import { Runtimes } from "@vibest/core/runtime/registry"
 import { UserPlatform } from "@vibest/core/session/system-prompt"
 import * as HerdrBun from "@vibest/herdr-sdk/bun"
-import { McpRuntime } from "@vibest/mcp/service"
+import { Mcp } from "@vibest/mcp/index"
 import * as VibestPlugin from "@vibest/plugin"
 import { pre } from "@vibest/plugin-builtins"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
@@ -111,6 +111,7 @@ const platform = Layer.mergeAll(
   Digest.layerWebCrypto,
   SecureRandom.layerWebCrypto,
   FetchHttpClient.layer,
+  Layer.succeed(FetchHttpClient.Fetch, globalThis.fetch),
   unrefStdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector.Service, (endpoint) => BunSocket.makeNet({ path: endpoint })),
@@ -469,6 +470,7 @@ export const replacements: LayerNode.Replacements = [
   PlatformNode.digest.replace(platformNode),
   PlatformNode.secureRandom.replace(platformNode),
   PlatformNode.childProcessSpawner.replace(platformNode),
+  PlatformNode.fetch.replace(platformNode),
   PlatformNode.sqlClientLayer.replace(
     LayerNode.make({
       name: "vibest/Sqlite",
@@ -528,7 +530,7 @@ export const replacements: LayerNode.Replacements = [
       deps: [PlatformNode.fileSystem, PlatformNode.childProcessSpawner],
     }),
   ),
-  Mcp.hostNode.replace(Layer.succeed(Mcp.Host, McpRuntime.make)),
+  CoreMcp.node.replace(Mcp.node),
 ]
 
 export const app = (info: App.Interface) => App.node.replace(Layer.succeed(App.Service, info))

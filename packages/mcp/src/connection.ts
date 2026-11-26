@@ -1,7 +1,10 @@
+import crypto from "node:crypto"
+
 import type { AuthProvider, FetchLike, Implementation } from "@modelcontextprotocol/client"
 import type { Mcp } from "@vibest/schema/mcp"
 import { KeyedMutex } from "@vibest/util/keyed-mutex"
-import { Cause, Duration, Effect, Exit, Scope } from "effect"
+import { Cause, Duration, Effect, Exit, FileSystem, Path, Scope } from "effect"
+import { FetchHttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 
 import { McpClient } from "./client.ts"
@@ -35,6 +38,9 @@ export interface Input {
   readonly eventStreamIdleTimeout?: Duration.Input | undefined
   readonly authProvider: Effect.Effect<AuthProvider | undefined>
   readonly baseFetch?: FetchLike | undefined
+  readonly fetch: typeof globalThis.fetch
+  readonly fs: FileSystem.FileSystem
+  readonly path: Path.Path
   readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]
   readonly scope: Scope.Scope
   readonly lock: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
@@ -194,6 +200,9 @@ export const make = (input: Input): Connection => {
               : client.tools().pipe(Effect.map((listed) => ({ client, listed }))),
         ),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, input.spawner),
+        Effect.provideService(FileSystem.FileSystem, input.fs),
+        Effect.provideService(Path.Path, input.path),
+        Effect.provideService(FetchHttpClient.Fetch, input.fetch),
         Scope.provide(scope),
         (effect) =>
           config.type === "remote" && !input.shared && input.endpointLocks
@@ -240,7 +249,10 @@ export const make = (input: Input): Connection => {
           : { status: "failed", error: error instanceof Error ? error.message : String(error) },
         error instanceof ConnectError && error.answered === true,
       )
-    }).pipe(Effect.ensuring(input.events.settled)),
+    }).pipe(
+      Effect.ensuring(input.events.settled),
+      Effect.annotateLogs({ server: input.name, directory: input.directory, connectionID: crypto.randomUUID() }),
+    ),
   )
 
   return {

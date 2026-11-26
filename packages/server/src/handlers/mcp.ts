@@ -1,4 +1,5 @@
 import { Mcp } from "@vibest/core/mcp"
+import { ToolOutput } from "@vibest/core/tool-output"
 import { VibestApi } from "@vibest/protocol/api"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
@@ -6,6 +7,7 @@ import { HttpApiBuilder } from "effect/http-api"
 export const McpHandler = HttpApiBuilder.group(VibestApi, "server.mcp", (handlers) =>
   Effect.gen(function* () {
     const mcp = yield* Mcp.Service
+    const toolOutput = yield* ToolOutput.Service
 
     return handlers
       .handle("mcp.list", ({ query }) => mcp.list(query.directory))
@@ -17,25 +19,45 @@ export const McpHandler = HttpApiBuilder.group(VibestApi, "server.mcp", (handler
       .handle("mcp.search", ({ query }) => mcp.search(query.q, query.directory))
       .handle("mcp.describe", ({ params, query }) => mcp.describe(params.server, params.tool, query.directory))
       .handle("mcp.call", ({ params, payload }) =>
-        mcp.call({
-          server: params.server,
-          tool: params.tool,
-          args: payload.arguments,
-          directory: payload.directory,
-          maxBytes: payload.maxBytes,
-          scratchpadDir: payload.scratchpadDir,
-        }),
+        mcp
+          .call({
+            server: params.server,
+            tool: params.tool,
+            args: payload.arguments,
+            directory: payload.directory,
+          })
+          .pipe(
+            Effect.flatMap((result) =>
+              toolOutput.truncateCallResult({
+                server: params.server,
+                tool: params.tool,
+                result,
+                maxBytes: payload.maxBytes,
+                scratchpadDir: payload.scratchpadDir,
+              }),
+            ),
+          ),
       )
       .handle("mcp.events", ({ params, query }) => mcp.events(params.server, query.directory))
       .handle("mcp.skills", ({ params, query }) => mcp.skills(params.server, query.directory))
       .handle("mcp.read", ({ params, payload }) =>
-        mcp.read({
-          server: params.server,
-          uri: payload.uri,
-          directory: payload.directory,
-          maxBytes: payload.maxBytes,
-          scratchpadDir: payload.scratchpadDir,
-        }),
+        mcp
+          .read({
+            server: params.server,
+            uri: payload.uri,
+            directory: payload.directory,
+          })
+          .pipe(
+            Effect.flatMap((result) =>
+              toolOutput.truncateResourceResult({
+                server: params.server,
+                uri: payload.uri,
+                result,
+                maxBytes: payload.maxBytes,
+                scratchpadDir: payload.scratchpadDir,
+              }),
+            ),
+          ),
       )
       .handle("mcp.authStart", ({ params }) => mcp.authStart(params.server))
       .handle("mcp.authComplete", ({ params, payload }) =>

@@ -6,14 +6,18 @@ import os from "node:os"
 import path from "node:path"
 
 import { BunServices } from "@effect/platform-bun"
-import type { Mcp } from "@vibest/schema/mcp"
-import { Cause, Deferred, Effect, Exit, Fiber, Option, Predicate } from "effect"
+import { Bus } from "@vibest/core/bus"
+import { Layout } from "@vibest/schema/layout"
+import type { Mcp as McpSchema } from "@vibest/schema/mcp"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Predicate, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 
 import { OAuthFlowError } from "../src/errors.ts"
+import { Mcp } from "../src/index.ts"
+import { McpMetadataCache } from "../src/metadata-cache.ts"
 import { McpOAuth } from "../src/oauth.ts"
+import { McpPool } from "../src/pool.ts"
 import { McpSecrets } from "../src/secrets.ts"
-import { McpRuntime } from "../src/service.ts"
 import { McpVault } from "../src/vault.ts"
 
 const withTempDirAsync = async <A>(fn: (dir: string) => Promise<A>): Promise<A> => {
@@ -26,6 +30,30 @@ const withTempDirAsync = async <A>(fn: (dir: string) => Promise<A>): Promise<A> 
   }
 }
 
+const noopBusLayer = Layer.succeed(
+  Bus.Service,
+  Bus.Service.of({
+    subscribe: () => Effect.die("unused"),
+    publish: () => Effect.succeed(undefined as never),
+    transaction: (effect) => effect,
+    afterCommit: () => Effect.undefined,
+    log: () => Stream.empty,
+    project: () => Effect.undefined,
+    rebuild: Effect.void,
+  }),
+)
+
+const testMcpEnv = (vibestHome: string) => {
+  const layoutLayer = Layer.effect(Layout, Layout.make(vibestHome)).pipe(Layer.provide(BunServices.layer))
+  const base = Layer.mergeAll(BunServices.layer, layoutLayer, noopBusLayer)
+
+  const deps = Layer.mergeAll(McpPool.layer(), McpVault.layer({ vibestHome }), McpMetadataCache.layer(vibestHome)).pipe(
+    Layer.provideMerge(base),
+  )
+
+  return deps
+}
+
 describe("McpSecrets lazy !command resolver", () => {
   it("never executes !command during fingerprinting, unescapes !!, resolves lazily, and fails closed", async () => {
     await withTempDirAsync(async (dir) => {
@@ -36,14 +64,23 @@ describe("McpSecrets lazy !command resolver", () => {
       expect(fp).toMatch(/^[0-9a-f]{64}$/)
       expect(fs.existsSync(marker)).toBe(false)
 
-      const escaped = await Effect.runPromise(McpSecrets.resolveValue("!!literal-bang", "test"))
+      const escaped = await Effect.runPromise(
+        McpSecrets.resolveValue("!!literal-bang", "test").pipe(Effect.provide(BunServices.layer)),
+      )
+
       expect(escaped).toBe("!literal-bang")
 
-      const resolved = await Effect.runPromise(McpSecrets.resolveValue(cmd, "test"))
+      const resolved = await Effect.runPromise(
+        McpSecrets.resolveValue(cmd, "test").pipe(Effect.provide(BunServices.layer)),
+      )
+
       expect(resolved).toBe("secret-val")
       expect(fs.existsSync(marker)).toBe(true)
 
-      const exit = await Effect.runPromiseExit(McpSecrets.resolveValue("!sh -c 'exit 1'", "test.fail"))
+      const exit = await Effect.runPromiseExit(
+        McpSecrets.resolveValue("!sh -c 'exit 1'", "test.fail").pipe(Effect.provide(BunServices.layer)),
+      )
+
       expect(Exit.isFailure(exit)).toBe(true)
     })
   })
@@ -53,16 +90,19 @@ describe("McpVault AES-256-GCM AAD, single-flight refresh, and logout generation
   it("encrypts at rest with 0o600, binds canonicalServerUrl as AAD, and supports host import", async () => {
     await withTempDirAsync(async (root) => {
       const vibestHome = path.join(root, "vibest")
-      const vault = McpVault.make({ vibestHome })
       const serverUrl = "https://mcp.example.com/v1#frag"
 
       await Effect.runPromise(
-        vault.set("demo", serverUrl, {
-          id: "cred-1",
-          serverUrl: McpVault.canonicalServerUrl(serverUrl),
-          tokens: { accessToken: "super-secret-token-123", refreshToken: "refresh-abc" },
-          updatedAt: Date.now(),
-        }),
+        Effect.gen(function* () {
+          const vault = yield* McpVault.make({ vibestHome })
+
+          yield* vault.set("demo", serverUrl, {
+            id: "cred-1",
+            serverUrl: McpVault.canonicalServerUrl(serverUrl),
+            tokens: { accessToken: "super-secret-token-123", refreshToken: "refresh-abc" },
+            updatedAt: Date.now(),
+          })
+        }).pipe(Effect.provide(BunServices.layer)),
       )
 
       const encPath = path.join(vibestHome, "mcp-credentials.enc")
@@ -76,8 +116,14 @@ describe("McpVault AES-256-GCM AAD, single-flight refresh, and logout generation
         expect(fs.statSync(keyPath).mode & 0o077).toBe(0)
       }
 
-      const freshVault = McpVault.make({ vibestHome })
-      const loaded = await Effect.runPromise(freshVault.get("demo", "https://mcp.example.com/v1"))
+      const loaded = await Effect.runPromise(
+        Effect.gen(function* () {
+          const freshVault = yield* McpVault.make({ vibestHome })
+
+          return yield* freshVault.get("demo", "https://mcp.example.com/v1")
+        }).pipe(Effect.provide(BunServices.layer)),
+      )
+
       expect(loaded?.tokens?.accessToken).toBe("super-secret-token-123")
 
       const tampered = JSON.parse(rawEnc) as {
@@ -93,7 +139,11 @@ describe("McpVault AES-256-GCM AAD, single-flight refresh, and logout generation
       fs.writeFileSync(encPath, JSON.stringify(tampered), { mode: 0o600 })
 
       const swappedExit = await Effect.runPromiseExit(
-        McpVault.make({ vibestHome }).get("demo", "https://evil.example.com/v1"),
+        Effect.gen(function* () {
+          const fresh = yield* McpVault.make({ vibestHome })
+
+          return yield* fresh.get("demo", "https://evil.example.com/v1")
+        }).pipe(Effect.provide(BunServices.layer)),
       )
 
       expect(Exit.isFailure(swappedExit)).toBe(true)
@@ -102,69 +152,66 @@ describe("McpVault AES-256-GCM AAD, single-flight refresh, and logout generation
 
   it("serializes concurrent refreshes (single-flight) and discards refresh if logout occurred mid-flight", async () => {
     await withTempDirAsync(async (vibestHome) => {
-      const vault = McpVault.make({ vibestHome })
       const url = "https://api.example.com/mcp"
 
       await Effect.runPromise(
-        vault.set("svc", url, {
-          id: "c1",
-          serverUrl: url,
-          tokens: { accessToken: "tok-v1", refreshToken: "ref-v1" },
-          updatedAt: 1,
-        }),
-      )
-
-      let performCount = 0
-
-      const [r1, r2] = await Effect.runPromise(
-        Effect.all(
-          [
-            vault.refresh("svc", url, {
-              presentedAccess: "tok-v1",
-              perform: (cur) =>
-                Effect.gen(function* () {
-                  performCount++
-                  yield* Effect.sleep("30 millis")
-
-                  return { ...cur, tokens: { accessToken: "tok-v2", refreshToken: "ref-v2" }, updatedAt: 2 }
-                }),
-              shouldInvalidate: () => false,
-            }),
-            vault.refresh("svc", url, {
-              presentedAccess: "tok-v1",
-              perform: (cur) =>
-                Effect.sync(() => {
-                  performCount++
-
-                  return { ...cur, tokens: { accessToken: "tok-v3", refreshToken: "ref-v3" }, updatedAt: 3 }
-                }),
-              shouldInvalidate: () => false,
-            }),
-          ],
-          { concurrency: 2 },
-        ),
-      )
-
-      expect(performCount).toBe(1)
-      expect(r1?.tokens?.accessToken).toBe("tok-v2")
-      expect(r2?.tokens?.accessToken).toBe("tok-v2")
-
-      const transientExit = await Effect.runPromiseExit(
-        vault.refresh("svc", url, {
-          presentedAccess: "tok-v2",
-          perform: () => Effect.fail(new Error("HTTP 503")),
-          shouldInvalidate: () => false,
-        }),
-      )
-
-      expect(Exit.isFailure(transientExit)).toBe(true)
-      expect((await Effect.runPromise(vault.get("svc", url)))?.tokens?.accessToken).toBe("tok-v2")
-
-      const started = Deferred.makeUnsafe<void>()
-      const release = Deferred.makeUnsafe<void>()
-
-      const result = await Effect.runPromise(
         Effect.gen(function* () {
+          const vault = yield* McpVault.make({ vibestHome })
+
+          yield* vault.set("svc", url, {
+            id: "c1",
+            serverUrl: url,
+            tokens: { accessToken: "tok-v1", refreshToken: "ref-v1" },
+            updatedAt: 1,
+          })
+
+          let performCount = 0
+
+          const [r1, r2] = yield* Effect.all(
+            [
+              vault.refresh("svc", url, {
+                presentedAccess: "tok-v1",
+                perform: (cur) =>
+                  Effect.gen(function* () {
+                    performCount++
+                    yield* Effect.sleep("30 millis")
+
+                    return { ...cur, tokens: { accessToken: "tok-v2", refreshToken: "ref-v2" }, updatedAt: 2 }
+                  }),
+                shouldInvalidate: () => false,
+              }),
+              vault.refresh("svc", url, {
+                presentedAccess: "tok-v1",
+                perform: (cur) =>
+                  Effect.sync(() => {
+                    performCount++
+
+                    return { ...cur, tokens: { accessToken: "tok-v3", refreshToken: "ref-v3" }, updatedAt: 3 }
+                  }),
+                shouldInvalidate: () => false,
+              }),
+            ],
+            { concurrency: 2 },
+          )
+
+          expect(performCount).toBe(1)
+          expect(r1?.tokens?.accessToken).toBe("tok-v2")
+          expect(r2?.tokens?.accessToken).toBe("tok-v2")
+
+          const transientExit = yield* Effect.exit(
+            vault.refresh("svc", url, {
+              presentedAccess: "tok-v2",
+              perform: () => Effect.fail(new Error("HTTP 503")),
+              shouldInvalidate: () => false,
+            }),
+          )
+
+          expect(Exit.isFailure(transientExit)).toBe(true)
+          expect((yield* vault.get("svc", url))?.tokens?.accessToken).toBe("tok-v2")
+
+          const started = Deferred.makeUnsafe<void>()
+          const release = Deferred.makeUnsafe<void>()
+
           const fiber = yield* Effect.forkChild(
             vault.refresh("svc", url, {
               presentedAccess: "tok-v2",
@@ -183,12 +230,11 @@ describe("McpVault AES-256-GCM AAD, single-flight refresh, and logout generation
           yield* vault.remove("svc", url)
           yield* Deferred.succeed(release, undefined)
 
-          return yield* Fiber.join(fiber)
-        }),
+          const result = yield* Fiber.join(fiber)
+          expect(result).toBeUndefined()
+          expect(yield* vault.get("svc", url)).toBeUndefined()
+        }).pipe(Effect.provide(BunServices.layer)),
       )
-
-      expect(result).toBeUndefined()
-      expect(await Effect.runPromise(vault.get("svc", url))).toBeUndefined()
     })
   })
 })
@@ -254,41 +300,46 @@ describe("McpOAuth PKCE 2-step headless flow, origin-locked headers, and 403 ins
       const base = `http://127.0.0.1:${port}`
 
       try {
-        const vault = McpVault.make({ vibestHome })
-        const manager = McpOAuth.makeAuthManager({ vault, enableLoopback: false })
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const vault = yield* McpVault.Service
+            const manager = yield* McpOAuth.makeAuthManager({ enableLoopback: false })
 
-        const config: Mcp.RemoteServerConfig = {
-          type: "remote",
-          url: `${base}/mcp`,
-          oauth: {
-            authServerMetadataUrl: `${base}/.well-known/oauth-authorization-server`,
-            redirectUri: "http://127.0.0.1/cb",
-          },
-        }
+            const config: McpSchema.RemoteServerConfig = {
+              type: "remote",
+              url: `${base}/mcp`,
+              oauth: {
+                authServerMetadataUrl: `${base}/.well-known/oauth-authorization-server`,
+                redirectUri: "http://127.0.0.1/cb",
+              },
+            }
 
-        const started = await Effect.runPromise(manager.authStart("remote-demo", config))
-        const authUrl = new URL(started.authorizationUrl)
-        expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256")
-        expect(authUrl.searchParams.get("state")).toBe(started.state)
-        expect(authUrl.searchParams.get("client_id")).toBe("dcr-client-1")
+            const started = yield* manager.authStart("remote-demo", config)
+            const authUrl = new URL(started.authorizationUrl)
+            expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256")
+            expect(authUrl.searchParams.get("state")).toBe(started.state)
+            expect(authUrl.searchParams.get("client_id")).toBe("dcr-client-1")
 
-        const badState = await Effect.runPromiseExit(
-          manager.authComplete("remote-demo", `http://127.0.0.1/cb?code=abc&state=wrong-state`),
+            const badState = yield* Effect.exit(
+              manager.authComplete("remote-demo", `http://127.0.0.1/cb?code=abc&state=wrong-state`),
+            )
+
+            expect(Exit.isFailure(badState)).toBe(true)
+
+            const completed = yield* manager.authComplete(
+              "remote-demo",
+              `http://127.0.0.1/cb?code=auth-code-99&state=${started.state}`,
+            )
+
+            expect(completed.authenticated).toBe(true)
+            expect(completed.scope).toBe("read write")
+            expect(lastTokenBody).toContain("code=auth-code-99")
+            expect(lastTokenBody).toContain("code_verifier=")
+
+            const stored = yield* vault.get("remote-demo", config.url)
+            expect(stored?.tokens?.accessToken).toBe("oauth-access-xyz")
+          }).pipe(Effect.provide(testMcpEnv(vibestHome))),
         )
-
-        expect(Exit.isFailure(badState)).toBe(true)
-
-        const completed = await Effect.runPromise(
-          manager.authComplete("remote-demo", `http://127.0.0.1/cb?code=auth-code-99&state=${started.state}`),
-        )
-
-        expect(completed.authenticated).toBe(true)
-        expect(completed.scope).toBe("read write")
-        expect(lastTokenBody).toContain("code=auth-code-99")
-        expect(lastTokenBody).toContain("code_verifier=")
-
-        const stored = await Effect.runPromise(vault.get("remote-demo", config.url))
-        expect(stored?.tokens?.accessToken).toBe("oauth-access-xyz")
       } finally {
         asServer.close()
       }
@@ -339,11 +390,12 @@ describe("McpOAuth PKCE 2-step headless flow, origin-locked headers, and 403 ins
 
   it("returns typed OAuthFlowError on malformed URLs and resolves !command secrets before HTTP requests", async () => {
     await withTempDirAsync(async (vibestHome) => {
-      const vault = McpVault.make({ vibestHome })
-      const manager = McpOAuth.makeAuthManager({ vault, enableLoopback: false })
-
       const badUrlExit = await Effect.runPromiseExit(
-        manager.authStart("bad", { type: "remote", url: "not-a-valid-url" }),
+        Effect.gen(function* () {
+          const manager = yield* McpOAuth.makeAuthManager({ enableLoopback: false })
+
+          return yield* manager.authStart("bad", { type: "remote", url: "not-a-valid-url" })
+        }).pipe(Effect.provide(testMcpEnv(vibestHome))),
       )
 
       expect(Exit.isFailure(badUrlExit)).toBe(true)
@@ -375,7 +427,7 @@ describe("McpOAuth PKCE 2-step headless flow, origin-locked headers, and 403 ins
         await Effect.runPromise(
           Effect.scoped(
             Effect.gen(function* () {
-              const rt = yield* McpRuntime.make({ vibestHome })
+              const rt = yield* Mcp.make()
 
               yield* rt.add("remote-secret", {
                 type: "remote",
@@ -387,7 +439,7 @@ describe("McpOAuth PKCE 2-step headless flow, origin-locked headers, and 403 ins
 
               yield* rt.connect("remote-secret")
             }),
-          ).pipe(Effect.provide(BunServices.layer)),
+          ).pipe(Effect.provide(testMcpEnv(vibestHome))),
         )
 
         expect(seenHeaders.length).toBeGreaterThan(0)

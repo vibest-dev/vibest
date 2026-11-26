@@ -1,12 +1,8 @@
-import { Layout } from "@vibest/schema/layout"
 import type { Mcp } from "@vibest/schema/mcp"
-import { McpEvent } from "@vibest/schema/mcp-event"
 import { LayerNode } from "@vibest/util/layer-node"
-import { Context, Effect, Layer, type Schema, type Scope } from "effect"
-import type { ChildProcessSpawner } from "effect/process"
+import { Context, Effect, Layer, type Schema } from "effect"
 
 import { Bus } from "../bus.ts"
-import { PlatformNode } from "../effect/platform.ts"
 
 export * as McpService from "./service.ts"
 
@@ -28,8 +24,6 @@ export interface Interface {
     readonly tool: string
     readonly args?: Schema.JsonObject | undefined
     readonly directory?: string | undefined
-    readonly maxBytes?: number | undefined
-    readonly scratchpadDir?: string | undefined
   }) => Effect.Effect<Mcp.CallResult, Mcp.NotFoundError | Mcp.ToolCallError | Mcp.AuthError>
   readonly events: (
     server: string,
@@ -43,8 +37,6 @@ export interface Interface {
     readonly server: string
     readonly uri: string
     readonly directory?: string | undefined
-    readonly maxBytes?: number | undefined
-    readonly scratchpadDir?: string | undefined
   }) => Effect.Effect<Mcp.ReadResourceResult, Mcp.NotFoundError | Mcp.ToolCallError | Mcp.AuthError>
   readonly authStart: (server: string) => Effect.Effect<Mcp.AuthStartResult, Mcp.NotFoundError | Mcp.AuthError>
   readonly authComplete: (
@@ -64,47 +56,10 @@ export interface Interface {
   readonly authLogout: (server: string) => Effect.Effect<void, Mcp.NotFoundError | Mcp.AuthError>
 }
 
-export interface HostOptions {
-  readonly vibestHome: string
-  readonly events?:
-    | {
-        readonly onStatusChanged?: ((server: Mcp.ServerName, status: Mcp.Status) => Effect.Effect<void>) | undefined
-        readonly onToolsChanged?: ((server: Mcp.ServerName) => Effect.Effect<void>) | undefined
-        readonly onResourcesChanged?: ((server: Mcp.ServerName) => Effect.Effect<void>) | undefined
-      }
-    | undefined
-}
-
-export type HostFactory = (
-  options: HostOptions,
-) => Effect.Effect<Interface, never, Scope.Scope | ChildProcessSpawner.ChildProcessSpawner>
-
-export class Host extends Context.Service<Host, HostFactory>()("vibest/McpHost") {}
-
-export const hostNode = LayerNode.unbound(Host)
-
 export class Service extends Context.Service<Service, Interface>()("vibest/Mcp") {}
-
-export const layer = Layer.effect(
-  Service,
-  Effect.gen(function* () {
-    const layout = yield* Layout
-    const bus = yield* Bus.Service
-    const makeHost = yield* Host
-
-    return yield* makeHost({
-      vibestHome: layout.home,
-      events: {
-        onStatusChanged: (server, status) => bus.publish(McpEvent.StatusChanged, { server, status }),
-        onToolsChanged: (server) => bus.publish(McpEvent.ToolsChanged, { server }),
-        onResourcesChanged: (server) => bus.publish(McpEvent.ResourcesChanged, { server }),
-      },
-    })
-  }),
-)
 
 export const node = LayerNode.make({
   service: Service,
-  layer,
-  deps: [PlatformNode.layout, PlatformNode.childProcessSpawner, Bus.node, hostNode],
+  layer: Layer.effect(Service, Effect.die("vibest/Mcp is unbound; replace Mcp.node with @vibest/mcp's Mcp.node")),
+  deps: [Bus.node],
 })

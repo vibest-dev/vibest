@@ -2,7 +2,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { deserializeMessage, serializeMessage, type JSONRPCMessage, type Transport } from "@modelcontextprotocol/client"
-import { Cause, Duration, Effect, Fiber, Option, Queue, Result, Scope, Stream } from "effect"
+import { Cause, Duration, Effect, Fiber, FileSystem, Option, Path, Queue, Result, Scope, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { NpxResolver } from "./npx-resolver.ts"
@@ -49,6 +49,8 @@ export const resolveCwd = (directory: string, cwd: string | undefined): string =
 
 export const make = Effect.fn("McpStdio.make")(function* (options: Options) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const fs = yield* FileSystem.FileSystem
+  const pathSvc = yield* Path.Path
   const scope = yield* Effect.scope
   const outgoing = yield* Queue.bounded<string, Cause.Done>(OUTGOING_CAPACITY)
 
@@ -123,7 +125,7 @@ export const make = Effect.fn("McpStdio.make")(function* (options: Options) {
                   vibestHome: options.vibestHome,
                   npmCacheDir: options.npmCacheDir,
                   spawner,
-                })
+                }).pipe(Effect.provideService(FileSystem.FileSystem, fs), Effect.provideService(Path.Path, pathSvc))
               : { command: options.command, args: options.args, resolved: false }
 
           const handle = yield* spawner.spawn(

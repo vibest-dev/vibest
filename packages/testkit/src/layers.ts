@@ -60,6 +60,7 @@ export const base: LayerNode.Replacements = [
   PlatformNode.digest.replace(platform),
   PlatformNode.secureRandom.replace(platform),
   PlatformNode.childProcessSpawner.replace(platform),
+  PlatformNode.fetch.replace(platform),
   PlatformNode.sqlClient.replace(checkedSqlite),
   Git.node.replace(fakeGit),
   pluginLoaderNode.replace(

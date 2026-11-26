@@ -1,8 +1,11 @@
 import crypto from "node:crypto"
-import fs from "node:fs"
-import path from "node:path"
 
-import { Context, Effect, Layer, Option, Schema, Semaphore } from "effect"
+import { PlatformNode } from "@vibest/core/effect/platform"
+import { PrivateFile } from "@vibest/core/effect/private-file"
+import { Layout } from "@vibest/schema/layout"
+import { KeyedMutex } from "@vibest/util/keyed-mutex"
+import { LayerNode } from "@vibest/util/layer-node"
+import { Context, Effect, FileSystem, Layer, Option, Path, Schema, Semaphore } from "effect"
 
 import { VaultError } from "./errors.ts"
 
@@ -87,97 +90,77 @@ const entryKey = (server: string, serverUrl: string): string =>
 
 const aadFor = (serverUrl: string): Buffer => Buffer.from(`${AAD_PREFIX}\0${canonicalServerUrl(serverUrl)}`, "utf8")
 
-const ensurePrivateFile = (filePath: string): boolean => {
-  try {
-    const stat = fs.lstatSync(filePath)
+const ensurePrivateFile = (fs: FileSystem.FileSystem, filePath: string): Effect.Effect<boolean> =>
+  fs.lstat(filePath).pipe(
+    Effect.map((info) => {
+      if (info.type !== "File") return false
 
-    if (!stat.isFile() || stat.isSymbolicLink()) return false
+      if (process.platform !== "win32" && (info.mode & 0o077) !== 0) return false
 
-    if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) return false
+      return true
+    }),
+    Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(true)),
+    Effect.orElseSucceed(() => false),
+  )
 
-    return true
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return true
+const resolveVaultKey = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  vibestHome: string,
+  envKey?: string,
+): Effect.Effect<Buffer, VaultError> =>
+  Effect.gen(function* () {
+    const fromEnv = envKey ?? process.env[VAULT_KEY_ENV]
 
-    return false
-  }
-}
+    if (fromEnv !== undefined && fromEnv.trim().length > 0) {
+      const decoded = Buffer.from(fromEnv.trim(), "base64")
 
-const atomicWritePrivate = (filePath: string, content: string): void => {
-  const dir = path.dirname(filePath)
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-
-  if (process.platform !== "win32") fs.chmodSync(dir, 0o700)
-  const tmpPath = path.join(dir, `.${path.basename(filePath)}.${crypto.randomBytes(8).toString("hex")}.tmp`)
-  let fd: number | undefined
-
-  try {
-    fd = fs.openSync(tmpPath, "wx", 0o600)
-    fs.writeFileSync(fd, content, "utf8")
-    fs.fsyncSync(fd)
-    fs.closeSync(fd)
-    fd = undefined
-    fs.renameSync(tmpPath, filePath)
-  } catch (error) {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd)
-      } catch {
-        fd = undefined
+      if (decoded.length !== 32) {
+        return yield* new VaultError({
+          operation: "unlock",
+          message: `${VAULT_KEY_ENV} must decode to exactly 32 bytes`,
+        })
       }
+
+      return decoded
     }
 
-    try {
-      fs.rmSync(tmpPath, { force: true })
-    } catch {
-      fd = undefined
-    }
+    const keyPath = path.join(vibestHome, VAULT_KEY_FILE)
+    const isPrivate = yield* ensurePrivateFile(fs, keyPath)
 
-    throw error
-  }
-}
-
-const resolveVaultKey = (vibestHome: string, envKey?: string): Effect.Effect<Buffer, VaultError> =>
-  Effect.try({
-    try: () => {
-      const fromEnv = envKey ?? process.env[VAULT_KEY_ENV]
-
-      if (fromEnv !== undefined && fromEnv.trim().length > 0) {
-        const decoded = Buffer.from(fromEnv.trim(), "base64")
-
-        if (decoded.length !== 32) {
-          throw new Error(`${VAULT_KEY_ENV} must decode to exactly 32 bytes`)
-        }
-
-        return decoded
-      }
-
-      const keyPath = path.join(vibestHome, VAULT_KEY_FILE)
-
-      if (!ensurePrivateFile(keyPath)) {
-        throw new Error(`Vault key at ${keyPath} is not a private regular file (0o600 required)`)
-      }
-
-      if (fs.existsSync(keyPath)) {
-        const existing = Buffer.from(fs.readFileSync(keyPath, "utf8").trim(), "base64")
-
-        if (existing.length !== 32) {
-          throw new Error(`Vault key at ${keyPath} is corrupted`)
-        }
-
-        return existing
-      }
-
-      const generated = crypto.randomBytes(32)
-      atomicWritePrivate(keyPath, generated.toString("base64"))
-
-      return generated
-    },
-    catch: (error) =>
-      new VaultError({
+    if (!isPrivate) {
+      return yield* new VaultError({
         operation: "unlock",
-        message: error instanceof Error ? error.message : String(error),
-      }),
+        message: `Vault key at ${keyPath} is not a private regular file (0o600 required)`,
+      })
+    }
+
+    const existingText = yield* fs.readFileString(keyPath).pipe(
+      Effect.map(Option.some),
+      Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(Option.none<string>())),
+      Effect.mapError((error) => new VaultError({ operation: "unlock", message: error.message })),
+    )
+
+    if (Option.isSome(existingText)) {
+      const existing = Buffer.from(existingText.value.trim(), "base64")
+
+      if (existing.length !== 32) {
+        return yield* new VaultError({
+          operation: "unlock",
+          message: `Vault key at ${keyPath} is corrupted`,
+        })
+      }
+
+      return existing
+    }
+
+    const generated = crypto.randomBytes(32)
+
+    yield* PrivateFile.writePrivateAtomic(fs, path, keyPath, generated.toString("base64")).pipe(
+      Effect.mapError((error) => new VaultError({ operation: "unlock", message: error.message })),
+    )
+
+    return generated
   })
 
 const encryptEntry = (key: Buffer, serverUrl: string, entry: CredentialEntry): EncryptedRecord => {
@@ -238,57 +221,61 @@ export interface VaultOptions {
   readonly vaultKeyBase64?: string | undefined
 }
 
-export const make = (options: VaultOptions): Interface => {
+export const make = Effect.fn("McpVault.make")(function* (
+  options: VaultOptions,
+): Effect.fn.Return<Interface, never, FileSystem.FileSystem | Path.Path> {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
   const vaultPath = path.join(options.vibestHome, VAULT_FILE)
   const cache = new Map<string, CredentialEntry | undefined>()
   const generations = new Map<string, number>()
-  const refreshMutexes = new Map<string, Semaphore.Semaphore>()
+  const refreshLocks = KeyedMutex.makeUnsafe<string>()
   const storeLock = Semaphore.makeUnsafe(1)
 
-  const getMutex = (key: string): Semaphore.Semaphore => {
-    const existing = refreshMutexes.get(key)
-
-    if (existing) return existing
-    const created = Semaphore.makeUnsafe(1)
-    refreshMutexes.set(key, created)
-
-    return created
-  }
-
   const readStoreFile = (): Effect.Effect<Record<string, EncryptedRecord>, VaultError> =>
-    Effect.try({
-      try: () => {
-        if (!ensurePrivateFile(vaultPath)) {
-          throw new Error(`Vault file at ${vaultPath} is not a private regular file (0o600 required)`)
-        }
+    Effect.gen(function* () {
+      const isPrivate = yield* ensurePrivateFile(fs, vaultPath)
 
-        if (!fs.existsSync(vaultPath)) return {}
-        const decoded = decodeVaultStore(JSON.parse(fs.readFileSync(vaultPath, "utf8")))
-
-        if (Option.isNone(decoded)) {
-          throw new Error(`Vault file at ${vaultPath} is corrupted or has unsupported version`)
-        }
-
-        return { ...decoded.value.entries }
-      },
-      catch: (error) =>
-        new VaultError({
+      if (!isPrivate) {
+        return yield* new VaultError({
           operation: "read",
-          message: error instanceof Error ? error.message : String(error),
-        }),
+          message: `Vault file at ${vaultPath} is not a private regular file (0o600 required)`,
+        })
+      }
+
+      const raw = yield* fs.readFileString(vaultPath).pipe(
+        Effect.map(Option.some),
+        Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(Option.none<string>())),
+        Effect.mapError((error) => new VaultError({ operation: "read", message: error.message })),
+      )
+
+      if (Option.isNone(raw)) return {}
+
+      return yield* Effect.try({
+        try: () => {
+          const decoded = decodeVaultStore(JSON.parse(raw.value))
+
+          if (Option.isNone(decoded)) {
+            throw new Error(`Vault file at ${vaultPath} is corrupted or has unsupported version`)
+          }
+
+          return { ...decoded.value.entries }
+        },
+        catch: (error) =>
+          new VaultError({
+            operation: "read",
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      })
     })
 
   const writeStoreFile = (entries: Readonly<Record<string, EncryptedRecord>>): Effect.Effect<void, VaultError> =>
-    Effect.try({
-      try: () => {
-        atomicWritePrivate(vaultPath, JSON.stringify({ version: ENVELOPE_VERSION, entries }, null, 2))
-      },
-      catch: (error) =>
-        new VaultError({
-          operation: "write",
-          message: error instanceof Error ? error.message : String(error),
-        }),
-    })
+    PrivateFile.writePrivateAtomic(
+      fs,
+      path,
+      vaultPath,
+      JSON.stringify({ version: ENVELOPE_VERSION, entries }, null, 2),
+    ).pipe(Effect.mapError((error) => new VaultError({ operation: "write", message: error.message })))
 
   const get = Effect.fn("McpVault.get")(function* (
     server: string,
@@ -302,7 +289,7 @@ export const make = (options: VaultOptions): Interface => {
       return cached ? structuredClone(cached) : undefined
     }
 
-    const encryptionKey = yield* resolveVaultKey(options.vibestHome, options.vaultKeyBase64)
+    const encryptionKey = yield* resolveVaultKey(fs, path, options.vibestHome, options.vaultKeyBase64)
     const store = yield* readStoreFile()
     const record = store[key]
 
@@ -335,7 +322,7 @@ export const make = (options: VaultOptions): Interface => {
 
     yield* storeLock.withPermit(
       Effect.gen(function* () {
-        const encryptionKey = yield* resolveVaultKey(options.vibestHome, options.vaultKeyBase64)
+        const encryptionKey = yield* resolveVaultKey(fs, path, options.vibestHome, options.vaultKeyBase64)
         const store = yield* readStoreFile()
         const encrypted = encryptEntry(encryptionKey, serverUrl, entry)
         yield* writeStoreFile({ ...store, [key]: encrypted })
@@ -373,9 +360,8 @@ export const make = (options: VaultOptions): Interface => {
     refreshOptions: RefreshOptions<E>,
   ): Effect.Effect<CredentialEntry | undefined, VaultError | E> => {
     const key = entryKey(server, serverUrl)
-    const mutex = getMutex(key)
 
-    return mutex.withPermit(
+    return refreshLocks.withLock(key)(
       Effect.gen(function* () {
         const startGen = generations.get(key) ?? 0
         const current = yield* get(server, serverUrl)
@@ -416,7 +402,24 @@ export const make = (options: VaultOptions): Interface => {
     )
   }
 
-  return { get, set, remove, generation, refresh }
-}
+  return Service.of({ get, set, remove, generation, refresh })
+})
 
-export const layer = (options: VaultOptions) => Layer.succeed(Service, make(options))
+export const layer = (options?: Partial<VaultOptions>) =>
+  Layer.effect(
+    Service,
+    Effect.gen(function* () {
+      const vibestHome = options?.vibestHome ?? (yield* Layout).home
+
+      return yield* make({
+        vibestHome,
+        ...(options?.vaultKeyBase64 !== undefined && { vaultKeyBase64: options.vaultKeyBase64 }),
+      })
+    }),
+  )
+
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer(),
+  deps: [PlatformNode.layout, PlatformNode.fileSystem, PlatformNode.path],
+})

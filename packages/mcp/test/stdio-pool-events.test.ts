@@ -3,13 +3,39 @@ import os from "node:os"
 import path from "node:path"
 
 import { BunServices } from "@effect/platform-bun"
-import type { Mcp } from "@vibest/schema/mcp"
-import { Deferred, Effect, Exit, FiberSet, Scope, Stream } from "effect"
+import { Bus } from "@vibest/core/bus"
+import { Layout } from "@vibest/schema/layout"
+import type { Mcp as McpSchema } from "@vibest/schema/mcp"
+import { Deferred, Effect, Exit, FiberSet, Layer, Scope, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 
 import { McpClient } from "../src/client.ts"
+import { Mcp } from "../src/index.ts"
+import { McpMetadataCache } from "../src/metadata-cache.ts"
 import { McpPool } from "../src/pool.ts"
-import { McpRuntime } from "../src/service.ts"
+import { McpVault } from "../src/vault.ts"
+
+const noopBusLayer = Layer.succeed(
+  Bus.Service,
+  Bus.Service.of({
+    subscribe: () => Effect.die("unused"),
+    publish: () => Effect.succeed(undefined as never),
+    transaction: (effect) => effect,
+    afterCommit: () => Effect.undefined,
+    log: () => Stream.empty,
+    project: () => Effect.undefined,
+    rebuild: Effect.void,
+  }),
+)
+
+const testMcpEnv = (vibestHome: string) => {
+  const layoutLayer = Layer.effect(Layout, Layout.make(vibestHome)).pipe(Layer.provide(BunServices.layer))
+  const base = Layer.mergeAll(BunServices.layer, layoutLayer, noopBusLayer)
+
+  return Layer.mergeAll(McpPool.layer(), McpVault.layer({ vibestHome }), McpMetadataCache.layer(vibestHome)).pipe(
+    Layer.provideMerge(base),
+  )
+}
 
 const FAKE_STDIO_SERVER = `
 import readline from "node:readline"
@@ -142,7 +168,7 @@ describe("McpStdio, McpPool scale-to-zero, and SEP-3415 events", () => {
     fs.writeFileSync(script, FAKE_STDIO_SERVER, "utf8")
 
     try {
-      const config: Mcp.LocalServerConfig = {
+      const config: McpSchema.LocalServerConfig = {
         type: "local",
         command: [process.execPath, script],
         cwd: dir,
@@ -189,7 +215,7 @@ describe("McpStdio, McpPool scale-to-zero, and SEP-3415 events", () => {
     fs.writeFileSync(script, FAKE_STDIO_SERVER, "utf8")
 
     try {
-      const config: Mcp.LocalServerConfig = {
+      const config: McpSchema.LocalServerConfig = {
         type: "local",
         command: [process.execPath, script],
         cwd: dir,
@@ -292,7 +318,7 @@ describe("McpStdio, McpPool scale-to-zero, and SEP-3415 events", () => {
     fs.writeFileSync(script, FAKE_STDIO_SERVER, "utf8")
 
     try {
-      const unpooledConfig: Mcp.LocalServerConfig = {
+      const unpooledConfig: McpSchema.LocalServerConfig = {
         type: "local",
         command: [process.execPath, script],
         cwd: dir,
@@ -368,7 +394,7 @@ describe("McpStdio, McpPool scale-to-zero, and SEP-3415 events", () => {
       const ephemeral = await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
-            const rt = yield* McpRuntime.make({ vibestHome })
+            const rt = yield* Mcp.make()
 
             yield* rt.add("idle-srv", {
               type: "local",
@@ -385,7 +411,7 @@ describe("McpStdio, McpPool scale-to-zero, and SEP-3415 events", () => {
 
             return { pid, aliveAfterIdle: isPidAlive(pid) }
           }),
-        ).pipe(Effect.provide(BunServices.layer)),
+        ).pipe(Effect.provide(testMcpEnv(vibestHome))),
       )
 
       expect(ephemeral.pid).toBeGreaterThan(0)
@@ -460,7 +486,7 @@ rl.on("line", (line) => {
       const result = await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
-            const rt = yield* McpRuntime.make({ vibestHome })
+            const rt = yield* Mcp.make()
 
             yield* rt.add("priv-srv", {
               type: "local",
@@ -481,7 +507,7 @@ rl.on("line", (line) => {
               toolNames: afterTools.map((t) => t.name),
             }
           }),
-        ).pipe(Effect.provide(BunServices.layer)),
+        ).pipe(Effect.provide(testMcpEnv(vibestHome))),
       )
 
       expect(result.hasSecretOnDisk).toBe(false)

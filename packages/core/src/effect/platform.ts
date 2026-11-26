@@ -31,3 +31,4 @@ export const sqlClient = LayerNode.make({
 
 export const layout = LayerNode.unbound(Layout)
 export const httpClient = LayerNode.make({ service: HttpClient.HttpClient, layer: FetchHttpClient.layer, deps: [] })
+export const fetch = LayerNode.unbound(FetchHttpClient.Fetch)

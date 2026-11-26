@@ -1,11 +1,12 @@
 import crypto from "node:crypto"
-import fs from "node:fs"
-import path from "node:path"
 
+import { PlatformNode } from "@vibest/core/effect/platform"
+import { PrivateFile } from "@vibest/core/effect/private-file"
+import { Layout } from "@vibest/schema/layout"
 import { Mcp } from "@vibest/schema/mcp"
-import { Option, Schema } from "effect"
+import { LayerNode } from "@vibest/util/layer-node"
+import { Clock, Context, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 
-import { writeAtomicFile } from "./fs-util.ts"
 import { McpSecrets } from "./secrets.ts"
 
 export * as McpMetadataCache from "./metadata-cache.ts"
@@ -76,11 +77,18 @@ export const isPersistable = (
   return true
 }
 
-export interface MetadataCacheStore {
-  readonly get: (server: string, fingerprint: string, now?: number, maxAgeMs?: number) => CachedServerEntry | undefined
-  readonly set: (server: string, config: Mcp.ServerConfig, entry: CachedServerEntry) => void
-  readonly invalidate: (server: string) => void
+export interface Interface {
+  readonly get: (
+    server: string,
+    fingerprint: string,
+    now?: number,
+    maxAgeMs?: number,
+  ) => Effect.Effect<CachedServerEntry | undefined>
+  readonly set: (server: string, config: Mcp.ServerConfig, entry: CachedServerEntry) => Effect.Effect<void>
+  readonly invalidate: (server: string) => Effect.Effect<void>
 }
+
+export class Service extends Context.Service<Service, Interface>()("@vibest/McpMetadataCache") {}
 
 const isEntryValid = (entry: CachedServerEntry, fingerprint: string, now: number, maxAgeMs: number): boolean => {
   if (entry.fingerprint !== fingerprint) return false
@@ -97,77 +105,107 @@ const isEntryValid = (entry: CachedServerEntry, fingerprint: string, now: number
   return true
 }
 
-export const make = (vibestHome: string): MetadataCacheStore => {
+export const make = Effect.fn("McpMetadataCache.make")(function* (
+  vibestHome: string,
+): Effect.fn.Return<Interface, never, FileSystem.FileSystem | Path.Path> {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
   const cachePath = path.join(vibestHome, "cache", "mcp-metadata-cache.json")
   const memory = new Map<string, CachedServerEntry>()
 
-  const readDisk = (): Record<string, CachedServerEntry> => {
-    if (!fs.existsSync(cachePath)) return {}
+  const readDisk = (): Effect.Effect<Record<string, CachedServerEntry>> =>
+    fs.readFileString(cachePath).pipe(
+      Effect.map((raw) => {
+        try {
+          const parsed = decodeDiskCache(JSON.parse(raw))
 
-    try {
-      const parsed = decodeDiskCache(JSON.parse(fs.readFileSync(cachePath, "utf8")))
+          return Option.isSome(parsed) ? { ...parsed.value.servers } : {}
+        } catch {
+          return {}
+        }
+      }),
+      Effect.orElseSucceed(() => ({})),
+    )
 
-      return Option.isSome(parsed) ? { ...parsed.value.servers } : {}
-    } catch {
-      return {}
-    }
-  }
+  const writeDisk = (servers: Readonly<Record<string, CachedServerEntry>>): Effect.Effect<void> =>
+    PrivateFile.writeAtomic(fs, path, cachePath, JSON.stringify({ version: CACHE_VERSION, servers }, null, 2)).pipe(
+      Effect.ignore,
+    )
 
-  const writeDisk = (servers: Readonly<Record<string, CachedServerEntry>>): void => {
-    try {
-      writeAtomicFile(cachePath, JSON.stringify({ version: CACHE_VERSION, servers }, null, 2))
-    } catch {
-      return
-    }
-  }
+  const removeFromDisk = (server: string): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const disk = yield* readDisk()
 
-  const removeFromDisk = (server: string): void => {
-    const disk = readDisk()
+      if (!(server in disk)) return
+      const next = { ...disk }
+      delete next[server]
+      yield* writeDisk(next)
+    })
 
-    if (!(server in disk)) return
-    const next = { ...disk }
-    delete next[server]
-    writeDisk(next)
-  }
-
-  const get = (server: string, fingerprint: string, now = Date.now(), maxAgeMs = 0): CachedServerEntry | undefined => {
+  const get = Effect.fn("McpMetadataCache.get")(function* (
+    server: string,
+    fingerprint: string,
+    now?: number,
+    maxAgeMs = 0,
+  ): Effect.fn.Return<CachedServerEntry | undefined> {
+    const currentNow = now ?? (yield* Clock.currentTimeMillis)
     const inMem = memory.get(server)
 
     if (inMem !== undefined) {
-      if (isEntryValid(inMem, fingerprint, now, maxAgeMs)) return inMem
+      if (isEntryValid(inMem, fingerprint, currentNow, maxAgeMs)) return inMem
 
       if (inMem.cacheScope === "private" || inMem.ttlMs === 0) return undefined
     }
 
-    const disk = readDisk()[server]
+    const disk = (yield* readDisk())[server]
 
     if (!disk) return undefined
 
     if (disk.cacheScope === "private" || disk.ttlMs === 0) return undefined
 
-    if (!isEntryValid(disk, fingerprint, now, maxAgeMs)) return undefined
+    if (!isEntryValid(disk, fingerprint, currentNow, maxAgeMs)) return undefined
     memory.set(server, disk)
 
     return disk
-  }
+  })
 
-  const set = (server: string, config: Mcp.ServerConfig, entry: CachedServerEntry): void => {
+  const set = Effect.fn("McpMetadataCache.set")(function* (
+    server: string,
+    config: Mcp.ServerConfig,
+    entry: CachedServerEntry,
+  ): Effect.fn.Return<void> {
     memory.set(server, entry)
 
     if (!isPersistable(config, { cacheScope: entry.cacheScope, ttlMs: entry.ttlMs })) {
-      removeFromDisk(server)
+      yield* removeFromDisk(server)
 
       return
     }
 
-    const disk = readDisk()
-    writeDisk({ ...disk, [server]: entry })
-  }
+    const disk = yield* readDisk()
+    yield* writeDisk({ ...disk, [server]: entry })
+  })
 
-  const invalidate = (server: string): void => {
+  const invalidate = Effect.fn("McpMetadataCache.invalidate")(function* (server: string): Effect.fn.Return<void> {
     memory.delete(server)
-    removeFromDisk(server)
-  }
+    yield* removeFromDisk(server)
+  })
 
-  return { get, set, invalidate }
-}
+  return Service.of({ get, set, invalidate })
+})
+
+export const layer = (vibestHome?: string) =>
+  Layer.effect(
+    Service,
+    Effect.gen(function* () {
+      const home = vibestHome ?? (yield* Layout).home
+
+      return yield* make(home)
+    }),
+  )
+
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer(),
+  deps: [PlatformNode.layout, PlatformNode.fileSystem, PlatformNode.path],
+})

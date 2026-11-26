@@ -1,119 +1,127 @@
-import childProcess from "node:child_process"
 import crypto from "node:crypto"
 
 import type { Mcp } from "@vibest/schema/mcp"
-import { Effect, Predicate } from "effect"
+import { Duration, Effect, Option, Predicate, Stream } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { SecretResolutionError } from "./errors.ts"
 
 export * as McpSecrets from "./secrets.ts"
 
-const COMMAND_TIMEOUT_MS = 10_000
+const COMMAND_TIMEOUT = Duration.seconds(10)
 const COMMAND_MAX_OUTPUT_BYTES = 1024 * 1024
-const USE_PROCESS_GROUP = process.platform !== "win32"
 
 export const isCommandSecret = (value: string): boolean => value.startsWith("!") && !value.startsWith("!!")
 
 const unescapeLiteral = (value: string): string => (value.startsWith("!!") ? value.slice(1) : value)
 
-const runSecretCommand = (command: string, context: string): Effect.Effect<string, SecretResolutionError> =>
-  Effect.callback<string, SecretResolutionError>((resume) => {
-    let output = Buffer.alloc(0)
-    let settled = false
+const shellCommandFor = (command: string): readonly [string, ReadonlyArray<string>] =>
+  process.platform === "win32" ? ["cmd.exe", ["/d", "/s", "/c", command]] : ["/bin/sh", ["-c", command]]
 
-    const child = childProcess.spawn(command, {
-      shell: true,
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-      detached: USE_PROCESS_GROUP,
-    })
+const runSecretCommand = (
+  command: string,
+  context: string,
+): Effect.Effect<string, SecretResolutionError, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const [bin, args] = shellCommandFor(command)
 
-    const killChild = () => {
-      if (child.pid === undefined) return
+    const program = Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* spawner
+          .spawn(
+            ChildProcess.make(bin, [...args], {
+              stdin: "ignore",
+              stdout: "pipe",
+              stderr: "ignore",
+              detached: process.platform !== "win32",
+              forceKillAfter: Duration.seconds(1),
+            }),
+          )
+          .pipe(
+            Effect.mapError(
+              (error) =>
+                new SecretResolutionError({
+                  context,
+                  message: `secret command failed to start: ${error.message}`,
+                }),
+            ),
+          )
 
-      if (USE_PROCESS_GROUP) {
-        try {
-          process.kill(-child.pid, "SIGKILL")
-        } catch {
-          return
+        const chunks: Array<Uint8Array> = []
+        let totalBytes = 0
+
+        yield* handle.stdout.pipe(
+          Stream.runForEach((chunk) =>
+            Effect.suspend(() => {
+              totalBytes += chunk.byteLength
+
+              if (totalBytes > COMMAND_MAX_OUTPUT_BYTES) {
+                return handle.kill({ killSignal: "SIGKILL" }).pipe(
+                  Effect.ignore,
+                  Effect.andThen(
+                    Effect.fail(
+                      new SecretResolutionError({
+                        context,
+                        message: "secret command output exceeded 1 MiB",
+                      }),
+                    ),
+                  ),
+                )
+              }
+
+              chunks.push(chunk)
+
+              return Effect.void
+            }),
+          ),
+          Effect.mapError((error) =>
+            error instanceof SecretResolutionError
+              ? error
+              : new SecretResolutionError({ context, message: error.message }),
+          ),
+        )
+
+        const code = yield* handle.exitCode.pipe(
+          Effect.mapError((error) => new SecretResolutionError({ context, message: error.message })),
+        )
+
+        if (Number(code) !== 0) {
+          return yield* new SecretResolutionError({
+            context,
+            message: `secret command exited with code ${code}`,
+          })
         }
 
-        return
-      }
+        const resolved = Buffer.concat(chunks, totalBytes).toString("utf8").trim()
 
-      try {
-        child.kill("SIGKILL")
-      } catch {
-        return
-      }
+        if (resolved.length === 0) {
+          return yield* new SecretResolutionError({
+            context,
+            message: "secret command returned empty output",
+          })
+        }
+
+        return resolved
+      }),
+    )
+
+    const result = yield* program.pipe(Effect.timeoutOption(COMMAND_TIMEOUT))
+
+    if (Option.isNone(result)) {
+      return yield* new SecretResolutionError({
+        context,
+        message: `secret command timed out after ${Duration.toMillis(COMMAND_TIMEOUT)}ms`,
+      })
     }
 
-    const finishError = (message: string) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resume(Effect.fail(new SecretResolutionError({ context, message })))
-    }
-
-    const finishSuccess = (value: string) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resume(Effect.succeed(value))
-    }
-
-    const timer = setTimeout(() => {
-      killChild()
-      finishError(`secret command timed out after ${COMMAND_TIMEOUT_MS}ms`)
-    }, COMMAND_TIMEOUT_MS)
-
-    child.on("error", (error) => {
-      finishError(`secret command failed to start: ${error.message}`)
-    })
-
-    child.stdout.on("data", (chunk: Buffer | string) => {
-      if (settled) return
-      output = Buffer.concat([output, Buffer.from(chunk)])
-
-      if (output.byteLength > COMMAND_MAX_OUTPUT_BYTES) {
-        killChild()
-        finishError("secret command output exceeded 1 MiB")
-      }
-    })
-
-    child.on("close", (code) => {
-      if (settled) return
-
-      if (code !== 0) {
-        finishError(`secret command exited with code ${code ?? "unknown"}`)
-
-        return
-      }
-
-      const resolved = output.toString("utf8").trim()
-
-      if (resolved.length === 0) {
-        finishError("secret command returned empty output")
-
-        return
-      }
-
-      finishSuccess(resolved)
-    })
-
-    return Effect.sync(() => {
-      if (!settled) {
-        settled = true
-        clearTimeout(timer)
-        killChild()
-      }
-    })
+    return result.value
   })
 
 export const resolveValue = Effect.fn("McpSecrets.resolveValue")(function* (
   value: string,
   context: string,
-): Effect.fn.Return<string, SecretResolutionError> {
+): Effect.fn.Return<string, SecretResolutionError, ChildProcessSpawner.ChildProcessSpawner> {
   if (!isCommandSecret(value)) return unescapeLiteral(value)
 
   return yield* runSecretCommand(value.slice(1), context)
@@ -122,7 +130,11 @@ export const resolveValue = Effect.fn("McpSecrets.resolveValue")(function* (
 export const resolveRecord = Effect.fn("McpSecrets.resolveRecord")(function* (
   record: Readonly<Record<string, string>> | undefined,
   contextPrefix: string,
-): Effect.fn.Return<Record<string, string> | undefined, SecretResolutionError> {
+): Effect.fn.Return<
+  Record<string, string> | undefined,
+  SecretResolutionError,
+  ChildProcessSpawner.ChildProcessSpawner
+> {
   if (record === undefined) return undefined
   const resolved: Record<string, string> = {}
 
@@ -136,7 +148,7 @@ export const resolveRecord = Effect.fn("McpSecrets.resolveRecord")(function* (
 export const resolveServerConfig = Effect.fn("McpSecrets.resolveServerConfig")(function* (
   server: string,
   config: Mcp.ServerConfig,
-): Effect.fn.Return<Mcp.ServerConfig, SecretResolutionError> {
+): Effect.fn.Return<Mcp.ServerConfig, SecretResolutionError, ChildProcessSpawner.ChildProcessSpawner> {
   if (config.type === "local") {
     const environment = yield* resolveRecord(config.environment, `${server}.environment`)
 

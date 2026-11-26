@@ -249,6 +249,9 @@ const repeats = (error: Error | string | number | boolean | null | undefined): b
   )
 }
 
+const rejectsUnknownQuery = (target: URL): boolean =>
+  target.hostname.endsWith(".googleapis.com") || target.hostname === "googleapis.com"
+
 const negotiation = (protocol: Mcp.Protocol | undefined): VersionNegotiationOptions => {
   if (protocol === "legacy") return { mode: "legacy" }
 
@@ -495,8 +498,10 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
       return yield* initialize(transport)
     }
 
-    const scopedFetch = McpOAuth.createScopedFetch({
+    const scopedFetch = yield* McpOAuth.loggedFetch({
+      server,
       serverUrl: resolvedConfig.url,
+      directory: options.directory,
       customHeaders: resolvedConfig.headers,
       baseFetch: options.baseFetch,
     })
@@ -513,7 +518,9 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
     }
 
     const parsedUrl = new URL(resolvedConfig.url)
-    const addedCodemode = resolvedConfig.codemode === false && !parsedUrl.searchParams.has("codemode")
+
+    const addedCodemode =
+      resolvedConfig.codemode !== false && !parsedUrl.searchParams.has("codemode") && !rejectsUnknownQuery(parsedUrl)
 
     if (addedCodemode) parsedUrl.searchParams.set("codemode", "false")
 

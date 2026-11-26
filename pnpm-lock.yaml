@@ -423,6 +423,9 @@ importers:
       '@modelcontextprotocol/core':
         specifier: 2.4.0
         version: 2.4.0
+      '@vibest/core':
+        specifier: workspace:*
+        version: link:../core
       '@vibest/schema':
         specifier: workspace:*
         version: link:../schema

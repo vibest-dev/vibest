@@ -8,7 +8,7 @@ const allowed = {
   plugin: ["@vibest/schema"],
   protocol: ["@vibest/schema"],
   client: ["@vibest/schema", "@vibest/protocol"],
-  mcp: ["@vibest/util", "@vibest/schema"],
+  mcp: ["@vibest/util", "@vibest/schema", "@vibest/core"],
   core: ["@vibest/util", "@vibest/schema", "@vibest/plugin"],
   server: ["@vibest/util", "@vibest/schema", "@vibest/plugin", "@vibest/core", "@vibest/protocol", "@vibest/client"],
   "platform-bun": [

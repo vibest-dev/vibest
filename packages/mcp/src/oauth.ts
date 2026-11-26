@@ -9,6 +9,7 @@ import {
   LATEST_PROTOCOL_VERSION,
   OAuthError,
   OAuthErrorCode,
+  parseErrorResponse,
   refreshAuthorization,
   resourceUrlFromServerUrl,
   UnauthorizedError,
@@ -21,7 +22,9 @@ import {
 } from "@modelcontextprotocol/client"
 import { OAuthMetadataSchema, OpenIdProviderDiscoveryMetadataSchema } from "@modelcontextprotocol/core"
 import { Mcp } from "@vibest/schema/mcp"
-import { Clock, Duration, Effect, Fiber, Schema } from "effect"
+import { Cause, Clock, Duration, Effect, Fiber, Match, Schema } from "effect"
+import { FetchHttpClient } from "effect/http"
+import { ChildProcessSpawner } from "effect/process"
 
 import { OAuthFlowError } from "./errors.ts"
 import { startLoopbackListener } from "./oauth-callback.ts"
@@ -58,7 +61,7 @@ const parseUrl = (raw: string, server: string, label: string): Effect.Effect<URL
 const resolveRemoteSecrets = (
   server: string,
   config: Mcp.RemoteServerConfig,
-): Effect.Effect<Mcp.RemoteServerConfig, OAuthFlowError> =>
+): Effect.Effect<Mcp.RemoteServerConfig, OAuthFlowError, ChildProcessSpawner.ChildProcessSpawner> =>
   McpSecrets.resolveServerConfig(server, config).pipe(
     Effect.flatMap((resolved) =>
       resolved.type === "remote"
@@ -120,6 +123,88 @@ export const createScopedFetch = (options: {
     return base(input, { ...init, headers, redirect: "manual" })
   }
 }
+
+export const loggedFetch = (fields: {
+  readonly server: string
+  readonly serverUrl: string
+  readonly directory?: string | undefined
+  readonly customHeaders?: Readonly<Record<string, string>> | undefined
+  readonly baseFetch?: FetchLike | undefined
+}) =>
+  Effect.gen(function* () {
+    const run = Effect.runPromiseWith(yield* Effect.context())
+    const contextFetch = yield* FetchHttpClient.Fetch
+    const base: FetchLike = fields.baseFetch ?? ((input, init) => contextFetch(input, init))
+
+    const scoped = createScopedFetch({
+      serverUrl: fields.serverUrl,
+      customHeaders: fields.customHeaders,
+      baseFetch: base,
+    })
+
+    const request: FetchLike = (url, init) => {
+      const grant = init?.body instanceof URLSearchParams ? init.body.get("grant_type") : undefined
+
+      const operation = Match.value(grant).pipe(
+        Match.when("refresh_token", () => "refresh" as const),
+        Match.when("authorization_code", () => "exchange" as const),
+        Match.orElse(() => undefined),
+      )
+
+      const started = Date.now()
+      const targetOrigin = url instanceof URL ? url.origin : new URL(url).origin
+
+      return run(
+        Effect.gen(function* () {
+          if (operation) yield* Effect.logInfo("mcp oauth request started")
+          const response = yield* Effect.tryPromise({ try: () => scoped(url, init), catch: (error) => error })
+          const result = { status: response.status, durationMs: Date.now() - started }
+
+          if (operation && !response.ok) {
+            const error = yield* Effect.tryPromise(async () => parseErrorResponse(await response.clone().text())).pipe(
+              Effect.orElseSucceed(() => undefined),
+            )
+
+            yield* Effect.logWarning("mcp oauth request rejected", {
+              ...result,
+              error: error?.code,
+              message: error?.message,
+            })
+          }
+
+          if (operation && response.ok) {
+            yield* Effect.logInfo("mcp oauth request succeeded", result)
+          }
+
+          if (!operation && (response.status === 401 || response.status === 403)) {
+            yield* Effect.logWarning("mcp http authentication rejected", result)
+          }
+
+          return response
+        }).pipe(
+          Effect.onError((cause) => {
+            if (init?.signal?.aborted) return Effect.logDebug("mcp http request aborted")
+            const err = Cause.squash(cause)
+
+            return Effect.logWarning("mcp http request failed", {
+              error: err instanceof Error ? err.message : String(err),
+              durationMs: Date.now() - started,
+            })
+          }),
+          Effect.annotateLogs({
+            server: fields.server,
+            ...(fields.directory !== undefined && { directory: fields.directory }),
+            requestID: crypto.randomUUID(),
+            origin: targetOrigin,
+            method: init?.method ?? "GET",
+            ...(operation !== undefined && { operation }),
+          }),
+        ),
+      )
+    }
+
+    return request
+  })
 
 const configuredDiscovery = async (
   config: Mcp.RemoteServerConfig,
@@ -183,7 +268,11 @@ const exchangeRefresh = (input: {
   readonly current: McpVault.CredentialEntry
   readonly resourceMetadataUrl: URL | undefined
   readonly now: number
-}): Effect.Effect<McpVault.CredentialEntry, RefreshRejected | IssuerChanged | Error> =>
+}): Effect.Effect<
+  McpVault.CredentialEntry,
+  RefreshRejected | IssuerChanged | Error,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
   Effect.gen(function* () {
     const resolvedConfig = yield* resolveRemoteSecrets(input.server, input.config).pipe(
       Effect.mapError((error) => new Error(error.message)),
@@ -289,17 +378,27 @@ interface PresentedTokenState {
   presented: string | undefined
 }
 
-export const connectProvider = (input: {
+export const connectProvider = Effect.fn("McpOAuth.connectProvider")(function* (input: {
   readonly server: string
   readonly config: Mcp.RemoteServerConfig
-  readonly vault: McpVault.Interface
-  readonly fetchFn: FetchLike
-}): AuthProvider => {
+  readonly vault?: McpVault.Interface | undefined
+  readonly fetchFn?: FetchLike | undefined
+}): Effect.fn.Return<AuthProvider, never, McpVault.Service | ChildProcessSpawner.ChildProcessSpawner> {
+  const vault = input.vault ?? (yield* McpVault.Service)
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const context = yield* Effect.context()
+  const run = Effect.runPromiseWith(context)
+
   if (input.config.bearerToken !== undefined) {
     const rawBearer = input.config.bearerToken
 
     return {
-      token: async () => Effect.runPromise(McpSecrets.resolveValue(rawBearer, `${input.server}.bearerToken`)),
+      token: () =>
+        run(
+          McpSecrets.resolveValue(rawBearer, `${input.server}.bearerToken`).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          ),
+        ),
     }
   }
 
@@ -307,100 +406,108 @@ export const connectProvider = (input: {
     return { token: async () => undefined }
   }
 
+  const fetchFn =
+    input.fetchFn ??
+    (yield* loggedFetch({
+      server: input.server,
+      serverUrl: input.config.url,
+      customHeaders: input.config.headers,
+    }))
+
   const state: PresentedTokenState = { presented: undefined }
   const refused = () => new UnauthorizedError(`MCP server "${input.config.url}" requires user authorization`)
 
   return {
-    token: async () => {
-      const entry = await Effect.runPromise(
-        input.vault.get(input.server, input.config.url).pipe(Effect.orElseSucceed(() => undefined)),
-      )
+    token: () =>
+      run(
+        Effect.gen(function* () {
+          const entry = yield* vault.get(input.server, input.config.url).pipe(Effect.orElseSucceed(() => undefined))
 
-      if (!entry?.tokens) {
-        state.presented = undefined
+          if (!entry?.tokens) {
+            state.presented = undefined
 
-        return undefined
-      }
+            return undefined
+          }
 
-      const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
 
-      const expiringSoon =
-        entry.tokens.expiresAt !== undefined &&
-        entry.tokens.expiresAt > 0 &&
-        now + REFRESH_AHEAD_MS >= entry.tokens.expiresAt
+          const expiringSoon =
+            entry.tokens.expiresAt !== undefined &&
+            entry.tokens.expiresAt > 0 &&
+            now + REFRESH_AHEAD_MS >= entry.tokens.expiresAt
 
-      if (expiringSoon && entry.tokens.refreshToken) {
-        const refreshed = await Effect.runPromise(
-          input.vault
+          if (expiringSoon && entry.tokens.refreshToken) {
+            const refreshed = yield* vault
+              .refresh(input.server, input.config.url, {
+                presentedAccess: entry.tokens.accessToken,
+                shouldRefresh: (cur) =>
+                  cur.tokens?.expiresAt !== undefined &&
+                  cur.tokens.expiresAt > 0 &&
+                  now + REFRESH_AHEAD_MS >= cur.tokens.expiresAt,
+                perform: (cur) =>
+                  exchangeRefresh({
+                    server: input.server,
+                    config: input.config,
+                    fetchFn,
+                    current: cur,
+                    resourceMetadataUrl: undefined,
+                    now,
+                  }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+                shouldInvalidate: (error) => error instanceof RefreshRejected,
+              })
+              .pipe(Effect.orElseSucceed(() => entry))
+
+            state.presented = refreshed?.tokens?.accessToken
+
+            return state.presented
+          }
+
+          state.presented = entry.tokens.accessToken
+
+          return state.presented
+        }),
+      ),
+    onUnauthorized: (contextArg) =>
+      run(
+        Effect.gen(function* () {
+          const rejected = state.presented
+          const wwwAuth = extractWWWAuthenticateParams(contextArg.response)
+          const now = yield* Clock.currentTimeMillis
+
+          const refreshed = yield* vault
             .refresh(input.server, input.config.url, {
-              presentedAccess: entry.tokens.accessToken,
-              shouldRefresh: (cur) =>
-                cur.tokens?.expiresAt !== undefined &&
-                cur.tokens.expiresAt > 0 &&
-                now + REFRESH_AHEAD_MS >= cur.tokens.expiresAt,
+              presentedAccess: rejected,
               perform: (cur) =>
                 exchangeRefresh({
                   server: input.server,
                   config: input.config,
-                  fetchFn: input.fetchFn,
+                  fetchFn,
                   current: cur,
-                  resourceMetadataUrl: undefined,
+                  resourceMetadataUrl: wwwAuth.resourceMetadataUrl,
                   now,
-                }),
+                }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
               shouldInvalidate: (error) => error instanceof RefreshRejected,
             })
-            .pipe(Effect.orElseSucceed(() => entry)),
-        )
+            .pipe(
+              Effect.catch((error) => {
+                if (error instanceof RefreshRejected || error instanceof IssuerChanged) {
+                  return Effect.fail(refused())
+                }
 
-        state.presented = refreshed?.tokens?.accessToken
-
-        return state.presented
-      }
-
-      state.presented = entry.tokens.accessToken
-
-      return state.presented
-    },
-    onUnauthorized: async (context) => {
-      const rejected = state.presented
-      const wwwAuth = extractWWWAuthenticateParams(context.response)
-      const now = Date.now()
-
-      const refreshed = await Effect.runPromise(
-        input.vault
-          .refresh(input.server, input.config.url, {
-            presentedAccess: rejected,
-            perform: (cur) =>
-              exchangeRefresh({
-                server: input.server,
-                config: input.config,
-                fetchFn: input.fetchFn,
-                current: cur,
-                resourceMetadataUrl: wwwAuth.resourceMetadataUrl,
-                now,
+                return Effect.fail(
+                  new OAuthError(
+                    OAuthErrorCode.TemporarilyUnavailable,
+                    `Could not refresh OAuth token: ${error instanceof Error ? error.message : String(error)}`,
+                  ),
+                )
               }),
-            shouldInvalidate: (error) => error instanceof RefreshRejected,
-          })
-          .pipe(
-            Effect.catch((error) => {
-              if (error instanceof RefreshRejected || error instanceof IssuerChanged) {
-                return Effect.fail(refused())
-              }
+            )
 
-              return Effect.fail(
-                new OAuthError(
-                  OAuthErrorCode.TemporarilyUnavailable,
-                  `Could not refresh OAuth token: ${error instanceof Error ? error.message : String(error)}`,
-                ),
-              )
-            }),
-          ),
-      )
-
-      if (!refreshed?.tokens?.accessToken) throw refused()
-    },
+          if (!refreshed?.tokens?.accessToken) return yield* Effect.fail(refused())
+        }),
+      ),
   }
-}
+})
 
 interface PendingFlow {
   readonly server: string
@@ -447,14 +554,17 @@ export interface AuthManager {
   readonly closeAll: Effect.Effect<void>
 }
 
-export const makeAuthManager = (options: {
-  readonly vault: McpVault.Interface
+export const makeAuthManager = Effect.fn("McpOAuth.makeAuthManager")(function* (options?: {
+  readonly vault?: McpVault.Interface | undefined
   readonly baseFetch?: FetchLike | undefined
   readonly enableLoopback?: boolean | undefined
   readonly pendingFlowTtlMs?: number | undefined
-}): AuthManager => {
+}): Effect.fn.Return<AuthManager, never, McpVault.Service | ChildProcessSpawner.ChildProcessSpawner> {
+  const vault = options?.vault ?? (yield* McpVault.Service)
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const contextFetch = yield* FetchHttpClient.Fetch
   const pending = new Map<string, PendingFlow>()
-  const flowTtlMs = options.pendingFlowTtlMs ?? PENDING_FLOW_TTL_MS
+  const flowTtlMs = options?.pendingFlowTtlMs ?? PENDING_FLOW_TTL_MS
 
   const cleanupFlow = (server: string): Effect.Effect<void> =>
     Effect.suspend(() => {
@@ -513,7 +623,7 @@ export const makeAuthManager = (options: {
       now,
     })
 
-    yield* options.vault
+    yield* vault
       .set(flow.server, flow.config.url, entry)
       .pipe(Effect.mapError((error) => new OAuthFlowError({ server: flow.server, message: error.message })))
 
@@ -538,17 +648,22 @@ export const makeAuthManager = (options: {
     }
 
     yield* parseUrl(rawConfig.url, server, "server")
-    const config = yield* resolveRemoteSecrets(server, rawConfig)
+
+    const config = yield* resolveRemoteSecrets(server, rawConfig).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    )
+
     const oauth = config.oauth || undefined
 
     const redirectParsed =
       oauth?.redirectUri !== undefined ? yield* parseUrl(oauth.redirectUri, server, "redirect") : undefined
 
-    const fetchFn = createScopedFetch({
+    const fetchFn = yield* loggedFetch({
+      server,
       serverUrl: config.url,
       customHeaders: config.headers,
-      baseFetch: options.baseFetch,
-    })
+      baseFetch: options?.baseFetch,
+    }).pipe(Effect.provideService(FetchHttpClient.Fetch, contextFetch))
 
     const state = crypto.randomBytes(32).toString("base64url")
     const now = yield* Clock.currentTimeMillis
@@ -562,7 +677,7 @@ export const makeAuthManager = (options: {
       authorizationUrl: undefined,
     }
 
-    const existing = yield* options.vault.get(server, config.url).pipe(Effect.orElseSucceed(() => undefined))
+    const existing = yield* vault.get(server, config.url).pipe(Effect.orElseSucceed(() => undefined))
 
     if (existing?.clientInfo) {
       storeState.client = {
@@ -574,7 +689,7 @@ export const makeAuthManager = (options: {
     const redirectPath = redirectParsed?.pathname ?? "/callback"
 
     const loopback =
-      options.enableLoopback !== false
+      options?.enableLoopback !== false
         ? yield* startLoopbackListener({
             redirectPath,
             requestedPort: oauth?.callbackPort ?? (Number(redirectParsed?.port) || 0),
@@ -842,7 +957,7 @@ export const makeAuthManager = (options: {
       updatedAt: now,
     }
 
-    yield* options.vault
+    yield* vault
       .set(server, config.url, entry)
       .pipe(Effect.mapError((error) => new OAuthFlowError({ server, message: error.message })))
 
@@ -860,7 +975,7 @@ export const makeAuthManager = (options: {
   ): Effect.fn.Return<void, OAuthFlowError> {
     yield* cleanupFlow(server)
     yield* parseUrl(config.url, server, "server")
-    yield* options.vault
+    yield* vault
       .remove(server, config.url)
       .pipe(Effect.mapError((error) => new OAuthFlowError({ server, message: error.message })))
   })
@@ -868,4 +983,4 @@ export const makeAuthManager = (options: {
   const closeAll = Effect.forEach(Array.from(pending.keys()), cleanupFlow, { discard: true })
 
   return { authStart, authComplete, setToken, logout, closeAll }
-}
+})

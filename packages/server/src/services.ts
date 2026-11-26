@@ -29,6 +29,7 @@ import { Restart } from "@vibest/core/session/restart"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Starts } from "@vibest/core/session/starts"
 import { SessionStore } from "@vibest/core/session/store"
+import { ToolOutput } from "@vibest/core/tool-output"
 import { Git } from "@vibest/core/worktree/git"
 import { LayerNode } from "@vibest/util/layer-node"
 
@@ -59,6 +60,7 @@ export const services = LayerNode.group([
   Subscriptions.node,
   Plugins.node,
   Mcp.node,
+  ToolOutput.node,
   RepositoryUrl.node,
   Git.node,
   SessionLocks.node,
