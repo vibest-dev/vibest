@@ -300,6 +300,28 @@ importers:
         specifier: 4.1.5
         version: 4.1.5
 
+  packages/codemode:
+    dependencies:
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@vibest/util':
+        specifier: workspace:*
+        version: link:../util
+      effect:
+        specifier: 4.1.5
+        version: 4.1.5
+      psychoscript:
+        specifier: 0.3.0
+        version: 0.3.0(effect@4.1.5)
+    devDependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.1.5(effect@4.1.5)
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.1.5(effect@4.1.5)(vitest@5.0.3)
+
   packages/core:
     dependencies:
       '@vibest/plugin':
@@ -454,6 +476,9 @@ importers:
       '@vibest/client':
         specifier: workspace:*
         version: link:../client
+      '@vibest/codemode':
+        specifier: workspace:*
+        version: link:../codemode
       '@vibest/core':
         specifier: workspace:*
         version: link:../core
@@ -693,6 +718,9 @@ importers:
       '@vibest/client':
         specifier: workspace:*
         version: link:../client
+      '@vibest/codemode':
+        specifier: workspace:*
+        version: link:../codemode
       '@vibest/core':
         specifier: workspace:*
         version: link:../core
@@ -1619,6 +1647,11 @@ packages:
   '@vitest/spy@5.0.3':
     resolution: {integrity: sha512-XhFysQTB8AZ+P4gMi+Lpo99vg2AZi0qKpaB9yXQl37+CaMEAPO3iH/wGVnSyL5MPERiLezpqTVtrR6UZH5GCXg==}
 
+  acorn@8.15.0:
+    resolution: {integrity: sha512-NZyJarBfL7nWwIq+FDL6Zp/yHEhePMNnnJ0y3qfieCrmNvYct8uvtiV41UvlSe6apAfk0fY1FbWx+NwfmpvtTg==}
+    engines: {node: '>=0.4.0'}
+    hasBin: true
+
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
@@ -2054,6 +2087,15 @@ packages:
       kerberos: ^2.0.0
     peerDependenciesMeta:
       kerberos:
+        optional: true
+
+  psychoscript@0.3.0:
+    resolution: {integrity: sha512-S4VohBlR6aXJtitKUZaYJ0OYs7AHjdKqBGYEL+6YoMU0oBFiVTFw8vTPrFujKBRuhjtj5kNu69CCJ/MBk4eM2g==}
+    engines: {bun: '>=1.4', node: '>=24'}
+    peerDependencies:
+      effect: 4.1.5
+    peerDependenciesMeta:
+      effect:
         optional: true
 
   quansync@1.0.0:
@@ -3051,6 +3093,8 @@ snapshots:
 
   '@vitest/spy@5.0.3': {}
 
+  acorn@8.15.0: {}
+
   agent-base@7.1.4: {}
 
   agent-base@9.0.0: {}
@@ -3449,6 +3493,12 @@ snapshots:
       long: 5.3.2
 
   proxy-agent-negotiate@1.1.0: {}
+
+  psychoscript@0.3.0(effect@4.1.5):
+    dependencies:
+      acorn: 8.15.0
+    optionalDependencies:
+      effect: 4.1.5
 
   quansync@1.0.0: {}
 

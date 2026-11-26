@@ -147,6 +147,8 @@ describe("vibest.sock access and endpoint coverage", () => {
           c["server.mcp"]["mcp.authSetToken"]({ params: { server: "demo" }, payload: { accessToken: "t" } }),
         ],
         ["mcp.authLogout", c["server.mcp"]["mcp.authLogout"]({ params: { server: "demo" } })],
+        ["codemode.execute", c["server.codemode"]["codemode.execute"]({ payload: { code: "return 1;" } })],
+        ["codemode.declarations", c["server.codemode"]["codemode.declarations"]({ query: {} })],
       ]
 
       const bare = yield* client
@@ -196,6 +198,7 @@ describe("vibest.sock access and endpoint coverage", () => {
 
       yield* withHeaders(bare["server.plugin"]["plugin.list"]({}), protocolHeaders())
       assert.isArray(yield* w["server.mcp"]["mcp.list"]({ query: {} }))
+      assert.isString((yield* w["server.codemode"]["codemode.declarations"]({ query: {} })).declarations)
       yield* withHeaders(bare["server.daemon"]["daemon.concurrency"]({}), protocolHeaders())
       assert.isArray(
         yield* withHeaders(

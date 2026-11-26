@@ -1,4 +1,5 @@
 import { Bus } from "@vibest/core/bus"
+import { CodeMode } from "@vibest/core/codemode"
 import { Database } from "@vibest/core/database/database"
 import { Harness } from "@vibest/core/harness"
 import { Integration } from "@vibest/core/harness/integration"
@@ -61,6 +62,7 @@ export const services = LayerNode.group([
   Plugins.node,
   Mcp.node,
   ToolOutput.node,
+  CodeMode.node,
   RepositoryUrl.node,
   Git.node,
   SessionLocks.node,

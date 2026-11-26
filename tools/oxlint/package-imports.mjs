@@ -9,6 +9,7 @@ const allowed = {
   protocol: ["@vibest/schema"],
   client: ["@vibest/schema", "@vibest/protocol"],
   mcp: ["@vibest/util", "@vibest/schema", "@vibest/core"],
+  codemode: ["@vibest/util", "@vibest/schema"],
   core: ["@vibest/util", "@vibest/schema", "@vibest/plugin"],
   server: ["@vibest/util", "@vibest/schema", "@vibest/plugin", "@vibest/core", "@vibest/protocol", "@vibest/client"],
   "platform-bun": [
@@ -16,6 +17,7 @@ const allowed = {
     "@vibest/schema",
     "@vibest/plugin",
     "@vibest/mcp",
+    "@vibest/codemode",
     "@vibest/core",
     "@vibest/client",
     "@vibest/server",

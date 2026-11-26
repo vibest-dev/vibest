@@ -200,6 +200,7 @@ export const toServerInfo = (
       }),
       toolCount: toolsList.length,
       ...(config.pool !== undefined && { pooled: config.pool }),
+      ...(config.codemode !== undefined && { codemode: config.codemode }),
       ...(config.disabled !== undefined && { disabled: config.disabled }),
       ...(config.type === "remote" && { url: config.url }),
       ...(config.type === "local" && { command: [...config.command] }),

@@ -148,6 +148,7 @@ export const ServerInfo = Schema.Struct({
   toolCount: Schema.Number,
   capabilities: Schema.optional(ServerCapabilities),
   pooled: Schema.optional(Schema.Boolean),
+  codemode: Schema.optional(Schema.Boolean),
   disabled: Schema.optional(Schema.Boolean),
   url: Schema.optional(Schema.String),
   command: Schema.optional(Schema.Array(Schema.String)),
