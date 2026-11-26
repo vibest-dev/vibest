@@ -239,9 +239,11 @@ const checks: ReadonlyArray<Check> = [
         "agy/.agents/plugins/vibest/plugin.json",
         "agy/.agents/plugins/vibest/hooks.json",
         "agy/.agents/plugins/vibest/hook.sh",
+        "agy/.agents/plugins/vibest/skills/mcp/SKILL.md",
         ...["pi", "claude", "cursor"].flatMap((h) => [
           `${h}/skills/delegate/SKILL.md`,
           `${h}/skills/pipeline/SKILL.md`,
+          `${h}/skills/mcp/SKILL.md`,
         ]),
       ])
         expect(await Bun.file(path.join(harnesses, file)).exists(), `missing ${file} in ${harnesses}`)

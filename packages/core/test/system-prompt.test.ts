@@ -62,6 +62,8 @@ describe("systemPrompt: the definition body first, then facts that name the chan
     assert.notInclude(prompt, "<title>")
     assert.include(prompt, "`<vibest-message>`")
     assert.include(prompt, "Text with no wrapper is from the user")
+    assert.include(prompt, "MCP servers, the CodeMode JS sandbox, and background automations run through `vibest mcp`")
+    assert.include(prompt, "read the `mcp` skill when using them.")
   })
 })
 

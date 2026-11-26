@@ -22,11 +22,33 @@ export const createId = (now = Date.now()): ID => {
 
 const decodeDuration = Schema.decodeUnknownOption(Schema.DurationFromString)
 
-export const durationMillis = (value: string) => decodeDuration(value).pipe(Option.map(Duration.toMillis))
+const SHORTHAND_UNITS = {
+  ms: "millis",
+  s: "seconds",
+  m: "minutes",
+  h: "hours",
+  d: "days",
+} as const
+
+type ShorthandUnit = keyof typeof SHORTHAND_UNITS
+
+const isShorthandUnit = (value: string): value is ShorthandUnit => value in SHORTHAND_UNITS
+
+const normalizeDuration = (value: string): string => {
+  const match = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)\s*$/i.exec(value)
+
+  if (!match) return value
+  const key = match[2]!.toLowerCase()
+
+  return isShorthandUnit(key) ? `${match[1]} ${SHORTHAND_UNITS[key]}` : value
+}
+
+export const durationMillis = (value: string) =>
+  decodeDuration(normalizeDuration(value)).pipe(Option.map(Duration.toMillis))
 
 export const DurationString = Schema.String.annotate({
   identifier: "AutomationDuration",
-  description: 'A duration such as "30 seconds", "5 minutes" or "2 hours".',
+  description: 'A duration such as "30 seconds", "5 minutes", "2 hours", or shorthand like "30s", "5m", "2h".',
 })
 
 const zone = {
