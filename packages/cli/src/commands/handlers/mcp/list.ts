@@ -1,5 +1,5 @@
 import { Mcp } from "@vibest/schema/mcp"
-import { Effect, Option, Path } from "effect"
+import { Console, Effect, Option, Path } from "effect"
 
 import { json, vibest } from "../../../caller.ts"
 import { Runtime } from "../../../framework/runtime.ts"
@@ -12,8 +12,29 @@ export default Runtime.handler(Commands.commands.mcp.commands.list, (o) =>
     const server = Option.getOrUndefined(o.server)
     const tool = Option.getOrUndefined(o.tool)
 
-    if (o.events && o.skills) {
-      return yield* new Mcp.ConfigError({ message: "Specify at most one of --events or --skills" })
+    const filterCount = [o.events, o.skills, o.types].filter(Boolean).length
+
+    if (filterCount > 1) {
+      return yield* new Mcp.ConfigError({ message: "Specify at most one of --events, --skills, or --types" })
+    }
+
+    if (o.types) {
+      if (tool !== undefined) {
+        return yield* new Mcp.ConfigError({ message: "--types cannot be combined with a <tool> argument" })
+      }
+
+      yield* vibest((client) =>
+        client["server.codemode"]
+          ["codemode.declarations"]({
+            query: {
+              directory,
+              ...(server !== undefined && { server }),
+            },
+          })
+          .pipe(Effect.flatMap((result) => Console.log(result.declarations))),
+      )
+
+      return
     }
 
     if (server === undefined) {

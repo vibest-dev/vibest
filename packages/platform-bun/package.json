@@ -20,6 +20,7 @@
     "@effect/platform-bun": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
     "@vibest/client": "workspace:*",
+    "@vibest/codemode": "workspace:*",
     "@vibest/core": "workspace:*",
     "@vibest/herdr-sdk": "workspace:*",
     "@vibest/mcp": "workspace:*",

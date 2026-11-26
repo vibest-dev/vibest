@@ -10,7 +10,9 @@ import { HttpConnector } from "@vibest/client/client"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { nodeUnixHttpClient } from "@vibest/client/unix-http.node"
+import { CodeModeRuntime } from "@vibest/codemode/service"
 import { App } from "@vibest/core/app"
+import { CodeMode } from "@vibest/core/codemode"
 import { PRIVATE_FILE, SQL_NAMES } from "@vibest/core/database/database"
 import { checkLedger, migrations } from "@vibest/core/database/migration"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/schema.sql"
@@ -30,6 +32,7 @@ import * as VibestPluginEffect from "@vibest/plugin/effect"
 import * as VibestPluginHost from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
 import { Layout, UserUid } from "@vibest/schema/layout"
+import { VibestApiTools } from "@vibest/server/codemode/vibest-api-tools"
 import { type Host, LockFailed } from "@vibest/server/daemon"
 import { Load } from "@vibest/server/machine/load"
 import { Machines } from "@vibest/server/machine/machines"
@@ -531,6 +534,9 @@ export const replacements: LayerNode.Replacements = [
     }),
   ),
   CoreMcp.node.replace(Mcp.node),
+  CodeMode.hostNode.replace(Layer.succeed(CodeMode.Host, () => CodeModeRuntime.make())),
+  VibestApiTools.httpConnectorNode.replace(platformNode),
+  CodeMode.builtinToolsNode.replace(VibestApiTools.node),
 ]
 
 export const app = (info: App.Interface) => App.node.replace(Layer.succeed(App.Service, info))
