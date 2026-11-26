@@ -1,7 +1,7 @@
 import { Layout } from "@vibest/schema/layout"
 import type { Mcp } from "@vibest/schema/mcp"
 import { LayerNode } from "@vibest/util/layer-node"
-import { Clock, Context, Effect, FileSystem, Layer, Path } from "effect"
+import { Clock, Context, Duration, Effect, FiberSet, FileSystem, Layer, Option, Path } from "effect"
 
 import { PlatformNode } from "./effect/platform.ts"
 
@@ -9,7 +9,11 @@ export * as ToolOutput from "./tool-output.ts"
 
 export const MAX_LINES = 2_000
 export const MAX_BYTES = 50 * 1024
+export const RETENTION = Duration.days(7)
 export const DIRECTORY = "tool-output"
+const CLEANUP_INTERVAL_MS = Duration.toMillis(Duration.hours(1))
+const RETENTION_MS = Duration.toMillis(RETENTION)
+const CLEANUP_CONCURRENCY = 8
 
 const encoder = new TextEncoder()
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" })
@@ -62,6 +66,62 @@ export const truncateInline = (text: string, maxBytes: number = MAX_BYTES): stri
   return text.slice(0, end) + suffix
 }
 
+const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+const BASE64_LOOKUP: ReadonlyMap<string, number> = new Map(Array.from(BASE64_CHARS, (ch, idx) => [ch, idx] as const))
+
+const decodeBase64 = (raw: string): Uint8Array => {
+  const cleaned = raw.replace(/\s+/g, "").replace(/=+$/, "")
+  const out = new Uint8Array(Math.floor((cleaned.length * 3) / 4))
+  let offset = 0
+  let buffer = 0
+  let bits = 0
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const val = BASE64_LOOKUP.get(cleaned[i]!)
+
+    if (val === undefined) continue
+    buffer = (buffer << 6) | val
+    bits += 6
+
+    if (bits >= 8) {
+      bits -= 8
+      out[offset++] = (buffer >> bits) & 0xff
+    }
+  }
+
+  return offset === out.length ? out : out.subarray(0, offset)
+}
+
+const extensionForMime = (mimeType: string): string => {
+  const normalized = mimeType.split(";")[0]?.trim().toLowerCase() ?? ""
+
+  switch (normalized) {
+    case "image/png":
+      return ".png"
+    case "image/jpeg":
+      return ".jpg"
+    case "image/gif":
+      return ".gif"
+    case "image/webp":
+      return ".webp"
+    case "image/svg+xml":
+      return ".svg"
+    case "application/pdf":
+      return ".pdf"
+    case "application/json":
+      return ".json"
+    case "text/plain":
+      return ".txt"
+    case "text/markdown":
+      return ".md"
+    case "text/html":
+      return ".html"
+    default:
+      return ".bin"
+  }
+}
+
 const sanitizeSegment = (value: string): string =>
   value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "tool"
 
@@ -92,6 +152,8 @@ export interface TruncateResourceInput {
 export interface Interface {
   readonly truncateCallResult: (input: TruncateCallInput) => Effect.Effect<Mcp.CallResult>
   readonly truncateResourceResult: (input: TruncateResourceInput) => Effect.Effect<Mcp.ReadResourceResult>
+  readonly save: (bytes: Uint8Array, extension: string, directory?: string) => Effect.Effect<string>
+  readonly cleanup: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("vibest/ToolOutput") {}
@@ -103,13 +165,77 @@ export const layer = Layer.effect(
     const path = yield* Path.Path
     const layout = yield* Layout
     const defaultDir = path.join(layout.home, DIRECTORY)
+    const cleanupFibers = yield* FiberSet.makeRuntime<never, void, never>()
+    const state = { lastCleanupAt: yield* Clock.currentTimeMillis }
+
+    const cleanup = Effect.fn("ToolOutput.cleanup")(function* (): Effect.fn.Return<void> {
+      const entries = yield* fs.readDirectory(defaultDir).pipe(
+        Effect.map((items) => items.filter((entry) => entry.startsWith("tool_"))),
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      )
+
+      if (entries.length === 0) return
+      const cutoff = (yield* Clock.currentTimeMillis) - RETENTION_MS
+
+      yield* Effect.forEach(
+        entries,
+        (entry) =>
+          Effect.gen(function* () {
+            const fullPath = path.join(defaultDir, entry)
+            const info = yield* fs.stat(fullPath)
+
+            if (Option.isSome(info.mtime) && info.mtime.value.getTime() < cutoff) {
+              yield* fs.remove(fullPath, { force: true })
+            }
+          }).pipe(Effect.ignore),
+        { concurrency: CLEANUP_CONCURRENCY, discard: true },
+      )
+    })
+
+    const maybeTriggerCleanup = Effect.fn("ToolOutput.maybeTriggerCleanup")(function* () {
+      const now = yield* Clock.currentTimeMillis
+
+      if (now - state.lastCleanupAt < CLEANUP_INTERVAL_MS) return
+      state.lastCleanupAt = now
+      cleanupFibers(cleanup().pipe(Effect.ignore))
+    })
+
+    yield* Effect.forkScoped(cleanup().pipe(Effect.ignore))
+
+    const ensurePrivateDir = (dir: string) =>
+      fs
+        .makeDirectory(dir, { recursive: true, mode: 0o700 })
+        .pipe(Effect.andThen(fs.chmod(dir, 0o700).pipe(Effect.ignore)))
+
+    const save = Effect.fn("ToolOutput.save")(function* (
+      bytes: Uint8Array,
+      extension: string,
+      directory?: string,
+    ): Effect.fn.Return<string> {
+      const targetDir = directory ?? defaultDir
+      const now = yield* Clock.currentTimeMillis
+      const rand = Math.random().toString(36).slice(2, 10)
+      const normalizedExt = extension.startsWith(".") || extension === "" ? extension : `.${extension}`
+      const file = path.join(targetDir, `tool_${now.toString(16)}_${rand}${normalizedExt}`)
+
+      yield* ensurePrivateDir(targetDir).pipe(
+        Effect.andThen(fs.writeFile(file, bytes, { mode: 0o600 })),
+        Effect.andThen(fs.chmod(file, 0o600).pipe(Effect.ignore)),
+        Effect.orDie,
+      )
+
+      yield* maybeTriggerCleanup()
+
+      return file
+    })
 
     const saveFullOutput = (dir: string, name: string, text: string) =>
       Effect.gen(function* () {
         const file = path.join(dir, name)
 
-        const failure = yield* fs.makeDirectory(dir, { recursive: true }).pipe(
-          Effect.andThen(fs.writeFileString(file, text)),
+        const failure = yield* ensurePrivateDir(dir).pipe(
+          Effect.andThen(fs.writeFileString(file, text, { mode: 0o600 })),
+          Effect.andThen(fs.chmod(file, 0o600).pipe(Effect.ignore)),
           Effect.as(undefined),
           Effect.catch((error) =>
             Effect.logWarning("failed to save full tool output", { file, error: error.message }).pipe(
@@ -117,6 +243,8 @@ export const layer = Layer.effect(
             ),
           ),
         )
+
+        yield* maybeTriggerCleanup()
 
         return { file, failure }
       })
@@ -151,18 +279,40 @@ export const layer = Layer.effect(
       if (input.result.truncated !== undefined) return input.result
       const maxBytes = input.maxBytes ?? MAX_BYTES
       const maxLines = input.maxLines ?? MAX_LINES
+      const targetDir = input.scratchpadDir ?? defaultDir
 
-      const textParts = input.result.content.flatMap((item) => (item.type === "text" ? [item.text] : []))
+      const normalizedContent: Array<Mcp.CallContent> = []
+      let savedMediaFile: string | undefined
+
+      for (const item of input.result.content) {
+        if (item.type === "media") {
+          const bytes = decodeBase64(item.data)
+          const savedPath = yield* save(bytes, extensionForMime(item.mimeType), targetDir)
+          savedMediaFile ??= savedPath
+          normalizedContent.push({
+            type: "text",
+            text: `[Binary resource (${item.mimeType}, ${bytes.byteLength} bytes) saved to ${savedPath}]`,
+          })
+          continue
+        }
+
+        normalizedContent.push(item)
+      }
+
+      const textParts = normalizedContent.flatMap((item) => (item.type === "text" ? [item.text] : []))
       const text = joinParts(textParts)
       const totalLines = countLines(text)
 
       if (totalLines <= maxLines && utf8ByteLength(text) <= maxBytes) {
-        return input.result
+        return {
+          ...input.result,
+          content: normalizedContent,
+          ...(savedMediaFile !== undefined && { outputFile: savedMediaFile }),
+        }
       }
 
       const end = Math.min(afterLines(text, maxLines), byteBoundary(text, maxBytes))
       const shown = stripTrailingLineBreak(text, end)
-      const targetDir = input.scratchpadDir ?? defaultDir
       const now = yield* Clock.currentTimeMillis
       const rand = Math.random().toString(36).slice(2, 10)
       const name = `tool_${now.toString(16)}_${sanitizeSegment(input.server)}_${sanitizeSegment(input.tool)}_${rand}.txt`
@@ -174,7 +324,7 @@ export const layer = Layer.effect(
       let separator = false
       let marked = false
 
-      for (const item of input.result.content) {
+      for (const item of normalizedContent) {
         if (item.type !== "text") {
           bounded.push(item)
           continue
@@ -267,7 +417,7 @@ export const layer = Layer.effect(
       }
     })
 
-    return Service.of({ truncateCallResult, truncateResourceResult })
+    return Service.of({ truncateCallResult, truncateResourceResult, save, cleanup })
   }),
 )
 

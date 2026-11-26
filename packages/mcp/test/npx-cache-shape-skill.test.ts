@@ -239,4 +239,64 @@ describe("ToolOutput unified exit guard", () => {
       expect(emojiCut.endsWith("…")).toBe(true)
     })
   })
+
+  it("saves binary media blocks to 0o600 files and cleans up tool_* files older than 7 days", async () => {
+    await withTempDirAsync(async (root) => {
+      const toolOutputDir = path.join(root, ToolOutput.DIRECTORY)
+      fs.mkdirSync(toolOutputDir, { recursive: true, mode: 0o700 })
+
+      const oldFile = path.join(toolOutputDir, "tool_old_expired.txt")
+      const recentFile = path.join(toolOutputDir, "tool_recent_keep.txt")
+      const otherFile = path.join(toolOutputDir, "unrelated_keep.txt")
+      fs.writeFileSync(oldFile, "old", "utf8")
+      fs.writeFileSync(recentFile, "recent", "utf8")
+      fs.writeFileSync(otherFile, "other", "utf8")
+
+      const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
+      const oneDayAgo = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000)
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      fs.utimesSync(oldFile, eightDaysAgo, eightDaysAgo)
+      fs.utimesSync(recentFile, oneDayAgo, oneDayAgo)
+      fs.utimesSync(otherFile, thirtyDaysAgo, thirtyDaysAgo)
+
+      const layoutLayer = Layer.effect(Layout, Layout.make(root)).pipe(Layer.provide(BunServices.layer))
+      const toolOutputLayer = ToolOutput.layer.pipe(Layer.provide(Layer.mergeAll(BunServices.layer, layoutLayer)))
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const toolOutput = yield* ToolOutput.Service
+          yield* toolOutput.cleanup()
+
+          expect(fs.existsSync(oldFile)).toBe(false)
+          expect(fs.existsSync(recentFile)).toBe(true)
+          expect(fs.existsSync(otherFile)).toBe(true)
+
+          const rawBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+          const mediaResult = yield* toolOutput.truncateCallResult({
+            server: "vision",
+            tool: "screenshot",
+            result: {
+              isError: false,
+              content: [{ type: "media", mimeType: "image/png", data: rawBytes.toString("base64") }],
+            },
+          })
+
+          expect(mediaResult.outputFile).toBeDefined()
+          expect(mediaResult.outputFile!.endsWith(".png")).toBe(true)
+          expect(Buffer.compare(fs.readFileSync(mediaResult.outputFile!), rawBytes)).toBe(0)
+
+          if (process.platform !== "win32") {
+            expect(fs.statSync(mediaResult.outputFile!).mode & 0o077).toBe(0)
+          }
+
+          expect(mediaResult.content[0]?.type).toBe("text")
+
+          if (mediaResult.content[0]?.type === "text") {
+            expect(mediaResult.content[0].text).toContain("Binary resource (image/png, 8 bytes) saved to")
+          }
+        }).pipe(Effect.provide(toolOutputLayer)),
+      )
+    })
+  })
 })
