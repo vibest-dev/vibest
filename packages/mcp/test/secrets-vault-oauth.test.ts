@@ -301,44 +301,46 @@ describe("McpOAuth PKCE 2-step headless flow, origin-locked headers, and 403 ins
 
       try {
         await Effect.runPromise(
-          Effect.gen(function* () {
-            const vault = yield* McpVault.Service
-            const manager = yield* McpOAuth.makeAuthManager({ enableLoopback: false })
+          Effect.scoped(
+            Effect.gen(function* () {
+              const vault = yield* McpVault.Service
+              const manager = yield* McpOAuth.makeAuthManager({ enableLoopback: false })
 
-            const config: McpSchema.RemoteServerConfig = {
-              type: "remote",
-              url: `${base}/mcp`,
-              oauth: {
-                authServerMetadataUrl: `${base}/.well-known/oauth-authorization-server`,
-                redirectUri: "http://127.0.0.1/cb",
-              },
-            }
+              const config: McpSchema.RemoteServerConfig = {
+                type: "remote",
+                url: `${base}/mcp`,
+                oauth: {
+                  authServerMetadataUrl: `${base}/.well-known/oauth-authorization-server`,
+                  redirectUri: "http://127.0.0.1/cb",
+                },
+              }
 
-            const started = yield* manager.authStart("remote-demo", config)
-            const authUrl = new URL(started.authorizationUrl)
-            expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256")
-            expect(authUrl.searchParams.get("state")).toBe(started.state)
-            expect(authUrl.searchParams.get("client_id")).toBe("dcr-client-1")
+              const started = yield* manager.authStart("remote-demo", config)
+              const authUrl = new URL(started.authorizationUrl)
+              expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256")
+              expect(authUrl.searchParams.get("state")).toBe(started.state)
+              expect(authUrl.searchParams.get("client_id")).toBe("dcr-client-1")
 
-            const badState = yield* Effect.exit(
-              manager.authComplete("remote-demo", `http://127.0.0.1/cb?code=abc&state=wrong-state`),
-            )
+              const badState = yield* Effect.exit(
+                manager.authComplete("remote-demo", `http://127.0.0.1/cb?code=abc&state=wrong-state`),
+              )
 
-            expect(Exit.isFailure(badState)).toBe(true)
+              expect(Exit.isFailure(badState)).toBe(true)
 
-            const completed = yield* manager.authComplete(
-              "remote-demo",
-              `http://127.0.0.1/cb?code=auth-code-99&state=${started.state}`,
-            )
+              const completed = yield* manager.authComplete(
+                "remote-demo",
+                `http://127.0.0.1/cb?code=auth-code-99&state=${started.state}`,
+              )
 
-            expect(completed.authenticated).toBe(true)
-            expect(completed.scope).toBe("read write")
-            expect(lastTokenBody).toContain("code=auth-code-99")
-            expect(lastTokenBody).toContain("code_verifier=")
+              expect(completed.authenticated).toBe(true)
+              expect(completed.scope).toBe("read write")
+              expect(lastTokenBody).toContain("code=auth-code-99")
+              expect(lastTokenBody).toContain("code_verifier=")
 
-            const stored = yield* vault.get("remote-demo", config.url)
-            expect(stored?.tokens?.accessToken).toBe("oauth-access-xyz")
-          }).pipe(Effect.provide(testMcpEnv(vibestHome))),
+              const stored = yield* vault.get("remote-demo", config.url)
+              expect(stored?.tokens?.accessToken).toBe("oauth-access-xyz")
+            }),
+          ).pipe(Effect.provide(testMcpEnv(vibestHome))),
         )
       } finally {
         asServer.close()
@@ -386,16 +388,60 @@ describe("McpOAuth PKCE 2-step headless flow, origin-locked headers, and 403 ins
     })
 
     expect(McpOAuth.extractInsufficientScope(stepUpRes)).toBe("admin:write")
+
+    const redirectHops: Array<{
+      readonly url: string
+      readonly hasCustom: boolean
+      readonly hasAuth: boolean
+    }> = []
+
+    const redirectFetch = McpOAuth.createScopedFetch({
+      serverUrl: "https://resource.example.com/mcp",
+      customHeaders: { "X-Api-Key": "secret-key" },
+      baseFetch: async (input, init) => {
+        const urlStr = String(input)
+        const headers = new Headers(init?.headers)
+        redirectHops.push({
+          url: urlStr,
+          hasCustom: headers.get("X-Api-Key") === "secret-key",
+          hasAuth: headers.has("authorization"),
+        })
+
+        if (urlStr === "https://resource.example.com/start") {
+          return new Response(null, { status: 302, headers: { location: "https://resource.example.com/same-origin" } })
+        }
+
+        if (urlStr === "https://resource.example.com/same-origin") {
+          return new Response(null, { status: 302, headers: { location: "https://cdn.other.example.com/final" } })
+        }
+
+        return new Response("redirected-ok", { status: 200 })
+      },
+    })
+
+    const finalRes = await redirectFetch("https://resource.example.com/start", {
+      headers: { authorization: "Bearer tok-123" },
+    })
+
+    expect(finalRes.status).toBe(200)
+    expect(await finalRes.text()).toBe("redirected-ok")
+    expect(redirectHops).toEqual([
+      { url: "https://resource.example.com/start", hasCustom: true, hasAuth: true },
+      { url: "https://resource.example.com/same-origin", hasCustom: true, hasAuth: true },
+      { url: "https://cdn.other.example.com/final", hasCustom: false, hasAuth: false },
+    ])
   })
 
   it("returns typed OAuthFlowError on malformed URLs and resolves !command secrets before HTTP requests", async () => {
     await withTempDirAsync(async (vibestHome) => {
       const badUrlExit = await Effect.runPromiseExit(
-        Effect.gen(function* () {
-          const manager = yield* McpOAuth.makeAuthManager({ enableLoopback: false })
+        Effect.scoped(
+          Effect.gen(function* () {
+            const manager = yield* McpOAuth.makeAuthManager({ enableLoopback: false })
 
-          return yield* manager.authStart("bad", { type: "remote", url: "not-a-valid-url" })
-        }).pipe(Effect.provide(testMcpEnv(vibestHome))),
+            return yield* manager.authStart("bad", { type: "remote", url: "not-a-valid-url" })
+          }),
+        ).pipe(Effect.provide(testMcpEnv(vibestHome))),
       )
 
       expect(Exit.isFailure(badUrlExit)).toBe(true)

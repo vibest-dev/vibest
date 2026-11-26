@@ -23,6 +23,7 @@ import {
   type ReadResourceResult,
   type Resource,
   type ResourceTemplateType,
+  type Tool as SdkTool,
   type Transport,
   type VersionNegotiationOptions,
 } from "@modelcontextprotocol/client"
@@ -59,7 +60,7 @@ export { ConnectError, EventStreamRejectedError, EventStreamTerminatedError, Nee
 
 const DEFAULT_STARTUP_TIMEOUT = 30_000
 const DEFAULT_CATALOG_TIMEOUT = 30_000
-const DEFAULT_EXECUTION_TIMEOUT = 10 * 60 * 1_000
+const DEFAULT_EXECUTION_TIMEOUT = 12 * 60 * 60 * 1_000
 const TERMINATE_TIMEOUT = 1_000
 const HEADER_MISMATCH = -32020
 const EVENTS_EXTENSION = "io.modelcontextprotocol/events"
@@ -91,7 +92,7 @@ const SkillListStandard = Schema.toStandardSchemaV1(
   }),
 )
 
-const StreamResultStandard = Schema.toStandardSchemaV1(Schema.Json)
+const StreamResultStandard = Schema.toStandardSchemaV1(Schema.Unknown)
 
 const ActiveNotificationStandard = Schema.toStandardSchemaV1(
   Schema.Struct({ cursor: CursorSchema, truncated: Schema.optional(Schema.Boolean), ...SubscribedFields }),
@@ -249,10 +250,22 @@ const repeats = (error: Error | string | number | boolean | null | undefined): b
   )
 }
 
-const rejectsUnknownQuery = (target: URL): boolean =>
-  target.hostname.endsWith(".googleapis.com") || target.hostname === "googleapis.com"
+const rejectsUnknownQuery = (target: URL): boolean => {
+  const host = target.hostname
 
-const negotiation = (protocol: Mcp.Protocol | undefined): VersionNegotiationOptions => {
+  return (
+    host === "googleapis.com" ||
+    host.endsWith(".googleapis.com") ||
+    /(^|\.)zohomcp\./.test(host) ||
+    host === "localhost" ||
+    host === "[::1]" ||
+    /^127(?:\.\d{1,3}){3}$/.test(host)
+  )
+}
+
+const negotiation = (protocol: Mcp.Protocol | undefined): VersionNegotiationOptions | undefined => {
+  if (protocol === undefined) return undefined
+
   if (protocol === "legacy") return { mode: "legacy" }
 
   if (protocol === "2026-07-28") return { mode: { pin: "2026-07-28" } }
@@ -269,16 +282,22 @@ const toCallToolResult = (result: SdkCallToolResult): Mcp.CallResult => {
         content.push({ type: "text", text: block.text })
       } else if (block.type === "image" || block.type === "audio") {
         content.push({ type: "media", data: block.data, mimeType: block.mimeType })
+      } else if (block.type === "resource_link") {
+        content.push({ type: "text", text: block.uri })
       } else if (block.type === "resource") {
         if ("text" in block.resource) {
           content.push({ type: "text", text: block.resource.text })
         } else if ("blob" in block.resource) {
-          content.push({
-            type: "media",
-            data: block.resource.blob,
-            mimeType: block.resource.mimeType ?? "application/octet-stream",
-            uri: block.resource.uri,
-          })
+          if (block.resource.mimeType) {
+            content.push({
+              type: "media",
+              data: block.resource.blob,
+              mimeType: block.resource.mimeType,
+              uri: block.resource.uri,
+            })
+          } else {
+            content.push({ type: "text", text: block.resource.uri })
+          }
         }
       }
     }
@@ -316,6 +335,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
     onChanged: () => changed[key](),
   })
 
+  const runFork = Effect.runForkWith(yield* Effect.context())
   const streams = new Map<string, Queue.Queue<Mcp.EventMessage, Error | Cause.Done>>()
   const pendingEventQueues: Array<Queue.Queue<Mcp.EventMessage, Error | Cause.Done>> = []
   const errorState: ClientErrorState = { lastError: undefined, requiredScope: undefined }
@@ -356,6 +376,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
 
   const initialize = Effect.fn("McpClient.initialize")(function* (transport: Transport) {
     if (options.events) interceptEventStreams(transport)
+    const versionNegotiation = negotiation(protocol)
 
     const client = new Client(options.clientInfo ?? { name: "vibest", version: "0.0.2" }, {
       capabilities: {
@@ -365,7 +386,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
           [SKILLS_EXTENSION]: {},
         },
       },
-      versionNegotiation: negotiation(protocol),
+      ...(versionNegotiation !== undefined && { versionNegotiation }),
       listChanged: {
         tools: listChanged("tools"),
         prompts: listChanged("prompts"),
@@ -376,6 +397,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
     client.onerror = (error) => {
       if (error.name === "AbortError") return
       errorState.lastError = describe(error)
+      runFork(Effect.logWarning("mcp transport error", { server, error: errorState.lastError }))
     }
 
     if (options.roots !== false) {
@@ -581,6 +603,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
     const catalog = { timeout: timeout?.catalog ?? DEFAULT_CATALOG_TIMEOUT }
     const execution = timeout?.execution ?? DEFAULT_EXECUTION_TIMEOUT
     const idleTimeout = options.eventStreamIdleTimeout ?? EVENT_STREAM_IDLE
+    const listed = new Map<string, SdkTool>()
 
     const request = <A>(what: string, run: (signal: AbortSignal) => Promise<A>) =>
       Effect.tryPromise({
@@ -749,6 +772,12 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
                   })
                 }
 
+                listed.clear()
+
+                for (const rawTool of result.tools) {
+                  if (rawTool.name) listed.set(rawTool.name, rawTool)
+                }
+
                 const rawCacheScope = Predicate.hasProperty(result, "cacheScope") ? result.cacheScope : undefined
                 const cacheScope = rawCacheScope === "public" || rawCacheScope === "private" ? rawCacheScope : undefined
                 const rawTtlMs = Predicate.hasProperty(result, "ttlMs") ? result.ttlMs : undefined
@@ -803,6 +832,10 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
                 signal,
                 timeout: execution,
                 onprogress: () => {},
+                toolDefinition: {
+                  ...(listed.get(input.name) ?? { name: input.name, inputSchema: { type: "object" } }),
+                  outputSchema: undefined,
+                },
               },
             ),
           catch: toError,

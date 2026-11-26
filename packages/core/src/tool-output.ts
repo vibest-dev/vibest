@@ -1,7 +1,7 @@
 import { Layout } from "@vibest/schema/layout"
 import type { Mcp } from "@vibest/schema/mcp"
 import { LayerNode } from "@vibest/util/layer-node"
-import { Clock, Context, Duration, Effect, FiberSet, FileSystem, Layer, Option, Path } from "effect"
+import { Clock, Context, Duration, Effect, FiberSet, FileSystem, Layer, Option, Path, Schema } from "effect"
 
 import { PlatformNode } from "./effect/platform.ts"
 
@@ -66,31 +66,50 @@ export const truncateInline = (text: string, maxBytes: number = MAX_BYTES): stri
   return text.slice(0, end) + suffix
 }
 
-const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+const decodeBase64Option = Schema.decodeUnknownOption(Schema.Uint8ArrayFromBase64)
 
-const BASE64_LOOKUP: ReadonlyMap<string, number> = new Map(Array.from(BASE64_CHARS, (ch, idx) => [ch, idx] as const))
+const decodeBase64 = (raw: string): Uint8Array =>
+  Option.getOrElse(decodeBase64Option(raw.replace(/\s+/g, "")), () => new Uint8Array())
 
-const decodeBase64 = (raw: string): Uint8Array => {
-  const cleaned = raw.replace(/\s+/g, "").replace(/=+$/, "")
-  const out = new Uint8Array(Math.floor((cleaned.length * 3) / 4))
-  let offset = 0
-  let buffer = 0
-  let bits = 0
+const sliceTextItems = <Item>(input: {
+  readonly items: ReadonlyArray<Item>
+  readonly shownLength: number
+  readonly getText: (item: Item) => string | undefined
+  readonly withText: (item: Item, text: string) => Item
+  readonly makeMarker: () => Item
+}): Array<Item> => {
+  const bounded: Array<Item> = []
+  let remaining = input.shownLength
+  let separator = false
+  let marked = false
 
-  for (let i = 0; i < cleaned.length; i++) {
-    const val = BASE64_LOOKUP.get(cleaned[i]!)
+  for (const item of input.items) {
+    const text = input.getText(item)
 
-    if (val === undefined) continue
-    buffer = (buffer << 6) | val
-    bits += 6
-
-    if (bits >= 8) {
-      bits -= 8
-      out[offset++] = (buffer >> bits) & 0xff
+    if (text === undefined) {
+      bounded.push(item)
+      continue
     }
+
+    if (separator && remaining > 0) remaining--
+    separator = text !== "" && !text.endsWith("\n")
+
+    if (!marked && remaining >= text.length) {
+      bounded.push(item)
+      remaining -= text.length
+      continue
+    }
+
+    if (remaining > 0) bounded.push(input.withText(item, text.slice(0, remaining)))
+
+    if (!marked) bounded.push(input.makeMarker())
+    remaining = 0
+    marked = true
   }
 
-  return offset === out.length ? out : out.subarray(0, offset)
+  if (!marked) bounded.push(input.makeMarker())
+
+  return bounded
 }
 
 const extensionForMime = (mimeType: string): string => {
@@ -300,17 +319,32 @@ export const layer = Layer.effect(
       }
 
       const textParts = normalizedContent.flatMap((item) => (item.type === "text" ? [item.text] : []))
-      const text = joinParts(textParts)
-      const totalLines = countLines(text)
+      const baseText = joinParts(textParts)
 
-      if (totalLines <= maxLines && utf8ByteLength(text) <= maxBytes) {
+      const structuredText =
+        input.result.structured !== undefined ? JSON.stringify(input.result.structured, null, 2) : undefined
+
+      const structuredFits =
+        structuredText === undefined ||
+        (countLines(baseText) + countLines(structuredText) <= maxLines &&
+          utf8ByteLength(baseText) + utf8ByteLength(structuredText) <= maxBytes)
+
+      if (countLines(baseText) <= maxLines && utf8ByteLength(baseText) <= maxBytes && structuredFits) {
         return {
           ...input.result,
           content: normalizedContent,
+          truncated: false,
           ...(savedMediaFile !== undefined && { outputFile: savedMediaFile }),
         }
       }
 
+      const contentForSlice: ReadonlyArray<Mcp.CallContent> =
+        structuredText !== undefined
+          ? [...normalizedContent, { type: "text", text: structuredText }]
+          : normalizedContent
+
+      const text = structuredText !== undefined ? joinParts([...textParts, structuredText]) : baseText
+      const totalLines = countLines(text)
       const end = Math.min(afterLines(text, maxLines), byteBoundary(text, maxBytes))
       const shown = stripTrailingLineBreak(text, end)
       const now = yield* Clock.currentTimeMillis
@@ -319,34 +353,13 @@ export const layer = Layer.effect(
       const { file, failure } = yield* saveFullOutput(targetDir, name, text)
       const marker = formatMarker(text, end, shown, totalLines, file, failure)
 
-      const bounded: Array<Mcp.CallContent> = []
-      let remaining = shown.length
-      let separator = false
-      let marked = false
-
-      for (const item of normalizedContent) {
-        if (item.type !== "text") {
-          bounded.push(item)
-          continue
-        }
-
-        if (separator && remaining > 0) remaining--
-        separator = item.text !== "" && !item.text.endsWith("\n")
-
-        if (!marked && remaining >= item.text.length) {
-          bounded.push(item)
-          remaining -= item.text.length
-          continue
-        }
-
-        if (remaining > 0) bounded.push({ type: "text", text: item.text.slice(0, remaining) })
-
-        if (!marked) bounded.push({ type: "text", text: marker })
-        remaining = 0
-        marked = true
-      }
-
-      if (!marked) bounded.push({ type: "text", text: marker })
+      const bounded = sliceTextItems({
+        items: contentForSlice,
+        shownLength: shown.length,
+        getText: (item) => (item.type === "text" ? item.text : undefined),
+        withText: (_item, sliced): Mcp.CallContent => ({ type: "text", text: sliced }),
+        makeMarker: (): Mcp.CallContent => ({ type: "text", text: marker }),
+      })
 
       return {
         isError: input.result.isError,
@@ -362,52 +375,56 @@ export const layer = Layer.effect(
       if (input.result.truncated !== undefined) return input.result
       const maxBytes = input.maxBytes ?? MAX_BYTES
       const maxLines = input.maxLines ?? MAX_LINES
+      const targetDir = input.scratchpadDir ?? defaultDir
 
-      const textParts = input.result.contents.flatMap((item) => (item.text !== undefined ? [item.text] : []))
+      const normalizedContents: Array<Mcp.ResourceContent> = []
+      let savedBlobFile: string | undefined
+
+      for (const item of input.result.contents) {
+        if (item.blob !== undefined) {
+          const mimeType = item.mimeType ?? "application/octet-stream"
+          const bytes = decodeBase64(item.blob)
+          const savedPath = yield* save(bytes, extensionForMime(mimeType), targetDir)
+          savedBlobFile ??= savedPath
+          normalizedContents.push({
+            uri: item.uri,
+            mimeType: "text/plain",
+            text: `[Binary resource (${mimeType}, ${bytes.byteLength} bytes) saved to ${savedPath}]`,
+          })
+          continue
+        }
+
+        normalizedContents.push(item)
+      }
+
+      const textParts = normalizedContents.flatMap((item) => (item.text !== undefined ? [item.text] : []))
       const text = joinParts(textParts)
       const totalLines = countLines(text)
 
       if (totalLines <= maxLines && utf8ByteLength(text) <= maxBytes) {
-        return input.result
+        return {
+          ...input.result,
+          contents: normalizedContents,
+          truncated: false,
+          ...(savedBlobFile !== undefined && { outputFile: savedBlobFile }),
+        }
       }
 
       const end = Math.min(afterLines(text, maxLines), byteBoundary(text, maxBytes))
       const shown = stripTrailingLineBreak(text, end)
-      const targetDir = input.scratchpadDir ?? defaultDir
       const now = yield* Clock.currentTimeMillis
       const rand = Math.random().toString(36).slice(2, 10)
       const name = `tool_${now.toString(16)}_${sanitizeSegment(input.server)}_resource_${rand}.txt`
       const { file, failure } = yield* saveFullOutput(targetDir, name, text)
       const marker = formatMarker(text, end, shown, totalLines, file, failure)
 
-      const bounded: Array<Mcp.ResourceContent> = []
-      let remaining = shown.length
-      let separator = false
-      let marked = false
-
-      for (const item of input.result.contents) {
-        if (item.text === undefined) {
-          bounded.push(item)
-          continue
-        }
-
-        if (separator && remaining > 0) remaining--
-        separator = item.text !== "" && !item.text.endsWith("\n")
-
-        if (!marked && remaining >= item.text.length) {
-          bounded.push(item)
-          remaining -= item.text.length
-          continue
-        }
-
-        if (remaining > 0) bounded.push({ ...item, text: item.text.slice(0, remaining) })
-
-        if (!marked) bounded.push({ uri: input.result.uri, mimeType: "text/plain", text: marker })
-        remaining = 0
-        marked = true
-      }
-
-      if (!marked) bounded.push({ uri: input.result.uri, mimeType: "text/plain", text: marker })
+      const bounded = sliceTextItems({
+        items: normalizedContents,
+        shownLength: shown.length,
+        getText: (item) => item.text,
+        withText: (item, sliced) => ({ ...item, text: sliced }),
+        makeMarker: () => ({ uri: input.result.uri, mimeType: "text/plain", text: marker }),
+      })
 
       return {
         uri: input.result.uri,

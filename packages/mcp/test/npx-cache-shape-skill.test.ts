@@ -295,6 +295,38 @@ describe("ToolOutput unified exit guard", () => {
           if (mediaResult.content[0]?.type === "text") {
             expect(mediaResult.content[0].text).toContain("Binary resource (image/png, 8 bytes) saved to")
           }
+
+          const structuredResult = yield* toolOutput.truncateCallResult({
+            server: "analytics",
+            tool: "dump",
+            result: {
+              isError: false,
+              content: [{ type: "text", text: "ok" }],
+              structured: { huge: "x".repeat(100_000) },
+            },
+            maxBytes: 1024,
+          })
+
+          expect(structuredResult.truncated).toBe(true)
+          expect(structuredResult.structured).toBeUndefined()
+          expect(structuredResult.outputFile).toBeDefined()
+          expect(fs.readFileSync(structuredResult.outputFile!, "utf8")).toContain("x".repeat(10_000))
+
+          const blobResource = yield* toolOutput.truncateResourceResult({
+            server: "vision",
+            uri: "file:///image.png",
+            result: {
+              uri: "file:///image.png",
+              contents: [{ uri: "file:///image.png", mimeType: "image/png", blob: rawBytes.toString("base64") }],
+            },
+          })
+
+          expect(blobResource.truncated).toBe(false)
+          expect(blobResource.outputFile).toBeDefined()
+          expect(blobResource.outputFile!.endsWith(".png")).toBe(true)
+          expect(Buffer.compare(fs.readFileSync(blobResource.outputFile!), rawBytes)).toBe(0)
+          expect(blobResource.contents[0]?.blob).toBeUndefined()
+          expect(blobResource.contents[0]?.text).toContain("Binary resource (image/png, 8 bytes) saved to")
         }).pipe(Effect.provide(toolOutputLayer)),
       )
     })

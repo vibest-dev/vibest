@@ -103,22 +103,22 @@
     ],
     "runtime.doctor": "open",
     "plugin.list": "open",
-    "mcp.list": "open",
-    "mcp.add": "open",
-    "mcp.remove": "open",
-    "mcp.connect": "open",
-    "mcp.disconnect": "open",
-    "mcp.tools": "open",
-    "mcp.search": "open",
-    "mcp.describe": "open",
-    "mcp.call": "open",
-    "mcp.events": "open",
-    "mcp.skills": "open",
-    "mcp.read": "open",
-    "mcp.authStart": "open",
-    "mcp.authComplete": "open",
-    "mcp.authSetToken": "open",
-    "mcp.authLogout": "open",
+    "mcp.list": "agent",
+    "mcp.add": "cli",
+    "mcp.remove": "cli",
+    "mcp.connect": "agent",
+    "mcp.disconnect": "agent",
+    "mcp.tools": "agent",
+    "mcp.search": "agent",
+    "mcp.describe": "agent",
+    "mcp.call": "agent",
+    "mcp.events": "agent",
+    "mcp.skills": "agent",
+    "mcp.read": "agent",
+    "mcp.authStart": "cli",
+    "mcp.authComplete": "cli",
+    "mcp.authSetToken": "cli",
+    "mcp.authLogout": "cli",
     "subscription.list": "open",
     "machine.list": "cli",
     "machine.add": "cli",
@@ -8661,6 +8661,33 @@
                 }
               }
             },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                  }
+                }
+              }
+            },
             "409": {
               "description": "ProtocolRejected",
               "content": {
@@ -8720,6 +8747,33 @@
                 }
               }
             },
+            "403": {
+              "description": "Forbidden | InvalidCaller",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                  }
+                }
+              }
+            },
             "409": {
               "description": "ProtocolRejected",
               "content": {
@@ -8773,12 +8827,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -8835,12 +8913,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "InvalidCaller | Forbidden",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -8920,12 +9022,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "InvalidCaller | Forbidden",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -8993,12 +9119,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "InvalidCaller | Forbidden",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -9062,6 +9212,33 @@
                 "application/json": {
                   "schema": {
                     "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/NoSuchSessionEncoded"
                   }
                 }
               }
@@ -9134,8 +9311,25 @@
                 }
               }
             },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
             "404": {
-              "description": "McpNotFoundError | McpToolNotFoundError",
+              "description": "McpNotFoundError | McpToolNotFoundError | NoSuchSession",
               "content": {
                 "application/json": {
                   "schema": {
@@ -9145,6 +9339,9 @@
                       },
                       {
                         "$ref": "#/components/schemas/McpToolNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
                       }
                     ]
                   }
@@ -9221,12 +9418,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "InvalidCaller | Forbidden",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -9365,12 +9586,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "InvalidCaller | Forbidden",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -9448,12 +9693,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "InvalidCaller | Forbidden",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -9530,12 +9799,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "InvalidCaller | Forbidden",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -9669,12 +9962,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -9741,12 +10058,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -9842,12 +10183,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }
@@ -9964,12 +10329,36 @@
                 }
               }
             },
-            "404": {
-              "description": "McpNotFoundError",
+            "403": {
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
                   }
                 }
               }

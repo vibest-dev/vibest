@@ -45,6 +45,15 @@ const enforceHttpBodyLimit = (response: Response): Response => {
   })
 }
 
+const MAX_REDIRECTS = 10
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+
+const withNoIdleTimeout = (init: RequestInit | undefined): RequestInit => {
+  const next: RequestInit & { timeout?: boolean } = { ...init, timeout: false }
+
+  return next
+}
+
 export const createScopedFetch = (options: {
   readonly serverUrl: string
   readonly customHeaders?: Readonly<Record<string, string>> | undefined
@@ -52,18 +61,64 @@ export const createScopedFetch = (options: {
 }): FetchLike => {
   const base = options.baseFetch ?? globalThis.fetch
   const allowedOrigin = new URL(options.serverUrl).origin
+  const customEntries = options.customHeaders ? Object.entries(options.customHeaders) : []
 
-  return (input, init) => {
-    const targetUrl = input instanceof URL ? input : new URL(input)
-    const headers = new Headers(init?.headers)
+  return async (input, init) => {
+    const initialUrl = input instanceof URL ? input : new URL(input)
 
-    if (options.customHeaders && targetUrl.origin === allowedOrigin) {
-      for (const [key, value] of Object.entries(options.customHeaders)) {
-        if (!headers.has(key)) headers.set(key, value)
-      }
+    if (customEntries.length === 0) {
+      return base(input, withNoIdleTimeout(init))
     }
 
-    return base(input, { ...init, headers, redirect: "manual" })
+    let currentUrl = initialUrl
+    let currentInit: RequestInit = withNoIdleTimeout(init)
+
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const headers = new Headers(currentInit.headers)
+
+      if (currentUrl.origin === allowedOrigin) {
+        for (const [key, value] of customEntries) {
+          if (!headers.has(key)) headers.set(key, value)
+        }
+      } else {
+        for (const [key] of customEntries) headers.delete(key)
+        headers.delete("authorization")
+      }
+
+      const response = await base(currentUrl, { ...currentInit, headers, redirect: "manual" })
+
+      if (!REDIRECT_STATUSES.has(response.status)) return response
+      const location = response.headers.get("location")
+
+      if (!location || hop === MAX_REDIRECTS) return response
+      void response.body?.cancel().catch(() => undefined)
+      const nextUrl = new URL(location, currentUrl)
+      const method = (currentInit.method ?? "GET").toUpperCase()
+
+      const dropBody =
+        response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")
+
+      const nextHeaders = new Headers(headers)
+
+      if (nextUrl.origin !== allowedOrigin) {
+        for (const [key] of customEntries) nextHeaders.delete(key)
+        nextHeaders.delete("authorization")
+      }
+
+      if (dropBody) {
+        nextHeaders.delete("content-length")
+        nextHeaders.delete("content-type")
+      }
+
+      currentUrl = nextUrl
+      currentInit = withNoIdleTimeout({
+        ...currentInit,
+        ...(dropBody && { method: "GET", body: null }),
+        headers: nextHeaders,
+      })
+    }
+
+    return base(currentUrl, withNoIdleTimeout({ ...currentInit, redirect: "manual" }))
   }
 }
 

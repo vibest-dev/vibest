@@ -1,8 +1,19 @@
 import { Mcp } from "@vibest/core/mcp"
 import { ToolOutput } from "@vibest/core/tool-output"
 import { VibestApi } from "@vibest/protocol/api"
-import { Effect } from "effect"
+import { Forbidden } from "@vibest/protocol/errors"
+import { Caller } from "@vibest/protocol/middleware"
+import { Effect, Predicate } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
+
+const requireCli = (method: string) =>
+  Effect.gen(function* () {
+    const caller = yield* Caller
+
+    if (!Predicate.isTagged(caller, "Cli")) {
+      return yield* new Forbidden({ method, message: `${method} is for the user's CLI` })
+    }
+  })
 
 export const McpHandler = HttpApiBuilder.group(VibestApi, "server.mcp", (handlers) =>
   Effect.gen(function* () {
@@ -11,8 +22,10 @@ export const McpHandler = HttpApiBuilder.group(VibestApi, "server.mcp", (handler
 
     return handlers
       .handle("mcp.list", ({ query }) => mcp.list(query.directory))
-      .handle("mcp.add", ({ params, payload }) => mcp.add(params.server, payload))
-      .handle("mcp.remove", ({ params }) => mcp.remove(params.server))
+      .handle("mcp.add", ({ params, payload }) =>
+        requireCli("mcp.add").pipe(Effect.andThen(mcp.add(params.server, payload))),
+      )
+      .handle("mcp.remove", ({ params }) => requireCli("mcp.remove").pipe(Effect.andThen(mcp.remove(params.server))))
       .handle("mcp.connect", ({ params, payload }) => mcp.connect(params.server, payload?.directory))
       .handle("mcp.disconnect", ({ params }) => mcp.disconnect(params.server))
       .handle("mcp.tools", ({ query }) => mcp.tools(query.server, query.directory))
@@ -59,11 +72,19 @@ export const McpHandler = HttpApiBuilder.group(VibestApi, "server.mcp", (handler
             ),
           ),
       )
-      .handle("mcp.authStart", ({ params }) => mcp.authStart(params.server))
-      .handle("mcp.authComplete", ({ params, payload }) =>
-        mcp.authComplete(params.server, payload.redirectUrlOrCode, payload.state),
+      .handle("mcp.authStart", ({ params }) =>
+        requireCli("mcp.authStart").pipe(Effect.andThen(mcp.authStart(params.server))),
       )
-      .handle("mcp.authSetToken", ({ params, payload }) => mcp.authSetToken(params.server, payload))
-      .handle("mcp.authLogout", ({ params }) => mcp.authLogout(params.server))
+      .handle("mcp.authComplete", ({ params, payload }) =>
+        requireCli("mcp.authComplete").pipe(
+          Effect.andThen(mcp.authComplete(params.server, payload.redirectUrlOrCode, payload.state)),
+        ),
+      )
+      .handle("mcp.authSetToken", ({ params, payload }) =>
+        requireCli("mcp.authSetToken").pipe(Effect.andThen(mcp.authSetToken(params.server, payload))),
+      )
+      .handle("mcp.authLogout", ({ params }) =>
+        requireCli("mcp.authLogout").pipe(Effect.andThen(mcp.authLogout(params.server))),
+      )
   }),
 )

@@ -6,7 +6,11 @@ export interface LoopbackOptions {
   readonly redirectPath: string
   readonly requestedPort: number
   readonly expectedState: string
-  readonly onCallback: (code: string, iss: string | undefined) => Effect.Effect<void, { readonly message: string }>
+  readonly onCallback: (
+    code: string,
+    iss: string | undefined,
+    host: string,
+  ) => Effect.Effect<void, { readonly message: string }>
 }
 
 export interface LoopbackHandle {
@@ -15,67 +19,74 @@ export interface LoopbackHandle {
 }
 
 export const startLoopbackListener = (options: LoopbackOptions): Effect.Effect<LoopbackHandle | undefined> =>
-  Effect.tryPromise({
-    try: () =>
-      new Promise<LoopbackHandle>((resolve, reject) => {
-        const srv = http.createServer((req, res) => {
-          const reqUrl = new URL(req.url ?? "/", "http://127.0.0.1")
+  Effect.gen(function* () {
+    const runFork = Effect.runForkWith(yield* Effect.context())
 
-          if (reqUrl.pathname !== options.redirectPath) {
-            res.writeHead(404).end("Not found")
+    return yield* Effect.tryPromise({
+      try: () =>
+        new Promise<LoopbackHandle>((resolve, reject) => {
+          const srv = http.createServer((req, res) => {
+            const reqUrl = new URL(req.url ?? "/", "http://127.0.0.1")
 
-            return
-          }
+            if (reqUrl.pathname !== options.redirectPath) {
+              res.writeHead(404).end("Not found")
 
-          const errorParam = reqUrl.searchParams.get("error_description") ?? reqUrl.searchParams.get("error")
+              return
+            }
 
-          if (errorParam) {
-            res.writeHead(400).end(`OAuth error: ${errorParam}`)
+            const errorParam = reqUrl.searchParams.get("error_description") ?? reqUrl.searchParams.get("error")
 
-            return
-          }
+            if (errorParam) {
+              res.writeHead(400).end(`OAuth error: ${errorParam}`)
 
-          const returnedState = reqUrl.searchParams.get("state")
-          const code = reqUrl.searchParams.get("code")
+              return
+            }
 
-          if (returnedState !== options.expectedState || !code) {
-            res.writeHead(400).end("Invalid OAuth state or missing code")
+            const returnedState = reqUrl.searchParams.get("state")
+            const code = reqUrl.searchParams.get("code")
 
-            return
-          }
+            if (returnedState !== options.expectedState || !code) {
+              res.writeHead(400).end("Invalid OAuth state or missing code")
 
-          Effect.runPromise(
-            options.onCallback(code, reqUrl.searchParams.get("iss") ?? undefined).pipe(
-              Effect.match({
-                onFailure: (error) => {
-                  res.writeHead(400, { "content-type": "text/plain" }).end(`Authorization failed: ${error.message}`)
+              return
+            }
+
+            const rawHost = (req.headers.host ?? "").split(":")[0]?.toLowerCase()
+            const host = rawHost === "localhost" ? "localhost" : "127.0.0.1"
+
+            runFork(
+              options.onCallback(code, reqUrl.searchParams.get("iss") ?? undefined, host).pipe(
+                Effect.match({
+                  onFailure: (error) => {
+                    res.writeHead(400, { "content-type": "text/plain" }).end(`Authorization failed: ${error.message}`)
+                  },
+                  onSuccess: () => {
+                    res
+                      .writeHead(200, { "content-type": "text/plain" })
+                      .end("Authorization complete. You may close this tab.")
+                  },
+                }),
+              ),
+            )
+          })
+
+          srv.once("error", reject)
+          srv.listen(options.requestedPort, "127.0.0.1", () => {
+            const addr = srv.address()
+
+            if (addr && !Predicate.isString(addr)) {
+              resolve({
+                port: addr.port,
+                close: () => {
+                  srv.close()
                 },
-                onSuccess: () => {
-                  res
-                    .writeHead(200, { "content-type": "text/plain" })
-                    .end("Authorization complete. You may close this tab.")
-                },
-              }),
-            ),
-          )
-        })
-
-        srv.once("error", reject)
-        srv.listen(options.requestedPort, "127.0.0.1", () => {
-          const addr = srv.address()
-
-          if (addr && !Predicate.isString(addr)) {
-            resolve({
-              port: addr.port,
-              close: () => {
-                srv.close()
-              },
-            })
-          } else {
-            srv.close()
-            reject(new Error("Failed to bind loopback callback server"))
-          }
-        })
-      }),
-    catch: () => undefined,
-  }).pipe(Effect.orElseSucceed(() => undefined))
+              })
+            } else {
+              srv.close()
+              reject(new Error("Failed to bind loopback callback server"))
+            }
+          })
+        }),
+      catch: () => undefined,
+    }).pipe(Effect.orElseSucceed(() => undefined))
+  })

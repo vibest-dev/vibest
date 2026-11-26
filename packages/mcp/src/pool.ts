@@ -84,8 +84,6 @@ export const key = (input: {
   ])
 }
 
-export const poolKey = key
-
 export const defaultIdleTimeoutMs = (config: Mcp.ServerConfig): number => {
   if (config.idleTimeoutMs !== undefined) return config.idleTimeoutMs
 

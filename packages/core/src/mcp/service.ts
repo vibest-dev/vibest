@@ -1,12 +1,13 @@
 import type { Mcp } from "@vibest/schema/mcp"
 import { LayerNode } from "@vibest/util/layer-node"
-import { Context, Effect, Layer, type Schema } from "effect"
+import { Context, Effect, type Schema, type Stream } from "effect"
 
-import { Bus } from "../bus.ts"
+import type { Bus } from "../bus.ts"
 
 export * as McpService from "./service.ts"
 
 export interface Interface {
+  readonly awaitStartup: () => Effect.Effect<void>
   readonly list: (directory?: string) => Effect.Effect<ReadonlyArray<Mcp.ServerInfo>>
   readonly add: (server: string, config: Mcp.ServerConfig) => Effect.Effect<Mcp.ServerInfo, Mcp.ConfigError>
   readonly remove: (server: string) => Effect.Effect<void, Mcp.NotFoundError>
@@ -29,6 +30,14 @@ export interface Interface {
     server: string,
     directory?: string,
   ) => Effect.Effect<ReadonlyArray<Mcp.EventType>, Mcp.NotFoundError | Mcp.ToolCallError>
+  readonly eventStream: (input: {
+    readonly server: string
+    readonly name: string
+    readonly arguments?: Schema.JsonObject | undefined
+    readonly cursor?: string | null | undefined
+    readonly maxAgeMs?: number | undefined
+    readonly directory?: string | undefined
+  }) => Stream.Stream<Mcp.EventMessage, Mcp.NotFoundError | Mcp.ToolCallError>
   readonly skills: (
     server: string,
     directory?: string,
@@ -58,8 +67,4 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("vibest/Mcp") {}
 
-export const node = LayerNode.make({
-  service: Service,
-  layer: Layer.effect(Service, Effect.die("vibest/Mcp is unbound; replace Mcp.node with @vibest/mcp's Mcp.node")),
-  deps: [Bus.node],
-})
+export const node = LayerNode.unbound<Service, Interface, LayerNode.Error<typeof Bus.node>>(Service)

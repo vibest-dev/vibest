@@ -2,7 +2,8 @@ import { Mcp } from "@vibest/schema/mcp"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
 
-import { ProtocolMiddleware } from "../middleware.ts"
+import { Forbidden } from "../errors.ts"
+import { CallerMiddleware, ProtocolMiddleware } from "../middleware.ts"
 
 const ServerPath = { server: Schema.String }
 const ServerToolPath = { server: Schema.String, tool: Schema.String }
@@ -19,14 +20,14 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
       params: ServerPath,
       payload: Mcp.ServerConfig,
       success: Mcp.ServerInfo,
-      error: [Mcp.ConfigError],
+      error: [Forbidden, Mcp.ConfigError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.add", summary: "Add or update an MCP server" })),
   )
   .add(
     HttpApiEndpoint.delete("mcp.remove", "/api/mcp/:server", {
       params: ServerPath,
       success: Schema.Void,
-      error: [Mcp.NotFoundError],
+      error: [Forbidden, Mcp.NotFoundError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.remove", summary: "Remove an MCP server" })),
   )
   .add(
@@ -121,7 +122,7 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
     HttpApiEndpoint.post("mcp.authStart", "/api/mcp/:server/auth/start", {
       params: ServerPath,
       success: Mcp.AuthStartResult,
-      error: [Mcp.NotFoundError, Mcp.AuthError],
+      error: [Forbidden, Mcp.NotFoundError, Mcp.AuthError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.authStart", summary: "Start MCP OAuth flow" })),
   )
   .add(
@@ -132,7 +133,7 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
         state: Schema.optional(Schema.String),
       }),
       success: Mcp.AuthCompleteResult,
-      error: [Mcp.NotFoundError, Mcp.AuthError],
+      error: [Forbidden, Mcp.NotFoundError, Mcp.AuthError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.authComplete", summary: "Complete MCP OAuth flow" })),
   )
   .add(
@@ -145,15 +146,16 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
         scope: Schema.optional(Schema.String),
       }),
       success: Mcp.AuthCompleteResult,
-      error: [Mcp.NotFoundError, Mcp.AuthError],
+      error: [Forbidden, Mcp.NotFoundError, Mcp.AuthError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.authSetToken", summary: "Set static MCP token" })),
   )
   .add(
     HttpApiEndpoint.delete("mcp.authLogout", "/api/mcp/:server/auth", {
       params: ServerPath,
       success: Schema.Void,
-      error: [Mcp.NotFoundError, Mcp.AuthError],
+      error: [Forbidden, Mcp.NotFoundError, Mcp.AuthError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.authLogout", summary: "Remove MCP OAuth credentials" })),
   )
+  .middleware(CallerMiddleware)
   .middleware(ProtocolMiddleware)
   .annotateMerge(OpenApi.annotations({ title: "mcp" }))

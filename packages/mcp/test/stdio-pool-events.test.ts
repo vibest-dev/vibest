@@ -230,7 +230,7 @@ describe("McpStdio, McpPool scale-to-zero, and SEP-3415 events", () => {
             const scope = yield* Effect.scope
             const run = yield* FiberSet.makeRuntime<never, void, never>()
             const pool = yield* McpPool.make()
-            const key = McpPool.poolKey({ config, cwd: dir, mcpEvents: true })
+            const key = McpPool.key({ config, cwd: dir, mcpEvents: true })
             const readyA = yield* Deferred.make<void, Error>()
             const readyB = yield* Deferred.make<void, Error>()
 
@@ -332,7 +332,7 @@ describe("McpStdio, McpPool scale-to-zero, and SEP-3415 events", () => {
             const scope = yield* Effect.scope
             const run = yield* FiberSet.makeRuntime<never, void, never>()
             const pool = yield* McpPool.make()
-            const key = McpPool.poolKey({ config: unpooledConfig, cwd: dir, mcpEvents: true })
+            const key = McpPool.key({ config: unpooledConfig, cwd: dir, mcpEvents: true })
             const readyA = yield* Deferred.make<void, Error>()
             const readyB = yield* Deferred.make<void, Error>()
 
@@ -421,7 +421,7 @@ describe("McpStdio, McpPool scale-to-zero, and SEP-3415 events", () => {
     }
   })
 
-  it("never persists private/ttlMs:0 tools/list to disk and refreshes connection + cache on -32602", async () => {
+  it("never persists private/ttlMs:0 tools/list to disk and refreshes tools on HEADER_MISMATCH (-32020) without retrying -32602", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-mcp-b2b4-"))
     const script = path.join(dir, "priv-server.mjs")
 
@@ -433,6 +433,7 @@ const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity 
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\\n")
 let listCount = 0
 let callCount = 0
+let invalidParamCalls = 0
 rl.on("line", (line) => {
   if (!line.trim()) return
   const msg = JSON.parse(line)
@@ -464,9 +465,22 @@ rl.on("line", (line) => {
     return
   }
   if (msg.method === "tools/call") {
+    if (msg.params?.name === "bad_params_tool") {
+      invalidParamCalls++
+      send({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params -32602" } })
+      return
+    }
+    if (msg.params?.name === "bad_params_count") {
+      send({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: { resultType: "complete", content: [{ type: "text", text: String(invalidParamCalls) }] },
+      })
+      return
+    }
     callCount++
     if (callCount === 1) {
-      send({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params -32602" } })
+      send({ jsonrpc: "2.0", id: msg.id, error: { code: -32020, message: "Header mismatch" } })
       return
     }
     send({
@@ -499,12 +513,18 @@ rl.on("line", (line) => {
             const cachePath = path.join(vibestHome, "cache", "mcp-metadata-cache.json")
             const diskContent = fs.existsSync(cachePath) ? fs.readFileSync(cachePath, "utf8") : ""
             const callRes = yield* rt.call({ server: "priv-srv", tool: "refreshed_tool", directory: dir })
-            const afterTools = yield* rt.tools("priv-srv", dir)
+
+            const badExit = yield* rt
+              .call({ server: "priv-srv", tool: "bad_params_tool", directory: dir })
+              .pipe(Effect.exit)
+
+            const countRes = yield* rt.call({ server: "priv-srv", tool: "bad_params_count", directory: dir })
 
             return {
               hasSecretOnDisk: diskContent.includes("secret_tool"),
               callText: callRes.content[0]?.type === "text" ? callRes.content[0].text : "",
-              toolNames: afterTools.map((t) => t.name),
+              badFailed: Exit.isFailure(badExit),
+              invalidParamCalls: countRes.content[0]?.type === "text" ? countRes.content[0].text : "",
             }
           }),
         ).pipe(Effect.provide(testMcpEnv(vibestHome))),
@@ -512,7 +532,139 @@ rl.on("line", (line) => {
 
       expect(result.hasSecretOnDisk).toBe(false)
       expect(result.callText).toBe("ok-after-refresh")
-      expect(result.toolNames).toEqual(["refreshed_tool"])
+      expect(result.badFailed).toBe(true)
+      expect(result.invalidParamCalls).toBe("1")
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("Mcp.Service.eventStream keeps an unpooled ephemeral server open across events and pins a pooled server past idleTimeoutMs", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-mcp-evstream-"))
+    const script = path.join(dir, "event-stream-server.mjs")
+
+    fs.writeFileSync(
+      script,
+      `
+import readline from "node:readline"
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity })
+const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\\n")
+rl.on("line", (line) => {
+  if (!line.trim()) return
+  const msg = JSON.parse(line)
+  if (msg.method === "initialize") {
+    send({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: {
+        protocolVersion: msg.params?.protocolVersion ?? "2025-03-26",
+        capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/events": {} } },
+        serverInfo: { name: "ev-srv", version: "1.0.0" },
+      },
+    })
+    return
+  }
+  if (msg.method === "server/discover") {
+    send({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: {
+        supportedVersions: ["2026-07-28"],
+        capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/events": {} } },
+        serverInfo: { name: "ev-srv", version: "1.0.0" },
+      },
+    })
+    return
+  }
+  if (msg.method === "tools/list") {
+    send({ jsonrpc: "2.0", id: msg.id, result: { resultType: "complete", ttlMs: 60000, cacheScope: "public", tools: [] } })
+    return
+  }
+  if (msg.method === "events/stream") {
+    const subId = msg.id
+    send({
+      jsonrpc: "2.0",
+      method: "notifications/events/active",
+      params: { cursor: "c0", _meta: { "io.modelcontextprotocol/subscriptionId": subId } },
+    })
+    setTimeout(() => {
+      send({
+        jsonrpc: "2.0",
+        method: "notifications/events/event",
+        params: {
+          eventId: "ev-1",
+          name: "tick",
+          timestamp: new Date().toISOString(),
+          data: { n: 1 },
+          cursor: "c1",
+          _meta: { "io.modelcontextprotocol/subscriptionId": subId },
+        },
+      })
+      setTimeout(() => {
+        send({
+          jsonrpc: "2.0",
+          method: "notifications/events/event",
+          params: {
+            eventId: "ev-2",
+            name: "tick",
+            timestamp: new Date().toISOString(),
+            data: { n: 2 },
+            cursor: "c2",
+            _meta: { "io.modelcontextprotocol/subscriptionId": subId },
+          },
+        })
+        send({ jsonrpc: "2.0", id: subId, result: { resultType: "complete" } })
+      }, 220)
+    }, 80)
+  }
+})
+`,
+      "utf8",
+    )
+
+    try {
+      const vibestHome = path.join(dir, "vibest-home")
+
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const rt = yield* Mcp.make()
+
+            yield* rt.add("ephemeral-ev", {
+              type: "local",
+              command: [process.execPath, script],
+              cwd: dir,
+              pool: false,
+              protocol: "legacy",
+            })
+
+            const ephemeralEvents = yield* rt
+              .eventStream({ server: "ephemeral-ev", name: "tick", directory: dir })
+              .pipe(Stream.runCollect)
+
+            yield* rt.add("pooled-ev", {
+              type: "local",
+              command: [process.execPath, script],
+              cwd: dir,
+              pool: true,
+              idleTimeoutMs: 120,
+              protocol: "2026-07-28",
+            })
+
+            const pooledEvents = yield* rt
+              .eventStream({ server: "pooled-ev", name: "tick", directory: dir })
+              .pipe(Stream.runCollect)
+
+            return {
+              ephemeralTypes: Array.from(ephemeralEvents).map((m) => m.type),
+              pooledTypes: Array.from(pooledEvents).map((m) => m.type),
+            }
+          }),
+        ).pipe(Effect.provide(testMcpEnv(vibestHome))),
+      )
+
+      expect(result.ephemeralTypes).toEqual(["active", "event", "event"])
+      expect(result.pooledTypes).toEqual(["active", "event", "event"])
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

@@ -1,4 +1,4 @@
-import { Predicate, Schema } from "effect"
+import { Option, Predicate, Schema } from "effect"
 
 export * as Json from "./json.ts"
 
@@ -6,6 +6,14 @@ export const isJsonObject = (value: Schema.Json | undefined): value is Schema.Js
   Predicate.isObject(value) && !Array.isArray(value)
 
 export const decodeJsonOption = Schema.decodeUnknownOption(Schema.Json)
+
+export const parseJsonOption = (raw: string): Option.Option<Schema.Json> => {
+  try {
+    return decodeJsonOption(JSON.parse(raw))
+  } catch {
+    return Option.none()
+  }
+}
 
 export const deepEqualJson = (a: Schema.Json | undefined, b: Schema.Json | undefined): boolean => {
   if (a === b) return true

@@ -21,7 +21,7 @@ import {
 } from "@modelcontextprotocol/client"
 import { OAuthMetadataSchema, OpenIdProviderDiscoveryMetadataSchema } from "@modelcontextprotocol/core"
 import { Mcp } from "@vibest/schema/mcp"
-import { Clock, Duration, Effect, Fiber, Schema } from "effect"
+import { Clock, Duration, Effect, Fiber, FiberSet, Schema, type Scope } from "effect"
 import { FetchHttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -125,6 +125,7 @@ const configuredDiscovery = async (
 }
 
 const toVaultEntry = (input: {
+  readonly id?: string | undefined
   readonly serverUrl: string
   readonly tokens: StoredOAuthTokens
   readonly clientInfo?: StoredOAuthClientInformation | undefined
@@ -132,7 +133,7 @@ const toVaultEntry = (input: {
   readonly issuer?: string | undefined
   readonly now: number
 }): McpVault.CredentialEntry => ({
-  id: crypto.randomUUID(),
+  id: input.id ?? crypto.randomUUID(),
   serverUrl: McpVault.canonicalServerUrl(input.serverUrl),
   tokens: {
     accessToken: input.tokens.access_token,
@@ -252,6 +253,7 @@ const exchangeRefresh = (input: {
         })
 
         return toVaultEntry({
+          id: input.current.id,
           serverUrl: resolvedConfig.url,
           tokens: { refresh_token: refreshToken, ...tokens },
           clientInfo: client,
@@ -334,7 +336,7 @@ export const connectProvider = Effect.fn("McpOAuth.connectProvider")(function* (
             entry.tokens.expiresAt > 0 &&
             now + REFRESH_AHEAD_MS >= entry.tokens.expiresAt
 
-          if (expiringSoon && entry.tokens.refreshToken) {
+          if (expiringSoon && entry.tokens.refreshToken && entry.discovery !== undefined) {
             const refreshed = yield* vault
               .refresh(input.server, input.config.url, {
                 presentedAccess: entry.tokens.accessToken,
@@ -395,7 +397,7 @@ export const connectProvider = Effect.fn("McpOAuth.connectProvider")(function* (
                 return Effect.fail(
                   new OAuthError(
                     OAuthErrorCode.TemporarilyUnavailable,
-                    `Could not refresh OAuth token: ${error instanceof Error ? error.message : String(error)}`,
+                    `Could not refresh OAuth token: ${error instanceof OAuthError ? error.code : error instanceof Error ? error.message : String(error)}`,
                   ),
                 )
               }),
@@ -457,10 +459,11 @@ export const makeAuthManager = Effect.fn("McpOAuth.makeAuthManager")(function* (
   readonly baseFetch?: FetchLike | undefined
   readonly enableLoopback?: boolean | undefined
   readonly pendingFlowTtlMs?: number | undefined
-}): Effect.fn.Return<AuthManager, never, McpVault.Service | ChildProcessSpawner.ChildProcessSpawner> {
+}): Effect.fn.Return<AuthManager, never, McpVault.Service | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope> {
   const vault = options?.vault ?? (yield* McpVault.Service)
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const contextFetch = yield* FetchHttpClient.Fetch
+  const expiryFibers = yield* FiberSet.makeRuntime<never, void, never>()
   const pending = new Map<string, PendingFlow>()
   const flowTtlMs = options?.pendingFlowTtlMs ?? PENDING_FLOW_TTL_MS
 
@@ -585,6 +588,7 @@ export const makeAuthManager = Effect.fn("McpOAuth.makeAuthManager")(function* (
     }
 
     const redirectPath = redirectParsed?.pathname ?? "/callback"
+    const callbackHost = { reached: "127.0.0.1" }
 
     const loopback =
       options?.enableLoopback !== false
@@ -592,7 +596,8 @@ export const makeAuthManager = Effect.fn("McpOAuth.makeAuthManager")(function* (
             redirectPath,
             requestedPort: oauth?.callbackPort ?? (Number(redirectParsed?.port) || 0),
             expectedState: state,
-            onCallback: (code, iss) => {
+            onCallback: (code, iss, host) => {
+              callbackHost.reached = host
               const active = pending.get(server)
 
               if (!active) return Effect.fail({ message: "OAuth flow expired or already completed" })
@@ -650,12 +655,18 @@ export const makeAuthManager = Effect.fn("McpOAuth.makeAuthManager")(function* (
 
     const useCimd =
       !oauth?.clientId &&
+      !oauth?.redirectUri &&
       Boolean(oauth?.clientMetadataUrl) &&
-      discovery.authorizationServerMetadata?.client_id_metadata_document_supported === true
+      discovery.authorizationServerMetadata?.client_id_metadata_document_supported === true &&
+      (discovery.authorizationServerMetadata?.token_endpoint_auth_methods_supported?.includes("none") ?? false)
 
-    const redirectUrl =
-      oauth?.redirectUri ??
-      (loopback !== undefined ? `http://127.0.0.1:${loopback.port}${redirectPath}` : "http://127.0.0.1:0/callback")
+    const loopbackUrl = (host: string) =>
+      loopback !== undefined ? `http://${host}:${loopback.port}${redirectPath}` : `http://${host}:0/callback`
+
+    const redirectUrlFor = () => oauth?.redirectUri ?? loopbackUrl(callbackHost.reached)
+
+    const redirectUris =
+      oauth?.redirectUri !== undefined ? [oauth.redirectUri] : [loopbackUrl("127.0.0.1"), loopbackUrl("localhost")]
 
     const staticClient = oauth?.clientId
       ? {
@@ -666,7 +677,7 @@ export const makeAuthManager = Effect.fn("McpOAuth.makeAuthManager")(function* (
 
     const oauthProvider: OAuthClientProvider = {
       get redirectUrl() {
-        return redirectUrl
+        return redirectUrlFor()
       },
       discoveryState: async () => storeState.discovery,
       saveDiscoveryState: (next) => {
@@ -676,7 +687,7 @@ export const makeAuthManager = Effect.fn("McpOAuth.makeAuthManager")(function* (
       ...(useCimd && oauth?.clientMetadataUrl !== undefined && { clientMetadataUrl: oauth.clientMetadataUrl }),
       state: () => state,
       clientMetadata: {
-        redirect_uris: [redirectUrl],
+        redirect_uris: redirectUris,
         client_name: "vibest",
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
@@ -739,7 +750,7 @@ export const makeAuthManager = Effect.fn("McpOAuth.makeAuthManager")(function* (
       })
     }
 
-    const expiryFiber = yield* Effect.forkDetach(
+    const expiryFiber = expiryFibers(
       Effect.sleep(Duration.millis(flowTtlMs)).pipe(
         Effect.andThen(
           Effect.sync(() => {
@@ -776,7 +787,7 @@ export const makeAuthManager = Effect.fn("McpOAuth.makeAuthManager")(function* (
       authorizationUrl: storeState.authorizationUrl.toString(),
       state,
       expiresAt,
-      ...(loopback !== undefined && { callbackUrl: redirectUrl }),
+      ...(loopback !== undefined && { callbackUrl: redirectUrlFor() }),
     }
   })
 
@@ -878,7 +889,7 @@ export const makeAuthManager = Effect.fn("McpOAuth.makeAuthManager")(function* (
       .pipe(Effect.mapError((error) => new OAuthFlowError({ server, message: error.message })))
   })
 
-  const closeAll = Effect.forEach(Array.from(pending.keys()), cleanupFlow, { discard: true })
+  const closeAll = Effect.suspend(() => Effect.forEach(Array.from(pending.keys()), cleanupFlow, { discard: true }))
 
   return { authStart, authComplete, setToken, logout, closeAll }
 })
