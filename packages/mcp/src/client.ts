@@ -778,9 +778,13 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
                   if (rawTool.name) listed.set(rawTool.name, rawTool)
                 }
 
-                const rawCacheScope = Predicate.hasProperty(result, "cacheScope") ? result.cacheScope : undefined
+                const isModern = client.getProtocolEra() === "modern"
+
+                const rawCacheScope =
+                  isModern && Predicate.hasProperty(result, "cacheScope") ? result.cacheScope : undefined
+
                 const cacheScope = rawCacheScope === "public" || rawCacheScope === "private" ? rawCacheScope : undefined
-                const rawTtlMs = Predicate.hasProperty(result, "ttlMs") ? result.ttlMs : undefined
+                const rawTtlMs = isModern && Predicate.hasProperty(result, "ttlMs") ? result.ttlMs : undefined
                 const ttlMs = Predicate.isNumber(rawTtlMs) ? rawTtlMs : undefined
 
                 return {

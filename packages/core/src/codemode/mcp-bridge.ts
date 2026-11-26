@@ -95,6 +95,7 @@ export const createLazyMcpDispatcher = Effect.fn("CodeModeMcpBridge.createLazyMc
   const listed = yield* mcp.list(options.directory)
   const allowed = options.servers !== undefined ? new Set(options.servers) : undefined
   const byKey = new Map<string, McpSchema.ServerInfo>()
+  const toolMaps = new Map<string, ReadonlyMap<string, string>>()
 
   for (const server of listed) {
     byKey.set(server.name, server)
@@ -102,6 +103,28 @@ export const createLazyMcpDispatcher = Effect.fn("CodeModeMcpBridge.createLazyMc
 
     if (!byKey.has(jsName)) byKey.set(jsName, server)
   }
+
+  const resolveToolName = (serverName: string, requested: string): Effect.Effect<string> =>
+    Effect.gen(function* () {
+      let map = toolMaps.get(serverName)
+
+      if (map === undefined) {
+        const serverTools = yield* mcp.tools(serverName, options.directory).pipe(Effect.orElseSucceed(() => []))
+        const built = new Map<string, string>()
+
+        for (const item of serverTools) {
+          built.set(item.name, item.name)
+          const jsName = SchemaType.toIdentifier(item.name)
+
+          if (!built.has(jsName)) built.set(jsName, item.name)
+        }
+
+        toolMaps.set(serverName, built)
+        map = built
+      }
+
+      return map.get(requested) ?? requested
+    })
 
   return (server, tool, args) => {
     const info = byKey.get(server)
@@ -122,17 +145,18 @@ export const createLazyMcpDispatcher = Effect.fn("CodeModeMcpBridge.createLazyMc
       return Effect.fail({ message: `MCP server "${info.name}" is not included in the allowed servers list` })
     }
 
-    return mcp
-      .call({
-        server: info.name,
-        tool,
-        args: isJsonObject(args) ? args : {},
-        directory: options.directory,
-      })
-      .pipe(
-        Effect.mapError((error) => ({ message: error.message })),
-        Effect.flatMap(unwrapMcpCallResult),
-      )
+    return resolveToolName(info.name, tool).pipe(
+      Effect.flatMap((resolvedTool) =>
+        mcp.call({
+          server: info.name,
+          tool: resolvedTool,
+          args: isJsonObject(args) ? args : {},
+          directory: options.directory,
+        }),
+      ),
+      Effect.mapError((error) => ({ message: error.message })),
+      Effect.flatMap(unwrapMcpCallResult),
+    )
   }
 })
 

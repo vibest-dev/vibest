@@ -537,6 +537,13 @@ const mcp = Spec.make("mcp", {
       description: "Add or update a local or remote MCP server in ~/.vibest/mcp.json",
       params: {
         server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+        args: Argument.String("command").pipe(
+          Argument.withDescription(
+            "Local MCP server command and arguments after -- (for example: vibest mcp add fs -- npx -y @modelcontextprotocol/server-filesystem /dir)",
+          ),
+          Argument.withMetavar("[-- <command> <args...>]"),
+          Argument.atLeast(0),
+        ),
         url: Flag.String("url").pipe(Flag.withDescription("Remote MCP server URL"), Flag.optional),
         command: Flag.String("command").pipe(
           Flag.withDescription("Local MCP server command and arguments (repeat for each arg)"),
@@ -655,9 +662,9 @@ const mcp = Spec.make("mcp", {
   ],
 })
 
-const autoId = Argument.String("id").pipe(Argument.withDescription("Automation id (aut_...)"))
+const automationId = Argument.String("id").pipe(Argument.withDescription("Automation id (aut_...)"))
 
-const auto = Spec.make("auto", {
+const automation = Spec.make("automation", {
   description: "Manage scheduled and MCP event automations",
   commands: [
     Spec.make("create", {
@@ -730,24 +737,24 @@ const auto = Spec.make("auto", {
     }),
     Spec.make("get", {
       description: "Show one automation as JSON",
-      params: { id: autoId },
+      params: { id: automationId },
     }),
     Spec.make("pause", {
       description: "Pause an active automation",
-      params: { id: autoId },
+      params: { id: automationId },
     }),
     Spec.make("resume", {
       description: "Resume a paused automation",
-      params: { id: autoId },
+      params: { id: automationId },
     }),
     Spec.make("remove", {
       alias: "rm",
       description: "Delete an automation",
-      params: { id: autoId },
+      params: { id: automationId },
     }),
     Spec.make("run-now", {
       description: "Execute an automation immediately once",
-      params: { id: autoId },
+      params: { id: automationId },
     }),
   ],
 })
@@ -775,7 +782,7 @@ export const Commands = Spec.make("vibest", {
     worktree,
     plugins,
     mcp,
-    auto,
+    automation,
     subscriptions,
     onboard,
     doctor,
