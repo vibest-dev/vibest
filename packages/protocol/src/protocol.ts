@@ -115,4 +115,5 @@ export const CAPABILITIES = {
   worktrees: true,
   stop: true,
   mcp: true,
+  codemode: true,
 } as const

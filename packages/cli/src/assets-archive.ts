@@ -89,10 +89,20 @@ const collectEntries = (prefix: string, root: string, current: string, out: Arra
 
 export const packDirectoryArchive = (
   roots: ReadonlyArray<{ readonly prefix: string; readonly dir: string }>,
+  files: ReadonlyArray<{ readonly path: string; readonly file: string; readonly mode?: number }> = [],
 ): Uint8Array => {
   const entries: Array<ArchiveEntry> = []
 
   for (const { prefix, dir } of roots) collectEntries(prefix, dir, dir, entries)
+
+  for (const item of files) {
+    const stat = fs.statSync(item.file)
+    entries.push({
+      path: item.path,
+      mode: item.mode ?? stat.mode & 0o777,
+      data: fs.readFileSync(item.file),
+    })
+  }
 
   return encodeArchive(entries)
 }

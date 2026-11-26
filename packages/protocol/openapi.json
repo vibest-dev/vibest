@@ -18,7 +18,8 @@
     "agents": true,
     "worktrees": true,
     "stop": true,
-    "mcp": true
+    "mcp": true,
+    "codemode": true
   },
   "access": {
     "daemon.ping": [
@@ -119,6 +120,8 @@
     "mcp.authComplete": "cli",
     "mcp.authSetToken": "cli",
     "mcp.authLogout": "cli",
+    "codemode.execute": "agent",
+    "codemode.declarations": "agent",
     "subscription.list": "open",
     "machine.list": "cli",
     "machine.add": "cli",
@@ -10377,6 +10380,173 @@
           "summary": "Remove MCP OAuth credentials"
         }
       },
+      "/api/codemode/execute": {
+        "post": {
+          "tags": [
+            "codemode"
+          ],
+          "operationId": "codemode.execute",
+          "parameters": [],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "CodeModeExecutionResult",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CodeModeExecutionResult"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Execute JavaScript in the confined Psychoscript CodeMode sandbox with mounted MCP tools",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodeModeExecuteRequest"
+                }
+              }
+            },
+            "required": true
+          }
+        }
+      },
+      "/api/codemode/declarations": {
+        "get": {
+          "tags": [
+            "codemode"
+          ],
+          "operationId": "codemode.declarations",
+          "parameters": [
+            {
+              "name": "directory",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            },
+            {
+              "name": "server",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "CodeModeDeclarationsResult",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CodeModeDeclarationsResult"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Render TypeScript declarations for MCP tools available in CodeMode"
+        }
+      },
       "/api/subscription": {
         "get": {
           "tags": [
@@ -15280,6 +15450,388 @@
           ],
           "additionalProperties": false
         },
+        "CodeModeDeclarationsResult": {
+          "type": "object",
+          "properties": {
+            "declarations": {
+              "type": "string"
+            },
+            "servers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "toolCount": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "declarations",
+            "servers",
+            "toolCount"
+          ],
+          "additionalProperties": false
+        },
+        "CodeModeExecutionResult": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/CodeModeExecutionSuccess"
+            },
+            {
+              "$ref": "#/components/schemas/CodeModeExecutionFailure"
+            }
+          ]
+        },
+        "CodeModeExecutionFailure": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            },
+            "error": {
+              "$ref": "#/components/schemas/CodeModeExecutionError"
+            },
+            "logs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "calls": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/CodeModeToolCallRecord"
+              }
+            },
+            "truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "outputFile": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "ok",
+            "error",
+            "logs",
+            "calls"
+          ],
+          "additionalProperties": false
+        },
+        "CodeModeToolCallRecord": {
+          "type": "object",
+          "properties": {
+            "server": {
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/components/schemas/CodeModeToolCallStatus"
+            },
+            "durationMs": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "server",
+            "tool",
+            "path",
+            "status",
+            "durationMs"
+          ],
+          "additionalProperties": false
+        },
+        "CodeModeToolCallStatus": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "error",
+            "cancelled"
+          ]
+        },
+        "CodeModeExecutionError": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/components/schemas/CodeModeErrorKind"
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "stack": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "CodeModeErrorKind": {
+          "type": "string",
+          "enum": [
+            "ParseError",
+            "ScriptError",
+            "Timeout",
+            "MemoryLimit",
+            "Aborted",
+            "ToolLimit",
+            "ToolDenied",
+            "SandboxError"
+          ]
+        },
+        "CodeModeExecutionSuccess": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "value": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "logs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "calls": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/CodeModeToolCallRecord"
+              }
+            },
+            "storeWrites": {
+              "$ref": "#/components/schemas/CodeModeStoreWrites"
+            },
+            "truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "outputFile": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "ok",
+            "logs",
+            "calls",
+            "storeWrites"
+          ],
+          "additionalProperties": false
+        },
+        "CodeModeStoreWrites": {
+          "type": "object",
+          "properties": {
+            "set": {
+              "type": "object"
+            },
+            "delete": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "set",
+            "delete"
+          ],
+          "additionalProperties": false
+        },
+        "CodeModeExecuteRequest": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "directory": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "servers": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "bindings": {
+              "anyOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "anyOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "limits": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CodeModeExecutionLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        "CodeModeExecutionLimits": {
+          "type": "object",
+          "properties": {
+            "timeoutMs": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxToolCalls": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxLogBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 262144
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
         "McpAuthErrorEncoded": {
           "type": "object",
           "properties": {
@@ -15943,6 +16495,16 @@
               ]
             },
             "pooled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "codemode": {
               "anyOf": [
                 {
                   "type": "boolean"
@@ -16918,6 +17480,9 @@
       },
       {
         "name": "mcp"
+      },
+      {
+        "name": "codemode"
       },
       {
         "name": "subscription"

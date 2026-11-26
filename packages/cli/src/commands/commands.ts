@@ -526,6 +526,10 @@ const mcp = Spec.make("mcp", {
           Flag.withDescription("List only SEP-2640 skills for the server"),
           Flag.withDefault(false),
         ),
+        types: Flag.Boolean("types").pipe(
+          Flag.withDescription("Print TypeScript declarations for CodeMode (all servers or one server)"),
+          Flag.withDefault(false),
+        ),
       },
     }),
     Spec.make("add", {
@@ -583,6 +587,28 @@ const mcp = Spec.make("mcp", {
         json: Argument.String("json").pipe(
           Argument.withDescription("JSON object of tool arguments"),
           Argument.optional,
+        ),
+      },
+    }),
+    Spec.make("exec", {
+      description: "Execute JavaScript in the confined Psychoscript CodeMode sandbox with mounted MCP tools",
+      params: {
+        code: Argument.String("code").pipe(
+          Argument.withDescription("JavaScript async body to execute"),
+          Argument.optional,
+        ),
+        file: Flag.String("file").pipe(Flag.withDescription("Read JavaScript source from a file path"), Flag.optional),
+        input: Flag.String("input").pipe(
+          Flag.withDescription("JSON value bound to the global `input` variable"),
+          Flag.optional,
+        ),
+        server: Flag.String("server").pipe(
+          Flag.withDescription("Restrict mounted MCP servers (repeat for multiple servers)"),
+          Flag.atLeast(0),
+        ),
+        timeout: Flag.Int("timeout").pipe(
+          Flag.withDescription("Execution timeout in milliseconds (default 30000)"),
+          Flag.optional,
         ),
       },
     }),

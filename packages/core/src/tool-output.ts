@@ -1,7 +1,8 @@
+import type { CodeMode } from "@vibest/schema/codemode"
 import { Layout } from "@vibest/schema/layout"
 import type { Mcp } from "@vibest/schema/mcp"
 import { LayerNode } from "@vibest/util/layer-node"
-import { Clock, Context, Duration, Effect, FiberSet, FileSystem, Layer, Option, Path, Schema } from "effect"
+import { Clock, Context, Duration, Effect, FiberSet, FileSystem, Layer, Option, Path, Predicate, Schema } from "effect"
 
 import { PlatformNode } from "./effect/platform.ts"
 
@@ -168,9 +169,19 @@ export interface TruncateResourceInput {
   readonly scratchpadDir?: string | undefined
 }
 
+export interface TruncateExecutionOptions {
+  readonly maxBytes?: number | undefined
+  readonly maxLines?: number | undefined
+  readonly scratchpadDir?: string | undefined
+}
+
 export interface Interface {
   readonly truncateCallResult: (input: TruncateCallInput) => Effect.Effect<Mcp.CallResult>
   readonly truncateResourceResult: (input: TruncateResourceInput) => Effect.Effect<Mcp.ReadResourceResult>
+  readonly truncateExecutionResult: (
+    result: CodeMode.ExecutionResult,
+    options?: TruncateExecutionOptions,
+  ) => Effect.Effect<CodeMode.ExecutionResult>
   readonly save: (bytes: Uint8Array, extension: string, directory?: string) => Effect.Effect<string>
   readonly cleanup: () => Effect.Effect<void>
 }
@@ -454,7 +465,77 @@ export const layer = Layer.effect(
       }
     })
 
-    return Service.of({ truncateCallResult, truncateResourceResult, save, cleanup })
+    const truncateExecutionResult = Effect.fn("ToolOutput.truncateExecutionResult")(function* (
+      result: CodeMode.ExecutionResult,
+      options?: TruncateExecutionOptions,
+    ): Effect.fn.Return<CodeMode.ExecutionResult> {
+      if (result.truncated !== undefined) return result
+      const maxBytes = options?.maxBytes ?? MAX_BYTES
+      const maxLines = options?.maxLines ?? MAX_LINES
+      const targetDir = options?.scratchpadDir ?? defaultDir
+
+      const logsText = result.logs.join("\n")
+      const logsOver = countLines(logsText) > maxLines || utf8ByteLength(logsText) > maxBytes
+      let nextLogs = result.logs
+      let truncated = false
+      let outputFile: string | undefined
+
+      if (logsOver) {
+        const { shown, file, failure, marker } = yield* spillText({
+          text: logsText,
+          maxBytes,
+          maxLines,
+          targetDir,
+          label: "codemode_logs",
+        })
+
+        nextLogs = shown.length > 0 ? [shown, marker] : [marker]
+        truncated = true
+
+        if (failure === undefined) outputFile = file
+      }
+
+      if (!result.ok) {
+        return truncated
+          ? { ...result, logs: nextLogs, truncated: true, ...(outputFile !== undefined && { outputFile }) }
+          : result
+      }
+
+      const serializedValue =
+        result.value === undefined
+          ? ""
+          : Predicate.isString(result.value)
+            ? result.value
+            : JSON.stringify(result.value, null, 2)
+
+      const valueOver = countLines(serializedValue) > maxLines || utf8ByteLength(serializedValue) > maxBytes
+
+      if (!valueOver) {
+        return truncated
+          ? { ...result, logs: nextLogs, truncated: true, ...(outputFile !== undefined && { outputFile }) }
+          : result
+      }
+
+      const { shown, file, failure, marker } = yield* spillText({
+        text: serializedValue,
+        maxBytes,
+        maxLines,
+        targetDir,
+        label: "codemode",
+      })
+
+      const finalOutputFile = failure === undefined ? file : outputFile
+
+      return {
+        ...result,
+        value: shown.length > 0 ? `${shown}\n\n${marker}` : marker,
+        logs: nextLogs,
+        truncated: true,
+        ...(finalOutputFile !== undefined && { outputFile: finalOutputFile }),
+      }
+    })
+
+    return Service.of({ truncateCallResult, truncateResourceResult, truncateExecutionResult, save, cleanup })
   }),
 )
 

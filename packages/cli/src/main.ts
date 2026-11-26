@@ -66,6 +66,7 @@ const Handlers = Runtime.handlers(Commands, {
     search: () => import("./commands/handlers/mcp/search.ts"),
     read: () => import("./commands/handlers/mcp/read.ts"),
     call: () => import("./commands/handlers/mcp/call.ts"),
+    exec: () => import("./commands/handlers/mcp/exec.ts"),
     auth: {
       start: () => import("./commands/handlers/mcp/auth/start.ts"),
       complete: () => import("./commands/handlers/mcp/auth/complete.ts"),
