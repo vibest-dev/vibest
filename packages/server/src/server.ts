@@ -1,6 +1,7 @@
 import { Agents } from "@vibest/core/agent/registry"
 import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
+import { CodeMode } from "@vibest/core/codemode"
 import { Database } from "@vibest/core/database/database"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Harness } from "@vibest/core/harness"
@@ -35,6 +36,7 @@ import type { ServeError } from "effect/http/HttpServerError"
 import { AdmissionLive, CallerMiddlewareLive, ProtocolMiddlewareLive } from "./gates.ts"
 import { AgentHandler } from "./handlers/agent.ts"
 import * as CallerChecks from "./handlers/caller.ts"
+import { CodeModeHandler } from "./handlers/codemode.ts"
 import { DaemonHandler, DaemonHandlers } from "./handlers/daemon.ts"
 import { EventHandler } from "./handlers/event.ts"
 import { HarnessHandler } from "./handlers/harness.ts"
@@ -78,6 +80,7 @@ export const handlersCore = Layer.mergeAll(
   RuntimeHandler,
   PluginHandler,
   McpHandler,
+  CodeModeHandler,
   SubscriptionHandler,
   MachineHandler,
   RemoteHandler,
@@ -142,6 +145,7 @@ export const handlerDeps = [
   Inbound.node,
   Plugins.node,
   Mcp.node,
+  CodeMode.node,
   Processes.node,
   Project.node,
   Remote.node,

@@ -64,6 +64,8 @@ export const ACCESS = {
   "mcp.authComplete": "cli",
   "mcp.authSetToken": "cli",
   "mcp.authLogout": "cli",
+  "codemode.execute": "agent",
+  "codemode.declarations": "agent",
   "subscription.list": "open",
   "machine.list": "cli",
   "machine.add": "cli",

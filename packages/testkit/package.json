@@ -15,6 +15,7 @@
     "@effect/sql-sqlite-bun": "catalog:",
     "@effect/vitest": "catalog:",
     "@vibest/client": "workspace:*",
+    "@vibest/codemode": "workspace:*",
     "@vibest/core": "workspace:*",
     "@vibest/mcp": "workspace:*",
     "@vibest/platform-bun": "workspace:*",

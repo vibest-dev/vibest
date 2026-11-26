@@ -1,6 +1,8 @@
+import { CodeModeRuntime } from "@vibest/codemode/service"
 import { Agents } from "@vibest/core/agent/registry"
 import { App } from "@vibest/core/app"
 import { Bus } from "@vibest/core/bus"
+import { CodeMode } from "@vibest/core/codemode"
 import { Database } from "@vibest/core/database/database"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Harness } from "@vibest/core/harness"
@@ -34,6 +36,7 @@ import * as VibestPlugin from "@vibest/plugin/effect"
 import { NOT_CHECKED, type DaemonIdentity } from "@vibest/protocol/schemas"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
+import { VibestApiTools } from "@vibest/server/codemode/vibest-api-tools"
 import { DaemonHandlers } from "@vibest/server/handlers/daemon"
 import { Load } from "@vibest/server/machine/load"
 import { Machines } from "@vibest/server/machine/machines"
@@ -319,6 +322,9 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Harnesses.node.replace(harnessesLayer()),
       Subscriptions.node.replace(subscriptions),
       CoreMcp.node.replace(Mcp.node),
+      CodeMode.hostNode.replace(Layer.succeed(CodeMode.Host, () => CodeModeRuntime.make())),
+      VibestApiTools.httpConnectorNode.replace(platform),
+      CodeMode.builtinToolsNode.replace(VibestApiTools.node),
       Plugins.node.replace(plugins),
       RepositoryUrl.node.replace(defaultSsh),
       Machines.machineTransportNode.replace(defaultTransport),
