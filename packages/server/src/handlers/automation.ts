@@ -2,7 +2,6 @@ import { Automation } from "@vibest/core/automation"
 import { VibestApi } from "@vibest/protocol/api"
 import { Caller } from "@vibest/protocol/middleware"
 import { Effect, Predicate } from "effect"
-import { HttpServerRequest } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 
 export const AutomationHandler = HttpApiBuilder.group(VibestApi, "server.automation", (handlers) =>
@@ -38,18 +37,5 @@ export const AutomationHandler = HttpApiBuilder.group(VibestApi, "server.automat
       .handle("automation.remove", ({ params }) => automation.remove(params.id))
       .handle("automation.tick", () => automation.tick)
       .handle("automation.runNow", ({ params }) => automation.runNow(params.id))
-      .handle("automation.webhook", ({ params, payload }) =>
-        Effect.gen(function* () {
-          const request = yield* HttpServerRequest.HttpServerRequest
-          const rawBody = yield* request.text.pipe(Effect.orElseSucceed(() => JSON.stringify(payload)))
-
-          return yield* automation.webhook({
-            id: params.id,
-            rawBody,
-            payload,
-            headers: request.headers,
-          })
-        }),
-      )
   }),
 )

@@ -1,19 +1,23 @@
 import { Automation } from "@vibest/schema/automation"
-import { AutomationEvent } from "@vibest/schema/automation-event"
-import type { Event } from "@vibest/schema/event"
 import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
 
-import { Bus } from "../bus.ts"
 import { Database } from "../database/database.ts"
-import { Projectors } from "../reactor.ts"
-import { automationSql, type AutomationRow, type ListFilter, toInfo } from "./sql.ts"
+import {
+  automationSql,
+  type AutomationRow,
+  type InsertAutomationRow,
+  type ListFilter,
+  type ResumePatch,
+  type SettleOptions,
+  type SettlePatch,
+  toInfo,
+} from "./sql.ts"
 
 export * as AutomationStore from "./store.ts"
 
 export const make = Effect.gen(function* () {
   const { sql } = yield* Database.Service
-  const { publish, transaction: tx } = yield* Bus.Service
   const queries = automationSql(sql)
 
   const getRow = Effect.fn("AutomationStore.getRow")((id: string) => queries.get(id).pipe(Effect.orDie))
@@ -30,6 +34,8 @@ export const make = Effect.gen(function* () {
   return {
     getRow,
 
+    requireRow: Effect.fn("AutomationStore.requireRow")(requireRow),
+
     get: Effect.fn("AutomationStore.get")((id: string) => requireRow(id).pipe(Effect.map(toInfo))),
 
     list: Effect.fn("AutomationStore.list")((filter?: ListFilter) =>
@@ -39,99 +45,39 @@ export const make = Effect.gen(function* () {
       ),
     ),
 
-    create: Effect.fn("AutomationStore.create")((data: Event.Data<typeof AutomationEvent.Created>) =>
-      tx(
-        Effect.gen(function* () {
-          yield* publish(AutomationEvent.Created, data)
-          const row = yield* queries.get(data.automationId)
+    create: Effect.fn("AutomationStore.create")(function* (row: InsertAutomationRow) {
+      yield* queries.insert(row).pipe(Effect.orDie)
+      const inserted = yield* getRow(row.id)
 
-          return toInfo(row!)
-        }),
-      ).pipe(Effect.orDie),
-    ),
+      return toInfo(inserted!)
+    }),
 
-    pause: Effect.fn("AutomationStore.pause")(
-      (
-        id: Automation.ID,
-        details?: {
-          readonly reason?: string | undefined
-          readonly lastOutcome?: Automation.Outcome | undefined
-          readonly lastRunAt?: number | undefined
-          readonly failures?: number | undefined
-        },
-      ) =>
-        tx(
-          Effect.gen(function* () {
-            yield* requireRow(id)
-            yield* publish(AutomationEvent.Paused, {
-              automationId: id,
-              ...(details?.reason !== undefined && { reason: details.reason }),
-              ...(details?.lastOutcome !== undefined && { lastOutcome: details.lastOutcome }),
-              ...(details?.lastRunAt !== undefined && { lastRunAt: details.lastRunAt }),
-              ...(details?.failures !== undefined && { failures: details.failures }),
-            })
+    pause: Effect.fn("AutomationStore.pause")(function* (id: string, now: number) {
+      const existing = yield* requireRow(id)
 
-            const row = yield* queries.get(id)
+      if (existing.status !== "active") return toInfo(existing)
+      yield* queries.pause(existing.id, now).pipe(Effect.orDie)
 
-            return toInfo(row!)
-          }),
-        ).pipe(Effect.catchTag("SqlError", (e) => Effect.die(e))),
-    ),
+      return toInfo(yield* requireRow(existing.id))
+    }),
 
-    resume: Effect.fn("AutomationStore.resume")((id: Automation.ID, nextDueAt?: number) =>
-      tx(
-        Effect.gen(function* () {
-          yield* requireRow(id)
-          yield* publish(AutomationEvent.Resumed, {
-            automationId: id,
-            ...(nextDueAt !== undefined && { nextDueAt }),
-          })
+    resume: Effect.fn("AutomationStore.resume")(function* (id: string, patch: ResumePatch) {
+      const existing = yield* requireRow(id)
 
-          const row = yield* queries.get(id)
+      if (existing.status !== "paused") return toInfo(existing)
+      yield* queries.resume(existing.id, patch).pipe(Effect.orDie)
 
-          return toInfo(row!)
-        }),
-      ).pipe(Effect.catchTag("SqlError", (e) => Effect.die(e))),
-    ),
+      return toInfo(yield* requireRow(existing.id))
+    }),
 
-    remove: Effect.fn("AutomationStore.remove")((id: Automation.ID) =>
-      tx(
-        Effect.gen(function* () {
-          yield* requireRow(id)
-          yield* publish(AutomationEvent.Removed, { automationId: id })
-        }),
-      ).pipe(Effect.catchTag("SqlError", (e) => Effect.die(e))),
-    ),
+    remove: Effect.fn("AutomationStore.remove")(function* (id: string) {
+      const existing = yield* requireRow(id)
+      yield* queries.remove(existing.id).pipe(Effect.orDie)
+    }),
 
-    recordTriggered: Effect.fn("AutomationStore.recordTriggered")(
-      (data: Event.Data<typeof AutomationEvent.Triggered>) =>
-        tx(
-          Effect.gen(function* () {
-            const existing = yield* queries.get(data.automationId)
-
-            if (existing === undefined) return undefined
-            yield* publish(AutomationEvent.Triggered, data)
-            const row = yield* queries.get(data.automationId)
-
-            return row === undefined ? undefined : toInfo(row)
-          }),
-        ).pipe(Effect.orDie),
-    ),
-
-    saveCursor: Effect.fn("AutomationStore.saveCursor")(
-      (id: Automation.ID, cursor: string | null, lastEventId?: string) =>
-        tx(
-          Effect.gen(function* () {
-            const existing = yield* queries.get(id)
-
-            if (existing === undefined) return
-            yield* publish(AutomationEvent.CursorSaved, {
-              automationId: id,
-              cursor,
-              ...(lastEventId !== undefined && { lastEventId }),
-            })
-          }),
-        ).pipe(Effect.orDie),
+    settle: Effect.fn("AutomationStore.settle")(
+      (row: Pick<AutomationRow, "id" | "runCount">, patch: SettlePatch, options?: SettleOptions) =>
+        queries.settle(row, patch, options).pipe(Effect.orDie),
     ),
 
     nextDue: Effect.fn("AutomationStore.nextDue")(() => queries.nextDue().pipe(Effect.orDie)),
@@ -140,8 +86,8 @@ export const make = Effect.gen(function* () {
 
     activeEvents: Effect.fn("AutomationStore.activeEvents")(() => queries.activeEvents().pipe(Effect.orDie)),
 
-    hasDedupKey: Effect.fn("AutomationStore.hasDedupKey")((automationId: string, dedupKey: string) =>
-      queries.hasDedupKey(automationId, dedupKey).pipe(Effect.orDie),
+    hasPendingInboxMessage: Effect.fn("AutomationStore.hasPendingInboxMessage")(
+      (sessionId: string, requestId: string) => queries.hasPendingInboxMessage(sessionId, requestId).pipe(Effect.orDie),
     ),
   }
 })
@@ -155,5 +101,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Database.node, Bus.node, Projectors.node],
+  deps: [Database.node],
 })

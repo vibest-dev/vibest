@@ -1,6 +1,6 @@
 import { Agents } from "@vibest/core/agent/registry"
 import { App } from "@vibest/core/app"
-import { Automation, AutomationSecretStore, AutomationStore } from "@vibest/core/automation"
+import { Automation, AutomationStore } from "@vibest/core/automation"
 import { Bus } from "@vibest/core/bus"
 import { CodeMode } from "@vibest/core/codemode"
 import { Database } from "@vibest/core/database/database"
@@ -150,7 +150,6 @@ export const handlerDeps = [
   Mcp.node,
   CodeMode.node,
   AutomationStore.node,
-  AutomationSecretStore.node,
   Automation.node,
   Processes.node,
   Project.node,

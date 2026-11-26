@@ -1,5 +1,4 @@
 import { Automation } from "@vibest/schema/automation"
-import { AutomationEvent } from "@vibest/schema/automation-event"
 import { KeyedMutex } from "@vibest/util/keyed-mutex"
 import { LayerNode } from "@vibest/util/layer-node"
 import {
@@ -9,21 +8,21 @@ import {
   DateTime,
   Duration,
   Effect,
+  FiberMap,
+  FiberSet,
   Layer,
   Option,
   Path,
+  Ref,
   Result,
-  type Schema,
   Semaphore,
 } from "effect"
-import { Digest } from "effect/crypto"
 
-import { Bus } from "../bus.ts"
 import { CodeMode } from "../codemode.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Mcp } from "../mcp.ts"
 import { ProjectStore } from "../project/store.ts"
-import * as Reactor from "../reactor.ts"
+import { logFailure } from "../reactor.ts"
 import { Session } from "../session.ts"
 import { AutomationCode } from "./code.ts"
 import { AutomationEventStream } from "./event.ts"
@@ -34,14 +33,11 @@ import {
   followingSlot,
   freezeAtTrigger,
   isExpired,
+  isFinished,
   nextCron,
   parseTime,
-  readHeader,
   resolveZone,
-  sha256Hex,
-  verifyWebhookAuth,
 } from "./schedule.ts"
-import { AutomationSecretStore } from "./secret-store.ts"
 import { type ListFilter, toInfo } from "./sql.ts"
 import { AutomationStore } from "./store.ts"
 import { createWatchManager } from "./watch.ts"
@@ -51,14 +47,7 @@ export * as AutomationService from "./service.ts"
 export { followingSlot, nextCron, parseTime }
 
 const TICK_CONCURRENCY = 4
-const TIMER_KEY = "automation.timer"
-
-export interface WebhookCallInput {
-  readonly id: string
-  readonly rawBody: string
-  readonly payload: Schema.Json
-  readonly headers: Readonly<Record<string, string>>
-}
+const TIMER_KEY = "automation.next"
 
 export interface Interface {
   readonly create: (input: Automation.CreateInput) => Effect.Effect<Automation.Info, Automation.InvalidError>
@@ -69,37 +58,42 @@ export interface Interface {
   readonly remove: (id: string) => Effect.Effect<void, Automation.NotFoundError>
   readonly tick: Effect.Effect<void>
   readonly runNow: (id: string) => Effect.Effect<Automation.Info, Automation.NotFoundError | Automation.InvalidError>
-  readonly webhook: (
-    input: WebhookCallInput,
-  ) => Effect.Effect<
-    Automation.WebhookResult,
-    Automation.NotFoundError | Automation.InvalidError | Automation.WebhookUnauthorizedError
-  >
 }
 
 export class Service extends Context.Service<Service, Interface>()("vibest/Automation") {}
 
 export const make = Effect.gen(function* () {
   const store = yield* AutomationStore.Service
-  const secretStore = yield* AutomationSecretStore.Service
   const codemode = yield* CodeMode.Service
   const mcp = yield* Mcp.Service
   const sessions = yield* Session.Service
   const projectStore = yield* ProjectStore.Service
-  const digest = yield* Digest.Digest
   const path = yield* Path.Path
-  const reactor = yield* Reactor.make
+  const timers = yield* FiberMap.make<string>()
+  const handlers = yield* FiberSet.make()
   const armLock = yield* Semaphore.make(1)
-  const webhookLocks = yield* KeyedMutex.make<string>()
+  const tickLock = yield* Semaphore.make(1)
+  const tickRunning = yield* Ref.make(false)
+  const runLocks = yield* KeyedMutex.make<Automation.ID>()
 
-  const { pauseQuiet, executeRow } = createExecutor({ store, codemode, sessions })
+  const arm = (key: string, delay: Duration.Duration, effect: Effect.Effect<unknown, unknown>): Effect.Effect<void> =>
+    FiberMap.run(
+      timers,
+      key,
+      Effect.sleep(delay).pipe(Effect.andThen(FiberSet.run(handlers, logFailure(key)(effect)))),
+    ).pipe(Effect.asVoid)
+
+  const cancel = (key: string): Effect.Effect<void> => FiberMap.remove(timers, key)
+
+  const { pauseWith, executeRow } = createExecutor({ store, codemode, sessions })
 
   const { syncWatches, hasWatch } = yield* createWatchManager({
     store,
     mcp,
-    arm: reactor.arm,
-    cancel: reactor.cancel,
-    pauseQuiet,
+    arm,
+    cancel,
+    withRunLock: runLocks.withLock,
+    pauseWith,
     executeRow,
   })
 
@@ -115,45 +109,45 @@ export const make = Effect.gen(function* () {
     yield* Effect.forEach(
       due,
       Effect.fnUntraced(function* (initial) {
-        const row = yield* store.getRow(initial.id)
+        yield* runLocks.withLock(Automation.ID.make(initial.id))(
+          Effect.gen(function* () {
+            const row = yield* store.getRow(initial.id)
 
-        if (row === undefined || row.status !== "active" || row.nextDueAt === null || row.nextDueAt > from) return
+            if (row === undefined || row.status !== "active" || row.nextDueAt === null || row.nextDueAt > from) return
 
-        if (row.retryAt !== null && row.retryAt > from) return
-        const now = yield* Clock.currentTimeMillis
+            if (row.retryAt !== null && row.retryAt > from) return
+            const now = yield* Clock.currentTimeMillis
 
-        if (isExpired(row.expiresAt, now) && now - row.nextDueAt >= LATE_AFTER) {
-          yield* store.recordTriggered({
-            automationId: Automation.ID.make(row.id),
-            status: "done",
-            runCount: row.runCount,
-            failures: row.failures,
-            nextDueAt: null,
-            retryAt: null,
-            lastOutcome: "expired",
-          })
+            if (isExpired(row.expiresAt, now) && now - row.nextDueAt >= LATE_AFTER) {
+              yield* store.settle(row, {
+                status: "done",
+                nextDueAt: null,
+                retryAt: null,
+                lastOutcome: "expired",
+                timeUpdated: now,
+              })
 
-          return
-        }
+              return
+            }
 
-        yield* executeRow(row, now).pipe(
-          Effect.catchCause((cause) => {
-            if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-            const error = Cause.squash(cause)
+            yield* executeRow(row, now).pipe(
+              Effect.catchCause((cause) => {
+                if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
+                const error = Cause.squash(cause)
 
-            return Effect.logWarning("automation failed to run", { automationId: row.id, cause }).pipe(
-              Effect.andThen(
-                store.recordTriggered({
-                  automationId: Automation.ID.make(row.id),
-                  status: "active",
-                  runCount: row.runCount,
-                  failures: row.failures + 1,
-                  retryAt: now + FAILED_RETRY,
-                  lastRunAt: now,
-                  lastOutcome: "failed",
-                  lastOutput: error instanceof Error ? error.message : String(error),
-                }),
-              ),
+                return Effect.logWarning("automation failed to run", { automationId: row.id, cause }).pipe(
+                  Effect.andThen(
+                    store.settle(row, {
+                      failures: row.failures + 1,
+                      retryAt: now + FAILED_RETRY,
+                      lastRunAt: now,
+                      lastOutcome: "failed",
+                      lastOutput: error instanceof Error ? error.message : String(error),
+                      timeUpdated: now,
+                    }),
+                  ),
+                )
+              }),
             )
           }),
         )
@@ -164,58 +158,26 @@ export const make = Effect.gen(function* () {
 
   const armNext: Effect.Effect<void> = armLock.withPermits(1)(
     Effect.gen(function* () {
+      if (yield* Ref.get(tickRunning)) return
       const nextDueAt = yield* store.nextDue()
 
       if (nextDueAt === undefined) {
-        yield* reactor.cancel(TIMER_KEY)
+        yield* cancel(TIMER_KEY)
 
         return
       }
 
       const now = yield* Clock.currentTimeMillis
       const delay = Math.max(0, nextDueAt - now)
-      yield* reactor.arm(TIMER_KEY, Duration.millis(delay), tick)
+      yield* arm(TIMER_KEY, Duration.millis(delay), tick)
     }),
   )
 
-  const tick: Effect.Effect<void> = tickCore.pipe(Effect.ensuring(armNext))
-
-  yield* reactor.on(
-    [
-      AutomationEvent.Created,
-      AutomationEvent.Paused,
-      AutomationEvent.Resumed,
-      AutomationEvent.Removed,
-      AutomationEvent.Triggered,
-    ],
-    (event) =>
-      Effect.gen(function* () {
-        yield* armNext
-
-        if (event.type === "automation.created") {
-          if (event.data.trigger.type === "event") yield* syncWatches
-
-          return
-        }
-
-        if (event.type === "automation.removed" || event.type === "automation.paused") {
-          if (yield* hasWatch(event.data.automationId)) yield* syncWatches
-
-          return
-        }
-
-        if (event.type === "automation.resumed") {
-          const row = yield* store.getRow(event.data.automationId)
-
-          if (row !== undefined && toInfo(row).trigger.type === "event") yield* syncWatches
-
-          return
-        }
-
-        if ((yield* hasWatch(event.data.automationId)) && event.data.status !== "active") {
-          yield* syncWatches
-        }
-      }),
+  const tick: Effect.Effect<void> = tickLock.withPermits(1)(
+    Ref.set(tickRunning, true).pipe(
+      Effect.andThen(tickCore),
+      Effect.ensuring(Ref.set(tickRunning, false).pipe(Effect.andThen(armNext))),
+    ),
   )
 
   yield* Effect.forkScoped(Effect.all([armNext, syncWatches], { discard: true }))
@@ -228,7 +190,7 @@ export const make = Effect.gen(function* () {
     const zone = yield* resolveZone(tzInput)
     const tz = DateTime.zoneToString(zone)
 
-    let expiresAt: number | undefined
+    let expiresAt: number | null = null
 
     if (input.expires !== undefined) {
       const parsed = parseTime(input.expires, zone, now)
@@ -268,35 +230,34 @@ export const make = Effect.gen(function* () {
 
     const nextDueAt = yield* computeInitialDue(input.trigger, zone, tz, now)
 
-    if (nextDueAt !== undefined && expiresAt !== undefined && nextDueAt > expiresAt) {
+    if (nextDueAt !== undefined && expiresAt !== null && nextDueAt > expiresAt) {
       return yield* new Automation.InvalidError({ message: "First trigger time is after expires time" })
     }
 
-    const frozenTrigger = freezeAtTrigger(input.trigger, nextDueAt)
-
-    const normalizedTrigger: Automation.Trigger =
-      frozenTrigger.type === "webhook" && input.webhookSecret !== undefined
-        ? { type: "webhook", secretHash: yield* sha256Hex(digest, input.webhookSecret) }
-        : frozenTrigger
-
+    const normalizedTrigger = freezeAtTrigger(input.trigger, nextDueAt)
     const projectId = yield* resolveProjectId(directory, input.projectId)
     const automationId = Automation.createId(now)
 
     const created = yield* store.create({
-      automationId,
-      name: input.name,
+      id: automationId,
       projectId,
-      ...(input.sessionId !== undefined && { sessionId: input.sessionId }),
+      sessionId: input.sessionId ?? null,
       directory,
+      name: input.name,
       trigger: normalizedTrigger,
       tz,
       action: input.action,
-      ...(expiresAt !== undefined && { expiresAt }),
-      ...(nextDueAt !== undefined && { nextDueAt }),
+      nextDueAt: nextDueAt ?? null,
+      expiresAt,
+      eventPosition: normalizedTrigger.type === "event" ? {} : null,
+      timeCreated: now,
+      timeUpdated: now,
     })
 
-    if (input.trigger.type === "webhook" && input.webhookSecret !== undefined) {
-      yield* secretStore.set(automationId, input.webhookSecret)
+    if (normalizedTrigger.type === "event") {
+      yield* syncWatches
+    } else {
+      yield* armNext
     }
 
     return created
@@ -307,111 +268,90 @@ export const make = Effect.gen(function* () {
   const get = Effect.fn("Automation.get")((id: string) => store.get(id))
 
   const pause = Effect.fn("Automation.pause")(function* (id: string) {
-    const info = yield* store.get(id)
+    const now = yield* Clock.currentTimeMillis
+    const paused = yield* store.pause(id, now)
+    yield* armNext
+    yield* cancel(`automation.watch.${paused.id}`)
 
-    return yield* store.pause(info.id)
+    if (paused.trigger.type === "event" || (yield* hasWatch(paused.id))) {
+      yield* syncWatches
+    }
+
+    return paused
   })
 
   const resume = Effect.fn("Automation.resume")(function* (
     id: string,
   ): Effect.fn.Return<Automation.Info, Automation.NotFoundError | Automation.InvalidError> {
-    const info = yield* store.get(id)
+    const row = yield* store.requireRow(id)
+    const info = toInfo(row)
 
     if (info.status === "done") {
       return yield* new Automation.InvalidError({ message: `Automation ${id} is already done` })
     }
 
-    const now = yield* Clock.currentTimeMillis
-    const zone = yield* resolveZone(info.tz)
-    const nextDueAt = yield* computeResumeDue(info.trigger, zone, info.tz, now)
+    if (info.status !== "paused") return info
 
-    return yield* store.resume(info.id, nextDueAt)
+    const now = yield* Clock.currentTimeMillis
+    const next = computeResumeDue(info.trigger, info.tz, row.nextDueAt, now)
+
+    const done =
+      (info.trigger.type !== "event" && (next === null || isFinished(row.expiresAt, next))) ||
+      isExpired(row.expiresAt, now)
+
+    const resumed = yield* store.resume(info.id, {
+      status: done ? "done" : "active",
+      nextDueAt: done ? null : next,
+      timeUpdated: now,
+    })
+
+    yield* armNext
+
+    if (resumed.trigger.type === "event") {
+      yield* syncWatches
+    }
+
+    return resumed
   })
 
   const remove = Effect.fn("Automation.remove")(function* (id: string) {
     const info = yield* store.get(id)
     yield* store.remove(info.id)
-    yield* secretStore.remove(info.id)
+    yield* armNext
+    yield* cancel(`automation.watch.${info.id}`)
+
+    if (info.trigger.type === "event" || (yield* hasWatch(info.id))) {
+      yield* syncWatches
+    }
   })
 
   const runNow = Effect.fn("Automation.runNow")(function* (
     id: string,
   ): Effect.fn.Return<Automation.Info, Automation.NotFoundError | Automation.InvalidError> {
-    const row = yield* store.getRow(id)
+    const initial = yield* store.requireRow(id)
 
-    if (row === undefined) {
-      return yield* new Automation.NotFoundError({ automationId: id, message: `Automation not found: ${id}` })
-    }
-
-    const now = yield* Clock.currentTimeMillis
-    yield* executeRow(row, now, { manual: true })
-
-    return yield* store.get(id)
-  })
-
-  const webhook = Effect.fn("Automation.webhook")((input: WebhookCallInput) =>
-    webhookLocks.withLock(input.id)(
+    yield* runLocks.withLock(Automation.ID.make(initial.id))(
       Effect.gen(function* () {
-        const row = yield* store.getRow(input.id)
+        const row = yield* store.requireRow(id)
 
-        if (row === undefined) {
-          return yield* new Automation.NotFoundError({
-            automationId: input.id,
-            message: `Automation not found: ${input.id}`,
-          })
-        }
-
-        const info = toInfo(row)
-
-        if (info.trigger.type !== "webhook") {
-          return yield* new Automation.InvalidError({ message: `Automation ${input.id} is not a webhook automation` })
-        }
-
-        const webhookSecret = yield* secretStore.get(info.id)
-        yield* verifyWebhookAuth(digest, info.id, info.trigger, webhookSecret, input.headers, input.rawBody)
-
-        if (info.status !== "active") {
-          return {
-            automationId: info.id,
-            accepted: false,
-            deduplicated: false,
-            info,
-          }
-        }
-
-        const idempotencyKey = readHeader(input.headers, "x-idempotency-key")?.trim() || undefined
-
-        if (idempotencyKey !== undefined && (yield* store.hasDedupKey(info.id, idempotencyKey))) {
-          return {
-            automationId: info.id,
-            accepted: true,
-            deduplicated: true,
-            info,
-          }
+        if (row.status === "done") {
+          return yield* new Automation.InvalidError({ message: `Automation ${id} is already done` })
         }
 
         const now = yield* Clock.currentTimeMillis
-
-        yield* executeRow(row, now, {
-          webhook: {
-            payload: input.payload,
-            headers: input.headers,
-            ...(idempotencyKey !== undefined && { idempotencyKey }),
-          },
-          ...(idempotencyKey !== undefined && { dedupKey: idempotencyKey }),
-        })
-
-        const updated = yield* store.get(info.id)
-
-        return {
-          automationId: info.id,
-          accepted: true,
-          deduplicated: false,
-          info: updated,
-        }
+        yield* executeRow(row, now, { manual: true })
       }),
-    ),
-  )
+    )
+
+    yield* armNext
+    const updated = yield* store.get(id)
+
+    if (yield* hasWatch(updated.id)) {
+      yield* syncWatches
+    }
+
+    return updated
+  })
 
   return Service.of({
     create,
@@ -422,7 +362,6 @@ export const make = Effect.gen(function* () {
     remove,
     tick,
     runNow,
-    webhook,
   })
 })
 
@@ -431,15 +370,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [
-    AutomationStore.node,
-    AutomationSecretStore.node,
-    Bus.node,
-    CodeMode.node,
-    Mcp.node,
-    Session.node,
-    ProjectStore.node,
-    PlatformNode.digest,
-    PlatformNode.path,
-  ],
+  deps: [AutomationStore.node, CodeMode.node, Mcp.node, Session.node, ProjectStore.node, PlatformNode.path],
 })

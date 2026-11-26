@@ -13,6 +13,8 @@ export const MAX_CURSOR_BYTES = 4_096
 
 export type Message = Extract<McpSchema.EventMessage, { readonly type: "event" }>
 
+export type StreamMessage = Exclude<McpSchema.EventMessage, { readonly type: "error" }>
+
 export class Disconnected extends Schema.TaggedError<Disconnected>()("AutomationEventDisconnected", {
   message: Schema.String,
 }) {}
@@ -306,7 +308,7 @@ export const resolve = Effect.fn("AutomationEventStream.resolve")(function* (
   trigger: Automation.EventTrigger,
   directory: string,
   cursor?: string | null,
-): Effect.fn.Return<Stream.Stream<McpSchema.EventMessage, StreamInvalid | Disconnected>, StreamInvalid | Disconnected> {
+): Effect.fn.Return<Stream.Stream<StreamMessage, StreamInvalid | Disconnected>, StreamInvalid | Disconnected> {
   const { payloadValidator } = yield* validateEventTrigger(mcp, trigger, directory)
 
   const rawStream = mcp.eventStream({
@@ -320,7 +322,7 @@ export const resolve = Effect.fn("AutomationEventStream.resolve")(function* (
   return rawStream.pipe(
     Stream.concat(Stream.fail(new Error("MCP event stream closed"))),
     Stream.mapError((error) => new Disconnected({ message: error.message })),
-    Stream.filter((message) => message.type !== "error"),
+    Stream.filter((message): message is StreamMessage => message.type !== "error"),
     Stream.mapEffect((message) => {
       if (message.cursor !== null && ToolOutput.utf8ByteLength(message.cursor) > MAX_CURSOR_BYTES) {
         return Effect.fail(new StreamInvalid({ message: "Oversized event cursor" }))

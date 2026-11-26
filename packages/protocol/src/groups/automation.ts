@@ -18,7 +18,7 @@ export const AutomationGroup = HttpApiGroup.make("server.automation")
       .annotateMerge(
         OpenApi.annotations({
           identifier: "automation.create",
-          summary: "Create a scheduled, webhook, or MCP event automation",
+          summary: "Create a scheduled or MCP event automation",
         }),
       ),
   )
@@ -127,18 +127,5 @@ export const AutomationGroup = HttpApiGroup.make("server.automation")
           summary: "Run an automation once immediately",
         }),
       ),
-  )
-  .add(
-    HttpApiEndpoint.post("automation.webhook", "/api/automation/:id/webhook", {
-      params: idParam,
-      payload: Schema.Json,
-      success: Automation.WebhookResult,
-      error: [Automation.NotFoundError, Automation.InvalidError, Automation.WebhookUnauthorizedError],
-    }).annotateMerge(
-      OpenApi.annotations({
-        identifier: "automation.webhook",
-        summary: "Invoke a webhook automation with HMAC or bearer verification and idempotency-key deduplication",
-      }),
-    ),
   )
   .annotateMerge(OpenApi.annotations({ title: "automation" }))

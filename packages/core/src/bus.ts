@@ -209,7 +209,7 @@ const dropProjection = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const objects = yield* sql<{ type: string; name: string }>`SELECT type, name FROM sqlite_schema
       WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'
-        AND tbl_name NOT IN ('event', 'event_sequence', 'kv', ${MIGRATION_TABLE})
+        AND tbl_name NOT IN ('event', 'event_sequence', 'kv', ${MIGRATION_TABLE}, 'automation')
       ORDER BY type = 'index'`
 
     for (const object of objects)

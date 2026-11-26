@@ -658,10 +658,10 @@ const mcp = Spec.make("mcp", {
 const autoId = Argument.String("id").pipe(Argument.withDescription("Automation id (aut_...)"))
 
 const auto = Spec.make("auto", {
-  description: "Manage scheduled, webhook, and MCP event automations",
+  description: "Manage scheduled and MCP event automations",
   commands: [
     Spec.make("create", {
-      description: "Create a scheduled (at/every/cron), webhook, or MCP event automation",
+      description: "Create a scheduled (at/every/cron) or MCP event automation",
       params: {
         name: Argument.String("name").pipe(Argument.withDescription("Short label for this automation")),
         at: Flag.String("at").pipe(
@@ -674,14 +674,6 @@ const auto = Spec.make("auto", {
         ),
         cron: Flag.String("cron").pipe(
           Flag.withDescription('Run on a cron schedule such as "0 9 * * 1-5"'),
-          Flag.optional,
-        ),
-        webhook: Flag.Boolean("webhook").pipe(
-          Flag.withDescription("Trigger via POST /api/automation/:id/webhook"),
-          Flag.withDefault(false),
-        ),
-        webhookSecret: Flag.String("webhook-secret").pipe(
-          Flag.withDescription("Shared secret for HMAC-SHA256 or Bearer webhook verification"),
           Flag.optional,
         ),
         eventServer: Flag.String("event-server").pipe(
