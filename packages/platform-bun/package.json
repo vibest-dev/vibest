@@ -22,6 +22,7 @@
     "@vibest/client": "workspace:*",
     "@vibest/core": "workspace:*",
     "@vibest/herdr-sdk": "workspace:*",
+    "@vibest/mcp": "workspace:*",
     "@vibest/plugin": "workspace:*",
     "@vibest/plugin-builtins": "workspace:*",
     "@vibest/schema": "workspace:*",

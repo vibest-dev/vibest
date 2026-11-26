@@ -19,3 +19,27 @@ interface URL {
 declare var URL: {
   new (url: string): URL
 }
+
+declare namespace Intl {
+  interface SegmentData {
+    readonly segment: string
+    readonly index: number
+    readonly input: string
+  }
+
+  interface Segments {
+    containing(codeUnitIndex?: number): SegmentData | undefined
+  }
+
+  interface SegmenterOptions {
+    readonly granularity?: "grapheme" | "word" | "sentence"
+  }
+
+  interface Segmenter {
+    segment(input: string): Segments
+  }
+
+  var Segmenter: {
+    new (locales?: string | ReadonlyArray<string>, options?: SegmenterOptions): Segmenter
+  }
+}

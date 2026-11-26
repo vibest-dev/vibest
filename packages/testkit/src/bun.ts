@@ -30,6 +30,7 @@ export const services = Layer.mergeAll(
   Digest.layerWebCrypto,
   SecureRandom.layerWebCrypto,
   FetchHttpClient.layer,
+  Layer.succeed(FetchHttpClient.Fetch, globalThis.fetch),
   user,
   Layer.succeed(SocketConnector.Service, (endpoint: string) => BunSocket.makeNet({ path: endpoint })),
   Layer.succeed(HttpConnector.Service, nodeUnixHttpClient),

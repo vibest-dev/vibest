@@ -9,6 +9,7 @@ import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import { Identity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
 import { InboxStore } from "@vibest/core/inbox/store"
+import { Mcp as CoreMcp } from "@vibest/core/mcp"
 import { type Candidate, makeHost, Plugins } from "@vibest/core/plugin"
 import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/plugin/domains"
 import { Hooks } from "@vibest/core/plugin/hooks"
@@ -25,6 +26,7 @@ import { Sends } from "@vibest/core/session/sends"
 import { SessionStore } from "@vibest/core/session/store"
 import { Summaries } from "@vibest/core/session/summaries"
 import { Git } from "@vibest/core/worktree/git"
+import { Mcp } from "@vibest/mcp/index"
 import { agentPlugin } from "@vibest/plugin-builtins/agent"
 import { guardPlugin } from "@vibest/plugin-builtins/guard"
 import { runtimeChoicePlugin } from "@vibest/plugin-builtins/runtime-choice"
@@ -316,6 +318,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Harness.node.replace(harnessLayer()),
       Harnesses.node.replace(harnessesLayer()),
       Subscriptions.node.replace(subscriptions),
+      CoreMcp.node.replace(Mcp.node),
       Plugins.node.replace(plugins),
       RepositoryUrl.node.replace(defaultSsh),
       Machines.machineTransportNode.replace(defaultTransport),

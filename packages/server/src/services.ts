@@ -6,6 +6,7 @@ import { Harnesses } from "@vibest/core/harness/registry"
 import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import { Inbox } from "@vibest/core/inbox"
 import { InboxStore } from "@vibest/core/inbox/store"
+import { Mcp } from "@vibest/core/mcp"
 import { Plugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
 import { RepositoryUrl } from "@vibest/core/project/repository-url"
@@ -28,6 +29,7 @@ import { Restart } from "@vibest/core/session/restart"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Starts } from "@vibest/core/session/starts"
 import { SessionStore } from "@vibest/core/session/store"
+import { ToolOutput } from "@vibest/core/tool-output"
 import { Git } from "@vibest/core/worktree/git"
 import { LayerNode } from "@vibest/util/layer-node"
 
@@ -57,6 +59,8 @@ export const services = LayerNode.group([
   Inbox.node,
   Subscriptions.node,
   Plugins.node,
+  Mcp.node,
+  ToolOutput.node,
   RepositoryUrl.node,
   Git.node,
   SessionLocks.node,

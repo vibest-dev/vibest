@@ -114,4 +114,5 @@ export const CAPABILITIES = {
   agents: true,
   worktrees: true,
   stop: true,
+  mcp: true,
 } as const

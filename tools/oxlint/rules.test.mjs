@@ -224,6 +224,14 @@ describe("import policy", () => {
     expect(scopedFindings(bun, "packages/util/src/a.ts")).toEqual(refused)
   })
 
+  it("mcp imports only @vibest/util, @vibest/schema, and @vibest/core and refuses server and Bun", () => {
+    expect(scopedFindings(importing("@vibest/schema/mcp"), "packages/mcp/src/a.ts")).toEqual([])
+    expect(scopedFindings(importing("@vibest/util/keyed-mutex"), "packages/mcp/src/a.ts")).toEqual([])
+    expect(scopedFindings(core, "packages/mcp/src/a.ts")).toEqual([])
+    expect(scopedFindings(importing("@vibest/server/server"), "packages/mcp/src/a.ts")).toEqual(outside)
+    expect(scopedFindings(bun, "packages/mcp/src/a.ts")).toEqual(refused)
+  })
+
   it("the CLI refuses @vibest/core and herdr in every source file", () => {
     expect(scopedFindings(core, "packages/cli/src/a.ts")).toEqual(outside)
     expect(scopedFindings(herdr, "packages/cli/src/a.ts")).toEqual(outside)

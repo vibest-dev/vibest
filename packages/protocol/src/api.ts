@@ -8,6 +8,7 @@ import { HarnessGroup } from "./groups/harness.ts"
 import { HookGroup } from "./groups/hook.ts"
 import { InboxGroup } from "./groups/inbox.ts"
 import { MachineGroup } from "./groups/machine.ts"
+import { McpGroup } from "./groups/mcp.ts"
 import { PluginGroup } from "./groups/plugin.ts"
 import { ProjectGroup } from "./groups/project.ts"
 import { RemoteGroup } from "./groups/remote.ts"
@@ -29,6 +30,7 @@ export const VibestApi = HttpApi.make("server")
   .add(HarnessGroup)
   .add(RuntimeGroup)
   .add(PluginGroup)
+  .add(McpGroup)
   .add(SubscriptionGroup)
   .add(MachineGroup)
   .add(RemoteGroup)
