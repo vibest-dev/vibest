@@ -292,6 +292,26 @@ export const layer = Layer.effect(
       return `[showing ${range} of ${totalLines}${lastLineCut ? " (last line cut)" : ""}; ${savedPart}]`
     }
 
+    const spillText = (input: {
+      readonly text: string
+      readonly maxBytes: number
+      readonly maxLines: number
+      readonly targetDir: string
+      readonly label: string
+    }) =>
+      Effect.gen(function* () {
+        const totalLines = countLines(input.text)
+        const end = Math.min(afterLines(input.text, input.maxLines), byteBoundary(input.text, input.maxBytes))
+        const shown = stripTrailingLineBreak(input.text, end)
+        const now = yield* Clock.currentTimeMillis
+        const rand = Math.random().toString(36).slice(2, 10)
+        const name = `tool_${now.toString(16)}_${input.label}_${rand}.txt`
+        const { file, failure } = yield* saveFullOutput(input.targetDir, name, input.text)
+        const marker = formatMarker(input.text, end, shown, totalLines, file, failure)
+
+        return { shown, file, failure, marker }
+      })
+
     const truncateCallResult = Effect.fn("ToolOutput.truncateCallResult")(function* (
       input: TruncateCallInput,
     ): Effect.fn.Return<Mcp.CallResult> {
@@ -344,14 +364,14 @@ export const layer = Layer.effect(
           : normalizedContent
 
       const text = structuredText !== undefined ? joinParts([...textParts, structuredText]) : baseText
-      const totalLines = countLines(text)
-      const end = Math.min(afterLines(text, maxLines), byteBoundary(text, maxBytes))
-      const shown = stripTrailingLineBreak(text, end)
-      const now = yield* Clock.currentTimeMillis
-      const rand = Math.random().toString(36).slice(2, 10)
-      const name = `tool_${now.toString(16)}_${sanitizeSegment(input.server)}_${sanitizeSegment(input.tool)}_${rand}.txt`
-      const { file, failure } = yield* saveFullOutput(targetDir, name, text)
-      const marker = formatMarker(text, end, shown, totalLines, file, failure)
+
+      const { shown, file, failure, marker } = yield* spillText({
+        text,
+        maxBytes,
+        maxLines,
+        targetDir,
+        label: `${sanitizeSegment(input.server)}_${sanitizeSegment(input.tool)}`,
+      })
 
       const bounded = sliceTextItems({
         items: contentForSlice,
@@ -410,13 +430,13 @@ export const layer = Layer.effect(
         }
       }
 
-      const end = Math.min(afterLines(text, maxLines), byteBoundary(text, maxBytes))
-      const shown = stripTrailingLineBreak(text, end)
-      const now = yield* Clock.currentTimeMillis
-      const rand = Math.random().toString(36).slice(2, 10)
-      const name = `tool_${now.toString(16)}_${sanitizeSegment(input.server)}_resource_${rand}.txt`
-      const { file, failure } = yield* saveFullOutput(targetDir, name, text)
-      const marker = formatMarker(text, end, shown, totalLines, file, failure)
+      const { shown, file, failure, marker } = yield* spillText({
+        text,
+        maxBytes,
+        maxLines,
+        targetDir,
+        label: `${sanitizeSegment(input.server)}_resource`,
+      })
 
       const bounded = sliceTextItems({
         items: normalizedContents,
