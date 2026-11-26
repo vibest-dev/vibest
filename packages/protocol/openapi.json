@@ -16566,7 +16566,7 @@
         },
         "AutomationDuration": {
           "type": "string",
-          "description": "A duration such as \"30 seconds\", \"5 minutes\" or \"2 hours\"."
+          "description": "A duration such as \"30 seconds\", \"5 minutes\", \"2 hours\", or shorthand like \"30s\", \"5m\", \"2h\"."
         },
         "AutomationTriggerAt": {
           "type": "object",
