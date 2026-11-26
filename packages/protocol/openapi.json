@@ -1,5 +1,5 @@
 {
-  "protocol": 16,
+  "protocol": 17,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -143,7 +143,7 @@
     "openapi": "3.1.0",
     "info": {
       "title": "vibest HttpApi",
-      "version": "16"
+      "version": "17"
     },
     "paths": {
       "/api/daemon/ping": {
