@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 
+import { AutomationEvent } from "./automation-event.ts"
 import { Event, InvalidDurableEvent } from "./event.ts"
 import { MachineEvent } from "./machine-event.ts"
 import { ProcessEvent } from "./process-event.ts"
@@ -8,13 +9,19 @@ import { SessionEvent } from "./session-event.ts"
 
 export * as DurableEventManifest from "./durable-event-manifest.ts"
 
-export const PublicEvents = Event.inventory(...ProjectEvent.Public, ...SessionEvent.Public, ...MachineEvent.Public)
+export const PublicEvents = Event.inventory(
+  ...ProjectEvent.Public,
+  ...SessionEvent.Public,
+  ...MachineEvent.Public,
+  ...AutomationEvent.Public,
+)
 
 export const AllDurableDefinitions = Event.inventory(
   ...PublicEvents,
   ...SessionEvent.Internal,
   ...ProcessEvent.Internal,
   ...MachineEvent.Internal,
+  ...AutomationEvent.Internal,
 )
 
 export const DurableEvents = Event.durableMap(AllDurableDefinitions)

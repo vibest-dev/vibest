@@ -19,7 +19,8 @@
     "worktrees": true,
     "stop": true,
     "mcp": true,
-    "codemode": true
+    "codemode": true,
+    "automation": true
   },
   "access": {
     "daemon.ping": [
@@ -140,7 +141,16 @@
     "watch.subscribe": [
       "cli",
       "remote"
-    ]
+    ],
+    "automation.create": "agent",
+    "automation.list": "agent",
+    "automation.get": "agent",
+    "automation.pause": "agent",
+    "automation.resume": "agent",
+    "automation.remove": "agent",
+    "automation.tick": "agent",
+    "automation.runNow": "agent",
+    "automation.webhook": "open"
   },
   "openapi": {
     "openapi": "3.1.0",
@@ -10547,6 +10557,764 @@
           "summary": "Render TypeScript declarations for MCP tools available in CodeMode"
         }
       },
+      "/api/automation": {
+        "post": {
+          "tags": [
+            "automation"
+          ],
+          "operationId": "automation.create",
+          "parameters": [],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "AutomationInfo",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AutomationInfo"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "AutomationInvalidError | InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AutomationInvalidErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Create a scheduled, webhook, or MCP event automation",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationCreateInput"
+                }
+              }
+            },
+            "required": true
+          }
+        },
+        "get": {
+          "tags": [
+            "automation"
+          ],
+          "operationId": "automation.list",
+          "parameters": [
+            {
+              "name": "projectId",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            },
+            {
+              "name": "sessionId",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            },
+            {
+              "name": "status",
+              "in": "query",
+              "schema": {
+                "$ref": "#/components/schemas/AutomationStatus"
+              },
+              "required": false
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "Success",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/AutomationInfo"
+                    }
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "List automations"
+        }
+      },
+      "/api/automation/{id}": {
+        "get": {
+          "tags": [
+            "automation"
+          ],
+          "operationId": "automation.get",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "AutomationInfo",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AutomationInfo"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "AutomationNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AutomationNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Get one automation by id"
+        },
+        "delete": {
+          "tags": [
+            "automation"
+          ],
+          "operationId": "automation.remove",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "<No Content>"
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "AutomationNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AutomationNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Remove an automation"
+        }
+      },
+      "/api/automation/{id}/pause": {
+        "post": {
+          "tags": [
+            "automation"
+          ],
+          "operationId": "automation.pause",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "AutomationInfo",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AutomationInfo"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "AutomationNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AutomationNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Pause an automation"
+        }
+      },
+      "/api/automation/{id}/resume": {
+        "post": {
+          "tags": [
+            "automation"
+          ],
+          "operationId": "automation.resume",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "AutomationInfo",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AutomationInfo"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "AutomationInvalidError | InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AutomationInvalidErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "AutomationNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AutomationNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Resume a paused automation"
+        }
+      },
+      "/api/automation/tick": {
+        "post": {
+          "tags": [
+            "automation"
+          ],
+          "operationId": "automation.tick",
+          "parameters": [],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "<No Content>"
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Trigger all due automations immediately"
+        }
+      },
+      "/api/automation/{id}/run-now": {
+        "post": {
+          "tags": [
+            "automation"
+          ],
+          "operationId": "automation.runNow",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "AutomationInfo",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AutomationInfo"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "AutomationInvalidError | InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AutomationInvalidErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "InvalidCaller | Forbidden",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "AutomationNotFoundError | NoSuchSession",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AutomationNotFoundErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/NoSuchSessionEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Run an automation once immediately"
+        }
+      },
+      "/api/automation/{id}/webhook": {
+        "post": {
+          "tags": [
+            "automation"
+          ],
+          "operationId": "automation.webhook",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "AutomationWebhookResult",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AutomationWebhookResult"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "AutomationInvalidError | InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/AutomationInvalidErrorEncoded"
+                      },
+                      {
+                        "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "AutomationWebhookUnauthorizedError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AutomationWebhookUnauthorizedErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "AutomationNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AutomationNotFoundErrorEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Invoke a webhook automation with HMAC or bearer verification and idempotency-key deduplication",
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "required": true
+          }
+        }
+      },
       "/api/subscription": {
         "get": {
           "tags": [
@@ -15450,6 +16218,569 @@
           ],
           "additionalProperties": false
         },
+        "AutomationWebhookUnauthorizedErrorEncoded": {
+          "type": "object",
+          "properties": {
+            "_tag": {
+              "type": "string",
+              "enum": [
+                "AutomationWebhookUnauthorizedError"
+              ]
+            },
+            "automationId": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "_tag",
+            "automationId",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationInvalidErrorEncoded": {
+          "type": "object",
+          "properties": {
+            "_tag": {
+              "type": "string",
+              "enum": [
+                "AutomationInvalidError"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "_tag",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationNotFoundErrorEncoded": {
+          "type": "object",
+          "properties": {
+            "_tag": {
+              "type": "string",
+              "enum": [
+                "AutomationNotFoundError"
+              ]
+            },
+            "automationId": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "_tag",
+            "automationId",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationWebhookResult": {
+          "type": "object",
+          "properties": {
+            "automationId": {
+              "$ref": "#/components/schemas/AutomationId"
+            },
+            "accepted": {
+              "type": "boolean"
+            },
+            "deduplicated": {
+              "type": "boolean"
+            },
+            "info": {
+              "$ref": "#/components/schemas/AutomationInfo"
+            }
+          },
+          "required": [
+            "automationId",
+            "accepted",
+            "deduplicated",
+            "info"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationInfo": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/components/schemas/AutomationId"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "format": "uuid"
+            },
+            "directory": {
+              "type": "string"
+            },
+            "trigger": {
+              "$ref": "#/components/schemas/AutomationTrigger"
+            },
+            "tz": {
+              "type": "string"
+            },
+            "action": {
+              "$ref": "#/components/schemas/AutomationAction"
+            },
+            "expiresAt": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            },
+            "status": {
+              "$ref": "#/components/schemas/AutomationStatus"
+            },
+            "nextDueAt": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            },
+            "runCount": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "failures": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "lastRunAt": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            },
+            "lastOutcome": {
+              "$ref": "#/components/schemas/AutomationOutcome"
+            },
+            "lastOutput": {
+              "type": "string"
+            },
+            "retryAt": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            },
+            "state": {},
+            "eventCursor": {
+              "$ref": "#/components/schemas/AutomationEventCursor"
+            },
+            "createdAt": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            },
+            "updatedAt": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "projectId",
+            "directory",
+            "trigger",
+            "tz",
+            "action",
+            "status",
+            "runCount",
+            "failures",
+            "createdAt",
+            "updatedAt"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationEventCursor": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lastEventId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "AutomationOutcome": {
+          "type": "string",
+          "enum": [
+            "fired",
+            "late",
+            "skipped",
+            "disabled",
+            "failed",
+            "expired"
+          ]
+        },
+        "AutomationStatus": {
+          "type": "string",
+          "enum": [
+            "active",
+            "paused",
+            "done"
+          ]
+        },
+        "AutomationAction": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/AutomationActionPrompt"
+            },
+            {
+              "$ref": "#/components/schemas/AutomationActionCode"
+            }
+          ]
+        },
+        "AutomationActionCode": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "code"
+              ]
+            },
+            "code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "args": {},
+            "to": {
+              "$ref": "#/components/schemas/AutomationTarget"
+            }
+          },
+          "required": [
+            "type",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationTarget": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/AutomationTargetSession"
+            },
+            {
+              "$ref": "#/components/schemas/AutomationTargetAgent"
+            }
+          ]
+        },
+        "AutomationTargetAgent": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "agent"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationTargetSession": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "sessionId"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationActionPrompt": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "prompt"
+              ]
+            },
+            "prompt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "to": {
+              "$ref": "#/components/schemas/AutomationTarget"
+            }
+          },
+          "required": [
+            "type",
+            "prompt"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationTrigger": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/AutomationTriggerAt"
+            },
+            {
+              "$ref": "#/components/schemas/AutomationTriggerEvery"
+            },
+            {
+              "$ref": "#/components/schemas/AutomationTriggerCron"
+            },
+            {
+              "$ref": "#/components/schemas/AutomationTriggerWebhook"
+            },
+            {
+              "$ref": "#/components/schemas/AutomationTriggerEvent"
+            }
+          ]
+        },
+        "AutomationTriggerEvent": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "event"
+              ]
+            },
+            "server": {
+              "type": "string",
+              "minLength": 1
+            },
+            "event": {
+              "type": "string",
+              "minLength": 1
+            },
+            "args": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "type",
+            "server",
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationTriggerWebhook": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "webhook"
+              ]
+            },
+            "secretHash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationTriggerCron": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "cron"
+              ]
+            },
+            "cron": {
+              "type": "string"
+            },
+            "tz": {
+              "type": "string",
+              "description": "IANA time zone. Defaults to the server local time zone."
+            }
+          },
+          "required": [
+            "type",
+            "cron"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationTriggerEvery": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "every"
+              ]
+            },
+            "every": {
+              "$ref": "#/components/schemas/AutomationDuration"
+            },
+            "tz": {
+              "type": "string",
+              "description": "IANA time zone. Defaults to the server local time zone."
+            }
+          },
+          "required": [
+            "type",
+            "every"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationDuration": {
+          "type": "string",
+          "description": "A duration such as \"30 seconds\", \"5 minutes\" or \"2 hours\"."
+        },
+        "AutomationTriggerAt": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "at"
+              ]
+            },
+            "at": {
+              "type": "string",
+              "description": "An instant with an offset, a wall-clock time in tz such as \"2026-10-27T09:00\", or \"in 10 minutes\"."
+            },
+            "tz": {
+              "type": "string",
+              "description": "IANA time zone. Defaults to the server local time zone."
+            }
+          },
+          "required": [
+            "type",
+            "at"
+          ],
+          "additionalProperties": false
+        },
+        "AutomationId": {
+          "type": "string",
+          "pattern": "^aut_"
+        },
+        "AutomationCreateInput": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "trigger": {
+              "$ref": "#/components/schemas/AutomationTrigger"
+            },
+            "action": {
+              "$ref": "#/components/schemas/AutomationAction"
+            },
+            "directory": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "format": "uuid"
+            },
+            "expires": {
+              "type": "string"
+            },
+            "webhookSecret": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "name",
+            "trigger",
+            "action"
+          ],
+          "additionalProperties": false
+        },
         "CodeModeDeclarationsResult": {
           "type": "object",
           "properties": {
@@ -17483,6 +18814,9 @@
       },
       {
         "name": "codemode"
+      },
+      {
+        "name": "automation"
       },
       {
         "name": "subscription"

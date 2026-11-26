@@ -116,4 +116,5 @@ export const CAPABILITIES = {
   stop: true,
   mcp: true,
   codemode: true,
+  automation: true,
 } as const

@@ -1,3 +1,4 @@
+import { Automation } from "@vibest/schema/automation"
 import { Mcp } from "@vibest/schema/mcp"
 import { ProjectKind } from "@vibest/schema/project"
 import { Argument, Flag } from "effect/cli"
@@ -654,6 +655,111 @@ const mcp = Spec.make("mcp", {
   ],
 })
 
+const autoId = Argument.String("id").pipe(Argument.withDescription("Automation id (aut_...)"))
+
+const auto = Spec.make("auto", {
+  description: "Manage scheduled, webhook, and MCP event automations",
+  commands: [
+    Spec.make("create", {
+      description: "Create a scheduled (at/every/cron), webhook, or MCP event automation",
+      params: {
+        name: Argument.String("name").pipe(Argument.withDescription("Short label for this automation")),
+        at: Flag.String("at").pipe(
+          Flag.withDescription('Run once at an ISO time, zoned wall-clock time, or "in 10 minutes"'),
+          Flag.optional,
+        ),
+        every: Flag.String("every").pipe(
+          Flag.withDescription('Run periodically on a duration such as "30 seconds" or "5 minutes"'),
+          Flag.optional,
+        ),
+        cron: Flag.String("cron").pipe(
+          Flag.withDescription('Run on a cron schedule such as "0 9 * * 1-5"'),
+          Flag.optional,
+        ),
+        webhook: Flag.Boolean("webhook").pipe(
+          Flag.withDescription("Trigger via POST /api/automation/:id/webhook"),
+          Flag.withDefault(false),
+        ),
+        webhookSecret: Flag.String("webhook-secret").pipe(
+          Flag.withDescription("Shared secret for HMAC-SHA256 or Bearer webhook verification"),
+          Flag.optional,
+        ),
+        eventServer: Flag.String("event-server").pipe(
+          Flag.withDescription("MCP server name for a SEP-3415 push event trigger"),
+          Flag.optional,
+        ),
+        event: Flag.String("event").pipe(
+          Flag.withDescription("MCP event name for a SEP-3415 push event trigger"),
+          Flag.optional,
+        ),
+        eventArgs: Flag.String("event-args").pipe(
+          Flag.withDescription("JSON object of arguments for an MCP event subscription"),
+          Flag.optional,
+        ),
+        tz: Flag.String("tz").pipe(Flag.withDescription("IANA time zone"), Flag.optional),
+        expires: Flag.String("expires").pipe(
+          Flag.withDescription('Expiration time (ISO, zoned wall-clock, or "in 8 hours")'),
+          Flag.optional,
+        ),
+        prompt: Flag.String("prompt").pipe(
+          Flag.withDescription("Prompt text to deliver when triggered"),
+          Flag.optional,
+        ),
+        code: Flag.String("code").pipe(
+          Flag.withDescription("CodeMode JavaScript gate body to run with 0 LLM tokens"),
+          Flag.optional,
+        ),
+        codeFile: Flag.String("code-file").pipe(
+          Flag.withDescription("Read CodeMode JavaScript gate body from a file"),
+          Flag.optional,
+        ),
+        args: Flag.String("args").pipe(
+          Flag.withDescription("JSON value passed to CodeMode gate as input.args"),
+          Flag.optional,
+        ),
+        session: Flag.String("session").pipe(Flag.withDescription("Target existing session id"), Flag.optional),
+        agent: Flag.String("agent").pipe(
+          Flag.withDescription("Target agent definition to spawn a child session"),
+          Flag.optional,
+        ),
+      },
+    }),
+    Spec.make("list", {
+      alias: "ls",
+      description: "List automations as JSON",
+      params: {
+        status: Flag.Literals("status", Automation.Status.literals).pipe(
+          Flag.withDescription("Filter by status: active, paused, or done"),
+          Flag.optional,
+        ),
+        session: Flag.String("session").pipe(Flag.withDescription("Filter by creating session id"), Flag.optional),
+        project: Flag.String("project").pipe(Flag.withDescription("Filter by project id"), Flag.optional),
+      },
+    }),
+    Spec.make("get", {
+      description: "Show one automation as JSON",
+      params: { id: autoId },
+    }),
+    Spec.make("pause", {
+      description: "Pause an active automation",
+      params: { id: autoId },
+    }),
+    Spec.make("resume", {
+      description: "Resume a paused automation",
+      params: { id: autoId },
+    }),
+    Spec.make("remove", {
+      alias: "rm",
+      description: "Delete an automation",
+      params: { id: autoId },
+    }),
+    Spec.make("run-now", {
+      description: "Execute an automation immediately once",
+      params: { id: autoId },
+    }),
+  ],
+})
+
 export const Commands = Spec.make("vibest", {
   description: "In a project directory, open its entry session in this terminal. --new starts a new conversation",
   params: entryFlags,
@@ -677,6 +783,7 @@ export const Commands = Spec.make("vibest", {
     worktree,
     plugins,
     mcp,
+    auto,
     subscriptions,
     onboard,
     doctor,

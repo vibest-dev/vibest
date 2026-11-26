@@ -1,3 +1,4 @@
+import { Automation, AutomationSecretStore, AutomationStore } from "@vibest/core/automation"
 import { Bus } from "@vibest/core/bus"
 import { CodeMode } from "@vibest/core/codemode"
 import { Database } from "@vibest/core/database/database"
@@ -63,6 +64,9 @@ export const services = LayerNode.group([
   Mcp.node,
   ToolOutput.node,
   CodeMode.node,
+  AutomationStore.node,
+  AutomationSecretStore.node,
+  Automation.node,
   RepositoryUrl.node,
   Git.node,
   SessionLocks.node,
