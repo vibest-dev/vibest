@@ -61,13 +61,6 @@ export const CronTrigger = Schema.Struct({
 
 export type CronTrigger = typeof CronTrigger.Type
 
-export const WebhookTrigger = Schema.Struct({
-  type: Schema.tag("webhook"),
-  secretHash: optional(Schema.String),
-}).annotate({ identifier: "AutomationTriggerWebhook" })
-
-export type WebhookTrigger = typeof WebhookTrigger.Type
-
 export const EventTrigger = Schema.Struct({
   type: Schema.tag("event"),
   server: Schema.NonEmptyString,
@@ -77,7 +70,7 @@ export const EventTrigger = Schema.Struct({
 
 export type EventTrigger = typeof EventTrigger.Type
 
-export const Trigger = Schema.Union([AtTrigger, EveryTrigger, CronTrigger, WebhookTrigger, EventTrigger]).pipe(
+export const Trigger = Schema.Union([AtTrigger, EveryTrigger, CronTrigger, EventTrigger]).pipe(
   Schema.toTaggedUnion("type"),
   Schema.annotate({ identifier: "AutomationTrigger" }),
 )
@@ -157,12 +150,12 @@ export const Outcome = Schema.Literals(["fired", "late", "skipped", "disabled", 
 
 export type Outcome = typeof Outcome.Type
 
-export const EventCursor = Schema.Struct({
+export const EventPosition = Schema.Struct({
   cursor: optional(Schema.NullOr(Schema.String)),
-  lastEventId: optional(Schema.String),
-}).annotate({ identifier: "AutomationEventCursor" })
+  id: optional(Schema.String),
+}).annotate({ identifier: "AutomationEventPosition" })
 
-export type EventCursor = typeof EventCursor.Type
+export type EventPosition = typeof EventPosition.Type
 
 export const Info = Schema.Struct({
   id: ID,
@@ -183,7 +176,7 @@ export const Info = Schema.Struct({
   lastOutput: optional(Schema.String),
   retryAt: optional(Schema.Number),
   state: optional(Schema.Json),
-  eventCursor: optional(EventCursor),
+  eventPosition: optional(EventPosition),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
 }).annotate({ identifier: "AutomationInfo" })
@@ -198,19 +191,9 @@ export const CreateInput = Schema.Struct({
   projectId: optional(Schema.String),
   sessionId: optional(SessionId),
   expires: optional(Schema.String),
-  webhookSecret: optional(Schema.NonEmptyString),
 }).annotate({ identifier: "AutomationCreateInput" })
 
 export type CreateInput = typeof CreateInput.Type
-
-export const WebhookResult = Schema.Struct({
-  automationId: ID,
-  accepted: Schema.Boolean,
-  deduplicated: Schema.Boolean,
-  info: Info,
-}).annotate({ identifier: "AutomationWebhookResult" })
-
-export type WebhookResult = typeof WebhookResult.Type
 
 export class NotFoundError extends Schema.TaggedError<NotFoundError>()(
   "AutomationNotFoundError",
@@ -227,13 +210,4 @@ export class InvalidError extends Schema.TaggedError<InvalidError>()(
     message: Schema.String,
   },
   { httpApiStatus: 400 },
-) {}
-
-export class WebhookUnauthorizedError extends Schema.TaggedError<WebhookUnauthorizedError>()(
-  "AutomationWebhookUnauthorizedError",
-  {
-    automationId: Schema.String,
-    message: Schema.String,
-  },
-  { httpApiStatus: 401 },
 ) {}

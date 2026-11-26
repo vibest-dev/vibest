@@ -1,11 +1,9 @@
-import crypto from "node:crypto"
 import fs from "node:fs"
-import http from "node:http"
 import os from "node:os"
 import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
-import { cliHeaders, connect, withHeaders } from "@vibest/client/client"
+import { cliHeaders, connect } from "@vibest/client/client"
 import { Database } from "@vibest/core/database/database"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { Layout } from "@vibest/schema/layout"
@@ -71,10 +69,11 @@ const served = Server.layer.pipe(
 
 describe("vibestd /api/automation endpoints", () => {
   it.effect(
-    "supports automation CRUD, 0-token CodeMode gate over fake MCP, and HMAC webhook with idempotency dedup",
+    "supports automation CRUD, pause/resume/remove, 0-token CodeMode gate over fake MCP, and zero automation.* ledger rows",
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout
+        const { sql } = yield* Database.Service
         const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-auto-srv-"))
         const counterScript = path.join(workDir, "counter.mjs")
         const countFile = path.join(workDir, "count.txt")
@@ -135,79 +134,30 @@ describe("vibestd /api/automation endpoints", () => {
           assert.strictEqual(run3.status, "done")
           assert.deepStrictEqual(run3.state, { seen: 3 })
 
-          const secret = "webhook-hmac-secret"
-
-          const hookAuto = yield* client["server.automation"]["automation.create"]({
+          const second = yield* client["server.automation"]["automation.create"]({
             payload: {
-              name: "ci-webhook",
+              name: "lifecycle-auto",
               directory: workDir,
-              trigger: { type: "webhook" },
-              webhookSecret: secret,
-              action: {
-                type: "code",
-                code: `
-                  const prev = input.state?.events ?? [];
-                  return { state: { events: [...prev, input.webhook.payload.id] } };
-                `,
-              },
+              trigger: { type: "cron", cron: "0 9 * * 1-5", tz: "UTC" },
+              action: { type: "code", code: "return null;" },
             },
           })
 
-          const bodyObj = { id: "build-42" }
-          const rawBody = JSON.stringify(bodyObj)
-
-          const unauthorized = yield* withHeaders(
-            rawClient["server.automation"]["automation.webhook"]({
-              params: { id: hookAuto.id },
-              payload: bodyObj,
-            }),
-            { "x-vibest-signature-256": "sha256=invalid" },
-          ).pipe(Effect.exit)
-
-          assert.isTrue(Exit.isFailure(unauthorized))
-
-          const sig = crypto.createHmac("sha256", secret).update(rawBody, "utf8").digest("hex")
-
-          const hook1 = yield* withHeaders(
-            rawClient["server.automation"]["automation.webhook"]({
-              params: { id: hookAuto.id },
-              payload: bodyObj,
-            }),
-            {
-              "x-vibest-signature-256": `sha256=${sig}`,
-              "x-idempotency-key": "key-42",
-            },
-          )
-
-          assert.strictEqual(hook1.accepted, true)
-          assert.strictEqual(hook1.deduplicated, false)
-          assert.strictEqual(hook1.info.runCount, 1)
-          assert.deepStrictEqual(hook1.info.state, { events: ["build-42"] })
-
-          const hook2 = yield* withHeaders(
-            rawClient["server.automation"]["automation.webhook"]({
-              params: { id: hookAuto.id },
-              payload: bodyObj,
-            }),
-            {
-              "x-vibest-signature-256": `sha256=${sig}`,
-              "x-idempotency-key": "key-42",
-            },
-          )
-
-          assert.strictEqual(hook2.accepted, true)
-          assert.strictEqual(hook2.deduplicated, true)
-          assert.strictEqual(hook2.info.runCount, 1)
-
-          const paused = yield* client["server.automation"]["automation.pause"]({ params: { id: hookAuto.id } })
+          const paused = yield* client["server.automation"]["automation.pause"]({ params: { id: second.id } })
           assert.strictEqual(paused.status, "paused")
 
-          const resumed = yield* client["server.automation"]["automation.resume"]({ params: { id: hookAuto.id } })
+          const resumed = yield* client["server.automation"]["automation.resume"]({ params: { id: second.id } })
           assert.strictEqual(resumed.status, "active")
 
-          yield* client["server.automation"]["automation.remove"]({ params: { id: hookAuto.id } })
+          yield* client["server.automation"]["automation.remove"]({ params: { id: second.id } })
           const afterRemove = yield* client["server.automation"]["automation.list"]({ query: {} })
           assert.strictEqual(afterRemove.length, 1)
+
+          const deletedRows = yield* sql<{ id: string }>`SELECT id FROM automation WHERE id = ${second.id}`
+          assert.strictEqual(deletedRows.length, 0)
+
+          const autoEvents = yield* sql<{ type: string }>`SELECT type FROM event WHERE type LIKE 'automation.%'`
+          assert.strictEqual(autoEvents.length, 0)
         } finally {
           fs.rmSync(workDir, { recursive: true, force: true })
         }
@@ -358,74 +308,6 @@ describe("vibestd /api/automation endpoints", () => {
         assert.strictEqual(afterQuery.runCount, 1, afterQuery.lastOutput ?? "no output")
         assert.strictEqual(afterQuery.lastOutcome, "fired")
         assert.include(afterQuery.lastOutput ?? "", claimed.sessionId)
-      }).pipe(Effect.provide(served)),
-    30_000,
-  )
-
-  it.effect(
-    "verifies x-hub-signature-256 HMAC against exact raw wire bytes for pretty-printed JSON webhooks",
-    () =>
-      Effect.gen(function* () {
-        const layout = yield* Layout
-        const repo = yield* makeRepository
-        const rawClient = yield* connect(layout.socket)
-        const cli = authed(rawClient, cliHeaders(repo))
-        const secret = "pretty-json-hmac-secret"
-
-        const hook = yield* cli["server.automation"]["automation.create"]({
-          payload: {
-            name: "pretty-webhook",
-            directory: repo,
-            trigger: { type: "webhook" },
-            webhookSecret: secret,
-            action: {
-              type: "code",
-              code: "return { state: { a: webhook.payload.a, b: webhook.payload.b } };",
-            },
-          },
-        })
-
-        const prettyBody = '{\n  "b": 2,\n  "a": 1\n}'
-        const sig = `sha256=${crypto.createHmac("sha256", secret).update(prettyBody, "utf8").digest("hex")}`
-
-        const response = yield* Effect.tryPromise(
-          () =>
-            new Promise<{ readonly status: number; readonly body: string }>((resolve, reject) => {
-              const req = http.request(
-                {
-                  socketPath: layout.socket,
-                  path: `/api/automation/${hook.id}/webhook`,
-                  method: "POST",
-                  headers: {
-                    "content-type": "application/json",
-                    "content-length": String(Buffer.byteLength(prettyBody, "utf8")),
-                    "x-hub-signature-256": sig,
-                  },
-                },
-                (res) => {
-                  let data = ""
-                  res.setEncoding("utf8")
-                  res.on("data", (chunk: string) => {
-                    data += chunk
-                  })
-                  res.on("end", () => resolve({ status: res.statusCode ?? 0, body: data }))
-                },
-              )
-
-              req.on("error", reject)
-              req.end(prettyBody)
-            }),
-        )
-
-        assert.strictEqual(response.status, 200, response.body)
-
-        const parsed = JSON.parse(response.body) as {
-          readonly accepted: boolean
-          readonly info: { readonly state?: unknown }
-        }
-
-        assert.strictEqual(parsed.accepted, true)
-        assert.deepStrictEqual(parsed.info.state, { a: 1, b: 2 })
       }).pipe(Effect.provide(served)),
     30_000,
   )

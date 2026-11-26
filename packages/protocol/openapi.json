@@ -149,8 +149,7 @@
     "automation.resume": "agent",
     "automation.remove": "agent",
     "automation.tick": "agent",
-    "automation.runNow": "agent",
-    "automation.webhook": "open"
+    "automation.runNow": "agent"
   },
   "openapi": {
     "openapi": "3.1.0",
@@ -10631,7 +10630,7 @@
               }
             }
           },
-          "summary": "Create a scheduled, webhook, or MCP event automation",
+          "summary": "Create a scheduled or MCP event automation",
           "requestBody": {
             "content": {
               "application/json": {
@@ -11236,83 +11235,6 @@
             }
           },
           "summary": "Run an automation once immediately"
-        }
-      },
-      "/api/automation/{id}/webhook": {
-        "post": {
-          "tags": [
-            "automation"
-          ],
-          "operationId": "automation.webhook",
-          "parameters": [
-            {
-              "name": "id",
-              "in": "path",
-              "schema": {
-                "type": "string"
-              },
-              "required": true
-            }
-          ],
-          "security": [],
-          "responses": {
-            "200": {
-              "description": "AutomationWebhookResult",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/AutomationWebhookResult"
-                  }
-                }
-              }
-            },
-            "400": {
-              "description": "AutomationInvalidError | InvalidRequestError",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "anyOf": [
-                      {
-                        "$ref": "#/components/schemas/AutomationInvalidErrorEncoded"
-                      },
-                      {
-                        "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
-                      }
-                    ]
-                  }
-                }
-              }
-            },
-            "401": {
-              "description": "AutomationWebhookUnauthorizedError",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/AutomationWebhookUnauthorizedErrorEncoded"
-                  }
-                }
-              }
-            },
-            "404": {
-              "description": "AutomationNotFoundError",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/AutomationNotFoundErrorEncoded"
-                  }
-                }
-              }
-            }
-          },
-          "summary": "Invoke a webhook automation with HMAC or bearer verification and idempotency-key deduplication",
-          "requestBody": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "required": true
-          }
         }
       },
       "/api/subscription": {
@@ -16218,29 +16140,6 @@
           ],
           "additionalProperties": false
         },
-        "AutomationWebhookUnauthorizedErrorEncoded": {
-          "type": "object",
-          "properties": {
-            "_tag": {
-              "type": "string",
-              "enum": [
-                "AutomationWebhookUnauthorizedError"
-              ]
-            },
-            "automationId": {
-              "type": "string"
-            },
-            "message": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "_tag",
-            "automationId",
-            "message"
-          ],
-          "additionalProperties": false
-        },
         "AutomationInvalidErrorEncoded": {
           "type": "object",
           "properties": {
@@ -16280,30 +16179,6 @@
             "_tag",
             "automationId",
             "message"
-          ],
-          "additionalProperties": false
-        },
-        "AutomationWebhookResult": {
-          "type": "object",
-          "properties": {
-            "automationId": {
-              "$ref": "#/components/schemas/AutomationId"
-            },
-            "accepted": {
-              "type": "boolean"
-            },
-            "deduplicated": {
-              "type": "boolean"
-            },
-            "info": {
-              "$ref": "#/components/schemas/AutomationInfo"
-            }
-          },
-          "required": [
-            "automationId",
-            "accepted",
-            "deduplicated",
-            "info"
           ],
           "additionalProperties": false
         },
@@ -16417,8 +16292,8 @@
               ]
             },
             "state": {},
-            "eventCursor": {
-              "$ref": "#/components/schemas/AutomationEventCursor"
+            "eventPosition": {
+              "$ref": "#/components/schemas/AutomationEventPosition"
             },
             "createdAt": {
               "anyOf": [
@@ -16467,7 +16342,7 @@
           ],
           "additionalProperties": false
         },
-        "AutomationEventCursor": {
+        "AutomationEventPosition": {
           "type": "object",
           "properties": {
             "cursor": {
@@ -16480,7 +16355,7 @@
                 }
               ]
             },
-            "lastEventId": {
+            "id": {
               "type": "string"
             }
           },
@@ -16611,9 +16486,6 @@
               "$ref": "#/components/schemas/AutomationTriggerCron"
             },
             {
-              "$ref": "#/components/schemas/AutomationTriggerWebhook"
-            },
-            {
               "$ref": "#/components/schemas/AutomationTriggerEvent"
             }
           ]
@@ -16643,24 +16515,6 @@
             "type",
             "server",
             "event"
-          ],
-          "additionalProperties": false
-        },
-        "AutomationTriggerWebhook": {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "webhook"
-              ]
-            },
-            "secretHash": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
           ],
           "additionalProperties": false
         },
@@ -16768,10 +16622,6 @@
             },
             "expires": {
               "type": "string"
-            },
-            "webhookSecret": {
-              "type": "string",
-              "minLength": 1
             }
           },
           "required": [

@@ -1,10 +1,7 @@
-import crypto from "node:crypto"
-
 import { assert, describe, it } from "@effect/vitest"
 import {
   Automation,
   AutomationEventStream,
-  AutomationSecretStore,
   AutomationStore,
   followingSlot,
   nextCron,
@@ -14,12 +11,7 @@ import { Bus, equalToReplay } from "@vibest/core/bus"
 import { CodeMode } from "@vibest/core/codemode"
 import { Database } from "@vibest/core/database/database"
 import { checkLedger, open } from "@vibest/core/database/migration"
-import {
-  AUTOMATION_MIGRATION_ID,
-  BASELINE_PROJECTION_SCHEMA,
-  inspectSchema,
-  LOG_SCHEMA,
-} from "@vibest/core/database/schema.sql"
+import { AUTOMATION_MIGRATION_ID, inspectSchema, LOG_SCHEMA, PROJECTION_SCHEMA } from "@vibest/core/database/schema.sql"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Mcp } from "@vibest/core/mcp"
 import { ProjectStore } from "@vibest/core/project/store"
@@ -35,11 +27,23 @@ import { NoSuchSession } from "@vibest/schema/session"
 import { memorySqlite, services as bunServices } from "@vibest/testkit/bun"
 import { tempDirectory } from "@vibest/testkit/fakes"
 import { LayerNode } from "@vibest/util/layer-node"
-import { Clock, Cron, DateTime, Duration, Effect, Exit, Layer, Option, Queue, Result, Stream } from "effect"
+import {
+  Clock,
+  Cron,
+  DateTime,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  Result,
+  Stream,
+} from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
-
-const sha256Hex = (value: string) => crypto.createHash("sha256").update(value, "utf8").digest("hex")
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111"
 const PROJECT_ID = "22222222-2222-4222-8222-222222222222"
@@ -64,6 +68,7 @@ interface HarnessOptions {
   readonly eventTypes?: ReadonlyArray<McpSchema.EventType>
   readonly eventQueue?: Queue.Queue<McpSchema.EventMessage>
   readonly failSend?: boolean
+  readonly onSend?: (sent: FakeSentMessage) => Effect.Effect<void>
 }
 
 const makeHarness = (options: HarnessOptions = {}) => {
@@ -140,8 +145,11 @@ const makeHarness = (options: HarnessOptions = {}) => {
     send: (id, message, _sender, request) =>
       options.failSend
         ? Effect.fail(new NoSuchSession({ id, message: `missing session ${id}` }))
-        : Effect.sync(() => {
-            sent.push({ id, message, request })
+        : Effect.gen(function* () {
+            const record: FakeSentMessage = { id, message, request }
+            sent.push(record)
+
+            if (options.onSend) yield* options.onSend(record)
           }),
     admit: () => Effect.fail(new NoSuchSession({ id: "", message: "not implemented" })),
     interrupt: (id) => Effect.fail(new NoSuchSession({ id, message: "not implemented" })),
@@ -166,21 +174,13 @@ const makeHarness = (options: HarnessOptions = {}) => {
   )
 
   const layer = LayerNode.compile(
-    LayerNode.group([
-      Automation.node,
-      AutomationStore.node,
-      AutomationSecretStore.node,
-      Bus.node,
-      Database.node,
-      ProjectStore.node,
-    ]),
+    LayerNode.group([Automation.node, AutomationStore.node, Bus.node, Database.node, ProjectStore.node]),
     {
       replacements: [
         PlatformNode.sqlClientLayer.replace(Layer.succeed(PlatformNode.SqlClientLayer, Layer.fresh(memorySqlite))),
         Mcp.node.replace(Layer.succeed(Mcp.Service, fakeMcp)),
         CodeMode.node.replace(Layer.succeed(CodeMode.Service, fakeCodeMode)),
         Session.node.replace(Layer.succeed(Session.Service, fakeSession)),
-        PlatformNode.digest.replace(bunServices),
         PlatformNode.path.replace(bunServices),
         PlatformNode.fileSystem.replace(bunServices),
         PlatformNode.layout.replace(tempLayout),
@@ -222,71 +222,82 @@ describe("Automation core", () => {
     assert.isAbove(afterDst!, duringFallback)
   })
 
-  it.effect("runs 0-token CodeMode gate for 2 quiet ticks then delivers on tick 3 and transitions to done", () =>
-    Effect.gen(function* () {
-      const harness = makeHarness({
-        executeCode: (request) => {
-          const input = request.bindings?.input as { readonly state: { seen?: number } | null; readonly runs: number }
-          const seen = (input.state?.seen ?? 0) + 1
+  it.effect(
+    "runs 0-token CodeMode gate for 2 quiet ticks then delivers on tick 3, writes zero event rows, and physically deletes on remove",
+    () =>
+      Effect.gen(function* () {
+        const harness = makeHarness({
+          executeCode: (request) => {
+            const input = request.bindings?.input as { readonly state: { seen?: number } | null; readonly runs: number }
+            const seen = (input.state?.seen ?? 0) + 1
 
-          if (seen < 3) {
+            if (seen < 3) {
+              return Effect.succeed({
+                ok: true,
+                value: { state: { seen } },
+                logs: [`quiet check ${seen}`],
+                calls: [],
+                storeWrites: { set: {}, delete: [] },
+              })
+            }
+
             return Effect.succeed({
               ok: true,
-              value: { state: { seen } },
-              logs: [`quiet check ${seen}`],
+              value: { state: { seen }, done: true, send: { prompt: "Alert! Threshold reached." } },
+              logs: [`triggering on ${seen}`],
               calls: [],
               storeWrites: { set: {}, delete: [] },
             })
-          }
-
-          return Effect.succeed({
-            ok: true,
-            value: { state: { seen }, done: true, send: { prompt: "Alert! Threshold reached." } },
-            logs: [`triggering on ${seen}`],
-            calls: [],
-            storeWrites: { set: {}, delete: [] },
-          })
-        },
-      })
-
-      yield* Effect.gen(function* () {
-        const automation = yield* Automation.Service
-
-        const created = yield* automation.create({
-          name: "watcher",
-          directory: "/tmp/app",
-          projectId: PROJECT_ID,
-          sessionId: SESSION_ID,
-          trigger: { type: "every", every: "1 minute" },
-          action: { type: "code", code: "return null" },
+          },
         })
 
-        assert.strictEqual(created.status, "active")
-        assert.strictEqual(created.runCount, 0)
+        yield* Effect.gen(function* () {
+          const automation = yield* Automation.Service
+          const { sql } = yield* Database.Service
 
-        yield* TestClock.adjust(Duration.minutes(1))
-        const after1 = yield* automation.get(created.id)
-        assert.strictEqual(after1.runCount, 1)
-        assert.deepStrictEqual(after1.state, { seen: 1 })
-        assert.strictEqual(harness.sent.length, 0)
-        assert.strictEqual(harness.spawned.length, 0)
+          const created = yield* automation.create({
+            name: "watcher",
+            directory: "/tmp/app",
+            projectId: PROJECT_ID,
+            sessionId: SESSION_ID,
+            trigger: { type: "every", every: "1 minute" },
+            action: { type: "code", code: "return null" },
+          })
 
-        yield* TestClock.adjust(Duration.minutes(1))
-        const after2 = yield* automation.get(created.id)
-        assert.strictEqual(after2.runCount, 2)
-        assert.deepStrictEqual(after2.state, { seen: 2 })
-        assert.strictEqual(harness.sent.length, 0)
+          assert.strictEqual(created.status, "active")
+          assert.strictEqual(created.runCount, 0)
 
-        yield* TestClock.adjust(Duration.minutes(1))
-        const after3 = yield* automation.get(created.id)
-        assert.strictEqual(after3.runCount, 3)
-        assert.strictEqual(after3.status, "done")
-        assert.deepStrictEqual(after3.state, { seen: 3 })
-        assert.strictEqual(harness.sent.length, 1)
-        assert.strictEqual(harness.sent[0]?.id, SESSION_ID)
-        assert.strictEqual(harness.sent[0]?.message, "Alert! Threshold reached.")
-      }).pipe(Effect.provide(harness.layer))
-    }),
+          yield* TestClock.adjust(Duration.minutes(1))
+          const after1 = yield* automation.get(created.id)
+          assert.strictEqual(after1.runCount, 1)
+          assert.deepStrictEqual(after1.state, { seen: 1 })
+          assert.strictEqual(harness.sent.length, 0)
+          assert.strictEqual(harness.spawned.length, 0)
+
+          yield* TestClock.adjust(Duration.minutes(1))
+          const after2 = yield* automation.get(created.id)
+          assert.strictEqual(after2.runCount, 2)
+          assert.deepStrictEqual(after2.state, { seen: 2 })
+          assert.strictEqual(harness.sent.length, 0)
+
+          yield* TestClock.adjust(Duration.minutes(1))
+          const after3 = yield* automation.get(created.id)
+          assert.strictEqual(after3.runCount, 3)
+          assert.strictEqual(after3.status, "done")
+          assert.deepStrictEqual(after3.state, { seen: 3 })
+          assert.strictEqual(harness.sent.length, 1)
+          assert.strictEqual(harness.sent[0]?.id, SESSION_ID)
+          assert.strictEqual(harness.sent[0]?.message, "Alert! Threshold reached.")
+          assert.strictEqual(harness.sent[0]?.request, `aut:${created.id}:3:send`)
+
+          const ledgerEvents = yield* sql<{ type: string }>`SELECT type FROM event`
+          assert.isFalse(ledgerEvents.some((e) => e.type.startsWith("automation.")))
+
+          yield* automation.remove(created.id)
+          const remaining = yield* sql<{ id: string }>`SELECT id FROM automation WHERE id = ${created.id}`
+          assert.strictEqual(remaining.length, 0)
+        }).pipe(Effect.provide(harness.layer))
+      }),
   )
 
   it.effect(
@@ -419,37 +430,22 @@ describe("Automation core", () => {
   )
 
   it.effect(
-    "forbids recursive tools at runtime, redacts webhookSecret from ledger, blocks secretHash bypass, and deduplicates concurrent webhooks",
+    "settle optimistic CAS preserves concurrent pause during in-flight CodeMode run and prevents double-increment on stale run_count",
     () =>
       Effect.gen(function* () {
-        let codeExecs = 0
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
 
         const harness = makeHarness({
-          executeCode: (request, executeOptions) =>
+          executeCode: () =>
             Effect.gen(function* () {
-              if (request.code.includes("automation.create")) {
-                const allowed = executeOptions?.allowTool?.("automation.create")
-
-                if (allowed !== undefined && Result.isFailure(allowed)) {
-                  return {
-                    ok: false,
-                    error: { kind: "ToolDenied", message: allowed.failure },
-                    logs: [],
-                    calls: [],
-                  }
-                }
-              }
-
-              yield* Effect.yieldNow
-              codeExecs += 1
-              const input = request.bindings?.input as { readonly webhook?: { readonly payload?: { msg?: string } } }
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(release)
 
               return {
                 ok: true,
-                value: {
-                  send: { prompt: `Webhook: ${input.webhook?.payload?.msg ?? "none"}`, to: { agent: "general" } },
-                },
-                logs: [],
+                value: { state: { completed: true } },
+                logs: ["finished"],
                 calls: [],
                 storeWrites: { set: {}, delete: [] },
               }
@@ -458,143 +454,151 @@ describe("Automation core", () => {
 
         yield* Effect.gen(function* () {
           const automation = yield* Automation.Service
-          const bus = yield* Bus.Service
-          const { sql } = yield* Database.Service
-
-          const emptyExit = yield* automation
-            .create({
-              name: "empty-code",
-              directory: "/tmp/app",
-              projectId: PROJECT_ID,
-              trigger: { type: "webhook" },
-              action: { type: "code", code: "   " },
-            })
-            .pipe(Effect.exit)
-
-          assert.isTrue(Exit.isFailure(emptyExit))
-
-          const badAuto = yield* automation.create({
-            name: "bad",
-            directory: "/tmp/app",
-            projectId: PROJECT_ID,
-            trigger: { type: "every", every: "5 minutes" },
-            action: { type: "code", code: "await tools.automation.create({})" },
-          })
-
-          const afterBadRun = yield* automation.runNow(badAuto.id)
-          assert.strictEqual(afterBadRun.status, "paused")
-          assert.include(afterBadRun.lastOutput ?? "", "cannot be used inside an automation")
-
-          const secret = "top-secret-hmac-key"
-          const secretHash = sha256Hex(secret)
+          const store = yield* AutomationStore.Service
 
           const created = yield* automation.create({
-            name: "github-hook",
+            name: "cas-pause-race",
             directory: "/tmp/app",
             projectId: PROJECT_ID,
-            trigger: { type: "webhook" },
-            webhookSecret: secret,
+            sessionId: SESSION_ID,
+            trigger: { type: "every", every: "5 minutes" },
             action: { type: "code", code: "return null" },
           })
 
-          assert.strictEqual(created.trigger.type, "webhook")
+          const inFlight = yield* Effect.forkChild(automation.runNow(created.id))
+          yield* Deferred.await(started)
 
-          if (created.trigger.type === "webhook") {
-            assert.strictEqual(created.trigger.secretHash, secretHash)
-          }
+          const paused = yield* automation.pause(created.id)
+          assert.strictEqual(paused.status, "paused")
 
-          const loggedEvents = yield* Stream.runCollect(bus.log({ follow: false }))
-          assert.notInclude(JSON.stringify(loggedEvents), secret)
+          yield* Deferred.succeed(release, undefined)
+          const afterRun = yield* Fiber.join(inFlight)
 
-          const rawEventRows = yield* sql<{ data: string }>`SELECT data FROM event`
-          assert.isFalse(rawEventRows.some((row) => row.data.includes(secret)))
+          assert.strictEqual(afterRun.status, "paused")
+          assert.strictEqual(afterRun.runCount, 1)
+          assert.deepStrictEqual(afterRun.state, { completed: true })
 
-          const rawBody = JSON.stringify({ msg: "build-failed" })
-
-          const bearerHashBypass = yield* automation
-            .webhook({
-              id: created.id,
-              rawBody,
-              payload: { msg: "build-failed" },
-              headers: { authorization: `Bearer ${secretHash}` },
-            })
-            .pipe(Effect.exit)
-
-          assert.isTrue(Exit.isFailure(bearerHashBypass))
-
-          const hmacHashBypass = yield* automation
-            .webhook({
-              id: created.id,
-              rawBody,
-              payload: { msg: "build-failed" },
-              headers: {
-                "x-vibest-signature-256": `sha256=${crypto.createHmac("sha256", secretHash).update(rawBody, "utf8").digest("hex")}`,
-              },
-            })
-            .pipe(Effect.exit)
-
-          assert.isTrue(Exit.isFailure(hmacHashBypass))
-
-          const hashOnly = yield* automation.create({
-            name: "hash-only-hook",
-            directory: "/tmp/app",
-            projectId: PROJECT_ID,
-            trigger: { type: "webhook", secretHash },
-            action: { type: "code", code: "return null" },
-          })
-
-          const hashOnlyHmacBypass = yield* automation
-            .webhook({
-              id: hashOnly.id,
-              rawBody,
-              payload: { msg: "build-failed" },
-              headers: {
-                "x-vibest-signature-256": `sha256=${crypto.createHmac("sha256", secretHash).update(rawBody, "utf8").digest("hex")}`,
-              },
-            })
-            .pipe(Effect.exit)
-
-          assert.isTrue(Exit.isFailure(hashOnlyHmacBypass))
-
-          const sig = crypto.createHmac("sha256", secret).update(rawBody, "utf8").digest("hex")
-
-          const [first, second] = yield* Effect.all(
-            [
-              automation.webhook({
-                id: created.id,
-                rawBody,
-                payload: { msg: "build-failed" },
-                headers: {
-                  "x-vibest-signature-256": `sha256=${sig}`,
-                  "x-idempotency-key": "evt-001",
-                },
-              }),
-              automation.webhook({
-                id: created.id,
-                rawBody,
-                payload: { msg: "build-failed" },
-                headers: {
-                  authorization: `Bearer ${secret}`,
-                  "x-idempotency-key": "evt-001",
-                },
-              }),
-            ],
-            { concurrency: 2 },
+          const staleRow = { id: created.id, runCount: 0 }
+          yield* store.settle(
+            staleRow,
+            { runCount: 99, state: { clobbered: true }, timeUpdated: 999 },
+            { evenIfPaused: true },
           )
 
-          assert.strictEqual(first.accepted, true)
-          assert.strictEqual(second.accepted, true)
-          assert.strictEqual([first.deduplicated, second.deduplicated].filter(Boolean).length, 1)
-          assert.strictEqual(codeExecs, 1)
-          assert.strictEqual((yield* automation.get(created.id)).runCount, 1)
-          assert.strictEqual(harness.spawned.length, 1)
-          assert.strictEqual(harness.spawned[0]?.prompt, "Webhook: build-failed")
+          const afterStale = yield* automation.get(created.id)
+          assert.strictEqual(afterStale.runCount, 1)
+          assert.deepStrictEqual(afterStale.state, { completed: true })
         }).pipe(Effect.provide(harness.layer))
       }),
   )
 
+  it.effect("coalesces unread timer prompt deliveries using last_message_id against pending inbox rows", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness()
+
+      yield* Effect.gen(function* () {
+        const automation = yield* Automation.Service
+        const { sql } = yield* Database.Service
+
+        const created = yield* automation.create({
+          name: "unread-coalesce",
+          directory: "/tmp/app",
+          projectId: PROJECT_ID,
+          sessionId: SESSION_ID,
+          trigger: { type: "every", every: "1 minute" },
+          action: { type: "prompt", prompt: "Check build status" },
+        })
+
+        yield* TestClock.adjust(Duration.minutes(1))
+        const after1 = yield* automation.get(created.id)
+        assert.strictEqual(after1.runCount, 1)
+        assert.strictEqual(after1.lastOutcome, "fired")
+        assert.strictEqual(harness.sent.length, 1)
+        const firstRequestId = harness.sent[0]?.request
+        assert.strictEqual(firstRequestId, `aut:${created.id}:1`)
+
+        yield* sql`INSERT INTO inbox (
+          recipient_session_id, id, sender_type, sender_key, content, request_id, status
+        ) VALUES (${SESSION_ID}, 1, 'vibest', 'vibest', 'Check build status', ${firstRequestId!}, 'pending')`
+
+        yield* TestClock.adjust(Duration.minutes(1))
+        const after2 = yield* automation.get(created.id)
+        assert.strictEqual(after2.runCount, 1)
+        assert.strictEqual(after2.lastOutcome, "skipped")
+        assert.strictEqual(harness.sent.length, 1)
+
+        yield* sql`UPDATE inbox SET status = 'delivered' WHERE recipient_session_id = ${SESSION_ID} AND id = 1`
+
+        yield* TestClock.adjust(Duration.minutes(1))
+        const after3 = yield* automation.get(created.id)
+        assert.strictEqual(after3.runCount, 2)
+        assert.strictEqual(after3.lastOutcome, "fired")
+        assert.strictEqual(harness.sent.length, 2)
+        assert.strictEqual(harness.sent[1]?.request, `aut:${created.id}:2`)
+      }).pipe(Effect.provide(harness.layer))
+    }),
+  )
+
+  it.effect("forbids empty code and runtime forbidden tools", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        executeCode: (request, executeOptions) =>
+          Effect.sync(() => {
+            if (request.code.includes("automation.create")) {
+              const allowed = executeOptions?.allowTool?.("automation.create")
+
+              if (allowed !== undefined && Result.isFailure(allowed)) {
+                return {
+                  ok: false,
+                  error: { kind: "ToolDenied", message: allowed.failure },
+                  logs: [],
+                  calls: [],
+                }
+              }
+            }
+
+            return {
+              ok: true,
+              value: null,
+              logs: [],
+              calls: [],
+              storeWrites: { set: {}, delete: [] },
+            }
+          }),
+      })
+
+      yield* Effect.gen(function* () {
+        const automation = yield* Automation.Service
+
+        const emptyExit = yield* automation
+          .create({
+            name: "empty-code",
+            directory: "/tmp/app",
+            projectId: PROJECT_ID,
+            trigger: { type: "every", every: "5 minutes" },
+            action: { type: "code", code: "   " },
+          })
+          .pipe(Effect.exit)
+
+        assert.isTrue(Exit.isFailure(emptyExit))
+
+        const badAuto = yield* automation.create({
+          name: "bad",
+          directory: "/tmp/app",
+          projectId: PROJECT_ID,
+          trigger: { type: "every", every: "5 minutes" },
+          action: { type: "code", code: "await tools.automation.create({})" },
+        })
+
+        const afterBadRun = yield* automation.runNow(badAuto.id)
+        assert.strictEqual(afterBadRun.status, "paused")
+        assert.include(afterBadRun.lastOutput ?? "", "cannot be used inside an automation")
+      }).pipe(Effect.provide(harness.layer))
+    }),
+  )
+
   it.effect(
-    "streams MCP SEP-3415 push events, fails closed on format keyword, matches key-order-independent const/enum, persists cursor, pauses on truncated:true, and replays ledger cleanly",
+    "streams MCP SEP-3415 push events, updates event_position with zero ledger writes, skips duplicate eventId, and pauses on truncated:true",
     () =>
       Effect.gen(function* () {
         const formatValidator = AutomationEventStream.compileSchemaValidator({ type: "string", format: "email" })
@@ -670,7 +674,32 @@ describe("Automation core", () => {
             action: { type: "code", code: "return null" },
           })
 
+          assert.deepStrictEqual(created.eventPosition, {})
+
+          yield* Effect.yieldNow
+          yield* Effect.yieldNow
+          yield* TestClock.adjust(Duration.millis(10))
+
+          const afterOpen = yield* automation.get(created.id)
+          assert.deepStrictEqual(afterOpen.eventPosition, { cursor: null })
+
           yield* Queue.offer(eventQueue, { type: "active", cursor: "cur_1", truncated: false })
+          yield* Effect.yieldNow
+          yield* Effect.yieldNow
+          yield* TestClock.adjust(Duration.millis(10))
+
+          const afterHeartbeat = yield* automation.get(created.id)
+          assert.deepStrictEqual(afterHeartbeat.eventPosition, { cursor: "cur_1" })
+
+          yield* Queue.offer(eventQueue, {
+            type: "event",
+            eventId: "ev_1",
+            name: "deploy.failed",
+            timestamp: "2026-11-25T10:00:00Z",
+            data: { service: "billing" },
+            cursor: "cur_2",
+          })
+
           yield* Queue.offer(eventQueue, {
             type: "event",
             eventId: "ev_1",
@@ -686,10 +715,12 @@ describe("Automation core", () => {
 
           const afterEvent = yield* automation.get(created.id)
           assert.strictEqual(afterEvent.runCount, 1)
-          assert.strictEqual(afterEvent.eventCursor?.cursor, "cur_2")
-          assert.strictEqual(afterEvent.eventCursor?.lastEventId, "ev_1")
+          assert.deepStrictEqual(afterEvent.eventPosition, { cursor: "cur_2", id: "ev_1" })
           assert.strictEqual(harness.sent.length, 1)
           assert.strictEqual(harness.sent[0]?.message, "Deploy failed: billing")
+
+          const ledgerEvents = yield* sql<{ type: string }>`SELECT type FROM event`
+          assert.strictEqual(ledgerEvents.length, 0)
 
           yield* Queue.offer(eventQueue, { type: "active", cursor: "cur_3", truncated: true })
           yield* Effect.yieldNow
@@ -708,46 +739,63 @@ describe("Automation core", () => {
       }),
   )
 
-  it.effect("upgrades a pre-automation SQLite database cleanly via checkLedger and open() while preserving rows", () =>
-    Effect.gen(function* () {
-      const preAutomationLayer = Layer.fresh(Projectors.replay.pipe(Layer.provideMerge(memorySqlite)))
+  it.effect(
+    "upgrades a pre-automation SQLite database cleanly via checkLedger and open() and preserves automation rows across Bus.rebuild",
+    () =>
+      Effect.gen(function* () {
+        const preAutomationLayer = Layer.fresh(Projectors.replay.pipe(Layer.provideMerge(memorySqlite)))
 
-      yield* Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        const bus = yield* Bus.Service
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const bus = yield* Bus.Service
 
-        for (const statement of [...LOG_SCHEMA, ...BASELINE_PROJECTION_SCHEMA]) {
-          yield* sql.unsafe(statement)
-        }
+          for (const statement of [...LOG_SCHEMA, ...PROJECTION_SCHEMA]) {
+            yield* sql.unsafe(statement)
+          }
 
-        yield* sql`INSERT INTO kv (key, value) VALUES ('ledger', ${randomId()})`
-        yield* bus.transaction(
-          bus.publish(ProjectEvent.Created, { projectId: PROJECT_ID, directory: "/tmp/legacy", repositories: [] }),
-        )
+          yield* sql`INSERT INTO kv (key, value) VALUES ('ledger', ${randomId()})`
+          yield* bus.transaction(
+            bus.publish(ProjectEvent.Created, { projectId: PROJECT_ID, directory: "/tmp/legacy", repositories: [] }),
+          )
 
-        assert.strictEqual(yield* inspectSchema(), "ready")
+          assert.strictEqual(yield* inspectSchema(), "ready")
 
-        yield* checkLedger(sql).pipe(
-          Effect.provide(Layer.fresh(Projectors.replay.pipe(Layer.provideMerge(memorySqlite)))),
-        )
+          yield* checkLedger(sql).pipe(
+            Effect.provide(Layer.fresh(Projectors.replay.pipe(Layer.provideMerge(memorySqlite)))),
+          )
 
-        yield* open()
+          yield* open()
 
-        const applied = yield* sql<{ id: string }>`SELECT id FROM migration`
-        assert.deepStrictEqual(
-          applied.map((row) => row.id),
-          [AUTOMATION_MIGRATION_ID],
-        )
+          const applied = yield* sql<{ id: string }>`SELECT id FROM migration`
+          assert.deepStrictEqual(
+            applied.map((row) => row.id),
+            [AUTOMATION_MIGRATION_ID],
+          )
 
-        const projects = yield* sql<{ id: string }>`SELECT id FROM project`
-        assert.deepStrictEqual(
-          projects.map((row) => row.id),
-          [PROJECT_ID],
-        )
+          const automationId = AutomationSchema.createId(1_700_000_000_000)
+          yield* sql`INSERT INTO automation (
+            id, project_id, session_id, directory, name, trigger, tz, action,
+            status, next_due_at, expires_at, run_count, failures, time_created, time_updated
+          ) VALUES (
+            ${automationId}, ${PROJECT_ID}, ${SESSION_ID}, '/tmp/legacy', 'survives-rebuild',
+            '{"type":"every","every":"5 minutes"}', 'UTC', '{"type":"code","code":"return null"}',
+            'active', 1700000300000, NULL, 0, 0, 1700000000000, 1700000000000
+          )`
 
-        assert.strictEqual(yield* inspectSchema(), "ready")
-      }).pipe(Effect.provide(preAutomationLayer))
-    }),
+          yield* bus.rebuild
+
+          const preserved = yield* sql<{ id: string; name: string }>`SELECT id, name FROM automation`
+          assert.deepStrictEqual(preserved, [{ id: automationId, name: "survives-rebuild" }])
+
+          const projects = yield* sql<{ id: string }>`SELECT id FROM project`
+          assert.deepStrictEqual(
+            projects.map((row) => row.id),
+            [PROJECT_ID],
+          )
+
+          assert.strictEqual(yield* inspectSchema(), "ready")
+        }).pipe(Effect.provide(preAutomationLayer))
+      }),
   )
 
   it("decodes Automation.CodeResult strictly with onExcessProperty error", () => {

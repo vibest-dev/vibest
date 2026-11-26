@@ -87,7 +87,6 @@ export const ACCESS = {
   "automation.remove": "agent",
   "automation.tick": "agent",
   "automation.runNow": "agent",
-  "automation.webhook": "open",
 } as const satisfies Record<EndpointId, Access | readonly Access[]>
 
 export const UI_CALLS: ReadonlySet<string> = new Set([

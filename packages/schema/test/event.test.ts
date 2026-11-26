@@ -55,10 +55,10 @@ describe("event primitives and manifest", () => {
     assert.deepStrictEqual(SessionEvent.Created.durable, { aggregate: "sessionId", version: 1 })
   })
 
-  it("PublicEvents has 22 public events and zero process.*, automation.*, or internal events; DurableEvents has 37 versioned entries", () => {
+  it("PublicEvents has 22 public events and zero process.*, automation.*, or internal events; DurableEvents has 31 versioned entries", () => {
     assert.strictEqual(PublicEvents.length, 22)
-    assert.strictEqual(AllDurableDefinitions.length, 37)
-    assert.strictEqual(DurableEvents.size, 37)
+    assert.strictEqual(AllDurableDefinitions.length, 31)
+    assert.strictEqual(DurableEvents.size, 31)
 
     const publicTypes = PublicEvents.map((definition) => definition.type)
     assert.isFalse(publicTypes.some((type) => type.startsWith("process.")))

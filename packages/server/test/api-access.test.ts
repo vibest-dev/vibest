@@ -247,7 +247,6 @@ describe("vibest.sock access and endpoint coverage", () => {
         ...protectedCalls(bare).map(([method]) => method),
         "daemon.ping",
         "plugin.list",
-        "automation.webhook",
         "daemon.concurrency",
         "harness.list",
         "agent.list",

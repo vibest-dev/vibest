@@ -48,12 +48,6 @@ export const boundedOutput = (text: string): string => ToolOutput.truncateInline
 export const handoffOutput = (delivery: string, logs?: string): string =>
   boundedOutput(logs === undefined ? delivery : `${delivery}\n${logs}`)
 
-export interface WebhookInput {
-  readonly payload: Schema.Json
-  readonly headers: Readonly<Record<string, string>>
-  readonly idempotencyKey?: string | undefined
-}
-
 export interface RunCaller {
   readonly sessionId: string
   readonly projectId: string
@@ -65,7 +59,6 @@ export interface RunInput {
   readonly runs: number
   readonly caller?: RunCaller | undefined
   readonly event?: ReturnType<typeof AutomationEventStream.input> | undefined
-  readonly webhook?: WebhookInput | undefined
 }
 
 export type Outcome =
@@ -95,13 +88,6 @@ export const run = Effect.fn("AutomationCode.run")(function* (
     runs: input.runs,
     args: action.args ?? null,
     ...(input.event !== undefined && { event: input.event }),
-    ...(input.webhook !== undefined && {
-      webhook: {
-        payload: input.webhook.payload,
-        headers: input.webhook.headers,
-        ...(input.webhook.idempotencyKey !== undefined && { idempotencyKey: input.webhook.idempotencyKey }),
-      },
-    }),
   }
 
   const headers =

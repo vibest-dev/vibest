@@ -102,7 +102,7 @@ export const inspectSchema = (knownMigrations: ReadonlySet<string> = KNOWN_MIGRA
 
     const expected = [
       ...LOG_SCHEMA,
-      ...BASELINE_PROJECTION_SCHEMA,
+      ...PROJECTION_SCHEMA,
       ...(appliedSet.has(AUTOMATION_MIGRATION_ID) ? AUTOMATION_SCHEMA : []),
     ]
 
@@ -118,7 +118,7 @@ export const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-export const BASELINE_PROJECTION_SCHEMA = [
+export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
     id        TEXT PRIMARY KEY CHECK (length(id) = 36),
     directory TEXT UNIQUE
@@ -254,42 +254,32 @@ export const BASELINE_PROJECTION_SCHEMA = [
 export const AUTOMATION_SCHEMA = [
   `CREATE TABLE automation (
     id              TEXT PRIMARY KEY,
-    name            TEXT NOT NULL,
     project_id      TEXT NOT NULL,
     session_id      TEXT,
     directory       TEXT NOT NULL,
-    trigger_json    TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    trigger         TEXT NOT NULL,
     tz              TEXT NOT NULL,
-    action_json     TEXT NOT NULL,
-    status          TEXT NOT NULL CHECK (status IN ('active', 'paused', 'done')),
+    action          TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'done')),
     next_due_at     INTEGER,
     expires_at      INTEGER,
     run_count       INTEGER NOT NULL DEFAULT 0 CHECK (run_count >= 0),
     failures        INTEGER NOT NULL DEFAULT 0 CHECK (failures >= 0),
     last_run_at     INTEGER,
+    last_message_id TEXT,
     last_outcome    TEXT CHECK (last_outcome IN ('fired', 'late', 'skipped', 'disabled', 'failed', 'expired')),
     last_output     TEXT,
     retry_at        INTEGER,
-    state_json      TEXT,
-    event_cursor    TEXT,
-    last_event_id   TEXT,
-    has_cursor      INTEGER NOT NULL DEFAULT 0 CHECK (has_cursor IN (0, 1)),
-    created_at      INTEGER NOT NULL,
-    updated_at      INTEGER NOT NULL
+    state           TEXT,
+    event_position  TEXT,
+    time_created    INTEGER NOT NULL,
+    time_updated    INTEGER NOT NULL
   ) STRICT`,
   `CREATE INDEX automation_project ON automation (project_id)`,
   `CREATE INDEX automation_session ON automation (session_id) WHERE session_id IS NOT NULL`,
   `CREATE INDEX automation_active_due ON automation (next_due_at) WHERE status = 'active'`,
-  `CREATE TABLE automation_dedup (
-    automation_id TEXT NOT NULL REFERENCES automation(id) ON DELETE CASCADE,
-    dedup_key     TEXT NOT NULL,
-    created_at    INTEGER NOT NULL,
-    PRIMARY KEY (automation_id, dedup_key)
-  ) STRICT`,
-  `CREATE INDEX automation_dedup_created ON automation_dedup (automation_id, created_at)`,
 ]
-
-export const PROJECTION_SCHEMA = [...BASELINE_PROJECTION_SCHEMA, ...AUTOMATION_SCHEMA]
 
 export const PROJECTION_TABLES = {
   project: "id",
@@ -302,6 +292,4 @@ export const PROJECTION_TABLES = {
   machine: "name",
   remote: "id",
   outbox: "id",
-  automation: "id",
-  automation_dedup: "automation_id, dedup_key",
 } as const

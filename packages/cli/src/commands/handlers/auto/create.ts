@@ -25,20 +25,18 @@ export default Runtime.handler(Commands.commands.auto.commands.create, (o) =>
     const cron = Option.getOrUndefined(o.cron)
     const eventServer = Option.getOrUndefined(o.eventServer)
     const eventName = Option.getOrUndefined(o.event)
-    const webhookSecret = Option.getOrUndefined(o.webhookSecret)
     const expires = Option.getOrUndefined(o.expires)
 
     const triggerKinds = [
       at !== undefined,
       every !== undefined,
       cron !== undefined,
-      o.webhook || webhookSecret !== undefined,
       eventServer !== undefined || eventName !== undefined,
     ].filter(Boolean).length
 
     if (triggerKinds !== 1) {
       return yield* new Automation.InvalidError({
-        message: "Specify exactly one trigger: --at, --every, --cron, --webhook, or --event-server + --event",
+        message: "Specify exactly one trigger: --at, --every, --cron, or --event-server + --event",
       })
     }
 
@@ -50,8 +48,6 @@ export default Runtime.handler(Commands.commands.auto.commands.create, (o) =>
       trigger = { type: "every", every, ...(tz !== undefined && { tz }) }
     } else if (cron !== undefined) {
       trigger = { type: "cron", cron, ...(tz !== undefined && { tz }) }
-    } else if (o.webhook || webhookSecret !== undefined) {
-      trigger = { type: "webhook" }
     } else {
       if (eventServer === undefined || eventName === undefined) {
         return yield* new Automation.InvalidError({
@@ -143,7 +139,6 @@ export default Runtime.handler(Commands.commands.auto.commands.create, (o) =>
             directory,
             ...(c.sessionId !== undefined && { sessionId: c.sessionId }),
             ...(expires !== undefined && { expires }),
-            ...(webhookSecret !== undefined && { webhookSecret }),
           },
         })
         .pipe(Effect.flatMap(json)),

@@ -4,7 +4,7 @@ import { Clock, Duration, Effect, FiberMap, Predicate, Result, Semaphore, Stream
 import type { Mcp } from "../mcp.ts"
 import { AutomationEventStream } from "./event.ts"
 import type { ExecuteOptions } from "./execute.ts"
-import { type AutomationRow, toInfo } from "./sql.ts"
+import { type AutomationRow, parseEventPosition, type SettlePatch, toInfo } from "./sql.ts"
 import type { AutomationStore } from "./store.ts"
 
 const WATCH_RECONNECT_DELAY = Duration.seconds(5)
@@ -14,19 +14,16 @@ export interface WatchDeps {
   readonly mcp: Mcp.Interface
   readonly arm: (key: string, delay: Duration.Duration, effect: Effect.Effect<unknown, unknown>) => Effect.Effect<void>
   readonly cancel: (key: string) => Effect.Effect<void>
-  readonly pauseQuiet: (
-    id: Automation.ID,
-    details?: {
-      readonly reason?: string | undefined
-      readonly lastOutcome?: Automation.Outcome | undefined
-      readonly lastRunAt?: number | undefined
-      readonly failures?: number | undefined
-    },
+  readonly pauseWith: (
+    row: AutomationRow,
+    now: number,
+    reason: string,
+    extra?: Pick<SettlePatch, "failures" | "lastRunAt">,
   ) => Effect.Effect<void>
   readonly executeRow: (row: AutomationRow, now: number, options?: ExecuteOptions) => Effect.Effect<void>
 }
 
-export const createWatchManager = ({ store, mcp, arm, cancel, pauseQuiet, executeRow }: WatchDeps) =>
+export const createWatchManager = ({ store, mcp, arm, cancel, pauseWith, executeRow }: WatchDeps) =>
   Effect.gen(function* () {
     const watches = yield* FiberMap.make<Automation.ID>()
 
@@ -42,39 +39,37 @@ export const createWatchManager = ({ store, mcp, arm, cancel, pauseQuiet, execut
         const trigger = info.trigger
         const now = yield* Clock.currentTimeMillis
 
-        if (info.expiresAt !== undefined && now >= info.expiresAt) {
-          yield* store.recordTriggered({
-            automationId: id,
+        if (row.expiresAt !== null && now >= row.expiresAt) {
+          yield* store.settle(row, {
             status: "done",
-            runCount: info.runCount,
-            failures: info.failures,
             lastOutcome: "expired",
+            timeUpdated: now,
           })
 
           return
         }
 
-        const savedCursor = row.hasCursor === 1 ? row.eventCursor : undefined
+        const eventPos = parseEventPosition(row.eventPosition)
 
-        if (row.hasCursor === 1 && savedCursor === null) {
-          yield* pauseQuiet(id, {
-            reason: "No replay cursor; recreate the watch to start from now",
-            lastOutcome: "failed",
-            lastRunAt: now,
-          })
+        if (eventPos === null) {
+          yield* pauseWith(row, now, "No authorized event watch", { lastRunAt: now })
 
           return
         }
 
-        const resolved = yield* Effect.result(AutomationEventStream.resolve(mcp, trigger, row.directory, savedCursor))
+        if (eventPos.cursor === null) {
+          yield* pauseWith(row, now, "No replay cursor; recreate the watch to start from now", { lastRunAt: now })
+
+          return
+        }
+
+        const resolved = yield* Effect.result(
+          AutomationEventStream.resolve(mcp, trigger, row.directory, eventPos.cursor),
+        )
 
         if (Result.isFailure(resolved)) {
           if (Predicate.isTagged(resolved.failure, "AutomationEventStreamInvalid")) {
-            yield* pauseQuiet(id, {
-              reason: resolved.failure.message,
-              lastOutcome: "failed",
-              lastRunAt: now,
-            })
+            yield* pauseWith(row, now, resolved.failure.message, { lastRunAt: now })
           } else {
             yield* arm(`automation.watch.${id}`, WATCH_RECONNECT_DELAY, ensureWatch(id))
           }
@@ -82,8 +77,11 @@ export const createWatchManager = ({ store, mcp, arm, cancel, pauseQuiet, execut
           return
         }
 
-        if (row.hasCursor === 0) {
-          yield* store.saveCursor(id, null)
+        if (eventPos.cursor === undefined) {
+          yield* store.settle(row, {
+            eventPosition: { ...eventPos, cursor: null },
+            timeUpdated: now,
+          })
         }
 
         const streamOutcome = yield* resolved.success.pipe(
@@ -96,12 +94,10 @@ export const createWatchManager = ({ store, mcp, arm, cancel, pauseQuiet, execut
                 if (current === undefined || current.status !== "active") return false
 
                 if (current.expiresAt !== null && at >= current.expiresAt) {
-                  yield* store.recordTriggered({
-                    automationId: id,
+                  yield* store.settle(current, {
                     status: "done",
-                    runCount: current.runCount,
-                    failures: current.failures,
                     lastOutcome: "expired",
+                    timeUpdated: at,
                   })
 
                   return false
@@ -109,11 +105,22 @@ export const createWatchManager = ({ store, mcp, arm, cancel, pauseQuiet, execut
 
                 if (message.type === "error") return true
 
+                const currentEventPos = parseEventPosition(current.eventPosition)
+
                 if (message.type !== "event") {
-                  yield* store.saveCursor(id, message.cursor)
+                  yield* store.settle(current, {
+                    eventPosition: {
+                      ...eventPos,
+                      ...currentEventPos,
+                      cursor: message.cursor,
+                    },
+                    timeUpdated: at,
+                  })
 
                   return true
                 }
+
+                if (currentEventPos?.id === message.eventId) return true
 
                 yield* executeRow(current, at, { event: message })
                 const after = yield* store.getRow(id)
@@ -128,19 +135,16 @@ export const createWatchManager = ({ store, mcp, arm, cancel, pauseQuiet, execut
 
         if (Result.isFailure(streamOutcome)) {
           const at = yield* Clock.currentTimeMillis
+          const current = yield* store.getRow(id)
+
+          if (current === undefined || current.status !== "active") return
 
           if (Predicate.isTagged(streamOutcome.failure, "AutomationEventStreamInvalid")) {
-            yield* pauseQuiet(id, {
-              reason: streamOutcome.failure.message,
-              lastOutcome: "failed",
-              lastRunAt: at,
-            })
+            yield* pauseWith(current, at, streamOutcome.failure.message, { lastRunAt: at })
+          } else if (parseEventPosition(current.eventPosition)?.cursor == null) {
+            yield* pauseWith(current, at, "No replay cursor; recreate the watch to start from now", { lastRunAt: at })
           } else {
-            const current = yield* store.getRow(id)
-
-            if (current !== undefined && current.status === "active") {
-              yield* arm(`automation.watch.${id}`, WATCH_RECONNECT_DELAY, ensureWatch(id))
-            }
+            yield* arm(`automation.watch.${id}`, WATCH_RECONNECT_DELAY, ensureWatch(id))
           }
         }
       })

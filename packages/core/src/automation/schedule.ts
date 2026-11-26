@@ -1,58 +1,11 @@
 import { Automation } from "@vibest/schema/automation"
 import { Cron, DateTime, Effect, Option, Result } from "effect"
-import { Digest } from "effect/crypto"
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
-const HMAC_BLOCK_SIZE = 64
 
 const RELATIVE = /^in\s+(.+)$/i
 const OFFSET = /\d(?:z|[+-]\d{2}:?\d{2})$/i
-
-const encoder = new TextEncoder()
-
-const safeEqualHex = (a: string, b: string): boolean => {
-  const left = encoder.encode(a)
-  const right = encoder.encode(b)
-
-  if (left.length !== right.length) return false
-  let diff = 0
-
-  for (let i = 0; i < left.length; i++) diff |= left[i]! ^ right[i]!
-
-  return diff === 0
-}
-
-const concatBytes = (a: Uint8Array, b: Uint8Array): Uint8Array => {
-  const out = new Uint8Array(a.length + b.length)
-  out.set(a, 0)
-  out.set(b, a.length)
-
-  return out
-}
-
-const hmacSha256Hex = (digest: Digest.Digest["Service"], keyText: string, messageText: string) =>
-  Effect.gen(function* () {
-    const rawKey = encoder.encode(keyText)
-    const keyBytes = rawKey.length > HMAC_BLOCK_SIZE ? yield* digest.digest(Digest.sha256, rawKey) : rawKey
-    const block = new Uint8Array(HMAC_BLOCK_SIZE)
-    block.set(keyBytes, 0)
-
-    const ipad = new Uint8Array(HMAC_BLOCK_SIZE)
-    const opad = new Uint8Array(HMAC_BLOCK_SIZE)
-
-    for (let i = 0; i < HMAC_BLOCK_SIZE; i++) {
-      ipad[i] = block[i]! ^ 0x36
-      opad[i] = block[i]! ^ 0x5c
-    }
-
-    const inner = yield* digest.digest(Digest.sha256, concatBytes(ipad, encoder.encode(messageText)))
-
-    return yield* digest.digestHex(Digest.sha256, concatBytes(opad, inner))
-  })
-
-export const sha256Hex = (digest: Digest.Digest["Service"], value: string) =>
-  digest.digestHex(Digest.sha256, encoder.encode(value))
 
 export const resolveZone = (tz?: string): Effect.Effect<DateTime.TimeZone, Automation.InvalidError> => {
   const name = tz?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
@@ -117,7 +70,6 @@ export const followingSlot = (
 ): number | undefined => {
   switch (trigger.type) {
     case "at":
-    case "webhook":
     case "event":
       return undefined
 
@@ -190,7 +142,6 @@ export const computeInitialDue = (
         return next
       }
 
-      case "webhook":
       case "event":
         return undefined
     }
@@ -198,66 +149,13 @@ export const computeInitialDue = (
 
 export const computeResumeDue = (
   trigger: Automation.Trigger,
-  zone: DateTime.TimeZone,
   tz: string,
+  currentNextDueAt: number | null,
   now: number,
-): Effect.Effect<number | undefined, Automation.InvalidError> => {
-  if (trigger.type !== "at") return computeInitialDue(trigger, zone, tz, now)
-  const parsed = parseTime(trigger.at, zone, now)
+): number | null => {
+  if (trigger.type === "event") return null
 
-  if (Option.isNone(parsed)) {
-    return Effect.fail(new Automation.InvalidError({ message: `Invalid time: ${trigger.at}` }))
-  }
+  if (currentNextDueAt === null || currentNextDueAt > now) return currentNextDueAt
 
-  return Effect.succeed(Math.max(now, parsed.value))
+  return followingSlot(trigger, tz, currentNextDueAt, now) ?? currentNextDueAt
 }
-
-export const readHeader = (headers: Readonly<Record<string, string>>, name: string): string | undefined => {
-  const lower = name.toLowerCase()
-
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === lower) return value
-  }
-
-  return undefined
-}
-
-export const verifyWebhookAuth = (
-  digest: Digest.Digest["Service"],
-  id: Automation.ID,
-  trigger: Automation.WebhookTrigger,
-  webhookSecret: string | undefined,
-  headers: Readonly<Record<string, string>>,
-  rawBody: string,
-): Effect.Effect<void, Automation.WebhookUnauthorizedError> =>
-  Effect.gen(function* () {
-    const expectedHash =
-      trigger.secretHash ?? (webhookSecret !== undefined ? yield* sha256Hex(digest, webhookSecret) : undefined)
-
-    if (expectedHash === undefined) return
-
-    const sigHeader = readHeader(headers, "x-vibest-signature-256") ?? readHeader(headers, "x-hub-signature-256")
-
-    if (sigHeader !== undefined && webhookSecret !== undefined) {
-      const provided = sigHeader.startsWith("sha256=") ? sigHeader.slice("sha256=".length) : sigHeader
-      const expectedSig = yield* hmacSha256Hex(digest, webhookSecret, rawBody)
-
-      if (safeEqualHex(provided.toLowerCase(), expectedSig.toLowerCase())) return
-    }
-
-    const authHeader = readHeader(headers, "authorization")
-
-    if (authHeader !== undefined && /^bearer\s+/i.test(authHeader)) {
-      const token = authHeader.replace(/^bearer\s+/i, "").trim()
-      const tokenHash = yield* sha256Hex(digest, token)
-
-      if (safeEqualHex(tokenHash, expectedHash)) {
-        return
-      }
-    }
-
-    return yield* new Automation.WebhookUnauthorizedError({
-      automationId: id,
-      message: "Invalid or missing webhook signature or bearer secret",
-    })
-  })

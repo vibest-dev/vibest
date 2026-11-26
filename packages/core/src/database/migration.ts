@@ -6,6 +6,7 @@ import { Bus, checkReplay } from "../bus.ts"
 import { automationMigration } from "./migration/20261125000000-automation.ts"
 import {
   APPEND_ONLY_TRIGGER,
+  AUTOMATION_SCHEMA,
   inspectSchema,
   KNOWN_MIGRATIONS,
   LOG_SCHEMA,
@@ -31,7 +32,7 @@ const markApplied = (sql: SqlClient.SqlClient, id: string) =>
 export const installBaseline = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
 
-  for (const statement of [...LOG_SCHEMA, ...PROJECTION_SCHEMA]) yield* sql.unsafe(statement)
+  for (const statement of [...LOG_SCHEMA, ...PROJECTION_SCHEMA, ...AUTOMATION_SCHEMA]) yield* sql.unsafe(statement)
   yield* sql`INSERT INTO kv (key, value) VALUES ('ledger', ${randomId()})`
 })
 

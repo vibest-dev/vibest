@@ -271,6 +271,13 @@ describe("ledger access rules", () => {
       "4 vibest(projector-writes)",
     ])
     expect(oxlintFindings(source, core("session/projector.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("automation/sql.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("automation/store.ts"))).toEqual([
+      "1 vibest(projector-writes)",
+      "2 vibest(projector-writes)",
+      "3 vibest(projector-writes)",
+      "4 vibest(projector-writes)",
+    ])
   })
 
   it("projector-writes: database.ts may hold only its one opening write", () => {
@@ -302,6 +309,8 @@ describe("ledger access rules", () => {
     expect(oxlintFindings(source, core("session/sql-reads.ts"))).toEqual([])
     expect(oxlintFindings(source, core("session/store.ts"))).toEqual([])
     expect(oxlintFindings(source, core("session/projector.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("automation/sql.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("automation/store.ts"))).toEqual([])
     expect(oxlintFindings(source, core("database/database.ts"))).toEqual([])
     expect(oxlintFindings(source, core("bus.ts"))).toEqual([])
   })
