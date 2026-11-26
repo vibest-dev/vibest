@@ -93,6 +93,53 @@ export const stopSocketsUnder = async (
   }
 }
 
+export const stopHcSocketsUnder = async (
+  root: string,
+  runHc: (args: ReadonlyArray<string>, env: Record<string, string>) => Promise<void> = hcRun,
+) => {
+  for (const sock of await pathsNamed(root, "hc.sock")) {
+    const forget = async (args: ReadonlyArray<string>) => {
+      try {
+        await runHc(args, { HC_SOCKET: sock })
+      } catch {
+        return
+      }
+    }
+
+    await forget(["server", "stop"])
+
+    if (!(await socketListening(sock))) continue
+
+    const pids = Bun.spawnSync(["lsof", "-t", sock], { stdout: "pipe", stderr: "ignore" })
+      .stdout.toString()
+      .split(/\s+/)
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 1 && pid !== process.pid)
+
+    for (const pid of new Set(pids)) {
+      try {
+        process.kill(pid, "SIGTERM")
+      } catch (e) {
+        if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+      }
+    }
+
+    const deadline = Date.now() + 5_000
+
+    while ((await socketListening(sock)) && Date.now() < deadline) await Bun.sleep(50)
+
+    if (!(await socketListening(sock))) continue
+
+    for (const pid of new Set(pids)) {
+      try {
+        process.kill(pid, "SIGKILL")
+      } catch (e) {
+        if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+      }
+    }
+  }
+}
+
 export const endHerdrSocket = async (sock: string, name: string) => {
   if (!(await socketListening(sock))) return
 
@@ -160,51 +207,116 @@ const herdrRun = async (args: ReadonlyArray<string>, extra: Record<string, strin
   clearTimeout(timer)
 }
 
+const hcRun = async (args: ReadonlyArray<string>, extra: Record<string, string> = {}) => {
+  const env = { ...extra }
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && env[key] === undefined) env[key] = value
+  }
+
+  let child: ReturnType<typeof Bun.spawn>
+
+  try {
+    child = Bun.spawn(["hc", ...args], { env, stdin: "ignore", stdout: "ignore", stderr: "ignore" })
+  } catch {
+    return
+  }
+
+  const timer = setTimeout(() => child.kill(), 15_000)
+  await child.exited
+  clearTimeout(timer)
+}
+
 const worldDirExists = (root: string) =>
   fs.stat(root).then(
     () => true,
     () => false,
   )
 
-export const stopOwners = async (root: string) => {
-  const listed = Bun.spawnSync(["lsof", "-t", "+D", root], { stdout: "pipe", stderr: "ignore" }).stdout.toString()
+const rootsFor = async (root: string) => {
+  const realRoot = await fs.realpath(root).catch(() => root)
+  const prefixes = [...new Set([root, realRoot].map((dir) => (dir.endsWith(path.sep) ? dir : `${dir}${path.sep}`)))]
 
-  const pids = [
-    ...new Set(
-      listed
-        .split(/\s+/)
-        .map(Number)
-        .filter((pid) => Number.isInteger(pid) && pid > 1 && pid !== process.pid),
-    ),
-  ]
+  return { realRoot, prefixes }
+}
 
-  const doomed: Array<number> = []
+const lsofPids = (dir: string) =>
+  Bun.spawnSync(["lsof", "-t", "+D", dir], { stdout: "pipe", stderr: "ignore" })
+    .stdout.toString()
+    .split(/\s+/)
+    .map(Number)
+    .filter((pid) => Number.isInteger(pid) && pid > 1 && pid !== process.pid)
 
-  for (const pid of pids) {
-    const command = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]).stdout.toString()
+const psEntries = () => {
+  const args = ["ps", ...(process.getuid ? ["-u", String(process.getuid())] : ["-A"]), "-o", "pid=,pgid=,command="]
+  const out = Bun.spawnSync(args, { stdout: "pipe", stderr: "ignore" }).stdout.toString()
+  const entries = new Map<number, { pgid: number; command: string }>()
 
-    if (!/(herdr|hc|vibest)/.test(command) || command.includes("e2e/src/")) continue
-    doomed.push(pid)
+  for (const line of out.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
 
+    if (!match) continue
+    const pid = Number(match[1])
+    const pgid = Number(match[2])
+    const command = match[3] ?? ""
+
+    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) continue
+    entries.set(pid, { pgid, command })
+  }
+
+  return entries
+}
+
+const signalTarget = (pid: number, pgid: number | undefined, sig: NodeJS.Signals) => {
+  if (pgid === pid) {
     try {
-      process.kill(pid, "SIGTERM")
+      process.kill(-pid, sig)
     } catch (e) {
-      if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+      if (!(e instanceof Error) || !("code" in e) || (e.code !== "ESRCH" && e.code !== "EPERM")) throw e
     }
   }
 
+  try {
+    process.kill(pid, sig)
+  } catch (e) {
+    if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+  }
+}
+
+export const stopOwners = async (root: string) => {
+  const { realRoot, prefixes } = await rootsFor(root)
+  const fromReal = lsofPids(realRoot)
+  const lsofFound = new Set(fromReal.length > 0 || realRoot === root ? fromReal : lsofPids(root))
+  const entries = psEntries()
+  const doomed: Array<{ pid: number; pgid: number | undefined }> = []
+  const seen = new Set<number>()
+
+  for (const pid of lsofFound) {
+    const entry = entries.get(pid)
+    const command = entry?.command ?? Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]).stdout.toString()
+
+    if (!/(herdr|hc|vibest)/.test(command) || command.includes("e2e/src/")) continue
+    seen.add(pid)
+    doomed.push({ pid, pgid: entry?.pgid })
+  }
+
+  for (const [pid, entry] of entries) {
+    if (seen.has(pid) || entry.command.includes("e2e/src/")) continue
+
+    if (!prefixes.some((prefix) => entry.command.includes(prefix))) continue
+    seen.add(pid)
+    doomed.push({ pid, pgid: entry.pgid })
+  }
+
+  for (const target of doomed) signalTarget(target.pid, target.pgid, "SIGTERM")
+
   const deadline = Date.now() + 2_000
 
-  while (doomed.some((pid) => alive(pid)) && Date.now() < deadline) await Bun.sleep(50)
+  while (doomed.some((target) => alive(target.pid)) && Date.now() < deadline) await Bun.sleep(50)
 
-  for (const pid of doomed) {
-    if (!alive(pid)) continue
-
-    try {
-      process.kill(pid, "SIGKILL")
-    } catch (e) {
-      if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
-    }
+  for (const target of doomed) {
+    if (!alive(target.pid)) continue
+    signalTarget(target.pid, target.pgid, "SIGKILL")
   }
 }
 
@@ -235,6 +347,7 @@ export const removeExpiredWorlds = async (
     now?: number
     maxAgeMs?: number
     run?: (args: ReadonlyArray<string>, env?: Record<string, string>) => Promise<void>
+    runHc?: (args: ReadonlyArray<string>, env: Record<string, string>) => Promise<void>
   } = {},
 ) => {
   const tmpBase = options.tmpBase ?? worldTmpBase()
@@ -242,6 +355,7 @@ export const removeExpiredWorlds = async (
   const now = options.now ?? Date.now()
   const maxAgeMs = options.maxAgeMs ?? DAY_MS
   const run = options.run ?? herdrRun
+  const runHc = options.runHc ?? hcRun
 
   const forget = async (task: () => Promise<void>) => {
     try {
@@ -260,6 +374,7 @@ export const removeExpiredWorlds = async (
     const root = path.join(tmpBase, world)
     await stopRecordedDaemon(root)
     await stopSocketsUnder(root, run)
+    await stopHcSocketsUnder(root, runHc)
   }
 
   for (const name of targets.sessions) {

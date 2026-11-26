@@ -121,7 +121,12 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
     const handle = yield* spawner.spawn(
       ChildProcess.make("sh", yield* withStdin(stdin, process.execPath, [mainTs, ...args]), {
         cwd,
-        env: { PATH: PATH_WITHOUT_HARNESS_CLIS, ...env },
+        env: {
+          PATH: PATH_WITHOUT_HARNESS_CLIS,
+          ...(process.env.VIBEST_REAP_FILE !== undefined && { VIBEST_REAP_FILE: process.env.VIBEST_REAP_FILE }),
+          ...(process.env.BUN_OPTIONS !== undefined && { BUN_OPTIONS: process.env.BUN_OPTIONS }),
+          ...env,
+        },
         extendEnv: false,
         stdin: "ignore",
       }),
