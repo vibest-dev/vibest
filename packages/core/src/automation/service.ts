@@ -1,4 +1,5 @@
 import { Automation } from "@vibest/schema/automation"
+import { KeyedMutex } from "@vibest/util/keyed-mutex"
 import { LayerNode } from "@vibest/util/layer-node"
 import {
   Cause,
@@ -12,6 +13,7 @@ import {
   Layer,
   Option,
   Path,
+  Ref,
   Result,
   Semaphore,
 } from "effect"
@@ -70,6 +72,9 @@ export const make = Effect.gen(function* () {
   const timers = yield* FiberMap.make<string>()
   const handlers = yield* FiberSet.make()
   const armLock = yield* Semaphore.make(1)
+  const tickLock = yield* Semaphore.make(1)
+  const tickRunning = yield* Ref.make(false)
+  const runLocks = yield* KeyedMutex.make<Automation.ID>()
 
   const arm = (key: string, delay: Duration.Duration, effect: Effect.Effect<unknown, unknown>): Effect.Effect<void> =>
     FiberMap.run(
@@ -87,6 +92,7 @@ export const make = Effect.gen(function* () {
     mcp,
     arm,
     cancel,
+    withRunLock: runLocks.withLock,
     pauseWith,
     executeRow,
   })
@@ -103,41 +109,45 @@ export const make = Effect.gen(function* () {
     yield* Effect.forEach(
       due,
       Effect.fnUntraced(function* (initial) {
-        const row = yield* store.getRow(initial.id)
+        yield* runLocks.withLock(Automation.ID.make(initial.id))(
+          Effect.gen(function* () {
+            const row = yield* store.getRow(initial.id)
 
-        if (row === undefined || row.status !== "active" || row.nextDueAt === null || row.nextDueAt > from) return
+            if (row === undefined || row.status !== "active" || row.nextDueAt === null || row.nextDueAt > from) return
 
-        if (row.retryAt !== null && row.retryAt > from) return
-        const now = yield* Clock.currentTimeMillis
+            if (row.retryAt !== null && row.retryAt > from) return
+            const now = yield* Clock.currentTimeMillis
 
-        if (isExpired(row.expiresAt, now) && now - row.nextDueAt >= LATE_AFTER) {
-          yield* store.settle(row, {
-            status: "done",
-            nextDueAt: null,
-            retryAt: null,
-            lastOutcome: "expired",
-            timeUpdated: now,
-          })
+            if (isExpired(row.expiresAt, now) && now - row.nextDueAt >= LATE_AFTER) {
+              yield* store.settle(row, {
+                status: "done",
+                nextDueAt: null,
+                retryAt: null,
+                lastOutcome: "expired",
+                timeUpdated: now,
+              })
 
-          return
-        }
+              return
+            }
 
-        yield* executeRow(row, now).pipe(
-          Effect.catchCause((cause) => {
-            if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
-            const error = Cause.squash(cause)
+            yield* executeRow(row, now).pipe(
+              Effect.catchCause((cause) => {
+                if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause)
+                const error = Cause.squash(cause)
 
-            return Effect.logWarning("automation failed to run", { automationId: row.id, cause }).pipe(
-              Effect.andThen(
-                store.settle(row, {
-                  failures: row.failures + 1,
-                  retryAt: now + FAILED_RETRY,
-                  lastRunAt: now,
-                  lastOutcome: "failed",
-                  lastOutput: error instanceof Error ? error.message : String(error),
-                  timeUpdated: now,
-                }),
-              ),
+                return Effect.logWarning("automation failed to run", { automationId: row.id, cause }).pipe(
+                  Effect.andThen(
+                    store.settle(row, {
+                      failures: row.failures + 1,
+                      retryAt: now + FAILED_RETRY,
+                      lastRunAt: now,
+                      lastOutcome: "failed",
+                      lastOutput: error instanceof Error ? error.message : String(error),
+                      timeUpdated: now,
+                    }),
+                  ),
+                )
+              }),
             )
           }),
         )
@@ -148,6 +158,7 @@ export const make = Effect.gen(function* () {
 
   const armNext: Effect.Effect<void> = armLock.withPermits(1)(
     Effect.gen(function* () {
+      if (yield* Ref.get(tickRunning)) return
       const nextDueAt = yield* store.nextDue()
 
       if (nextDueAt === undefined) {
@@ -162,7 +173,12 @@ export const make = Effect.gen(function* () {
     }),
   )
 
-  const tick: Effect.Effect<void> = tickCore.pipe(Effect.ensuring(armNext))
+  const tick: Effect.Effect<void> = tickLock.withPermits(1)(
+    Ref.set(tickRunning, true).pipe(
+      Effect.andThen(tickCore),
+      Effect.ensuring(Ref.set(tickRunning, false).pipe(Effect.andThen(armNext))),
+    ),
+  )
 
   yield* Effect.forkScoped(Effect.all([armNext, syncWatches], { discard: true }))
 
@@ -255,6 +271,7 @@ export const make = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
     const paused = yield* store.pause(id, now)
     yield* armNext
+    yield* cancel(`automation.watch.${paused.id}`)
 
     if (paused.trigger.type === "event" || (yield* hasWatch(paused.id))) {
       yield* syncWatches
@@ -266,12 +283,7 @@ export const make = Effect.gen(function* () {
   const resume = Effect.fn("Automation.resume")(function* (
     id: string,
   ): Effect.fn.Return<Automation.Info, Automation.NotFoundError | Automation.InvalidError> {
-    const row = yield* store.getRow(id)
-
-    if (row === undefined) {
-      return yield* new Automation.NotFoundError({ automationId: id, message: `Automation not found: ${id}` })
-    }
-
+    const row = yield* store.requireRow(id)
     const info = toInfo(row)
 
     if (info.status === "done") {
@@ -306,6 +318,7 @@ export const make = Effect.gen(function* () {
     const info = yield* store.get(id)
     yield* store.remove(info.id)
     yield* armNext
+    yield* cancel(`automation.watch.${info.id}`)
 
     if (info.trigger.type === "event" || (yield* hasWatch(info.id))) {
       yield* syncWatches
@@ -315,16 +328,22 @@ export const make = Effect.gen(function* () {
   const runNow = Effect.fn("Automation.runNow")(function* (
     id: string,
   ): Effect.fn.Return<Automation.Info, Automation.NotFoundError | Automation.InvalidError> {
-    const row = yield* store.getRow(id)
+    const initial = yield* store.requireRow(id)
 
-    if (row === undefined) {
-      return yield* new Automation.NotFoundError({ automationId: id, message: `Automation not found: ${id}` })
-    }
+    yield* runLocks.withLock(Automation.ID.make(initial.id))(
+      Effect.gen(function* () {
+        const row = yield* store.requireRow(id)
 
-    const now = yield* Clock.currentTimeMillis
-    yield* executeRow(row, now, { manual: true })
+        if (row.status === "done") {
+          return yield* new Automation.InvalidError({ message: `Automation ${id} is already done` })
+        }
+
+        const now = yield* Clock.currentTimeMillis
+        yield* executeRow(row, now, { manual: true })
+      }),
+    )
+
     yield* armNext
-
     const updated = yield* store.get(id)
 
     if (yield* hasWatch(updated.id)) {

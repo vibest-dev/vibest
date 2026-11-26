@@ -34,6 +34,8 @@ export const make = Effect.gen(function* () {
   return {
     getRow,
 
+    requireRow: Effect.fn("AutomationStore.requireRow")(requireRow),
+
     get: Effect.fn("AutomationStore.get")((id: string) => requireRow(id).pipe(Effect.map(toInfo))),
 
     list: Effect.fn("AutomationStore.list")((filter?: ListFilter) =>

@@ -115,6 +115,32 @@ const COLUMNS = `id, project_id, session_id, directory, name, trigger, tz, actio
   status, next_due_at, expires_at, run_count, failures, last_run_at, last_message_id,
   last_outcome, last_output, retry_at, state, event_position, time_created, time_updated`
 
+const encodeNullableJson = (value: Schema.Json | Automation.EventPosition | null): string | null =>
+  value === null ? null : JSON.stringify(value)
+
+interface SettleColumn {
+  readonly column: string
+  readonly read: (patch: SettlePatch) => string | number | null | undefined
+}
+
+const SETTLE_COLUMNS: ReadonlyArray<SettleColumn> = [
+  { column: "status", read: (p) => p.status },
+  { column: "next_due_at", read: (p) => p.nextDueAt },
+  { column: "run_count", read: (p) => p.runCount },
+  { column: "failures", read: (p) => p.failures },
+  { column: "last_run_at", read: (p) => p.lastRunAt },
+  { column: "last_message_id", read: (p) => p.lastMessageId },
+  { column: "last_outcome", read: (p) => p.lastOutcome },
+  { column: "last_output", read: (p) => p.lastOutput },
+  { column: "retry_at", read: (p) => p.retryAt },
+  { column: "state", read: (p) => (p.state === undefined ? undefined : encodeNullableJson(p.state)) },
+  {
+    column: "event_position",
+    read: (p) => (p.eventPosition === undefined ? undefined : encodeNullableJson(p.eventPosition)),
+  },
+  { column: "time_updated", read: (p) => p.timeUpdated },
+]
+
 export interface ListFilter {
   readonly projectId?: string | undefined
   readonly sessionId?: string | undefined
@@ -180,64 +206,13 @@ export const automationSql = (sql: SqlClient.SqlClient) => ({
     const sets: Array<string> = []
     const params: Array<string | number | null> = []
 
-    if (patch.status !== undefined) {
-      sets.push("status = ?")
-      params.push(patch.status)
-    }
+    for (const entry of SETTLE_COLUMNS) {
+      const value = entry.read(patch)
 
-    if (patch.nextDueAt !== undefined) {
-      sets.push("next_due_at = ?")
-      params.push(patch.nextDueAt)
-    }
-
-    if (patch.runCount !== undefined) {
-      sets.push("run_count = ?")
-      params.push(patch.runCount)
-    }
-
-    if (patch.failures !== undefined) {
-      sets.push("failures = ?")
-      params.push(patch.failures)
-    }
-
-    if (patch.lastRunAt !== undefined) {
-      sets.push("last_run_at = ?")
-      params.push(patch.lastRunAt)
-    }
-
-    if (patch.lastMessageId !== undefined) {
-      sets.push("last_message_id = ?")
-      params.push(patch.lastMessageId)
-    }
-
-    if (patch.lastOutcome !== undefined) {
-      sets.push("last_outcome = ?")
-      params.push(patch.lastOutcome)
-    }
-
-    if (patch.lastOutput !== undefined) {
-      sets.push("last_output = ?")
-      params.push(patch.lastOutput)
-    }
-
-    if (patch.retryAt !== undefined) {
-      sets.push("retry_at = ?")
-      params.push(patch.retryAt)
-    }
-
-    if (patch.state !== undefined) {
-      sets.push("state = ?")
-      params.push(patch.state === null ? null : JSON.stringify(patch.state))
-    }
-
-    if (patch.eventPosition !== undefined) {
-      sets.push("event_position = ?")
-      params.push(patch.eventPosition === null ? null : JSON.stringify(patch.eventPosition))
-    }
-
-    if (patch.timeUpdated !== undefined) {
-      sets.push("time_updated = ?")
-      params.push(patch.timeUpdated)
+      if (value !== undefined) {
+        sets.push(`${entry.column} = ?`)
+        params.push(value)
+      }
     }
 
     if (sets.length === 0) return Effect.void

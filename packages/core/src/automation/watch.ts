@@ -1,5 +1,5 @@
 import type { Automation } from "@vibest/schema/automation"
-import { Clock, Duration, Effect, FiberMap, Predicate, Result, Semaphore, Stream } from "effect"
+import { Clock, Duration, Effect, FiberMap, Predicate, Result, Stream } from "effect"
 
 import type { Mcp } from "../mcp.ts"
 import { AutomationEventStream } from "./event.ts"
@@ -14,6 +14,7 @@ export interface WatchDeps {
   readonly mcp: Mcp.Interface
   readonly arm: (key: string, delay: Duration.Duration, effect: Effect.Effect<unknown, unknown>) => Effect.Effect<void>
   readonly cancel: (key: string) => Effect.Effect<void>
+  readonly withRunLock: (id: Automation.ID) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly pauseWith: (
     row: AutomationRow,
     now: number,
@@ -23,13 +24,12 @@ export interface WatchDeps {
   readonly executeRow: (row: AutomationRow, now: number, options?: ExecuteOptions) => Effect.Effect<void>
 }
 
-export const createWatchManager = ({ store, mcp, arm, cancel, pauseWith, executeRow }: WatchDeps) =>
+export const createWatchManager = ({ store, mcp, arm, cancel, withRunLock, pauseWith, executeRow }: WatchDeps) =>
   Effect.gen(function* () {
     const watches = yield* FiberMap.make<Automation.ID>()
 
     const runWatch = (id: Automation.ID): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const delivery = yield* Semaphore.make(1)
         const row = yield* store.getRow(id)
 
         if (row === undefined || row.status !== "active") return
@@ -86,7 +86,7 @@ export const createWatchManager = ({ store, mcp, arm, cancel, pauseWith, execute
 
         const streamOutcome = yield* resolved.success.pipe(
           Stream.takeWhileEffect((message) =>
-            delivery.withPermits(1)(
+            withRunLock(id)(
               Effect.gen(function* () {
                 const current = yield* store.getRow(id)
                 const at = yield* Clock.currentTimeMillis
@@ -102,8 +102,6 @@ export const createWatchManager = ({ store, mcp, arm, cancel, pauseWith, execute
 
                   return false
                 }
-
-                if (message.type === "error") return true
 
                 const currentEventPos = parseEventPosition(current.eventPosition)
 

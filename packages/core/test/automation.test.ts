@@ -798,6 +798,129 @@ describe("Automation core", () => {
       }),
   )
 
+  it.effect(
+    "serializes in-flight tick against concurrent armNext from unrelated create so slow-a executes only once",
+    () =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+
+        const harness = makeHarness({
+          onSend: () =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(release)
+            }),
+        })
+
+        yield* Effect.gen(function* () {
+          const automation = yield* Automation.Service
+
+          const slowA = yield* automation.create({
+            name: "slow-a",
+            directory: "/tmp/app",
+            projectId: PROJECT_ID,
+            sessionId: SESSION_ID,
+            trigger: { type: "every", every: "1 minute" },
+            action: { type: "prompt", prompt: "Slow ping" },
+          })
+
+          yield* TestClock.setTime((yield* Clock.currentTimeMillis) + 60_000)
+          const ticking = yield* Effect.forkChild(automation.tick)
+          yield* Deferred.await(started)
+
+          yield* automation.create({
+            name: "unrelated-b",
+            directory: "/tmp/app",
+            projectId: PROJECT_ID,
+            sessionId: SESSION_ID,
+            trigger: { type: "every", every: "10 minutes" },
+            action: { type: "prompt", prompt: "Other ping" },
+          })
+
+          yield* Effect.yieldNow
+          yield* TestClock.adjust(Duration.millis(10))
+          assert.strictEqual(harness.sent.length, 1)
+
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(ticking)
+
+          const after = yield* automation.get(slowA.id)
+          assert.strictEqual(after.runCount, 1)
+          assert.strictEqual(harness.sent.length, 1)
+        }).pipe(Effect.provide(harness.layer))
+      }),
+  )
+
+  it.effect("rejects runNow on a done automation with AutomationInvalidError and sends zero additional prompts", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness()
+
+      yield* Effect.gen(function* () {
+        const automation = yield* Automation.Service
+
+        const created = yield* automation.create({
+          name: "one-shot-done",
+          directory: "/tmp/app",
+          projectId: PROJECT_ID,
+          sessionId: SESSION_ID,
+          trigger: { type: "at", at: "in 1 minute" },
+          action: { type: "prompt", prompt: "Fire once" },
+        })
+
+        yield* TestClock.adjust(Duration.minutes(1))
+        const done = yield* automation.get(created.id)
+        assert.strictEqual(done.status, "done")
+        assert.strictEqual(harness.sent.length, 1)
+
+        const exit = yield* automation.runNow(created.id).pipe(Effect.exit)
+        assert.isTrue(Exit.isFailure(exit))
+
+        if (Exit.isFailure(exit)) {
+          assert.include(String(exit.cause), "AutomationInvalidError")
+        }
+
+        assert.strictEqual(harness.sent.length, 1)
+      }).pipe(Effect.provide(harness.layer))
+    }),
+  )
+
+  it.effect("records transient code failure on runNow of a paused automation without scheduling retryAt", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        executeCode: () =>
+          Effect.succeed({
+            ok: false,
+            error: { kind: "ScriptError", message: "boom" },
+            logs: [],
+            calls: [],
+          }),
+      })
+
+      yield* Effect.gen(function* () {
+        const automation = yield* Automation.Service
+
+        const created = yield* automation.create({
+          name: "paused-code-failure",
+          directory: "/tmp/app",
+          projectId: PROJECT_ID,
+          sessionId: SESSION_ID,
+          trigger: { type: "every", every: "5 minutes" },
+          action: { type: "code", code: 'throw new Error("boom")' },
+        })
+
+        yield* automation.pause(created.id)
+
+        const after = yield* automation.runNow(created.id)
+        assert.strictEqual(after.status, "paused")
+        assert.strictEqual(after.failures, 1)
+        assert.strictEqual(after.lastOutcome, "failed")
+        assert.include(after.lastOutput ?? "", "boom")
+        assert.isUndefined(after.retryAt)
+      }).pipe(Effect.provide(harness.layer))
+    }),
+  )
+
   it("decodes Automation.CodeResult strictly with onExcessProperty error", () => {
     const ok = AutomationSchema.decodeCodeResult({ state: { a: 1 }, done: false })
     assert.isTrue(Result.isSuccess(ok))

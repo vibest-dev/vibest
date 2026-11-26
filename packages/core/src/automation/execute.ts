@@ -134,6 +134,7 @@ export const createExecutor = ({ store, codemode, sessions }: ExecuteDeps) => {
     info: Automation.Info,
     now: number,
     outcome: Extract<AutomationCode.Outcome, { readonly ok: false }>,
+    manual: boolean,
   ) {
     const ended = yield* Clock.currentTimeMillis
     const strikes = row.failures + 1
@@ -147,13 +148,20 @@ export const createExecutor = ({ store, codemode, sessions }: ExecuteDeps) => {
     }
 
     if (!outcome.invalid && strikes < MAX_CODE_FAILURES) {
-      yield* store.settle(row, {
-        failures: strikes,
-        lastOutcome: "failed",
-        lastOutput: formatOutput(),
-        retryAt: ended + CODE_FAILED_RETRY,
-        timeUpdated: ended,
-      })
+      const keepPaused = manual || row.status === "paused"
+
+      yield* store.settle(
+        row,
+        {
+          failures: strikes,
+          lastRunAt: now,
+          lastOutcome: "failed",
+          lastOutput: formatOutput(),
+          ...(row.status === "active" && !manual && { retryAt: ended + CODE_FAILED_RETRY }),
+          timeUpdated: ended,
+        },
+        keepPaused ? { evenIfPaused: true } : undefined,
+      )
 
       return
     }
@@ -256,7 +264,7 @@ export const createExecutor = ({ store, codemode, sessions }: ExecuteDeps) => {
     })
 
     if (!codeOutcome.ok) {
-      yield* recordCodeFailure(row, info, now, codeOutcome)
+      yield* recordCodeFailure(row, info, now, codeOutcome, options?.manual === true)
 
       return
     }
@@ -269,12 +277,18 @@ export const createExecutor = ({ store, codemode, sessions }: ExecuteDeps) => {
       const delivered = yield* Effect.result(deliverPrompt(info, send.prompt, send.to, run, true))
 
       if (Result.isFailure(delivered)) {
-        yield* recordCodeFailure(row, info, now, {
-          ok: false,
-          error: delivered.failure.message,
-          output: codeOutcome.output,
-          invalid: true,
-        })
+        yield* recordCodeFailure(
+          row,
+          info,
+          now,
+          {
+            ok: false,
+            error: delivered.failure.message,
+            output: codeOutcome.output,
+            invalid: true,
+          },
+          options?.manual === true,
+        )
 
         return
       }
