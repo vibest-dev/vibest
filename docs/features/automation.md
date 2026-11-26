@@ -4,7 +4,7 @@ vibestd runs native event-driven automations (`at`, `every`, `cron`, and MCP `SE
 
 ## AUTO1. Scheduled triggers (`at`, `every`, `cron`) with event-driven timers
 
-`vibest auto create` accepts one-shot `at` triggers (`"in 10 minutes"`, ISO instants with offsets, or zoned wall-clock times), periodic `every` durations (`"30 seconds"`, `"5 minutes"`, `"1 hour"`), and `cron` expressions parsed with IANA time zone support. `vibestd` runs zero background polling loops: it arms a single cancellable one-shot timer (`automation.next`) for `MIN(next_due_at)` and re-arms on `create`, `pause`, `resume`, `remove`, `tick`, and `runNow` (plus startup). Missed `every` intervals during downtime coalesce into a single run while preserving phase, and `cron` schedules skip repeated wall-clock instants during DST fallback so no slot fires twice.
+`vibest automation create` accepts one-shot `at` triggers (`"in 10 minutes"`, ISO instants with offsets, or zoned wall-clock times), periodic `every` durations (`"30 seconds"`, `"5 minutes"`, `"1 hour"`), and `cron` expressions parsed with IANA time zone support. `vibestd` runs zero background polling loops: it arms a single cancellable one-shot timer (`automation.next`) for `MIN(next_due_at)` and re-arms on `create`, `pause`, `resume`, `remove`, `tick`, and `runNow` (plus startup). Missed `every` intervals during downtime coalesce into a single run while preserving phase, and `cron` schedules skip repeated wall-clock instants during DST fallback so no slot fires twice.
 
 ## AUTO2. 0-Token CodeMode gate (`action.type === "code"`)
 
@@ -33,6 +33,6 @@ Automations live in a single operational SQLite table (`automation`, created by 
 
 Transient failures in scheduled CodeMode runs back off by 1 minute and auto-pause after 3 consecutive failures (`MAX_CODE_FAILURES = 3`). Invalid code errors (parse errors, forbidden tools, invalid return shapes), failed delivery handoffs, and event-stream invalidations pause immediately with a bounded diagnostic in `lastOutput`.
 
-## AUTO7. HttpApi surface, daemon capability, and `vibest auto` CLI
+## AUTO7. HttpApi surface, daemon capability, and `vibest automation` CLI
 
-`vibestd` advertises `capabilities.automation: true` in `daemon.ping`, exposes the `server.automation` HttpApi group (`/api/automation`, `/api/automation/:id`, `/pause`, `/resume`, `/run-now`, `/tick`) documented in `packages/protocol/openapi.json`, and the CLI exposes `vibest auto create|list|ls|get|pause|resume|remove|rm|run-now`.
+`vibestd` advertises `capabilities.automation: true` in `daemon.ping`, exposes the `server.automation` HttpApi group (`/api/automation`, `/api/automation/:id`, `/pause`, `/resume`, `/run-now`, `/tick`) documented in `packages/protocol/openapi.json`, and the CLI exposes `vibest automation create|list|ls|get|pause|resume|remove|rm|run-now`.

@@ -662,9 +662,9 @@ const mcp = Spec.make("mcp", {
   ],
 })
 
-const autoId = Argument.String("id").pipe(Argument.withDescription("Automation id (aut_...)"))
+const automationId = Argument.String("id").pipe(Argument.withDescription("Automation id (aut_...)"))
 
-const auto = Spec.make("auto", {
+const automation = Spec.make("automation", {
   description: "Manage scheduled and MCP event automations",
   commands: [
     Spec.make("create", {
@@ -737,24 +737,24 @@ const auto = Spec.make("auto", {
     }),
     Spec.make("get", {
       description: "Show one automation as JSON",
-      params: { id: autoId },
+      params: { id: automationId },
     }),
     Spec.make("pause", {
       description: "Pause an active automation",
-      params: { id: autoId },
+      params: { id: automationId },
     }),
     Spec.make("resume", {
       description: "Resume a paused automation",
-      params: { id: autoId },
+      params: { id: automationId },
     }),
     Spec.make("remove", {
       alias: "rm",
       description: "Delete an automation",
-      params: { id: autoId },
+      params: { id: automationId },
     }),
     Spec.make("run-now", {
       description: "Execute an automation immediately once",
-      params: { id: autoId },
+      params: { id: automationId },
     }),
   ],
 })
@@ -782,7 +782,7 @@ export const Commands = Spec.make("vibest", {
     worktree,
     plugins,
     mcp,
-    auto,
+    automation,
     subscriptions,
     onboard,
     doctor,

@@ -1,11 +1,11 @@
 ---
 name: mcp
-description: Inspect and call MCP servers, tools, resources, and remote SEP-2640 skills via `vibest mcp`, run multi-tool JavaScript in the Psychoscript CodeMode sandbox (`vibest mcp exec`), handle truncated `ToolOutput` spills, and create or manage scheduled/event-driven automations (`vibest auto`). Use whenever working with MCP servers, CodeMode, remote MCP skills/events, or background automations.
+description: Inspect and call MCP servers, tools, resources, and remote SEP-2640 skills via `vibest mcp`, run multi-tool JavaScript in the Psychoscript CodeMode sandbox (`vibest mcp exec`), handle truncated `ToolOutput` spills, and create or manage scheduled/event-driven automations (`vibest automation`). Use whenever working with MCP servers, CodeMode, remote MCP skills/events, or background automations.
 ---
 
 # MCP, CodeMode & Automations
 
-Use `vibest mcp` to discover and invoke MCP servers (configured in `mcp.json` / `.mcp.json` or added via `vibest mcp add`), `vibest mcp exec` to run sandboxed JavaScript across multiple tools in one call, and `vibest auto` to schedule recurring or event-driven automations.
+Use `vibest mcp` to discover and invoke MCP servers (configured in `mcp.json` / `.mcp.json` or added via `vibest mcp add`), `vibest mcp exec` to run sandboxed JavaScript across multiple tools in one call, and `vibest automation` to schedule recurring or event-driven automations.
 
 ## Inspect & Discover
 
@@ -44,12 +44,12 @@ vibest mcp exec [--server <s1> ...] [--input '<json>'] --file <path.js>
 
 Tool and CodeMode outputs exceeding **2,000 lines** or **50 KiB** are automatically truncated at UTF-8/grapheme boundaries and spilled in full to `<VIBEST_HOME>/tool-output/tool_*` (the exact file path is printed in the truncation notice). Search or slice that file with `rg`, `grep`, `sed`, or `head` instead of reading the entire file into context.
 
-## Automations (`vibest auto`)
+## Automations (`vibest automation`)
 
 Create scheduled or event-driven background automations:
 
 ```sh
-vibest auto create <name> \
+vibest automation create <name> \
   (--at '<time>' | --every '<dur>' | --cron '<expr>' | --event-server <s> --event <ev> [--event-args '<json>']) \
   (--prompt '<text>' | --code '<js>' | --code-file <file>) \
   [--args '<json>'] [--tz <iana>] [--expires '<time>'] [--session <id> | --agent <id>]
@@ -57,14 +57,14 @@ vibest auto create <name> \
 
 - `--every` accepts durations such as `"30 seconds"`, `"10 minutes"`, `"2 hours"`, or shorthand like `"30s"`, `"10m"`, `"2h"`.
 
-- Running `vibest auto create` inside an agent session automatically binds your `VIBEST_SESSION_ID` as the default delivery target (override with `--session <id>` or `--agent <id>`).
+- Running `vibest automation create` inside an agent session automatically binds your `VIBEST_SESSION_ID` as the default delivery target (override with `--session <id>` or `--agent <id>`).
 - **0-token CodeMode gate (`--code` / `--code-file`)**:
   - Receives `input = { state, now, runs, args, event? }` (plus `tools.*`).
   - Return nothing / `null` (or `{ state }` without `send`) to stay silent and spend **0 LLM tokens**.
   - Return `{ state?, done?, send: { prompt, to? } }` to wake the target session with a message (set `done: true` to mark the automation finished).
 - Manage automations:
-  - `vibest auto list` — list automations and their status/run counts.
-  - `vibest auto get <id>` — inspect full details, `runCount`, `state`, and schedule.
-  - `vibest auto pause <id>` / `vibest auto resume <id>` — pause or resume an automation.
-  - `vibest auto run-now <id>` — trigger an immediate run and return its result.
-  - `vibest auto remove <id>` — delete an automation.
+  - `vibest automation list` — list automations and their status/run counts.
+  - `vibest automation get <id>` — inspect full details, `runCount`, `state`, and schedule.
+  - `vibest automation pause <id>` / `vibest automation resume <id>` — pause or resume an automation.
+  - `vibest automation run-now <id>` — trigger an immediate run and return its result.
+  - `vibest automation remove <id>` — delete an automation.

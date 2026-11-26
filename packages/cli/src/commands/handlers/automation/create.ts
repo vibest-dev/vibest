@@ -14,7 +14,7 @@ const parseJsonFlag = (raw: string, flagName: string): Effect.Effect<Schema.Json
     : Effect.fail(new Automation.InvalidError({ message: `Invalid ${flagName} JSON value` }))
 }
 
-export default Runtime.handler(Commands.commands.auto.commands.create, (o) =>
+export default Runtime.handler(Commands.commands.automation.commands.create, (o) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
     const fs = yield* FileSystem.FileSystem

@@ -4,7 +4,7 @@ import { json, vibest } from "../../../caller.ts"
 import { Runtime } from "../../../framework/runtime.ts"
 import { Commands } from "../../commands.ts"
 
-export default Runtime.handler(Commands.commands.auto.commands.get, (o) =>
+export default Runtime.handler(Commands.commands.automation.commands.get, (o) =>
   vibest((client) =>
     client["server.automation"]["automation.get"]({ params: { id: o.id } }).pipe(Effect.flatMap(json)),
   ),

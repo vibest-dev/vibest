@@ -110,4 +110,44 @@ describe("vibest mcp add positional command arguments", () => {
       ).pipe(Effect.provide(Platform.services)),
     TIMEOUT,
   )
+
+  it.effect(
+    "exposes vibest automation subcommands and rejects the old vibest auto command name",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const home = yield* tempDirectory("vibest-automation-cli-")
+
+          const server = http.createServer((req, res) => {
+            const url = new URL(req.url ?? "/", "http://vibest")
+
+            if (req.method === "GET" && url.pathname === "/api/daemon/ping")
+              return replyJson(res, {
+                protocol: PROTOCOL,
+                version: VERSION,
+                runtimes: [],
+                capabilities: { automation: true },
+              })
+
+            if (req.method === "GET" && url.pathname === "/api/automation") return replyJson(res, [])
+
+            return replyJson(res, { error: "NotFound" }, 404)
+          })
+
+          yield* Effect.acquireRelease(
+            Effect.callback<void>((resume) => void server.listen(`${home}/vibest.sock`, () => resume(Effect.void))),
+            () => Effect.sync(() => server.close()),
+          )
+
+          const env = { HOME: home, VIBEST_HOME: home }
+          const listed = yield* vibest(home, env, ["automation", "list"])
+          assert.strictEqual(listed.code, 0, listed.stderr)
+          assert.strictEqual(listed.stdout.trim(), "[]")
+
+          const oldAuto = yield* vibest(home, env, ["auto", "list"])
+          assert.notStrictEqual(oldAuto.code, 0)
+        }),
+      ).pipe(Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
 })
