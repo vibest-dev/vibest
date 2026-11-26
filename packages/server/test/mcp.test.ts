@@ -1,3 +1,4 @@
+import crypto from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -8,12 +9,17 @@ import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
 import { authed, testLayer } from "@vibest/testkit/fakes"
 import * as Platform from "@vibest/testkit/platform"
-import { Effect, Layer } from "effect"
+import { Effect, Exit, Layer } from "effect"
+
+const VALID_SKILL_BODY = "# PDF Processing Skill\nUse this skill to extract text from PDFs."
+const VALID_SKILL_DIGEST = `sha256:${crypto.createHash("sha256").update(VALID_SKILL_BODY, "utf8").digest("hex")}`
 
 const FAKE_STDIO_MCP = `
 import readline from "node:readline"
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity })
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\\n")
+const validSkillBody = ${JSON.stringify(VALID_SKILL_BODY)}
+const validSkillDigest = ${JSON.stringify(VALID_SKILL_DIGEST)}
 rl.on("line", (line) => {
   if (!line.trim()) return
   const msg = JSON.parse(line)
@@ -23,7 +29,14 @@ rl.on("line", (line) => {
       id: msg.id,
       result: {
         protocolVersion: msg.params?.protocolVersion ?? "2025-03-26",
-        capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/events": {} } },
+        capabilities: {
+          tools: {},
+          resources: {},
+          extensions: {
+            "io.modelcontextprotocol/events": {},
+            "io.modelcontextprotocol/skills": { directoryRead: false },
+          },
+        },
         serverInfo: { name: "test-mcp", version: "1.0.0", title: "Test MCP" },
         instructions: "Test MCP server instructions.",
       },
@@ -75,6 +88,46 @@ rl.on("line", (line) => {
       id: msg.id,
       result: { events: [{ name: "ping.event", description: "Ping event" }] },
     })
+    return
+  }
+  if (msg.method === "skills/list") {
+    send({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: {
+        resultType: "complete",
+        skills: [
+          {
+            uri: "skill://pdf-processing/SKILL.md",
+            frontmatter: { name: "pdf-processing", description: "Extract text from PDFs" },
+            resources: [
+              { uri: "skill://pdf-processing/SKILL.md", digest: validSkillDigest, size: validSkillBody.length },
+              { uri: "skill://pdf-processing/tampered.md", digest: validSkillDigest, size: 12 },
+            ],
+          },
+        ],
+      },
+    })
+    return
+  }
+  if (msg.method === "resources/read") {
+    const uri = msg.params?.uri
+    if (uri === "skill://pdf-processing/SKILL.md") {
+      send({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: { contents: [{ uri, mimeType: "text/markdown", text: validSkillBody }] },
+      })
+      return
+    }
+    if (uri === "skill://pdf-processing/tampered.md") {
+      send({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: { contents: [{ uri, mimeType: "text/markdown", text: "TAMPERED CONTENT" }] },
+      })
+      return
+    }
   }
 })
 `
@@ -165,11 +218,31 @@ describe("vibestd /api/mcp endpoints", () => {
           assert.strictEqual(events.length, 1)
           assert.strictEqual(events[0]?.name, "ping.event")
 
-          const syncResult = yield* client["server.mcp"]["mcp.syncSkills"]({ payload: {} })
-          assert.strictEqual(syncResult.synced.length, 1)
-          const skillContent = fs.readFileSync(syncResult.synced[0]!.skillPath, "utf8")
-          assert.include(skillContent, "name: mcp-demo")
-          assert.include(skillContent, "greet({ name: string; })")
+          const skills = yield* client["server.mcp"]["mcp.skills"]({
+            params: { server: "demo" },
+            query: { directory: workDir },
+          })
+
+          assert.strictEqual(skills.length, 1)
+          assert.strictEqual(skills[0]?.uri, "skill://pdf-processing/SKILL.md")
+          assert.strictEqual(skills[0]?.frontmatter.name, "pdf-processing")
+          assert.strictEqual(skills[0]?.resources.length, 2)
+
+          const readOk = yield* client["server.mcp"]["mcp.read"]({
+            params: { server: "demo" },
+            payload: { uri: "skill://pdf-processing/SKILL.md", directory: workDir },
+          })
+
+          assert.strictEqual(readOk.contents[0]?.text, VALID_SKILL_BODY)
+
+          const readTampered = yield* client["server.mcp"]
+            ["mcp.read"]({
+              params: { server: "demo" },
+              payload: { uri: "skill://pdf-processing/tampered.md", directory: workDir },
+            })
+            .pipe(Effect.exit)
+
+          assert.isTrue(Exit.isFailure(readTampered))
 
           yield* client["server.mcp"]["mcp.disconnect"]({ params: { server: "demo" } })
           yield* client["server.mcp"]["mcp.remove"]({ params: { server: "demo" } })

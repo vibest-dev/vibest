@@ -63,9 +63,11 @@ const DEFAULT_EXECUTION_TIMEOUT = 10 * 60 * 1_000
 const TERMINATE_TIMEOUT = 1_000
 const HEADER_MISMATCH = -32020
 const EVENTS_EXTENSION = "io.modelcontextprotocol/events"
+const SKILLS_EXTENSION = "io.modelcontextprotocol/skills"
 const SUBSCRIPTION_ID_KEY = "io.modelcontextprotocol/subscriptionId"
 const EVENT_STREAM_IDLE = Duration.seconds(60)
 const EVENT_LIST_PAGES = 100
+const SKILL_LIST_PAGES = 20
 const EVENT_STREAM_REJECTED = new Set([-32601, -32602, -32023, -32024, -32026])
 
 const CursorSchema = Schema.optional(Schema.NullOr(Schema.String))
@@ -78,6 +80,14 @@ const EventListStandard = Schema.toStandardSchemaV1(
   Schema.Struct({
     events: Schema.Array(Mcp.EventType),
     nextCursor: Schema.optional(Schema.String),
+  }),
+)
+
+const SkillListStandard = Schema.toStandardSchemaV1(
+  Schema.Struct({
+    skills: Schema.Array(Mcp.SkillEntry),
+    nextCursor: Schema.optional(Schema.String),
+    resultType: Schema.optional(Schema.String),
   }),
 )
 
@@ -142,11 +152,16 @@ export interface Events {
   }) => Stream.Stream<Mcp.EventMessage, Error>
 }
 
+export interface Skills {
+  readonly list: () => Effect.Effect<ReadonlyArray<Mcp.SkillEntry>, Error>
+}
+
 export interface Connection {
   readonly modern: boolean
   readonly protocolVersion: string | undefined
   readonly title: string | undefined
   readonly instructions: string | undefined
+  readonly capabilities: Mcp.ServerCapabilities
   readonly tools: () => Effect.Effect<ToolListResult, Error>
   readonly prompts: () => Effect.Effect<ReadonlyArray<Prompt>, Error>
   readonly resources: () => Effect.Effect<ReadonlyArray<Resource>, Error>
@@ -161,6 +176,7 @@ export interface Connection {
     readonly args?: Schema.JsonObject | undefined
   }) => Effect.Effect<Mcp.CallResult, Error>
   readonly events: Events | undefined
+  readonly skills: Skills | undefined
   readonly onClose: (callback: (reason: string) => void) => void
   readonly onSessionExpired: (callback: () => void) => void
   readonly onToolsChanged: (callback: () => void) => void
@@ -341,7 +357,10 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
     const client = new Client(options.clientInfo ?? { name: "vibest", version: "0.0.2" }, {
       capabilities: {
         ...(options.roots !== false && { roots: {} }),
-        ...(options.events === true && { extensions: { [EVENTS_EXTENSION]: {} } }),
+        extensions: {
+          ...(options.events === true && { [EVENTS_EXTENSION]: {} }),
+          [SKILLS_EXTENSION]: {},
+        },
       },
       versionNegotiation: negotiation(protocol),
       listChanged: {
@@ -579,12 +598,46 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
 
     const serverCapabilities = client.getServerCapabilities()
     const hasEvents = Boolean(options.events && serverCapabilities?.extensions?.[EVENTS_EXTENSION])
+    const hasSkills = Boolean(serverCapabilities?.extensions?.[SKILLS_EXTENSION])
+
+    const capabilities: Mcp.ServerCapabilities = {
+      tools: advertised("tools"),
+      resources: advertised("resources") || hasSkills,
+      events: hasEvents,
+      skills: hasSkills,
+    }
 
     const connection: Connection = {
       modern: client.getProtocolEra() === "modern",
       protocolVersion: client.getNegotiatedProtocolVersion(),
       title: client.getServerVersion()?.title?.trim() || undefined,
       instructions: client.getInstructions()?.trim() || undefined,
+      capabilities,
+      skills: hasSkills
+        ? {
+            list: Effect.fn("McpClient.skills.list")(function* () {
+              const items: Array<Mcp.SkillEntry> = []
+              let cursor: string | undefined
+
+              for (let page = 0; page < SKILL_LIST_PAGES; page++) {
+                const result = yield* list("list MCP skills", (signal) =>
+                  client.request(
+                    { method: "skills/list", params: cursor === undefined ? {} : { cursor } },
+                    SkillListStandard,
+                    { ...catalog, signal },
+                  ),
+                )
+
+                items.push(...result.skills)
+                cursor = result.nextCursor
+
+                if (cursor === undefined || result.resultType === "complete") return items
+              }
+
+              return items
+            }),
+          }
+        : undefined,
       events: hasEvents
         ? {
             list: Effect.fn("McpClient.events.list")(function* () {
@@ -721,7 +774,7 @@ export const connect = Effect.fn("McpClient.connect")(function* (options: Connec
             ).pipe(Effect.map((r) => r.resourceTemplates))
           : Effect.succeed([]),
       readResource: (input) => {
-        if (!advertised("resources")) return Effect.succeed(undefined)
+        if (!advertised("resources") && !hasSkills) return Effect.succeed(undefined)
 
         return request("read MCP resource", (signal) =>
           client.readResource({ uri: input.uri }, { signal, timeout: execution }),

@@ -27,7 +27,16 @@ export const McpHandler = HttpApiBuilder.group(VibestApi, "server.mcp", (handler
         }),
       )
       .handle("mcp.events", ({ params, query }) => mcp.events(params.server, query.directory))
-      .handle("mcp.syncSkills", ({ payload }) => mcp.syncSkills(payload?.projectDir))
+      .handle("mcp.skills", ({ params, query }) => mcp.skills(params.server, query.directory))
+      .handle("mcp.read", ({ params, payload }) =>
+        mcp.read({
+          server: params.server,
+          uri: payload.uri,
+          directory: payload.directory,
+          maxBytes: payload.maxBytes,
+          scratchpadDir: payload.scratchpadDir,
+        }),
+      )
       .handle("mcp.authStart", ({ params }) => mcp.authStart(params.server))
       .handle("mcp.authComplete", ({ params, payload }) =>
         mcp.authComplete(params.server, payload.redirectUrlOrCode, payload.state),

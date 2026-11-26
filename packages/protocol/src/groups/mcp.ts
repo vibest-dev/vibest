@@ -93,10 +93,29 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.events", summary: "List MCP server event types" })),
   )
   .add(
-    HttpApiEndpoint.post("mcp.syncSkills", "/api/mcp/sync-skills", {
-      payload: Schema.optional(Schema.Struct({ projectDir: Schema.optional(Schema.String) })),
-      success: Mcp.SkillSyncResult,
-    }).annotateMerge(OpenApi.annotations({ identifier: "mcp.syncSkills", summary: "Sync MCP SKILL.md files" })),
+    HttpApiEndpoint.get("mcp.skills", "/api/mcp/:server/skills", {
+      params: ServerPath,
+      query: { directory: Schema.optional(Schema.String) },
+      success: Schema.Array(Mcp.SkillEntry),
+      error: [Mcp.NotFoundError, Mcp.ToolCallError],
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "mcp.skills", summary: "List SEP-2640 skills advertised by an MCP server" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post("mcp.read", "/api/mcp/:server/resources/read", {
+      params: ServerPath,
+      payload: Schema.Struct({
+        uri: Schema.String,
+        directory: Schema.optional(Schema.String),
+        maxBytes: Schema.optional(Schema.Number),
+        scratchpadDir: Schema.optional(Schema.String),
+      }),
+      success: Mcp.ReadResourceResult,
+      error: [Mcp.NotFoundError, Mcp.ToolCallError, Mcp.AuthError],
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "mcp.read", summary: "Read a skill:// or MCP resource URI with digest check" }),
+    ),
   )
   .add(
     HttpApiEndpoint.post("mcp.authStart", "/api/mcp/:server/auth/start", {

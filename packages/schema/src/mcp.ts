@@ -129,6 +129,15 @@ export const Status = Schema.Union([
 
 export type Status = typeof Status.Type
 
+export const ServerCapabilities = Schema.Struct({
+  tools: Schema.Boolean,
+  resources: Schema.Boolean,
+  events: Schema.Boolean,
+  skills: Schema.Boolean,
+}).annotate({ identifier: "McpServerCapabilities" })
+
+export type ServerCapabilities = typeof ServerCapabilities.Type
+
 export const ServerInfo = Schema.Struct({
   name: ServerName,
   type: Schema.Literals(["local", "remote"]),
@@ -137,6 +146,7 @@ export const ServerInfo = Schema.Struct({
   title: Schema.optional(Schema.String),
   instructions: Schema.optional(Schema.String),
   toolCount: Schema.Number,
+  capabilities: Schema.optional(ServerCapabilities),
   pooled: Schema.optional(Schema.Boolean),
   disabled: Schema.optional(Schema.Boolean),
   url: Schema.optional(Schema.String),
@@ -267,20 +277,46 @@ export const AuthCompleteResult = Schema.Struct({
 
 export type AuthCompleteResult = typeof AuthCompleteResult.Type
 
-export const SkillSyncEntry = Schema.Struct({
-  server: ServerName,
-  skillPath: Schema.String,
-  toolCount: Schema.Number,
-}).annotate({ identifier: "McpSkillSyncEntry" })
+export const SkillResource = Schema.Struct({
+  uri: Schema.String,
+  digest: Schema.optional(Schema.String),
+  size: Schema.optional(Schema.Number),
+}).annotate({ identifier: "McpSkillResource" })
 
-export type SkillSyncEntry = typeof SkillSyncEntry.Type
+export type SkillResource = typeof SkillResource.Type
 
-export const SkillSyncResult = Schema.Struct({
-  synced: Schema.Array(SkillSyncEntry),
-  removed: Schema.Array(Schema.String),
-}).annotate({ identifier: "McpSkillSyncResult" })
+export const SkillFrontmatter = Schema.Struct({
+  name: Schema.String,
+  description: Schema.optional(Schema.String),
+}).annotate({ identifier: "McpSkillFrontmatter" })
 
-export type SkillSyncResult = typeof SkillSyncResult.Type
+export type SkillFrontmatter = typeof SkillFrontmatter.Type
+
+export const SkillEntry = Schema.Struct({
+  uri: Schema.String,
+  frontmatter: SkillFrontmatter,
+  resources: Schema.Array(SkillResource),
+}).annotate({ identifier: "McpSkillEntry" })
+
+export type SkillEntry = typeof SkillEntry.Type
+
+export const ResourceContent = Schema.Struct({
+  uri: Schema.String,
+  mimeType: Schema.optional(Schema.String),
+  text: Schema.optional(Schema.String),
+  blob: Schema.optional(Schema.String),
+}).annotate({ identifier: "McpResourceContent" })
+
+export type ResourceContent = typeof ResourceContent.Type
+
+export const ReadResourceResult = Schema.Struct({
+  uri: Schema.String,
+  contents: Schema.Array(ResourceContent),
+  truncated: Schema.optional(Schema.Boolean),
+  outputFile: Schema.optional(Schema.String),
+}).annotate({ identifier: "McpReadResourceResult" })
+
+export type ReadResourceResult = typeof ReadResourceResult.Type
 
 export class NotFoundError extends Schema.TaggedError<NotFoundError>()(
   "McpNotFoundError",

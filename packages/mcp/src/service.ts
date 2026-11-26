@@ -1,3 +1,4 @@
+import crypto from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 
@@ -10,9 +11,9 @@ import type { McpClient } from "./client.ts"
 import { writeAtomicFile } from "./fs-util.ts"
 import { McpMetadataCache } from "./metadata-cache.ts"
 import { McpOAuth } from "./oauth.ts"
+import { McpOutputGuard } from "./output-guard.ts"
 import { McpPool } from "./pool.ts"
 import { McpSecrets } from "./secrets.ts"
-import { McpSkillSync } from "./skill-sync.ts"
 import { McpStdio } from "./stdio.ts"
 import { renderToolSignature } from "./ts-shape.ts"
 import { McpVault } from "./vault.ts"
@@ -385,6 +386,9 @@ export const make = Effect.fn("McpRuntime.make")(function* (options: Options) {
         ...(held?.connection.client?.instructions !== undefined && {
           instructions: held.connection.client.instructions,
         }),
+        ...(held?.connection.client?.capabilities !== undefined && {
+          capabilities: held.connection.client.capabilities,
+        }),
         toolCount: toolsList.length,
         ...(config.pool !== undefined && { pooled: config.pool }),
         ...(config.disabled !== undefined && { disabled: config.disabled }),
@@ -631,7 +635,7 @@ export const make = Effect.fn("McpRuntime.make")(function* (options: Options) {
           ),
         )
 
-        return McpSkillSync.guardCallResult({
+        return McpOutputGuard.guardCallResult({
           server: input.server,
           tool: input.tool,
           result: rawResult,
@@ -674,68 +678,174 @@ export const make = Effect.fn("McpRuntime.make")(function* (options: Options) {
     )
   })
 
-  const syncSkills = Effect.fn("McpRuntime.syncSkills")(function* (
-    projectDir?: string,
-  ): Effect.fn.Return<Mcp.SkillSyncResult> {
-    const dir = projectDir ?? options.vibestHome
-    const configured = loadConfiguredServers(projectDir)
+  const skills = Effect.fn("McpRuntime.skills")(function* (
+    rawServer: string,
+    directory?: string,
+  ): Effect.fn.Return<ReadonlyArray<Mcp.SkillEntry>, Mcp.NotFoundError | Mcp.ToolCallError> {
+    return yield* withActiveEntry(rawServer, directory, (entry) =>
+      Effect.gen(function* () {
+        const client = entry.connection.client
 
-    const items: Array<{
-      readonly server: Mcp.ServerName
-      readonly exposure: Mcp.ExposureMode
-      readonly disabled?: boolean | undefined
-      readonly title?: string | undefined
-      readonly instructions?: string | undefined
-      readonly tools: ReadonlyArray<Mcp.ToolInfo>
-    }> = []
+        if (!client) {
+          return yield* new Mcp.ToolCallError({
+            server: rawServer,
+            tool: "skills/list",
+            message: `MCP server "${rawServer}" is not connected`,
+          })
+        }
 
-    for (const rawName of Object.keys(configured).toSorted()) {
-      const config = configured[rawName]
-      const decoded = decodeServerName(rawName)
+        if (!client.skills) return []
 
-      if (!config || Option.isNone(decoded)) continue
-      const exposure = config.exposure ?? "skill"
-
-      if (!config.disabled && exposure === "skill") {
-        const listed = yield* withActiveEntry(rawName, projectDir, (entry) =>
-          Effect.succeed({
-            title: entry.connection.client?.title,
-            instructions: entry.connection.client?.instructions,
-            tools: (entry.connection.tools ?? [])
-              .filter((tool) => toolAllowed(tool.name, entry.config))
-              .map((tool) => toToolInfo(entry.name, tool)),
-          }),
-        ).pipe(
-          Effect.orElseSucceed(() => ({
-            title: undefined,
-            instructions: undefined,
-            tools: [] satisfies ReadonlyArray<Mcp.ToolInfo>,
-          })),
+        return yield* client.skills.list().pipe(
+          Effect.mapError(
+            (error) =>
+              new Mcp.ToolCallError({
+                server: rawServer,
+                tool: "skills/list",
+                message: error.message,
+              }),
+          ),
         )
+      }),
+    )
+  })
 
-        const fallbackTools = listed.tools.length > 0 ? listed.tools : yield* cachedToolsFor(decoded.value, config, dir)
+  const verifyDigest = (
+    server: string,
+    uri: string,
+    expectedDigest: string,
+    contents: ReadonlyArray<Mcp.ResourceContent>,
+  ): Effect.Effect<void, Mcp.ToolCallError> => {
+    const normalized = expectedDigest.trim().toLowerCase()
 
-        items.push({
-          server: decoded.value,
-          exposure,
-          disabled: config.disabled,
-          title: listed.title,
-          instructions: listed.instructions,
-          tools: fallbackTools,
-        })
-      } else {
-        items.push({
-          server: decoded.value,
-          exposure,
-          disabled: config.disabled,
-          tools: yield* cachedToolsFor(decoded.value, config, dir),
-        })
+    if (!/^sha256:[0-9a-f]{64}$/.test(normalized)) {
+      return Effect.fail(
+        new Mcp.ToolCallError({
+          server,
+          tool: "resources/read",
+          message: `Unsupported skill resource digest format for "${uri}": ${expectedDigest}`,
+        }),
+      )
+    }
+
+    const expectedHex = normalized.slice("sha256:".length)
+    const hash = crypto.createHash("sha256")
+
+    for (const item of contents) {
+      if (item.text !== undefined) {
+        hash.update(Buffer.from(item.text, "utf8"))
+      } else if (item.blob !== undefined) {
+        hash.update(Buffer.from(item.blob, "base64"))
       }
     }
 
-    const skillsRoot = projectDir ? path.join(projectDir, ".agents", "skills") : path.join(options.vibestHome, "skills")
+    const actualHex = hash.digest("hex")
+    const matches = crypto.timingSafeEqual(Buffer.from(actualHex, "hex"), Buffer.from(expectedHex, "hex"))
 
-    return McpSkillSync.syncSkillsToDirectory({ skillsRoot, servers: items })
+    return matches
+      ? Effect.void
+      : Effect.fail(
+          new Mcp.ToolCallError({
+            server,
+            tool: "resources/read",
+            message: `SHA-256 digest mismatch for "${uri}": expected sha256:${expectedHex}, got sha256:${actualHex}`,
+          }),
+        )
+  }
+
+  const read = Effect.fn("McpRuntime.read")(function* (input: {
+    readonly server: string
+    readonly uri: string
+    readonly directory?: string | undefined
+    readonly maxBytes?: number | undefined
+    readonly scratchpadDir?: string | undefined
+  }): Effect.fn.Return<Mcp.ReadResourceResult, Mcp.NotFoundError | Mcp.ToolCallError | Mcp.AuthError> {
+    return yield* withActiveEntry(input.server, input.directory, (entry) =>
+      Effect.gen(function* () {
+        if (entry.config.disabled) {
+          return yield* new Mcp.ToolCallError({
+            server: input.server,
+            tool: "resources/read",
+            message: `MCP server "${input.server}" is disabled`,
+          })
+        }
+
+        const client = entry.connection.client
+
+        if (!client) {
+          if (entry.status.status === "needs_auth") {
+            return yield* new Mcp.AuthError({
+              server: input.server,
+              message: entry.status.error,
+              ...(entry.status.requiredScope !== undefined && { requiredScope: entry.status.requiredScope }),
+            })
+          }
+
+          const reason = entry.status.status === "failed" ? entry.status.error : "not connected"
+
+          return yield* new Mcp.ToolCallError({
+            server: input.server,
+            tool: "resources/read",
+            message: `MCP server "${input.server}" failed to connect: ${reason}`,
+          })
+        }
+
+        let expectedDigest: string | undefined
+
+        if (client.skills && input.uri.startsWith("skill://")) {
+          const advertisedSkills = yield* client.skills.list().pipe(Effect.orElseSucceed(() => []))
+
+          for (const skill of advertisedSkills) {
+            const match = skill.resources.find((resource) => resource.uri === input.uri)
+
+            if (match?.digest !== undefined) {
+              expectedDigest = match.digest
+              break
+            }
+          }
+        }
+
+        const raw = yield* entry.connection
+          .recovering(client, (liveClient) => liveClient.readResource({ uri: input.uri }))
+          .pipe(
+            Effect.mapError(
+              (error) =>
+                new Mcp.ToolCallError({
+                  server: input.server,
+                  tool: "resources/read",
+                  message: error.message,
+                }),
+            ),
+          )
+
+        if (!raw || raw.contents.length === 0) {
+          return yield* new Mcp.ToolCallError({
+            server: input.server,
+            tool: "resources/read",
+            message: `MCP resource not found: ${input.uri}`,
+          })
+        }
+
+        const contents: Array<Mcp.ResourceContent> = raw.contents.map((item) => ({
+          uri: item.uri,
+          ...(item.mimeType !== undefined && { mimeType: item.mimeType }),
+          ...("text" in item && item.text !== undefined && { text: item.text }),
+          ...("blob" in item && item.blob !== undefined && { blob: item.blob }),
+        }))
+
+        if (expectedDigest !== undefined) {
+          yield* verifyDigest(input.server, input.uri, expectedDigest, contents)
+        }
+
+        return McpOutputGuard.guardResourceResult({
+          server: input.server,
+          uri: input.uri,
+          result: { uri: input.uri, contents },
+          ...(input.maxBytes !== undefined && { maxBytes: input.maxBytes }),
+          ...(input.scratchpadDir !== undefined && { scratchpadDir: input.scratchpadDir }),
+        })
+      }),
+    )
   })
 
   const requireRemote = Effect.fn("McpRuntime.requireRemote")(function* (
@@ -815,7 +925,8 @@ export const make = Effect.fn("McpRuntime.make")(function* (options: Options) {
     describe,
     call,
     events,
-    syncSkills,
+    skills,
+    read,
     authStart,
     authComplete,
     authSetToken,

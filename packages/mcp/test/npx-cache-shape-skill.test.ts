@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest"
 
 import { McpMetadataCache } from "../src/metadata-cache.ts"
 import { NpxResolver } from "../src/npx-resolver.ts"
-import { McpSkillSync } from "../src/skill-sync.ts"
+import { McpOutputGuard } from "../src/output-guard.ts"
 // oxlint-disable-next-line anti-slop/no-shape-in-symbol-names -- testing required public API
 import { renderToolSignature, renderTsShape } from "../src/ts-shape.ts"
 
@@ -192,57 +192,13 @@ describe("renderTsShape", () => {
   })
 })
 
-describe("McpSkillSync & scratchpad overflow guard", () => {
-  it("compiles SKILL.md for skill-exposed servers, removes stale dirs, and guards oversized call results", () => {
+describe("McpOutputGuard scratchpad overflow guard", () => {
+  it("guards oversized call results and resource reads into scratchpadDir", () => {
     withTempDir((root) => {
-      const skillsRoot = path.join(root, "skills")
-      const staleDir = path.join(skillsRoot, "mcp-removed")
-      fs.mkdirSync(staleDir, { recursive: true })
-      fs.writeFileSync(path.join(staleDir, "SKILL.md"), "stale", "utf8")
-
-      const server = decodeServerName("linear")
-
-      const synced = McpSkillSync.syncSkillsToDirectory({
-        skillsRoot,
-        servers: [
-          {
-            server,
-            exposure: "skill",
-            title: "Linear",
-            instructions: "Use Linear tools for issue tracking.",
-            tools: [
-              {
-                server,
-                name: "list_issues",
-                description: "List issues in a team\nMore details on line 2.",
-                signature: "{ team: string; limit?: number; }",
-                inputSchema: { type: "object" },
-              },
-            ],
-          },
-          {
-            server: decodeServerName("direct-only"),
-            exposure: "direct",
-            tools: [],
-          },
-        ],
-      })
-
-      expect(synced.synced).toHaveLength(1)
-      expect(synced.removed).toEqual([staleDir])
-      expect(fs.existsSync(staleDir)).toBe(false)
-
-      const content = fs.readFileSync(synced.synced[0]!.skillPath, "utf8")
-      expect(content).toContain("name: mcp-linear")
-      expect(content).toContain("Use Linear tools for issue tracking.")
-      expect(content).toContain("`list_issues({ team: string; limit?: number; })` — List issues in a team")
-      expect(content).toContain("vibest mcp describe linear <tool>")
-      expect(content).toContain("vibest mcp call linear <tool> '<json>'")
-
       const scratchpadDir = path.join(root, "scratchpad")
       const hugeText = "A".repeat(4096)
 
-      const guarded = McpSkillSync.guardCallResult({
+      const guardedCall = McpOutputGuard.guardCallResult({
         server: "linear",
         tool: "list_issues",
         result: { isError: false, content: [{ type: "text", text: hugeText }] },
@@ -250,14 +206,30 @@ describe("McpSkillSync & scratchpad overflow guard", () => {
         scratchpadDir,
       })
 
-      expect(guarded.truncated).toBe(true)
-      expect(guarded.outputFile).toBeDefined()
-      expect(fs.readFileSync(guarded.outputFile!, "utf8")).toBe(hugeText)
-      expect(guarded.content[0]?.type).toBe("text")
+      expect(guardedCall.truncated).toBe(true)
+      expect(guardedCall.outputFile).toBeDefined()
+      expect(fs.readFileSync(guardedCall.outputFile!, "utf8")).toBe(hugeText)
+      expect(guardedCall.content[0]?.type).toBe("text")
 
-      if (guarded.content[0]?.type === "text") {
-        expect(guarded.content[0].text).toContain(guarded.outputFile!)
+      if (guardedCall.content[0]?.type === "text") {
+        expect(guardedCall.content[0].text).toContain(guardedCall.outputFile!)
       }
+
+      const guardedResource = McpOutputGuard.guardResourceResult({
+        server: "linear",
+        uri: "skill://pdf-processing/SKILL.md",
+        result: {
+          uri: "skill://pdf-processing/SKILL.md",
+          contents: [{ uri: "skill://pdf-processing/SKILL.md", mimeType: "text/markdown", text: hugeText }],
+        },
+        maxBytes: 1024,
+        scratchpadDir,
+      })
+
+      expect(guardedResource.truncated).toBe(true)
+      expect(guardedResource.outputFile).toBeDefined()
+      expect(fs.readFileSync(guardedResource.outputFile!, "utf8")).toBe(hugeText)
+      expect(guardedResource.contents[0]?.text).toContain(guardedResource.outputFile!)
     })
   })
 })

@@ -64,10 +64,8 @@ const Handlers = Runtime.handlers(Commands, {
     add: () => import("./commands/handlers/mcp/add.ts"),
     remove: () => import("./commands/handlers/mcp/remove.ts"),
     search: () => import("./commands/handlers/mcp/search.ts"),
-    describe: () => import("./commands/handlers/mcp/describe.ts"),
+    read: () => import("./commands/handlers/mcp/read.ts"),
     call: () => import("./commands/handlers/mcp/call.ts"),
-    events: () => import("./commands/handlers/mcp/events.ts"),
-    "sync-skills": () => import("./commands/handlers/mcp/sync-skills.ts"),
     auth: {
       start: () => import("./commands/handlers/mcp/auth/start.ts"),
       complete: () => import("./commands/handlers/mcp/auth/complete.ts"),

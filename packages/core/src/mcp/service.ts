@@ -35,7 +35,17 @@ export interface Interface {
     server: string,
     directory?: string,
   ) => Effect.Effect<ReadonlyArray<Mcp.EventType>, Mcp.NotFoundError | Mcp.ToolCallError>
-  readonly syncSkills: (projectDir?: string) => Effect.Effect<Mcp.SkillSyncResult>
+  readonly skills: (
+    server: string,
+    directory?: string,
+  ) => Effect.Effect<ReadonlyArray<Mcp.SkillEntry>, Mcp.NotFoundError | Mcp.ToolCallError>
+  readonly read: (input: {
+    readonly server: string
+    readonly uri: string
+    readonly directory?: string | undefined
+    readonly maxBytes?: number | undefined
+    readonly scratchpadDir?: string | undefined
+  }) => Effect.Effect<Mcp.ReadResourceResult, Mcp.NotFoundError | Mcp.ToolCallError | Mcp.AuthError>
   readonly authStart: (server: string) => Effect.Effect<Mcp.AuthStartResult, Mcp.NotFoundError | Mcp.AuthError>
   readonly authComplete: (
     server: string,

@@ -507,11 +507,26 @@ const machine = Spec.make("machine", {
 })
 
 const mcp = Spec.make("mcp", {
-  description: "Manage MCP servers, tools, events, OAuth credentials, and compiled SKILL.md indexes",
+  description: "Manage MCP servers, tools, SEP-2640 skills, SEP-3415 events, resources, and OAuth credentials",
   commands: [
     Spec.make("list", {
       alias: "ls",
-      description: "List configured MCP servers and their status as JSON",
+      description: "List MCP servers, inspect a server (tools/skills/events), or describe one tool",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Optional server name"), Argument.optional),
+        tool: Argument.String("tool").pipe(
+          Argument.withDescription("Optional tool name to describe"),
+          Argument.optional,
+        ),
+        events: Flag.Boolean("events").pipe(
+          Flag.withDescription("List only SEP-3415 event types for the server"),
+          Flag.withDefault(false),
+        ),
+        skills: Flag.Boolean("skills").pipe(
+          Flag.withDescription("List only SEP-2640 skills for the server"),
+          Flag.withDefault(false),
+        ),
+      },
     }),
     Spec.make("add", {
       description: "Add or update a local or remote MCP server in ~/.vibest/mcp.json",
@@ -550,36 +565,24 @@ const mcp = Spec.make("mcp", {
         query: Argument.String("query").pipe(Argument.withDescription("Search text")),
       },
     }),
-    Spec.make("describe", {
-      description: "Show full metadata and TypeScript signature for one MCP tool",
+    Spec.make("read", {
+      description: "Read a SEP-2640 skill:// URI (with SHA-256 verification) or MCP resource",
       params: {
         server: Argument.String("server").pipe(Argument.withDescription("Server name")),
-        tool: Argument.String("tool").pipe(Argument.withDescription("Tool name")),
+        uri: Argument.String("uri").pipe(Argument.withDescription("Resource or skill:// URI")),
       },
     }),
     Spec.make("call", {
-      description: "Invoke an MCP tool with optional JSON object arguments",
+      description: "Invoke an MCP tool (<server> <tool> [json] or <server.tool> [json])",
       params: {
-        server: Argument.String("server").pipe(Argument.withDescription("Server name")),
-        tool: Argument.String("tool").pipe(Argument.withDescription("Tool name")),
+        server: Argument.String("server").pipe(Argument.withDescription("Server name or server.tool")),
+        tool: Argument.String("tool").pipe(
+          Argument.withDescription("Tool name (or JSON object when using server.tool)"),
+          Argument.optional,
+        ),
         json: Argument.String("json").pipe(
           Argument.withDescription("JSON object of tool arguments"),
           Argument.optional,
-        ),
-      },
-    }),
-    Spec.make("events", {
-      description: "List SEP-3415 event types advertised by an MCP server",
-      params: {
-        server: Argument.String("server").pipe(Argument.withDescription("Server name")),
-      },
-    }),
-    Spec.make("sync-skills", {
-      description: "Compile SKILL.md indexes for MCP servers with skill exposure",
-      params: {
-        project: Flag.String("project").pipe(
-          Flag.withDescription("Project directory to write .agents/skills/mcp-*/SKILL.md into"),
-          Flag.optional,
         ),
       },
     }),

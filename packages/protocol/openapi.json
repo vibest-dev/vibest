@@ -113,7 +113,8 @@
     "mcp.describe": "open",
     "mcp.call": "open",
     "mcp.events": "open",
-    "mcp.syncSkills": "open",
+    "mcp.skills": "open",
+    "mcp.read": "open",
     "mcp.authStart": "open",
     "mcp.authComplete": "open",
     "mcp.authSetToken": "open",
@@ -9398,21 +9399,41 @@
           "summary": "List MCP server event types"
         }
       },
-      "/api/mcp/sync-skills": {
-        "post": {
+      "/api/mcp/{server}/skills": {
+        "get": {
           "tags": [
             "mcp"
           ],
-          "operationId": "mcp.syncSkills",
-          "parameters": [],
+          "operationId": "mcp.skills",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "directory",
+              "in": "query",
+              "schema": {
+                "type": "string"
+              },
+              "required": false
+            }
+          ],
           "security": [],
           "responses": {
             "200": {
-              "description": "McpSkillSyncResult",
+              "description": "Success",
               "content": {
                 "application/json": {
                   "schema": {
-                    "$ref": "#/components/schemas/McpSkillSyncResult"
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/McpSkillEntry"
+                    }
                   }
                 }
               }
@@ -9427,6 +9448,16 @@
                 }
               }
             },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
             "409": {
               "description": "ProtocolRejected",
               "content": {
@@ -9436,34 +9467,153 @@
                   }
                 }
               }
+            },
+            "502": {
+              "description": "McpToolCallError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpToolCallErrorEncoded"
+                  }
+                }
+              }
             }
           },
-          "summary": "Sync MCP SKILL.md files",
+          "summary": "List SEP-2640 skills advertised by an MCP server"
+        }
+      },
+      "/api/mcp/{server}/resources/read": {
+        "post": {
+          "tags": [
+            "mcp"
+          ],
+          "operationId": "mcp.read",
+          "parameters": [
+            {
+              "name": "server",
+              "in": "path",
+              "schema": {
+                "type": "string"
+              },
+              "required": true
+            }
+          ],
+          "security": [],
+          "responses": {
+            "200": {
+              "description": "McpReadResourceResult",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpReadResourceResult"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "InvalidRequestError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "McpAuthError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpAuthErrorEncoded"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "McpNotFoundError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpNotFoundErrorEncoded"
+                  }
+                }
+              }
+            },
+            "409": {
+              "description": "ProtocolRejected",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/ProtocolRejectedEncoded"
+                  }
+                }
+              }
+            },
+            "502": {
+              "description": "McpToolCallError",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/McpToolCallErrorEncoded"
+                  }
+                }
+              }
+            }
+          },
+          "summary": "Read a skill:// or MCP resource URI with digest check",
           "requestBody": {
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "projectDir": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "additionalProperties": false
+                  "type": "object",
+                  "properties": {
+                    "uri": {
+                      "type": "string"
                     },
-                    {
-                      "type": "null"
+                    "directory": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxBytes": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "Infinity",
+                            "-Infinity",
+                            "NaN"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "scratchpadDir": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
-                  ]
+                  },
+                  "required": [
+                    "uri"
+                  ],
+                  "additionalProperties": false
                 }
               }
             },
@@ -14891,60 +15041,6 @@
           ],
           "additionalProperties": false
         },
-        "McpSkillSyncResult": {
-          "type": "object",
-          "properties": {
-            "synced": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/McpSkillSyncEntry"
-              }
-            },
-            "removed": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": [
-            "synced",
-            "removed"
-          ],
-          "additionalProperties": false
-        },
-        "McpSkillSyncEntry": {
-          "type": "object",
-          "properties": {
-            "server": {
-              "$ref": "#/components/schemas/McpServerName"
-            },
-            "skillPath": {
-              "type": "string"
-            },
-            "toolCount": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "string",
-                  "enum": [
-                    "Infinity",
-                    "-Infinity",
-                    "NaN"
-                  ]
-                }
-              ]
-            }
-          },
-          "required": [
-            "server",
-            "skillPath",
-            "toolCount"
-          ],
-          "additionalProperties": false
-        },
         "McpToolCallErrorEncoded": {
           "type": "object",
           "properties": {
@@ -14969,6 +15065,172 @@
             "server",
             "tool",
             "message"
+          ],
+          "additionalProperties": false
+        },
+        "McpReadResourceResult": {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string"
+            },
+            "contents": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/McpResourceContent"
+              }
+            },
+            "truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "outputFile": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "uri",
+            "contents"
+          ],
+          "additionalProperties": false
+        },
+        "McpResourceContent": {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string"
+            },
+            "mimeType": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "blob": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "uri"
+          ],
+          "additionalProperties": false
+        },
+        "McpSkillEntry": {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string"
+            },
+            "frontmatter": {
+              "$ref": "#/components/schemas/McpSkillFrontmatter"
+            },
+            "resources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/McpSkillResource"
+              }
+            }
+          },
+          "required": [
+            "uri",
+            "frontmatter",
+            "resources"
+          ],
+          "additionalProperties": false
+        },
+        "McpSkillResource": {
+          "type": "object",
+          "properties": {
+            "uri": {
+              "type": "string"
+            },
+            "digest": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "size": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "uri"
+          ],
+          "additionalProperties": false
+        },
+        "McpSkillFrontmatter": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "name"
           ],
           "additionalProperties": false
         },
@@ -15281,6 +15543,16 @@
                 }
               ]
             },
+            "capabilities": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/McpServerCapabilities"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "pooled": {
               "anyOf": [
                 {
@@ -15331,6 +15603,30 @@
             "exposure",
             "status",
             "toolCount"
+          ],
+          "additionalProperties": false
+        },
+        "McpServerCapabilities": {
+          "type": "object",
+          "properties": {
+            "tools": {
+              "type": "boolean"
+            },
+            "resources": {
+              "type": "boolean"
+            },
+            "events": {
+              "type": "boolean"
+            },
+            "skills": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "tools",
+            "resources",
+            "events",
+            "skills"
           ],
           "additionalProperties": false
         },

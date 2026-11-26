@@ -14,9 +14,9 @@ export { McpPool } from "./pool.ts"
 
 export { McpSecrets } from "./secrets.ts"
 
-export { McpRuntime } from "./service.ts"
+export { McpOutputGuard } from "./output-guard.ts"
 
-export { McpSkillSync } from "./skill-sync.ts"
+export { McpRuntime } from "./service.ts"
 
 export { McpStdio } from "./stdio.ts"
 
