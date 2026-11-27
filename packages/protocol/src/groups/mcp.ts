@@ -35,14 +35,14 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
       params: ServerPath,
       payload: Schema.optional(Schema.Struct({ directory: Schema.optional(Schema.String) })),
       success: Mcp.ServerInfo,
-      error: [Mcp.NotFoundError],
+      error: [Forbidden, Mcp.NotFoundError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.connect", summary: "Connect an MCP server" })),
   )
   .add(
     HttpApiEndpoint.post("mcp.disconnect", "/api/mcp/:server/disconnect", {
       params: ServerPath,
       success: Schema.Void,
-      error: [Mcp.NotFoundError],
+      error: [Forbidden, Mcp.NotFoundError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.disconnect", summary: "Disconnect an MCP server" })),
   )
   .add(
@@ -52,7 +52,7 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
         directory: Schema.optional(Schema.String),
       },
       success: Schema.Array(Mcp.ToolInfo),
-      error: [Mcp.NotFoundError],
+      error: [Forbidden, Mcp.NotFoundError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.tools", summary: "List MCP tools" })),
   )
   .add(
@@ -69,7 +69,7 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
       params: ServerToolPath,
       query: { directory: Schema.optional(Schema.String) },
       success: Mcp.ToolInfo,
-      error: [Mcp.NotFoundError, Mcp.ToolNotFoundError],
+      error: [Forbidden, Mcp.NotFoundError, Mcp.ToolNotFoundError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.describe", summary: "Describe an MCP tool" })),
   )
   .add(
@@ -82,7 +82,7 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
         scratchpadDir: Schema.optional(Schema.String),
       }),
       success: Mcp.CallResult,
-      error: [Mcp.NotFoundError, Mcp.ToolCallError, Mcp.AuthError],
+      error: [Forbidden, Mcp.NotFoundError, Mcp.ToolCallError, Mcp.AuthError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.call", summary: "Call an MCP tool" })),
   )
   .add(
@@ -90,7 +90,7 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
       params: ServerPath,
       query: { directory: Schema.optional(Schema.String) },
       success: Schema.Array(Mcp.EventType),
-      error: [Mcp.NotFoundError, Mcp.ToolCallError],
+      error: [Forbidden, Mcp.NotFoundError, Mcp.ToolCallError],
     }).annotateMerge(OpenApi.annotations({ identifier: "mcp.events", summary: "List MCP server event types" })),
   )
   .add(
@@ -98,7 +98,7 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
       params: ServerPath,
       query: { directory: Schema.optional(Schema.String) },
       success: Schema.Array(Mcp.SkillEntry),
-      error: [Mcp.NotFoundError, Mcp.ToolCallError],
+      error: [Forbidden, Mcp.NotFoundError, Mcp.ToolCallError],
     }).annotateMerge(
       OpenApi.annotations({ identifier: "mcp.skills", summary: "List SEP-2640 skills advertised by an MCP server" }),
     ),
@@ -113,7 +113,7 @@ export const McpGroup = HttpApiGroup.make("server.mcp")
         scratchpadDir: Schema.optional(Schema.String),
       }),
       success: Mcp.ReadResourceResult,
-      error: [Mcp.NotFoundError, Mcp.ToolCallError, Mcp.AuthError],
+      error: [Forbidden, Mcp.NotFoundError, Mcp.ToolCallError, Mcp.AuthError],
     }).annotateMerge(
       OpenApi.annotations({ identifier: "mcp.read", summary: "Read a skill:// or MCP resource URI with digest check" }),
     ),

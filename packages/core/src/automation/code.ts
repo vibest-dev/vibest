@@ -58,6 +58,7 @@ export interface RunInput {
   readonly now: number
   readonly runs: number
   readonly caller?: RunCaller | undefined
+  readonly allowedExternalServers?: ReadonlyArray<string> | undefined
   readonly event?: ReturnType<typeof AutomationEventStream.input> | undefined
 }
 
@@ -108,7 +109,13 @@ export const run = Effect.fn("AutomationCode.run")(function* (
         bindings: { ...payload, input: payload },
         limits: CODE_LIMITS,
       },
-      { allowTool, ...(headers !== undefined && { headers }) },
+      {
+        allowTool,
+        ...(headers !== undefined && { headers }),
+        ...(input.allowedExternalServers !== undefined && {
+          allowedExternalServers: input.allowedExternalServers,
+        }),
+      },
     )
     .pipe(Effect.timeoutOption(TIMEOUT_MS))
 

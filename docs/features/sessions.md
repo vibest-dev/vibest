@@ -84,7 +84,7 @@ manage (send to, interrupt, peek at, archive) only the sessions it started.
 
 A user defines an agent with one Markdown file, `~/.vibest/agents/<id>.md`: the file name is the id (lowercase letters,
 digits and `-`, starting with a letter, at most 32 characters), the frontmatter holds `description` (required) and
-optionally `name` (equal to the file name), `harness`, `provider` and `model`, and the text after it is the prompt.
+optionally `name` (equal to the file name), `harness`, `provider`, `model` and `mcpServers`, and the text after it is the prompt.
 Each file is a whole definition: it does not take another agent's prompt or guard.
 
 ```markdown
@@ -197,3 +197,14 @@ and an archived session are refused. A session on another machine is stopped the
 has `vibest stop`; an older one is refused with a hint to update it. A plugin stops a session with
 `ctx.session.stop(id)`, recorded as the plugin; with `{ idleSince }` it stops the session only if it has done nothing
 since then and nothing waits for it, and answers whether it stopped it.
+
+## S68. Per-agent MCP server scoping
+
+An agent file may declare `mcpServers` as an inline or block YAML list of centrally configured MCP server names (omitted
+inherits all enabled servers; `[]` or an empty block disables all external MCP servers). Claude Code inline server
+config objects and unconfigured or disabled server names never invalidate the agent or block `vibest run --agent <id>`:
+named inline entries extract the server name and surface non-blocking `warnings` in `vibest agent list` and
+`vibest agent show <id>`. For a session of a scoped agent, `vibestd` filters `Session facts`, `mcp.list`, `mcp.tools`,
+`mcp.search`, and `codemode.declarations` to the allowlist, refuses disallowed servers with `Forbidden` before waking or
+connecting them across MCP, CodeMode, and Automation creation, and enforces the same allowlist during background
+execution of automations owned by that session.

@@ -119,6 +119,12 @@ describe("systemPrompt: the definition body first, then facts that name the chan
         { name: "overridden", type: "remote" },
         { name: "project_db", type: "local" },
       ])
+
+      const scoped = yield* configuredMcpServers(home, repo, ["project_db", "missing"])
+      assert.deepStrictEqual(scoped, [{ name: "project_db", type: "local" }])
+
+      const none = yield* configuredMcpServers(home, repo, [])
+      assert.deepStrictEqual(none, [])
     }).pipe(Effect.provide(Platform.services)),
   )
 })

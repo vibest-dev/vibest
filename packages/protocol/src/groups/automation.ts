@@ -2,6 +2,7 @@ import { Automation } from "@vibest/schema/automation"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
 
+import { Forbidden } from "../errors.ts"
 import { CallerMiddleware, ProtocolMiddleware } from "../middleware.ts"
 
 const idParam = { id: Schema.String }
@@ -11,7 +12,7 @@ export const AutomationGroup = HttpApiGroup.make("server.automation")
     HttpApiEndpoint.post("automation.create", "/api/automation", {
       payload: Automation.CreateInput,
       success: Automation.Info,
-      error: [Automation.InvalidError],
+      error: [Forbidden, Automation.InvalidError],
     })
       .middleware(CallerMiddleware)
       .middleware(ProtocolMiddleware)

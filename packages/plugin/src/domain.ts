@@ -134,6 +134,8 @@ export interface AgentDefinition {
   readonly harness?: string
   readonly provider?: string
   readonly model?: string
+  readonly mcpServers?: ReadonlyArray<string>
+  readonly warnings?: ReadonlyArray<string>
 }
 
 export interface InvalidAgent {

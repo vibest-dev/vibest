@@ -18,12 +18,15 @@ import {
   Semaphore,
 } from "effect"
 
+import { sessionMcpScope } from "../agent/mcp-scope.ts"
+import { Agents } from "../agent/registry.ts"
 import { CodeMode } from "../codemode.ts"
 import { PlatformNode } from "../effect/platform.ts"
 import { Mcp } from "../mcp.ts"
 import { ProjectStore } from "../project/store.ts"
 import { logFailure } from "../reactor.ts"
 import { Session } from "../session.ts"
+import { SessionStore } from "../session/store.ts"
 import { AutomationCode } from "./code.ts"
 import { AutomationEventStream } from "./event.ts"
 import { FAILED_RETRY, LATE_AFTER, createExecutor } from "./execute.ts"
@@ -67,6 +70,8 @@ export const make = Effect.gen(function* () {
   const codemode = yield* CodeMode.Service
   const mcp = yield* Mcp.Service
   const sessions = yield* Session.Service
+  const sessionStore = yield* SessionStore.Service
+  const agents = yield* Agents.Service
   const projectStore = yield* ProjectStore.Service
   const path = yield* Path.Path
   const timers = yield* FiberMap.make<string>()
@@ -85,7 +90,9 @@ export const make = Effect.gen(function* () {
 
   const cancel = (key: string): Effect.Effect<void> => FiberMap.remove(timers, key)
 
-  const { pauseWith, executeRow } = createExecutor({ store, codemode, sessions })
+  const resolveMcpScope = (sessionId: string) => sessionMcpScope(sessionStore, agents, sessionId)
+
+  const { pauseWith, executeRow } = createExecutor({ store, codemode, sessions, resolveMcpScope })
 
   const { syncWatches, hasWatch } = yield* createWatchManager({
     store,
@@ -95,6 +102,7 @@ export const make = Effect.gen(function* () {
     withRunLock: runLocks.withLock,
     pauseWith,
     executeRow,
+    resolveMcpScope,
   })
 
   const resolveProjectId = (directory: string, explicitProjectId?: string): Effect.Effect<string> =>
@@ -370,5 +378,14 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [AutomationStore.node, CodeMode.node, Mcp.node, Session.node, ProjectStore.node, PlatformNode.path],
+  deps: [
+    AutomationStore.node,
+    CodeMode.node,
+    Mcp.node,
+    Session.node,
+    SessionStore.node,
+    Agents.node,
+    ProjectStore.node,
+    PlatformNode.path,
+  ],
 })

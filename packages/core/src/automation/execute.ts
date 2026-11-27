@@ -1,7 +1,8 @@
 import { Automation } from "@vibest/schema/automation"
 import { messageOf } from "@vibest/schema/error"
-import { Clock, Effect, Result } from "effect"
+import { Clock, Effect, Option, Result } from "effect"
 
+import type { AgentMcpScope } from "../agent/mcp-scope.ts"
 import type { CodeMode } from "../codemode.ts"
 import type { Session } from "../session.ts"
 import { ToolOutput } from "../tool-output.ts"
@@ -25,6 +26,7 @@ export interface ExecuteDeps {
   readonly store: AutomationStore.Interface
   readonly codemode: CodeMode.Interface
   readonly sessions: Session.Interface
+  readonly resolveMcpScope: (sessionId: string) => Effect.Effect<Option.Option<AgentMcpScope>>
 }
 
 export interface ExecuteOptions {
@@ -37,7 +39,7 @@ interface DeliveryOutcome {
   readonly messageId: string
 }
 
-export const createExecutor = ({ store, codemode, sessions }: ExecuteDeps) => {
+export const createExecutor = ({ store, codemode, sessions, resolveMcpScope }: ExecuteDeps) => {
   const pauseWith = (
     row: AutomationRow,
     now: number,
@@ -255,11 +257,15 @@ export const createExecutor = ({ store, codemode, sessions }: ExecuteDeps) => {
       return
     }
 
+    const scope = row.sessionId !== null ? yield* resolveMcpScope(row.sessionId) : Option.none<AgentMcpScope>()
+    const allowedExternalServers = Option.isSome(scope) ? [...scope.value.allowed] : undefined
+
     const codeOutcome = yield* AutomationCode.run(codemode, row.directory, info.action, {
       state: info.state ?? null,
       now,
       runs: row.runCount,
       ...(row.sessionId !== null && { caller: { sessionId: row.sessionId, projectId: row.projectId } }),
+      ...(allowedExternalServers !== undefined && { allowedExternalServers }),
       ...(options?.event !== undefined && { event: AutomationEventStream.input(options.event) }),
     })
 

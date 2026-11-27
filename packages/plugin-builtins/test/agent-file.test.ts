@@ -63,4 +63,67 @@ describe("agent files", () => {
     assert.include(errorOf(result, "old"), "unknown key extends")
     assert.include(errorOf(result, "blank"), "description is empty")
   })
+
+  it("parses mcpServers in inline, empty, and block list forms without warnings", () => {
+    const result = read(
+      file("empty-inline.md", "---\ndescription: none\nmcpServers: []\n---\nBody."),
+      file("empty-block.md", "---\ndescription: none\nmcpServers:\nharness: pi\n---\nBody."),
+      file("inline.md", "---\ndescription: inline\nmcpServers: [context7, \"github\", 'linear', context7]\n---\nBody."),
+      file(
+        "block.md",
+        "---\ndescription: block\nmcpServers:\n  - context7\n  - \"github\"\n  - 'context7'\n---\nBody.",
+      ),
+    )
+
+    assert.deepStrictEqual(result.invalid, [])
+    assert.deepStrictEqual(result.definitions, [
+      { id: "empty-inline", description: "none", system: "Body.", mcpServers: [] },
+      { id: "empty-block", description: "none", system: "Body.", harness: "pi", mcpServers: [] },
+      { id: "inline", description: "inline", system: "Body.", mcpServers: ["context7", "github", "linear"] },
+      { id: "block", description: "block", system: "Body.", mcpServers: ["context7", "github"] },
+    ])
+  })
+
+  it("keeps agents valid with non-blocking warnings for Claude Code inline mcpServers objects and malformed scalars", () => {
+    const result = read(
+      file(
+        "claude-block.md",
+        [
+          "---",
+          "description: claude style",
+          "mcpServers:",
+          "  - context7",
+          "  - playwright:",
+          "      type: stdio",
+          "      command: npx",
+          '      args: ["@playwright/mcp"]',
+          "  - sentry: { type: remote, url: https://sentry.example/mcp }",
+          "  - { type: stdio, command: npx }",
+          "---",
+          "Body.",
+        ].join("\n"),
+      ),
+      file("scalar.md", "---\ndescription: scalar\nmcpServers: 123\n---\nBody."),
+      file("dup.md", "---\ndescription: dup\nmcpServers: []\nmcpServers: []\n---\nBody."),
+    )
+
+    assert.deepStrictEqual(
+      result.definitions.map((d) => d.id),
+      ["claude-block", "scalar"],
+    )
+
+    const claude = result.definitions.find((d) => d.id === "claude-block")!
+    assert.deepStrictEqual(claude.mcpServers, ["context7", "playwright", "sentry"])
+    assert.strictEqual(claude.warnings?.length, 3)
+    assert.include(claude.warnings![0], 'inline mcpServers config for "playwright" is ignored')
+    assert.include(claude.warnings![1], 'inline mcpServers config for "sentry" is ignored')
+    assert.include(claude.warnings![2], "inline mcpServers object entry is ignored")
+
+    const scalar = result.definitions.find((d) => d.id === "scalar")!
+    assert.isUndefined(scalar.mcpServers)
+    assert.strictEqual(scalar.warnings?.length, 1)
+    assert.include(scalar.warnings![0], "must be a list")
+
+    assert.include(errorOf(result, "dup"), "mcpServers is given twice")
+  })
 })
