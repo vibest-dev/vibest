@@ -196,7 +196,11 @@ describe.concurrent("Session", () => {
         { agent: "coordinator" },
       )
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* untilVirtual(sessionStore.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "not_started")
+      yield* untilVirtual(
+        sessionStore.getSession(id),
+        (w) => (w ? executionStateOf(w) : undefined) === "not_started",
+        "1 second",
+      )
       yield* sessions.send(id, "next")
       yield* until(sessionStore.getSession(id), (w) => (w ? executionStateOf(w) : undefined) === "open")
       yield* sessions.userPrompt(id, "next")

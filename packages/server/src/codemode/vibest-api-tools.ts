@@ -184,8 +184,7 @@ const readConfiguredAllowlist = (
     return new Set(DEFAULT_VIBEST_API_OPERATIONS)
   })
 
-const buildOperationPlans = (allowlist: ReadonlySet<string>): ReadonlyArray<OperationPlan> => {
-  if (allowlist.size === 0) return []
+const compileAllReadOnlyPlans = (): ReadonlyArray<OperationPlan> => {
   const decodedSpec = parseJsonOption(JSON.stringify(OpenApi.fromApi(VibestApi)))
 
   if (Option.isNone(decodedSpec) || !isJsonObject(decodedSpec.value) || !isJsonObject(decodedSpec.value.paths)) {
@@ -206,7 +205,6 @@ const buildOperationPlans = (allowlist: ReadonlySet<string>): ReadonlyArray<Oper
       if (
         !isJsonObject(op) ||
         !Predicate.isString(op.operationId) ||
-        !allowlist.has(op.operationId) ||
         !ALLOWED_READ_ONLY_VIBEST_OPERATIONS.has(op.operationId) ||
         (method !== "GET" && op.operationId !== "mcp.read")
       ) {
@@ -293,6 +291,11 @@ const buildOperationPlans = (allowlist: ReadonlySet<string>): ReadonlyArray<Oper
 
   return plans.toSorted((a, b) => a.toolName.localeCompare(b.toolName))
 }
+
+const ALL_READ_ONLY_PLANS: ReadonlyArray<OperationPlan> = compileAllReadOnlyPlans()
+
+const buildOperationPlans = (allowlist: ReadonlySet<string>): ReadonlyArray<OperationPlan> =>
+  allowlist.size === 0 ? [] : ALL_READ_ONLY_PLANS.filter((plan) => allowlist.has(plan.operationId))
 
 const formatHttpError = (status: number, text: string): string => {
   const parsed = parseJsonOption(text)

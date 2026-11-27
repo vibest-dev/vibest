@@ -6,8 +6,7 @@
   "type": "module",
   "scripts": {
     "eval": "bun src/main.ts",
-    "typecheck": "tsrs --noEmit --fast -p tsconfig.json",
-    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run tools/eval"
+    "typecheck": "tsrs --noEmit --fast -p tsconfig.json"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

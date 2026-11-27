@@ -60,12 +60,17 @@ const spawnCmd = (
     })
   })
 
-const setupIsolatedPiDir = async (piDir: string, provider: string, model: string): Promise<void> => {
-  await fsPromises.mkdir(piDir, { recursive: true, mode: 0o700 })
+const setupCleanPiDir = async (piDir: string, provider: string, model: string): Promise<void> => {
+  await fsPromises.mkdir(path.join(piDir, "sessions"), { recursive: true, mode: 0o700 })
   const userPi = path.join(os.homedir(), ".pi", "agent")
 
-  for (const name of ["auth.json", "models.json", "models-store.json", "cliproxyapi.json", "trust.json"]) {
-    await fsPromises.copyFile(path.join(userPi, name), path.join(piDir, name)).catch(() => undefined)
+  for (const name of ["auth.json", "models.json", "models-store.json", "cliproxyapi.json"]) {
+    const src = path.join(userPi, name)
+
+    if (fs.existsSync(src)) {
+      await fsPromises.copyFile(src, path.join(piDir, name)).catch(() => undefined)
+      await fsPromises.chmod(path.join(piDir, name), 0o600).catch(() => undefined)
+    }
   }
 
   const entries = await fsPromises.readdir(userPi).catch(() => [])
@@ -76,21 +81,33 @@ const setupIsolatedPiDir = async (piDir: string, provider: string, model: string
     }
   }
 
-  const userNpm = path.join(userPi, "npm")
+  const rawSettings = await fsPromises.readFile(path.join(userPi, "settings.json"), "utf8").catch(() => "{}")
+  let userPackages: ReadonlyArray<unknown> = []
 
-  if (fs.existsSync(userNpm)) {
-    await fsPromises.symlink(userNpm, path.join(piDir, "npm")).catch(() => undefined)
+  try {
+    const parsed: Schema.Json = JSON.parse(rawSettings)
+
+    if (isJsonObject(parsed) && Array.isArray(parsed.packages)) {
+      userPackages = parsed.packages
+    }
+  } catch {
+    void 0
   }
 
-  const settings = {
+  const providerPackages = userPackages
+    .filter(Predicate.isString)
+    .filter((pkg) => pkg.startsWith("npm:") && pkg.endsWith("-provider"))
+    .map((pkg) => path.join(userPi, "npm", "node_modules", pkg.slice("npm:".length)))
+    .filter((pkgPath) => fs.existsSync(pkgPath))
+
+  const cleanSettings = {
     defaultProvider: provider,
     defaultModel: model,
-    defaultThinkingLevel: "medium",
     quietStartup: true,
-    packages: ["npm:@getpie/pi-cliproxyapi-provider"],
+    ...(providerPackages.length > 0 && { packages: providerPackages }),
   }
 
-  await fsPromises.writeFile(path.join(piDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`, {
+  await fsPromises.writeFile(path.join(piDir, "settings.json"), `${JSON.stringify(cleanSettings, null, 2)}\n`, {
     mode: 0o600,
   })
 }
@@ -248,7 +265,7 @@ export const runStoryEval = async (story: StorySpec, opts: EvalCliOptions): Prom
       "utf8",
     )
 
-    await setupIsolatedPiDir(piDir, opts.provider, opts.model)
+    await setupCleanPiDir(piDir, opts.provider, opts.model)
     const setupRes = await story.setup(worldRoot, extRoot, repoDir)
     teardownStory = setupRes.teardown
 
