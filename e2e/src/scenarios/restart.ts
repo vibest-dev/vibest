@@ -19,7 +19,7 @@ import {
   paneOf,
   alive,
   binary,
-  compiled,
+  checkout,
   expect,
   expectFacts,
   harnesses,
@@ -52,10 +52,10 @@ const ensureRuntime = (args: ReadonlyArray<string>): ReadonlyArray<string> => {
 
 export const oldInstall = async (w: World, name: string) => {
   const old = path.join(w.root, `${name}-old`)
-  await fs.mkdir(path.join(old, "bin"), { recursive: true })
-  await fs.copyFile(compiled, path.join(old, "bin", "vibest"))
-  await fs.chmod(path.join(old, "bin", "vibest"), 0o755)
-  await fs.cp(harnesses, path.join(old, "harnesses"), { recursive: true })
+  const oldBin = path.join(old, "bin", "vibest")
+  const oldHarnesses = path.join(old, "harnesses")
+  await fs.mkdir(path.dirname(oldBin), { recursive: true })
+  await fs.cp(harnesses, oldHarnesses, { recursive: true })
 
   const patch = async (file: string, from: RegExp, to: string) => {
     const source = await fs.readFile(file, "utf8")
@@ -64,17 +64,36 @@ export const oldInstall = async (w: World, name: string) => {
     await fs.writeFile(file, patched)
   }
 
-  await patch(path.join(old, "harnesses", "pi", "extension.mjs"), /var VERSION = "[^"]+";/, `var VERSION = "${OLD}";`)
+  await patch(path.join(oldHarnesses, "pi", "extension.mjs"), /var VERSION = "[^"]+";/, `var VERSION = "${OLD}";`)
   await patch(
-    path.join(old, "harnesses", "claude", "hooks", "register.mjs"),
+    path.join(oldHarnesses, "claude", "hooks", "register.mjs"),
     /pluginVersion: "[^"]+"/,
     `pluginVersion: "${OLD}"`,
   )
+
+  const built = await w.run(path.join(checkout, "packages", "cli"), [
+    process.execPath,
+    "script/build.ts",
+    oldBin,
+    `bun-${process.platform}-${process.arch}`,
+    "--no-bytecode",
+    "--prebuilt-harnesses",
+    oldHarnesses,
+  ])
+
+  expect(built.code === 0, `oldInstall build exited ${built.code}: ${built.stdout}${built.stderr}`)
+  await fs.chmod(oldBin, 0o755)
+
+  if (process.platform === "darwin") {
+    const signed = await w.run(old, ["codesign", "--force", "-s", "-", oldBin])
+    expect(signed.code === 0, `codesign: ${signed.stdout}${signed.stderr}`)
+  }
+
   const bin = path.join(w.root, `${name}-bin`)
   await fs.mkdir(bin, { recursive: true })
   const wrapper = path.join(bin, "vibest")
   const point = (target: string) => fs.writeFile(wrapper, `#!/bin/sh\nexec '${target}' "$@"\n`, { mode: 0o755 })
-  await point(path.join(old, "bin", "vibest"))
+  await point(oldBin)
 
   return { old: OLD, wrapper, point, env: { PATH: `${bin}:${w.env().PATH}` } }
 }

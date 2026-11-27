@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import util from "node:util"
 
 import type { BunPlugin } from "bun"
 
@@ -30,23 +31,25 @@ const SIGNALS: ReadonlyArray<readonly [NodeJS.Signals, number]> = [
 
 const EXEC_ARGV = ["--smol", "--use-system-ca", "--no-warnings", "--"]
 
-export const prepareAssetsArchive = (harnessesDir?: string) => {
+export const prepareAssetsArchive = (harnessesDir?: string, prebuilt = false) => {
   const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-assets-"))
 
   try {
     const targetHarnessesDir = harnessesDir ?? path.join(stageDir, "harnesses")
 
-    const buildHarnesses = Bun.spawnSync(
-      [process.execPath, path.join(cliDir, "script/build-harnesses.ts"), targetHarnessesDir],
-      {
-        cwd: cliDir,
-        stdio: ["inherit", "inherit", "inherit"],
-      },
-    )
+    if (!prebuilt) {
+      const buildHarnesses = Bun.spawnSync(
+        [process.execPath, path.join(cliDir, "script/build-harnesses.ts"), targetHarnessesDir],
+        {
+          cwd: cliDir,
+          stdio: ["inherit", "inherit", "inherit"],
+        },
+      )
 
-    if (buildHarnesses.exitCode !== 0) {
-      fs.rmSync(stageDir, { recursive: true, force: true })
-      process.exit(buildHarnesses.exitCode)
+      if (buildHarnesses.exitCode !== 0) {
+        fs.rmSync(stageDir, { recursive: true, force: true })
+        process.exit(buildHarnesses.exitCode)
+      }
     }
 
     const archive = packDirectoryArchive([
@@ -188,9 +191,13 @@ const stopTempDaemon = (pgoHome: string) => {
 
 export const buildBinaries = async (
   jobs: ReadonlyArray<BuildJob>,
-  options: { readonly noBytecode?: boolean; readonly harnessesDir?: string } = {},
+  options: {
+    readonly noBytecode?: boolean
+    readonly harnessesDir?: string
+    readonly prebuiltHarnesses?: boolean
+  } = {},
 ): Promise<number> => {
-  const prepared = prepareAssetsArchive(options.harnessesDir)
+  const prepared = prepareAssetsArchive(options.harnessesDir, options.prebuiltHarnesses)
   const { archivePath } = prepared
 
   try {
@@ -325,10 +332,16 @@ export const buildBinaries = async (
 }
 
 if (import.meta.main) {
-  const rawArgs = process.argv.slice(2)
-  const noBytecode = rawArgs.includes("--no-bytecode")
-  const positional = rawArgs.filter((arg) => arg !== "--no-bytecode")
-  const [outfile = "dist/vibest", targetArg] = positional
+  const { values, positionals } = util.parseArgs({
+    args: process.argv.slice(2),
+    allowPositionals: true,
+    options: {
+      "no-bytecode": { type: "boolean", default: false },
+      "prebuilt-harnesses": { type: "string" },
+    },
+  })
+
+  const [outfile = "dist/vibest", targetArg] = positionals
   const matched = targetArg ? PLATFORM_TARGETS.find((t) => t.bunTarget === targetArg) : undefined
 
   if (targetArg && !matched) {
@@ -336,9 +349,14 @@ if (import.meta.main) {
     process.exit(1)
   }
 
+  const prebuiltHarnesses = values["prebuilt-harnesses"]
+    ? path.resolve(cliDir, values["prebuilt-harnesses"])
+    : undefined
+
   const exitCode = await buildBinaries([{ outfile, target: matched?.bunTarget }], {
-    noBytecode,
-    harnessesDir: path.join(cliDir, "harnesses"),
+    noBytecode: values["no-bytecode"],
+    harnessesDir: prebuiltHarnesses ?? path.join(cliDir, "harnesses"),
+    prebuiltHarnesses: prebuiltHarnesses !== undefined,
   })
 
   process.exit(exitCode)
