@@ -67,6 +67,11 @@ type Options = { cwd?: string; env?: NodeJS.ProcessEnv }
 
 const gateEnv = noCache ? { ...process.env, TURBO_FORCE: "true" } : process.env
 
+const writeAll = (stream: NodeJS.WriteStream, chunk: Buffer | string) =>
+  new Promise<void>((resolve) => {
+    stream.write(chunk, () => resolve())
+  })
+
 const run = (title: string, argv: ReadonlyArray<string>, options: Options = {}) =>
   new Promise<boolean>((resolve) => {
     const started = Date.now()
@@ -81,16 +86,21 @@ const run = (title: string, argv: ReadonlyArray<string>, options: Options = {}) 
     child.stdout.on("data", (b: Buffer) => out.push(b))
     child.stderr.on("data", (b: Buffer) => out.push(b))
 
-    const done = (ok: boolean, why: string) => {
-      console.log(`\n== verify: ${title} (${((Date.now() - started) / 1000).toFixed(1)} s)`)
-      process.stdout.write(Buffer.concat(out))
+    let settled = false
 
-      if (!ok) console.error(`\nverify: ${title} failed (${why})`)
+    const done = async (ok: boolean, why: string) => {
+      if (settled) return
+      settled = true
+
+      const header = Buffer.from(`\n== verify: ${title} (${((Date.now() - started) / 1000).toFixed(1)} s)\n`)
+      await writeAll(process.stdout, Buffer.concat([header, ...out]))
+
+      if (!ok) await writeAll(process.stderr, `\nverify: ${title} failed (${why})\n`)
       resolve(ok)
     }
 
-    child.on("error", (e) => done(false, e.message))
-    child.on("close", (code, signal) => done(code === 0, `exit ${code ?? signal}`))
+    child.on("error", (e) => void done(false, e.message))
+    child.on("close", (code, signal) => void done(code === 0, `exit ${code ?? signal}`))
   })
 
 const steps = async (list: ReadonlyArray<readonly [string, ReadonlyArray<string>, Options?]>) => {

@@ -498,6 +498,7 @@ describe("plugins: supervisor", () => {
           supervise(dir).pipe(Effect.provideService(FileSystem.FileSystem, pausingConfigReads(fs, config, pause))),
         )
 
+        yield* TestClock.withLive(eventually(service.settled, (ready) => ready, "initial plugins to settle"))
         assert.strictEqual((yield* TestClock.withLive(service.start(event))).model, "a1")
         const setups = count("setup:slow-scan-a")
         watchGate.hold = true

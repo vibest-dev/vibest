@@ -38,6 +38,10 @@
       "dependsOn": ["build"],
       "outputs": []
     },
+    "@vibest/platform-bun#test": {
+      "dependsOn": ["^typecheck", "@vibest/cli#build"],
+      "outputs": []
+    },
     "//#e2e": {
       "dependsOn": ["@vibest/cli#build"],
       "inputs": ["e2e/src/**"],
