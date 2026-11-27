@@ -23,6 +23,14 @@ describe("applyFrame", () => {
     expect(snap.sessions[0]).toMatchObject({ terminal: "t1r", branch: "main", machine: LOCAL })
   })
 
+  it("keeps only the checked-out branches of a multi-repository session", () => {
+    const multi = SESSION("idle").replace('"branch":"main"', '"branch":"web=fix/a\\napi=\\nweb2=main"')
+
+    expect(applyFrame(snap, wire(`{"result":[{"_tag":"Session","session":${multi}}]}`)).sessions[0]?.branch).toBe(
+      "fix/a, main",
+    )
+  })
+
   it("prefixes a remote session's terminal with its machine, and drops other runtimes", () => {
     const remote = SESSION("idle").replace('"parentId":null', '"parentId":null,"machine":"mac-mini"')
     const rex = SESSION("idle").replace('"runtime":"hc"', '"runtime":"rex"')

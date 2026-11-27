@@ -1,14 +1,19 @@
+import net from "net"
+
 import type { AsyncContext } from "gpui-kit"
 import { appHome, home, readTextFile } from "herdr"
-import { WebSocket, type WebSocketSocket } from "websocket"
 
+import { SseResponse } from "./sse.ts"
 import type { VibestState } from "./vibest-model.ts"
-import { applyFrame, emptyState, type WatchFrame } from "./watch-state.ts"
+import { applyFrame, emptyState } from "./watch-state.ts"
 
 const RETRY_MS = 3000
 
-interface DaemonInfo {
-  readonly ws?: { readonly url: string; readonly token: string; readonly protocol: number }
+interface Daemon {
+  readonly url: string
+  readonly port: number
+  readonly token: string
+  readonly protocol: number
 }
 
 interface FeedConfig {
@@ -22,19 +27,16 @@ const vibestHome = async (): Promise<string> => {
   return config.home ?? `${home()}/.vibest`
 }
 
-const frames = (text: string): WatchFrame[] =>
-  text.split("\n").flatMap((line) => (line.trim() === "" ? [] : [JSON.parse(line)]))
-
-const connect = async (): Promise<WebSocketSocket | null> => {
+const daemon = async (): Promise<Daemon | null> => {
   const text = await readTextFile(`${await vibestHome()}/vibestd.pid`)
-  const info: DaemonInfo = text === null ? {} : JSON.parse(text)
 
-  if (!info.ws) return null
-
-  return WebSocket.connect(info.ws.url, {
-    headers: { "vibest-token": info.ws.token, "vibest-protocol": String(info.ws.protocol) },
-  })
+  return text === null || text.trim() === "" ? null : (JSON.parse(text).http ?? null)
 }
+
+const auth = (d: Daemon) => ({
+  "vibest-token": d.token,
+  "vibest-protocol": String(d.protocol),
+})
 
 interface LaunchParams {
   readonly projectId: string
@@ -44,20 +46,29 @@ interface LaunchParams {
   readonly focus: boolean
 }
 
+const call = async <T>(method: string, path: string, body?: LaunchParams): Promise<T | null> => {
+  const d = await daemon()
+
+  if (!d) throw new Error("vibestd is not running")
+
+  const init: ShellFetchOptions = { method, headers: auth(d) }
+
+  if (body) {
+    init.headers = { ...auth(d), "content-type": "application/json" }
+    init.body = JSON.stringify(body)
+  }
+
+  const response = await fetch(`${d.url}${path}`, init)
+  const text = await response.text()
+  const reply: (T & { message?: string }) | null = text === "" ? null : JSON.parse(text)
+
+  if (!response.ok) throw new Error(reply?.message ?? `vibestd answered ${response.status}`)
+
+  return reply
+}
+
 export const launch = async (params: LaunchParams): Promise<void> => {
-  const socket = await connect()
-
-  if (!socket) throw new Error("vibestd is not running")
-
-  await socket.write(JSON.stringify({ jsonrpc: "2.0", id: "launch", method: "Launch", params }))
-
-  const reply = await socket.read()
-
-  socket.close()
-
-  const error = reply instanceof Uint8Array ? undefined : JSON.parse(reply).error
-
-  if (error) throw new Error(error.message ?? "vibestd could not start it")
+  await call<object>("POST", "/api/session/launch", params)
 }
 
 export interface HarnessChoice {
@@ -65,19 +76,8 @@ export interface HarnessChoice {
   readonly problem: string | null
 }
 
-export const harnesses = async (): Promise<HarnessChoice[]> => {
-  const socket = await connect()
-
-  if (!socket) return []
-
-  await socket.write(JSON.stringify({ jsonrpc: "2.0", id: "harnesses", method: "Harnesses.List", params: {} }))
-
-  const reply = await socket.read()
-
-  socket.close()
-
-  return reply instanceof Uint8Array ? [] : (JSON.parse(reply).result ?? [])
-}
+export const harnesses = async (): Promise<HarnessChoice[]> =>
+  (await call<HarnessChoice[]>("GET", "/api/harness")) ?? []
 
 export class VibestFeed {
   state: VibestState = emptyState("Connecting…")
@@ -95,22 +95,34 @@ export class VibestFeed {
   }
 
   async watch(cx: AsyncContext): Promise<void> {
-    const socket = await connect()
+    const d = await daemon()
 
-    if (!socket) return this.set(cx, emptyState("vibestd is not running or has no WebSocket"))
+    if (!d) return this.set(cx, emptyState("vibestd is not running"))
 
-    await socket.write(JSON.stringify({ jsonrpc: "2.0", id: "watch", method: "Watch", params: {} }))
+    const socket = await net.connect("127.0.0.1", d.port)
+    const sse = new SseResponse()
+    const headers = Object.entries(auth(d)).map(([k, v]) => `${k}: ${v}\r\n`)
 
-    for (;;) {
-      const message = await socket.read()
+    await socket.write(`GET /api/watch HTTP/1.0\r\naccept: text/event-stream\r\n${headers.join("")}\r\n`)
 
-      if (message instanceof Uint8Array) continue
+    try {
+      for (;;) {
+        const bytes = await socket.read()
 
-      const batch = frames(message)
+        if (bytes === null) {
+          if (sse.status !== 200) throw new Error(sse.refusal())
 
-      this.set(cx, batch.reduce(applyFrame, this.state))
+          return this.set(cx, { ...this.state, note: "vibestd ended the watch, reconnecting…" })
+        }
 
-      if (batch.some((frame) => frame.error)) return socket.close()
+        const frames = sse.push(bytes)
+
+        if (frames.length > 0) this.set(cx, frames.reduce(applyFrame, this.state))
+
+        if (frames.some((frame) => frame.error)) return
+      }
+    } finally {
+      socket.close()
     }
   }
 }

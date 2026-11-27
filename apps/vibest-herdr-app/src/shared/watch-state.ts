@@ -84,6 +84,13 @@ const herdrAddress = (t: WireTerminal | null, sessionMachine: string | undefined
   return machine === undefined || address.includes("/") ? address : `${machine}/${address}`
 }
 
+const branchOf = (git: WireSession["git"]): string =>
+  (git?.branch ?? "")
+    .split("\n")
+    .map((line) => line.split("=").at(-1) ?? "")
+    .filter((branch) => branch !== "")
+    .join(", ")
+
 const session = (s: WireSession): VibestSession => ({
   id: s.id,
   projectId: s.projectId,
@@ -93,7 +100,7 @@ const session = (s: WireSession): VibestSession => ({
   agent: s.agent,
   harness: s.harness,
   status: s.status,
-  branch: s.git?.branch ?? "",
+  branch: branchOf(s.git),
   terminal: herdrAddress(s.terminal, s.machine),
   lastActive: s.lastActive,
 })

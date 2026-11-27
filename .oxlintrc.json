@@ -133,6 +133,13 @@
       }
     },
     {
+      "files": ["apps/vibest-herdr-app/src/**"],
+      "rules": {
+        "unicorn/prefer-node-protocol": "off",
+        "vibest/node-import-style": "off"
+      }
+    },
+    {
       "files": ["**/test/**", "**/*.test.ts", "packages/testkit/src/**", "e2e/**"],
       "rules": {
         "typescript/consistent-type-assertions": "off"

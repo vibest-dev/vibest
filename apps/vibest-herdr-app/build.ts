@@ -19,7 +19,7 @@ for await (const entry of new Bun.Glob("mods/*/index.ts").scan(src)) {
     outdir: path.join(dist, mod),
     naming: "main.js",
     format: "esm",
-    target: "browser",
+    target: "node",
     external: ["gpui-kit", "gpui-base", "herdr", "websocket"],
   })
 
