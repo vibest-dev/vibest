@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { projectText, systemPrompt } from "@vibest/core/session/system-prompt"
+import { configuredMcpServers, projectText, systemPrompt } from "@vibest/core/session/system-prompt"
 import * as Platform from "@vibest/testkit/bun"
 import { tempDirectory } from "@vibest/testkit/directory"
 import { Deferred, Effect, Fiber, FileSystem, Path } from "effect"
@@ -65,7 +65,62 @@ describe("systemPrompt: the definition body first, then facts that name the chan
     assert.include(prompt, "MCP servers, the CodeMode JS sandbox, and background automations run through `vibest mcp`")
     assert.include(prompt, "and `vibest automation`")
     assert.include(prompt, "read the `mcp` skill when using them.")
+    assert.notInclude(prompt, "Configured MCP servers in this workspace:")
   })
+
+  it("lists configured MCP server names and types in Session facts when present", () => {
+    const prompt = facts({
+      mcpServers: [
+        { name: "context7", type: "remote" },
+        { name: "team_kb", type: "local" },
+      ],
+    })
+
+    assert.include(
+      prompt,
+      "Configured MCP servers in this workspace: context7 (remote), team_kb (local) (inspect tools with `vibest mcp list <server>` or `vibest mcp search <query>`; batch multi-tool calls with `vibest mcp exec`).",
+    )
+  })
+
+  it.effect("configuredMcpServers merges global mcp.json with project .mcp.json and skips disabled servers", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* tempDirectory("vibest-prompt-mcp-")
+      const home = path.join(root, "home")
+      const repo = path.join(root, "repo")
+      yield* fs.makeDirectory(home, { recursive: true })
+      yield* fs.makeDirectory(repo, { recursive: true })
+
+      yield* fs.writeFileString(
+        path.join(home, "mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            context7: { type: "remote", url: "https://mcp.context7.com/mcp" },
+            legacy_off: { type: "local", command: ["echo"], disabled: true },
+            overridden: { type: "local", command: ["echo"] },
+          },
+        }),
+      )
+
+      yield* fs.writeFileString(
+        path.join(repo, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            overridden: { type: "remote", url: "https://override.example.com/mcp" },
+            project_db: { type: "local", command: ["npx", "db-mcp"] },
+          },
+        }),
+      )
+
+      const servers = yield* configuredMcpServers(home, repo)
+      assert.deepStrictEqual(servers, [
+        { name: "context7", type: "remote" },
+        { name: "overridden", type: "remote" },
+        { name: "project_db", type: "local" },
+      ])
+    }).pipe(Effect.provide(Platform.services)),
+  )
 })
 
 describe("projectText: preferences.md and the curated memories/MEMORY.md index injected into every session's system prompt", () => {

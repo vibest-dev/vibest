@@ -43,7 +43,14 @@ import { Executions, notStartedMessage, Pickup } from "./executions.ts"
 import { SessionLocks, terminalLock } from "./locks.ts"
 import { isUsageLimitError } from "./replies.ts"
 import { SessionStore } from "./store.ts"
-import { projectText, removeSystemPrompt, systemPrompt, withTask, writeSystemPrompt } from "./system-prompt.ts"
+import {
+  configuredMcpServers,
+  projectText,
+  removeSystemPrompt,
+  systemPrompt,
+  withTask,
+  writeSystemPrompt,
+} from "./system-prompt.ts"
 
 export * as Placement from "./placement.ts"
 
@@ -150,6 +157,7 @@ export const make = Effect.gen(function* () {
       projectDir: layout.project(session.projectId),
       scratchpadDir: layout.scratchpadDir(session.projectId),
       agents: agents.all,
+      mcpServers: yield* configuredMcpServers(layout.home, directory || projectDirectory || undefined),
       ...(yield* projectText(layout.project(session.projectId))),
     })
   }, provided)

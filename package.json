@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "e2e": "bun e2e/src/main.ts",
+    "eval": "bun tools/eval/src/main.ts",
     "verify": "bun tools/verify/src/verify.ts",
     "build": "turbo run build",
     "lint": "oxlint .",
