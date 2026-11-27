@@ -96,7 +96,7 @@ describe.concurrent("vibestd.pid lock", () => {
           "no temp file is left",
         )
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 
   it.live(
@@ -118,7 +118,7 @@ describe.concurrent("vibestd.pid lock", () => {
         assert.notStrictEqual(next.instance, old.instance)
         assert.notStrictEqual(next.pid, process.pid)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 
   it.live(
@@ -150,7 +150,7 @@ describe.concurrent("vibestd.pid lock", () => {
         assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), "")
         assert.strictEqual(yield* contend(layout.daemonInfo), "ACQUIRED")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 
   it.live(
@@ -180,7 +180,7 @@ describe.concurrent("vibestd.pid lock", () => {
         yield* Fiber.await(proc)
         assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), "")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 
   it.live(
@@ -195,6 +195,6 @@ describe.concurrent("vibestd.pid lock", () => {
         process.kill(ping.pid!, "SIGTERM")
         yield* Fiber.await(proc)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 })

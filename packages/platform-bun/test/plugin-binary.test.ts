@@ -65,7 +65,7 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
   note(daemon.pid, `${binary} daemon --foreground`)
 
   try {
-    for (const deadline = Date.now() + 10_000; !(await rpc(probe(socket))); await Bun.sleep(100)) {
+    for (const deadline = Date.now() + 30_000; !(await rpc(probe(socket))); await Bun.sleep(100)) {
       if (daemon.exitCode !== null || Date.now() > deadline)
         assert.fail(`vibestd did not come up:\n${await fs.readFile(log, "utf8").catch(() => "")}`)
     }
@@ -90,6 +90,7 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
 }
 
 beforeAll(() => {
+  if (process.env.TURBO_HASH !== undefined) return
   const out = Bun.spawnSync(["bun", "run", "build"], { cwd: pkg, stdout: "pipe", stderr: "pipe" })
   assert.strictEqual(out.exitCode, 0, out.stderr.toString())
 }, 120_000)

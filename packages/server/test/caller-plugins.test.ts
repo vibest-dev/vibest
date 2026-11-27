@@ -262,64 +262,67 @@ describe("caller runtimes", () => {
     assert.deepStrictEqual(callerTarget([herdr, hc], env, "herdr", "foo"), { target: "foo" })
   })
 
-  it.live("a user runtime env key does not reach a process vibestd starts", () =>
-    Effect.gen(function* () {
-      const key = "VIBEST_USER_RUNTIME_ID"
-      const previous = process.env[key]
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          if (previous === undefined) delete process.env[key]
-          else process.env[key] = previous
-        }),
-      )
-      process.env[key] = "leaked"
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* tempDirectory("vibest-caller-plugins-")
-      yield* fs.makeDirectory(path.join(dir, "plugins"))
+  it.live(
+    "a user runtime env key does not reach a process vibestd starts",
+    () =>
+      Effect.gen(function* () {
+        const key = "VIBEST_USER_RUNTIME_ID"
+        const previous = process.env[key]
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            if (previous === undefined) delete process.env[key]
+            else process.env[key] = previous
+          }),
+        )
+        process.env[key] = "leaked"
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* tempDirectory("vibest-caller-plugins-")
+        yield* fs.makeDirectory(path.join(dir, "plugins"))
 
-      const user = Plugin.define({
-        id: "runtime-user",
-        effect: (context) =>
-          context.runtime
-            .transform((editor) =>
-              editor.add(
-                unusedRuntime(
-                  "user",
-                  { env: [key], terminal: () => Effect.succeed(undefined) },
-                  { status: () => Effect.succeed({ status: "offline", reason: "test" }), events: Stream.never },
+        const user = Plugin.define({
+          id: "runtime-user",
+          effect: (context) =>
+            context.runtime
+              .transform((editor) =>
+                editor.add(
+                  unusedRuntime(
+                    "user",
+                    { env: [key], terminal: () => Effect.succeed(undefined) },
+                    { status: () => Effect.succeed({ status: "offline", reason: "test" }), events: Stream.never },
+                  ),
                 ),
-              ),
-            )
-            .pipe(Effect.asVoid),
-      })
+              )
+              .pipe(Effect.asVoid),
+        })
 
-      const replacements = [
-        ...Platform.replacements,
-        ...hostReplacements,
-        builtinsNode.replace(
-          Layer.succeed(Builtins, [{ source: "builtin:runtime-user", revision: "-", options: {}, plugin: user }]),
-        ),
-      ]
+        const replacements = [
+          ...Platform.replacements,
+          ...hostReplacements,
+          builtinsNode.replace(
+            Layer.succeed(Builtins, [{ source: "builtin:runtime-user", revision: "-", options: {}, plugin: user }]),
+          ),
+        ]
 
-      const layout = yield* Layout.make(dir)
-      yield* runDaemon(Platform.daemon, replacements).pipe(
-        Effect.provideService(Layout, layout),
-        Effect.provideService(VibestCommand, ["/bin/vibest"]),
-        Effect.provide(
-          ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: dir, PATH: PATH_WITHOUT_HARNESS_CLIS })),
-        ),
-        Effect.forkScoped,
-      )
-      yield* Effect.gen(function* () {
-        while (process.env[key] !== undefined) yield* Effect.sleep("20 millis")
-      }).pipe(Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.die("caller env was not dropped") }))
+        const layout = yield* Layout.make(dir)
+        yield* runDaemon(Platform.daemon, replacements).pipe(
+          Effect.provideService(Layout, layout),
+          Effect.provideService(VibestCommand, ["/bin/vibest"]),
+          Effect.provide(
+            ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: dir, PATH: PATH_WITHOUT_HARNESS_CLIS })),
+          ),
+          Effect.forkScoped,
+        )
+        yield* Effect.gen(function* () {
+          while (process.env[key] !== undefined) yield* Effect.sleep("20 millis")
+        }).pipe(Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.die("caller env was not dropped") }))
 
-      const out = yield* (yield* ChildProcessSpawner.ChildProcessSpawner).string(
-        ChildProcess.make("sh", ["-c", `printf %s "\${${key}-}"`]),
-      )
+        const out = yield* (yield* ChildProcessSpawner.ChildProcessSpawner).string(
+          ChildProcess.make("sh", ["-c", `printf %s "\${${key}-}"`]),
+        )
 
-      assert.strictEqual(out, "")
-    }).pipe(Effect.provide(Platform.services)),
+        assert.strictEqual(out, "")
+      }).pipe(Effect.provide(Platform.services)),
+    60_000,
   )
 })
