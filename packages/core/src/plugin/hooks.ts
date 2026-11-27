@@ -1,10 +1,9 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import type { Change, TraceEntry } from "@vibest/schema/plugin"
+import { Bounded } from "@vibest/util/bounded"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Predicate, type Scope } from "effect"
-
-import { Bounded } from "../effect/bounded.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 
 export * as Hooks from "./hooks.ts"
 

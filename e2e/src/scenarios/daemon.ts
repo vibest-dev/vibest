@@ -1,8 +1,8 @@
 import fs from "node:fs/promises"
-import net from "node:net"
+import http from "node:http"
 import path from "node:path"
 
-import { Predicate, type Schema } from "effect"
+import { Predicate } from "effect"
 
 import { LOG_KEEP_BYTES, LOG_MAX_BYTES } from "../../../packages/platform-bun/src/log-file.ts"
 import { PROTOCOL } from "../../../packages/schema/src/version.ts"
@@ -16,22 +16,42 @@ type Status = { daemon: { status: string; pid?: number | null; protocol?: number
 const status = (w: World) => w.json<Status>(["status"])
 const running = async (w: World) => (await status(w)).daemon
 
-const raw = (w: World, request: Schema.JsonObject) =>
-  new Promise<Schema.JsonObject>((resolve, reject) => {
-    const socket = net.connect(path.join(w.vibestHome, "vibest.sock"))
-    let buffer = ""
-    socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`))
-    socket.on("data", (chunk) => {
-      buffer += chunk.toString()
-      const line = buffer.split("\n")[0]
+const raw = (
+  w: World,
+  request: {
+    readonly method: string
+    readonly path: string
+    readonly headers?: Record<string, string>
+    readonly body?: string
+  },
+) =>
+  new Promise<{ readonly status: number; readonly body: string }>((resolve, reject) => {
+    const req = http.request(
+      {
+        socketPath: path.join(w.vibestHome, "vibest.sock"),
+        method: request.method,
+        path: request.path,
+        headers: request.headers,
+      },
+      (res) => {
+        let body = ""
+        res.on("data", (chunk: Buffer) => {
+          body += chunk.toString()
+        })
+        res.on("end", () => {
+          resolve({ status: res.statusCode ?? 0, body })
+        })
+      },
+    )
 
-      if (buffer.includes("\n") && line) {
-        socket.destroy()
-        resolve(JSON.parse(line) as Schema.JsonObject)
-      }
+    req.on("error", reject)
+    req.setTimeout(5_000, () => {
+      req.destroy()
+      reject(new Error("no reply in 5 s"))
     })
-    socket.on("error", reject)
-    setTimeout(() => (socket.destroy(), reject(new Error("no reply in 5 s"))), 5_000)
+
+    if (request.body !== undefined) req.write(request.body)
+    req.end()
   })
 
 const hungTeardownPlugin = `import { Plugin } from "@vibest/plugin/effect"
@@ -69,7 +89,13 @@ const exitsAtDeadline = async <A>(w: World, pid: number, stop: () => Promise<A>)
   )
 }
 
-type Printed = { aggregate: string; seq: number; at: number; type: string; data: unknown }
+type Printed = {
+  id: string
+  type: string
+  created: number
+  durable: { aggregateId: string; seq: number; version: number }
+  data: unknown
+}
 
 const printed = (stdout: string) =>
   stdout
@@ -144,18 +170,18 @@ const checks: ReadonlyArray<Check> = [
 
         await exitsAtDeadline(w, pid, async () => {
           const reply = await raw(w, {
-            jsonrpc: "2.0",
-            id: "1",
-            method: "Daemon.Stop",
-            params: { instance: info.instance },
-            headers: [
-              ["vibest-protocol", String(PROTOCOL)],
-              ["vibest-caller", "cli"],
-              ["vibest-repository", w.repository],
-            ],
+            method: "POST",
+            path: "/api/daemon/stop",
+            headers: {
+              "content-type": "application/json",
+              "vibest-protocol": String(PROTOCOL),
+              "vibest-caller": "cli",
+              "vibest-repository": w.repository,
+            },
+            body: JSON.stringify({ instance: info.instance }),
           })
 
-          expect(!("error" in reply), `Daemon.Stop was refused: ${JSON.stringify(reply)}`)
+          expect(reply.status === 200, `daemon.stop was refused: ${JSON.stringify(reply)}`)
         })
       }
 
@@ -178,16 +204,14 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       await w.ok(["daemon"])
 
-      for (const headers of [undefined, [["vibest-protocol", "0"]]]) {
+      for (const headers of [undefined, { "vibest-protocol": "0" }]) {
         const reply = await raw(w, {
-          jsonrpc: "2.0",
-          id: "1",
-          method: "List",
-          params: {},
+          method: "GET",
+          path: "/api/session",
           ...(headers && { headers }),
         })
 
-        expect(JSON.stringify(reply).includes("ProtocolRejected"), `not refused: ${JSON.stringify(reply)}`)
+        expect(reply.status === 409 && reply.body.includes("ProtocolRejected"), `not refused: ${JSON.stringify(reply)}`)
       }
 
       expect((await running(w)).status === "running", "vibestd stopped answering")
@@ -221,33 +245,38 @@ const checks: ReadonlyArray<Check> = [
         const recorded = factsOf(w, sub)
         expect(
           own.map((f) => f.type).join() === recorded.join() &&
-            own.every((f, i) => f.aggregate === sub && f.seq === i + 1),
-          `events --session printed ${own.map((f) => `${f.seq} ${f.type}`).join(", ")}, not ${recorded.join(", ")}`,
+            own.every((f, i) => f.durable.aggregateId === sub && f.durable.seq === i + 1),
+          `events --session printed ${own.map((f) => `${f.durable.seq} ${f.type}`).join(", ")}, not ${recorded.join(", ")}`,
         )
         const all = printed((await events()).stdout)
         const rising = new Map<string, number>()
 
         for (const f of all) {
-          expect(f.seq > (rising.get(f.aggregate) ?? 0), `${f.aggregate} seq ${f.seq} did not rise in the whole log`)
-          rising.set(f.aggregate, f.seq)
+          expect(
+            f.durable.seq > (rising.get(f.durable.aggregateId) ?? 0),
+            `${f.durable.aggregateId} seq ${f.durable.seq} did not rise in the whole log`,
+          )
+          rising.set(f.durable.aggregateId, f.durable.seq)
         }
 
         expect(
-          own.every((f) => all.some((a) => a.aggregate === sub && a.seq === f.seq && a.type === f.type)),
+          own.every((f) =>
+            all.some((a) => a.durable.aggregateId === sub && a.durable.seq === f.durable.seq && a.type === f.type),
+          ),
           "the whole log lacks facts of the session",
         )
 
         const cut = Math.max(1, Math.floor(own.length / 2))
         const rest = printed((await events("--session", sub, "--after", String(cut))).stdout)
         expect(
-          rest.map((f) => f.seq).join() ===
+          rest.map((f) => f.durable.seq).join() ===
             own
               .slice(cut)
-              .map((f) => f.seq)
+              .map((f) => f.durable.seq)
               .join(),
-          `--after ${cut} printed seqs ${rest.map((f) => f.seq).join(", ")}, not ${own
+          `--after ${cut} printed seqs ${rest.map((f) => f.durable.seq).join(", ")}, not ${own
             .slice(cut)
-            .map((f) => f.seq)
+            .map((f) => f.durable.seq)
             .join(", ")}`,
         )
         const orphan = await events("--after", "1")
@@ -283,12 +312,14 @@ const checks: ReadonlyArray<Check> = [
           () =>
             lines().filter(
               (f) =>
-                f.type === "execution.succeeded" || f.type === "execution.failed" || f.type === "execution.interrupted",
+                f.type === "session.execution.succeeded" ||
+                f.type === "session.execution.failed" ||
+                f.type === "session.execution.interrupted",
             ).length >= 2,
           60_000,
         )
         const followed = lines()
-        const seqs = followed.map((f) => f.seq)
+        const seqs = followed.map((f) => f.durable.seq)
         expect(
           new Set(seqs).size === seqs.length && seqs.every((seq, i) => seq === cut + i + 1),
           `follow printed seqs ${seqs.join(", ")}`,

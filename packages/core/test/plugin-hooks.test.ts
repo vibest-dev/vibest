@@ -1,13 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Agents } from "@vibest/core/agents"
+import { Agents } from "@vibest/core/agent/registry"
 import { type Candidate, makeHost } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
 import { type SessionStartBefore, Plugin } from "@vibest/plugin/effect"
+import { memoryPluginHost } from "@vibest/testkit/bun"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "@vibest/testkit/harnesses"
 import { Duration, Deferred, Effect, Fiber, type Schema } from "effect"
 import { TestClock } from "effect/testing"
-
-import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { memoryPluginHost } from "./platform/bun.ts"
 
 const candidate = (
   source: string,

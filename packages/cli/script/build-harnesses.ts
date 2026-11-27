@@ -1,0 +1,38 @@
+import fs from "node:fs"
+import path from "node:path"
+
+const app = path.dirname(import.meta.dir)
+const outdir = path.resolve(process.argv[2] ?? path.join(app, "harnesses"))
+const packagesDir = path.join(app, "..")
+
+fs.rmSync(outdir, { recursive: true, force: true })
+
+for (const harness of ["pi", "claude", "cursor", "agy"]) {
+  const harnessDir = path.join(packagesDir, `harness-${harness}`)
+
+  const { exitCode } = Bun.spawnSync(
+    [process.execPath, path.join(harnessDir, "script/build.ts"), path.join(outdir, harness)],
+    {
+      stdio: ["inherit", "inherit", "inherit"],
+    },
+  )
+
+  if (exitCode !== 0) process.exit(exitCode)
+  const skills = path.join(harnessDir, harness === "pi" ? "src/skills" : "skills")
+  const skillsOut = path.join(outdir, harness, harness === "agy" ? ".agents/plugins/vibest/skills" : "skills")
+
+  const names = fs
+    .readdirSync(skills, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(skills, entry.name, "SKILL.md")))
+    .map((entry) => entry.name)
+    .sort()
+
+  if (names.length === 0) throw new Error(`no skills in ${skills}`)
+
+  for (const name of names) {
+    fs.cpSync(path.join(skills, name), path.join(skillsOut, name), {
+      recursive: true,
+      dereference: true,
+    })
+  }
+}

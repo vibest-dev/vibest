@@ -3,9 +3,9 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import { detectPlatformTarget, PLATFORM_TARGETS } from "@vibest/cli/platform-target"
 import { Predicate, Schema } from "effect"
 
-const root = path.resolve(import.meta.dirname, "../../..")
 const [version, flag, flagDir] = process.argv.slice(2)
 
 if (!version || flag !== "--from" || !flagDir) {
@@ -35,9 +35,11 @@ const run = (argv: ReadonlyArray<string>, cwd: string, env: NodeJS.ProcessEnv = 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-release-"))
 const packs = path.resolve(flagDir)
 
-const published: Array<string> = JSON.parse(run(["pnpm", "-r", "ls", "--json", "--depth", "-1"], root))
-  .filter((p: { private?: boolean }) => !p.private)
-  .map((p: { name: string }) => p.name)
+const published: ReadonlyArray<string> = [
+  "@vibest/cli",
+  "@vibest/plugin",
+  ...PLATFORM_TARGETS.map((t) => `@vibest/cli-${t.id}`),
+]
 
 const Dependencies = Schema.optional(Schema.Record(Schema.String, Schema.String))
 
@@ -48,6 +50,7 @@ const Manifest = Schema.Struct({
   bin: Schema.optional(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.String)])),
   main: Schema.optional(Schema.String),
   exports: Schema.optional(Schema.Json),
+  scripts: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   dependencies: Dependencies,
   optionalDependencies: Dependencies,
   peerDependencies: Dependencies,
@@ -90,21 +93,35 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
   for (const f of targets(manifest.exports)) has(f, "exports target")
 
   if (manifest.name === "@vibest/cli") {
+    has("bin/vibest", "launcher script")
+
+    if (manifest.scripts?.postinstall) errors.push("@vibest/cli: must not declare a postinstall script")
+
+    const expectedOpt = new Set(PLATFORM_TARGETS.map((t) => `@vibest/cli-${t.id}`))
+    const actualOpt = new Set(Object.keys(manifest.optionalDependencies ?? {}))
+
+    for (const dep of expectedOpt)
+      if (!actualOpt.has(dep)) errors.push(`@vibest/cli: missing optionalDependency ${dep}`)
+
+    for (const dep of actualOpt)
+      if (!expectedOpt.has(dep)) errors.push(`@vibest/cli: unexpected optionalDependency ${dep}`)
+  }
+
+  if (manifest.name === "@vibest/plugin") {
     for (const f of [
-      "harnesses/claude/.claude-plugin/plugin.json",
-      "harnesses/claude/hooks/hooks.json",
-      "harnesses/cursor/.cursor-plugin/plugin.json",
-      "harnesses/cursor/hooks/hooks.json",
-      "harnesses/agy/.agents/plugins/vibest/hooks.json",
-      "harnesses/agy/.agents/plugins/vibest/hook.sh",
-      "harnesses/pi/extension.mjs",
-      "harnesses/pi/presentation.mjs",
-      "harnesses/claude/skills/*/SKILL.md",
-      "harnesses/cursor/skills/*/SKILL.md",
-      "harnesses/agy/.agents/plugins/vibest/skills/*/SKILL.md",
-      "harnesses/pi/skills/*/SKILL.md",
+      "README.md",
+      "dist/promise/index.js",
+      "dist/promise/index.d.ts",
+      "dist/effect/index.js",
+      "dist/effect/index.d.ts",
     ])
-      has(f, "harness plugin file")
+      has(f, "compiled plugin artifact")
+
+    if (files.includes("dist/effect/launch.d.ts"))
+      errors.push("@vibest/plugin: internal dist/effect/launch.d.ts must not be published")
+
+    if (manifest.dependencies && "@vibest/schema" in manifest.dependencies)
+      errors.push("@vibest/plugin: packed dependencies must not include private @vibest/schema")
   }
 }
 
@@ -119,7 +136,7 @@ if (unpublished.length) errors.push(`${packs} holds tarballs of ${unpublished.jo
 if (tarballs.size !== fs.readdirSync(packs).filter((f) => f.endsWith(".tgz")).length)
   errors.push(`${packs} holds more than one tarball of a package`)
 
-const target = `${process.platform}-${process.arch}`
+const target = detectPlatformTarget()
 const platform = tarballs.get(`@vibest/cli-${target}`)
 const cli = tarballs.get("@vibest/cli")
 
@@ -136,12 +153,21 @@ else {
     npm_config_cache: path.join(dir, "npm-cache"),
   }
 
-  console.log(`== npm install @vibest/cli and @vibest/cli-${target}`)
-  run(["npm", "install", "--global", "--no-audit", "--no-fund", "--prefix", prefix, cli, platform], dir, env)
-  const out = run([path.join(prefix, "bin", "vibest"), "--version"], home, env).trim()
-  console.log(`vibest --version: ${out}`)
+  console.log(`== npm install --ignore-scripts @vibest/cli and @vibest/cli-${target}`)
+  run(
+    ["npm", "install", "--global", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", prefix, cli, platform],
+    dir,
+    env,
+  )
+  const first = run([path.join(prefix, "bin", "vibest"), "--version"], home, env).trim()
+  const second = run([path.join(prefix, "bin", "vibest"), "--version"], home, env).trim()
+  console.log(`vibest --version: ${first} (2nd: ${second})`)
 
-  if (out !== `vibest v${version}`) errors.push(`installed vibest --version printed "${out}", not "vibest v${version}"`)
+  if (first !== `vibest v${version}`)
+    errors.push(`installed vibest --version (1st) printed "${first}", not "vibest v${version}"`)
+
+  if (second !== `vibest v${version}`)
+    errors.push(`installed vibest --version (2nd) printed "${second}", not "vibest v${version}"`)
 }
 
 {

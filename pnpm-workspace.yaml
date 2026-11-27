@@ -1,11 +1,10 @@
 packages:
   - apps/*
   - packages/*
-  - packages/integration/*
-  - packages/plugins/*
   - tools/tsconfig
   - tools/verify
   - tools/bench
+  - tools/eval
   - e2e
 catalog:
   # Effect v4 moves in lockstep: every `effect` / `@effect/*` package on one version, or two runtimes meet. Exact pins.
@@ -22,6 +21,6 @@ overrides:
 # pnpm 11+ waits 24h before installing a new release by default; our own just-published packages would be blocked.
 minimumReleaseAge: 0
 allowBuilds:
-  # Transitive dependencies of @earendil-works/pi-coding-agent, which @vibest/pi only uses for types: their scripts are not needed.
+  # Transitive dependencies of @earendil-works/pi-coding-agent, which @vibest/harness-pi only uses for types: their scripts are not needed.
   "@google/genai": false
   protobufjs: false

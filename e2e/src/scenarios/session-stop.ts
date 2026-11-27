@@ -75,7 +75,7 @@ const checks: ReadonlyArray<Check> = [
 
         const ended = rows<{ data: string }>(
           w,
-          "SELECT data FROM event WHERE aggregate = ? AND type = 'process.ended' ORDER BY seq",
+          "SELECT data FROM event WHERE aggregate_id = ? AND type = 'process.ended.1' ORDER BY seq",
           id,
         ).map((r) => JSON.parse(r.data) as { reason: string; by?: { type?: string; session?: string } })
 

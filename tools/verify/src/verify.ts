@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { Schema } from "effect"
+import { detectPlatformTarget } from "@vibest/cli/platform-target"
 
 const root = path.resolve(import.meta.dirname, "../../..")
 const noCache = process.argv.includes("--no-cache")
@@ -28,6 +28,7 @@ const valueOf = (flag: string, what: string) => {
 const elsewhere = valueOf("--elsewhere", "check ids, comma-separated")
 const keepArchive = valueOf("--keep-archive", "a directory")
 const keptPacks = valueOf("--packs", "a directory")
+const excludeArchive = valueOf("--exclude-archive", "target ids, comma-separated")
 const STAGES = ["build", "typecheck", "test", "archive", "pack", "e2e"]
 const stages = valueOf("--stage", `stage names from ${STAGES.join(", ")}, comma-separated`)?.split(",") ?? STAGES
 const legs = valueOf("--leg", "curl, npm or curl,npm")?.split(",") ?? ["curl", "npm"]
@@ -66,6 +67,11 @@ type Options = { cwd?: string; env?: NodeJS.ProcessEnv }
 
 const gateEnv = noCache ? { ...process.env, TURBO_FORCE: "true" } : process.env
 
+const writeAll = (stream: NodeJS.WriteStream, chunk: Buffer | string) =>
+  new Promise<void>((resolve) => {
+    stream.write(chunk, () => resolve())
+  })
+
 const run = (title: string, argv: ReadonlyArray<string>, options: Options = {}) =>
   new Promise<boolean>((resolve) => {
     const started = Date.now()
@@ -80,16 +86,21 @@ const run = (title: string, argv: ReadonlyArray<string>, options: Options = {}) 
     child.stdout.on("data", (b: Buffer) => out.push(b))
     child.stderr.on("data", (b: Buffer) => out.push(b))
 
-    const done = (ok: boolean, why: string) => {
-      console.log(`\n== verify: ${title} (${((Date.now() - started) / 1000).toFixed(1)} s)`)
-      process.stdout.write(Buffer.concat(out))
+    let settled = false
 
-      if (!ok) console.error(`\nverify: ${title} failed (${why})`)
+    const done = async (ok: boolean, why: string) => {
+      if (settled) return
+      settled = true
+
+      const header = Buffer.from(`\n== verify: ${title} (${((Date.now() - started) / 1000).toFixed(1)} s)\n`)
+      await writeAll(process.stdout, Buffer.concat([header, ...out]))
+
+      if (!ok) await writeAll(process.stderr, `\nverify: ${title} failed (${why})\n`)
       resolve(ok)
     }
 
-    child.on("error", (e) => done(false, e.message))
-    child.on("close", (code, signal) => done(code === 0, `exit ${code ?? signal}`))
+    child.on("error", (e) => void done(false, e.message))
+    child.on("close", (code, signal) => void done(code === 0, `exit ${code ?? signal}`))
   })
 
 const steps = async (list: ReadonlyArray<readonly [string, ReadonlyArray<string>, Options?]>) => {
@@ -102,14 +113,7 @@ const all = async (legs: ReadonlyArray<Promise<boolean>>) => {
   if (!(await Promise.all(legs)).every(Boolean)) process.exit(1)
 }
 
-const target = `${process.platform}-${process.arch}`
-const platform = path.join(root, "packages", `cli-${target}`)
-
-if (!fs.existsSync(platform)) {
-  console.error(`verify: no platform package for ${target}`)
-  process.exit(1)
-}
-
+const target = detectPlatformTarget()
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-verify-"))
 const release = keepArchive ? path.resolve(keepArchive) : path.join(dir, "release")
 const curl = path.join(dir, "curl")
@@ -127,31 +131,22 @@ const tarballsIn = (folder: string) =>
 const packedName = (tarball: string): string =>
   JSON.parse(childProcess.execFileSync("tar", ["-xzOf", tarball, "package/package.json"], { encoding: "utf8" })).name
 
-const decodeWorkspace = Schema.decodeUnknownSync(
-  Schema.fromJsonString(Schema.Array(Schema.Struct({ path: Schema.String, private: Schema.optional(Schema.Boolean) }))),
-)
-
 const alreadyPacked = tarballsIn(packs).length > 0
-
-const toPack = keptPacks
-  ? decodeWorkspace(
-      childProcess.execFileSync("pnpm", ["-r", "ls", "--json", "--depth", "-1"], { cwd: root, encoding: "utf8" }),
-    )
-      .filter((p) => !p.private)
-      .map((p) => p.path)
-  : [path.join(root, "packages/cli"), platform]
+const releasePack = keptPacks !== undefined && has("pack") && !alreadyPacked
+const packAlsoBuildsArchives = releasePack && has("archive") && !curlLeg
 
 type Step = readonly [string, ReadonlyArray<string>, Options?]
 
-const archiveSteps: Array<Step> = has("archive")
-  ? [
-      [
-        "build the release archive",
-        ["bun", "scripts/build-archive.ts", target, release],
-        { cwd: path.join(root, "packages/cli") },
-      ],
-    ]
-  : []
+const archiveSteps: Array<Step> =
+  has("archive") && !packAlsoBuildsArchives
+    ? [
+        [
+          "build the release archive",
+          ["bun", "script/build-archive.ts", target, release],
+          { cwd: path.join(root, "packages/cli") },
+        ],
+      ]
+    : []
 
 const curlSteps: Array<Step> = curlLeg
   ? [
@@ -182,12 +177,27 @@ await all([
   ...(only.length === 0 && has("test") ? [run("test", ["pnpm", "run", "test"], { env: gateEnv })] : []),
   steps([...archiveSteps, ...curlSteps]),
   (async () => {
-    if (has("pack") && !alreadyPacked)
-      for (const pkg of toPack)
-        if (
-          !(await run(`pack ${path.relative(root, pkg)}`, ["pnpm", "pack", "--pack-destination", packs], { cwd: pkg }))
-        )
-          return false
+    if (has("pack") && !alreadyPacked) {
+      const cliPackArgs = [
+        "bun",
+        "script/pack.ts",
+        "--packs",
+        packs,
+        ...(releasePack ? ["--all"] : ["--target", target]),
+        ...(packAlsoBuildsArchives ? ["--archives", release] : []),
+        ...(excludeArchive ? ["--exclude-archive", excludeArchive] : []),
+      ]
+
+      if (!(await run("pack @vibest/cli", cliPackArgs, { cwd: path.join(root, "packages/cli") }))) return false
+
+      if (
+        releasePack &&
+        !(await run("pack @vibest/plugin", ["bun", "script/pack.ts", "--packs", packs], {
+          cwd: path.join(root, "packages/plugin"),
+        }))
+      )
+        return false
+    }
 
     if (!npmLeg) return true
     const installed = new Set(["@vibest/cli", `@vibest/cli-${target}`])
@@ -202,6 +212,7 @@ await all([
     return run(alreadyPacked ? `npm install (from ${packs})` : "npm install", [
       "npm",
       "install",
+      "--ignore-scripts",
       "--no-audit",
       "--no-fund",
       "--prefix",

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { answerFolderTrust, typeAndEnter } from "../drivers/claude.ts"
 import {
@@ -18,7 +19,7 @@ import {
   paneOf,
   alive,
   binary,
-  compiled,
+  checkout,
   expect,
   expectFacts,
   harnesses,
@@ -51,10 +52,10 @@ const ensureRuntime = (args: ReadonlyArray<string>): ReadonlyArray<string> => {
 
 export const oldInstall = async (w: World, name: string) => {
   const old = path.join(w.root, `${name}-old`)
-  await fs.mkdir(path.join(old, "bin"), { recursive: true })
-  await fs.copyFile(compiled, path.join(old, "bin", "vibest"))
-  await fs.chmod(path.join(old, "bin", "vibest"), 0o755)
-  await fs.cp(harnesses, path.join(old, "harnesses"), { recursive: true })
+  const oldBin = path.join(old, "bin", "vibest")
+  const oldHarnesses = path.join(old, "harnesses")
+  await fs.mkdir(path.dirname(oldBin), { recursive: true })
+  await fs.cp(harnesses, oldHarnesses, { recursive: true })
 
   const patch = async (file: string, from: RegExp, to: string) => {
     const source = await fs.readFile(file, "utf8")
@@ -63,17 +64,36 @@ export const oldInstall = async (w: World, name: string) => {
     await fs.writeFile(file, patched)
   }
 
-  await patch(path.join(old, "harnesses", "pi", "extension.mjs"), /var VERSION = "[^"]+";/, `var VERSION = "${OLD}";`)
+  await patch(path.join(oldHarnesses, "pi", "extension.mjs"), /var VERSION = "[^"]+";/, `var VERSION = "${OLD}";`)
   await patch(
-    path.join(old, "harnesses", "claude", "hooks", "register.mjs"),
+    path.join(oldHarnesses, "claude", "hooks", "register.mjs"),
     /pluginVersion: "[^"]+"/,
     `pluginVersion: "${OLD}"`,
   )
+
+  const built = await w.run(path.join(checkout, "packages", "cli"), [
+    process.execPath,
+    "script/build.ts",
+    oldBin,
+    `bun-${process.platform}-${process.arch}`,
+    "--no-bytecode",
+    "--prebuilt-harnesses",
+    oldHarnesses,
+  ])
+
+  expect(built.code === 0, `oldInstall build exited ${built.code}: ${built.stdout}${built.stderr}`)
+  await fs.chmod(oldBin, 0o755)
+
+  if (process.platform === "darwin") {
+    const signed = await w.run(old, ["codesign", "--force", "-s", "-", oldBin])
+    expect(signed.code === 0, `codesign: ${signed.stdout}${signed.stderr}`)
+  }
+
   const bin = path.join(w.root, `${name}-bin`)
   await fs.mkdir(bin, { recursive: true })
   const wrapper = path.join(bin, "vibest")
   const point = (target: string) => fs.writeFile(wrapper, `#!/bin/sh\nexec '${target}' "$@"\n`, { mode: 0o755 })
-  await point(path.join(old, "bin", "vibest"))
+  await point(oldBin)
 
   return { old: OLD, wrapper, point, env: { PATH: `${bin}:${w.env().PATH}` } }
 }
@@ -268,16 +288,21 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(kept?.version === old, `the kept agent's integration: ${kept?.version}`)
 
-        const refused = await fetch("http://vibestd/inbox/take", {
-          unix: path.join(w.vibestHome, "vibest-http.sock"),
+        const refused = await fetch("http://vibestd/api/inbox/take", {
+          unix: path.join(w.vibestHome, "vibest.sock"),
           method: "POST",
-          headers: { "vibest-protocol": "2", "vibest-session-id": before.id },
+          headers: {
+            "vibest-protocol": "2",
+            "vibest-caller": "session",
+            "vibest-session-id": before.id,
+            "content-type": "application/json",
+          },
           body: "{}",
         } as RequestInit)
 
-        const answer = (await refused.json()) as { error?: string; action?: string }
+        const answer = (await refused.json()) as { message?: string; action?: string }
         expect(
-          refused.status === 409 && answer.action === "vibest update" && /vibest update/.test(answer.error ?? ""),
+          refused.status === 409 && answer.action === "vibest update" && /vibest update/.test(answer.message ?? ""),
           `an old protocol's call got ${refused.status} ${JSON.stringify(answer)}`,
         )
 
@@ -456,12 +481,40 @@ const checks: ReadonlyArray<Check> = [
         expect(processOf() !== oldProcess, `the restarted subagent is still process ${oldProcess}`)
         const LATE = "a late reply from the harness the restart replaced"
 
-        const late = await w.run(repo, [wrapper, "integration", "stop", "--harness", "pi"], {
-          env: { ...env, VIBEST_SESSION_ID: id, VIBEST_PROCESS: String(oldProcess) },
-          stdin: JSON.stringify({ type: "agent_settled", text: LATE, error: "", aborted: false }),
-        })
+        const projectId = rows<{ project_id: string }>(w, "SELECT project_id FROM session WHERE id = ?", id)[0]!
+          .project_id
 
-        expect(late.code === 0, `the old process's execution end was not taken: ${late.stderr}`)
+        const late = await w.run(repo, [
+          "curl",
+          "-sS",
+          "-w",
+          "\n%{http_code}",
+          "--unix-socket",
+          path.join(w.vibestHome, "vibest.sock"),
+          "-X",
+          "POST",
+          "-H",
+          `vibest-protocol: ${PROTOCOL}`,
+          "-H",
+          `vibest-session-id: ${id}`,
+          "-H",
+          `vibest-project-id: ${projectId}`,
+          "-H",
+          "vibest-harness: pi",
+          "-H",
+          `vibest-process: ${oldProcess}`,
+          "-H",
+          "content-type: text/plain",
+          "--data-binary",
+          JSON.stringify({ type: "agent_settled", text: LATE, error: "", aborted: false }),
+          "http://vibest/api/hook/pi/execution-end",
+        ])
+
+        const lateStatus = Number(late.stdout.slice(late.stdout.lastIndexOf("\n") + 1))
+        expect(
+          late.code === 0 && lateStatus === 204,
+          `the old process's execution end was not taken: ${late.stdout}${late.stderr}`,
+        )
         expect(
           rows(w, "SELECT id FROM execution WHERE session_id = ? AND reply = ?", id, LATE).length === 0,
           "the old process's late execution end was recorded",

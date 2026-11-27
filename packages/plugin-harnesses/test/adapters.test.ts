@@ -72,6 +72,27 @@ describe("HarnessAdapter", () => {
     )
   })
 
+  it("scratchpadDir is granted to claude via --settings and --allowedTools, and to cursor and agy via --add-dir", () => {
+    const scratchpadDir = "/tmp/vibest-501/0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b/scratchpad"
+    const withScratchpad = { ...input, scratchpadDir }
+
+    const claudeArgv = Harness.harnessArgv(claude, withScratchpad, message)
+    assert.notInclude(claudeArgv, "--add-dir")
+    assert.deepStrictEqual(JSON.parse(claudeArgv[claudeArgv.indexOf("--settings") + 1]!), {
+      permissions: { additionalDirectories: [input.projectDir, scratchpadDir] },
+    })
+    assert.strictEqual(
+      claudeArgv[claudeArgv.indexOf("--allowedTools") + 1],
+      `Bash,Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**),Read(/${scratchpadDir}/**),Edit(/${scratchpadDir}/**)`,
+    )
+
+    for (const harness of [cursor, agy]) {
+      const argv = Harness.harnessArgv(harness, withScratchpad, message)
+      const addDirs = argv.flatMap((arg, i) => (arg === "--add-dir" ? [argv[i + 1]] : []))
+      assert.include(addDirs, scratchpadDir, harness.binary)
+    }
+  })
+
   it("agy's launch ends with --prompt-interactive and the message, after every option, new or resumed", () => {
     for (const resume of [false, true])
       assert.deepStrictEqual(Harness.harnessArgv(agy, { ...input, model: "m", resume }, message).slice(-2), [

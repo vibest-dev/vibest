@@ -1,12 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Git } from "@vibest/core/git"
 import { listProjectRepositories, projectRepositories, workspaceGit } from "@vibest/core/project/create"
+import { Git } from "@vibest/core/worktree/git"
+import { tempDirectory } from "@vibest/testkit/directory"
+import { FakeGit } from "@vibest/testkit/fake-git"
+import { sessionLayer } from "@vibest/testkit/session"
 import { Effect, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
-
-import { tempDirectory } from "./lib/directory.ts"
-import { FakeGit } from "./lib/fake-git.ts"
-import { sessionLayer } from "./lib/session.ts"
 
 const makeMultiRepoWorkspace = (names: ReadonlyArray<string>) =>
   Effect.gen(function* () {

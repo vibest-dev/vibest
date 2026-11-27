@@ -1,15 +1,12 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
-import { archived, terminalOf, exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
-import { Integration } from "@vibest/core/integration"
-import { Effect, Fiber, FileSystem } from "effect"
-import { TestClock } from "effect/testing"
-
-import { entryPending } from "./lib/directory.ts"
-import { FakeGit } from "./lib/fake-git.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until, untilVirtual, writeEnd } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
+import { archived, terminalOf, exitedAt, executionStateOf } from "@vibest/core/database/rows"
+import { Integration } from "@vibest/core/harness/integration"
+import { SessionStore } from "@vibest/core/session/store"
+import { entryPending } from "@vibest/testkit/directory"
+import { FakeGit } from "@vibest/testkit/fake-git"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { until, untilVirtual, writeEnd } from "@vibest/testkit/observe"
+import { makeRepository } from "@vibest/testkit/session"
 import {
   claudeEnd,
   spawnWorking,
@@ -18,7 +15,9 @@ import {
   test,
   executionAndSentCounts,
   sqlNotices,
-} from "./lib/sessions-helpers.ts"
+} from "@vibest/testkit/sessions-helpers"
+import { Effect, Fiber, FileSystem } from "effect"
+import { TestClock } from "effect/testing"
 
 describe.concurrent("Session", () => {
   test(
@@ -28,7 +27,7 @@ describe.concurrent("Session", () => {
       const { id, sessions } = yield* idleSession(yield* makeRepository)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
-      const left = terminalOf((yield* (yield* Db.Service).session.getSession(id))!)!.target["id"]!
+      const left = terminalOf((yield* (yield* SessionStore.Service).getSession(id))!)!.target["id"]!
       const placed = (yield* herdr.callsTo("open")).length
       const held = yield* herdr.hold("open", id)
       yield* sessions.send(id, "again")
@@ -45,10 +44,10 @@ describe.concurrent("Session", () => {
       yield* sessions.send(id, "once more")
       const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === placed + 2)
       const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
-      const db = yield* Db.Service
-      assert.strictEqual(yield* db.session.currentProcessId(id), reporter)
+      const sessionStore = yield* SessionStore.Service
+      assert.strictEqual(yield* sessionStore.currentProcessId(id), reporter)
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => row !== undefined && exitedAt(row) === null && terminalOf(row) !== null,
       )
       assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
@@ -60,11 +59,11 @@ describe.concurrent("Session", () => {
     "a resume whose close of the left terminal fails opens no second terminal and keeps the old record; a left terminal already gone counts as closed",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const { id, sessions } = yield* idleSession(yield* makeRepository)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
-      const left = (yield* db.session.getSession(id))!
+      const left = (yield* sessionStore.getSession(id))!
       const placed = (yield* herdr.callsTo("open")).length
       const notices = (yield* sqlNotices(id)).length
       const refused = yield* herdr.hold("close", terminalOf(left)!.target["id"]!)
@@ -73,7 +72,7 @@ describe.concurrent("Session", () => {
       yield* refused.release("failed")
       yield* until(sqlNotices(id), (rows) => rows.length > notices)
       assert.strictEqual((yield* herdr.callsTo("open")).length, placed)
-      assert.strictEqual(yield* db.session.currentProcessId(id), left.process!.id)
+      assert.strictEqual(yield* sessionStore.currentProcessId(id), left.process!.id)
 
       const gone = yield* herdr.hold("close", terminalOf(left)!.target["id"]!)
       yield* sessions.send(id, "once more")
@@ -87,14 +86,14 @@ describe.concurrent("Session", () => {
     "an execution end that lands after the terminal died, with a send queued: the exit is recorded and fails the send; nothing resumes the session",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const { id, sessions, sessionStore, inboxStore } = yield* spawnWorking(yield* makeRepository)
       yield* sessions.send(id, "queued")
       const placed = (yield* herdr.callsTo("open")).length
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
-      yield* untilVirtual(db.session.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
+      yield* untilVirtual(sessionStore.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
       assert.deepStrictEqual(
-        (yield* db.inbox.inboxWithStatus(id, "failed")).map((r) => r.message),
+        (yield* inboxStore.inboxWithStatus(id, "failed")).map((r) => r.message),
         ["queued"],
       )
       assert.lengthOf(yield* herdr.callsTo("open"), placed)
@@ -106,14 +105,14 @@ describe.concurrent("Session", () => {
     "a stop on the condition of idleness leaves a session that got work since then running",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const { id, sessions } = yield* idleSession(yield* makeRepository)
-      const seen = (yield* db.session.getSession(id))!.lastActive
+      const seen = (yield* sessionStore.getSession(id))!.lastActive
       yield* sessions.send(id, "more work")
       const out = yield* sessions.stop(id, { type: "plugin", plugin: "test" }, seen)
       assert.isFalse(out.stopped)
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
-      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.isNull(exitedAt((yield* sessionStore.getSession(id))!))
       assert.isTrue((yield* sessions.stop(id, { type: "user" })).stopped)
     }),
   )
@@ -154,7 +153,7 @@ describe.concurrent("Session", () => {
       const a = yield* idleSession(repo)
       yield* fs.remove(yield* sessionWorktree(a.id), { recursive: true })
       assert.deepInclude((yield* a.sessions.archive(a.id))!, { pane: "closed", workspace: "none", worktree: "gone" })
-      assert.isNotNull(exitedAt((yield* a.db.session.getSession(a.id))!))
+      assert.isNotNull(exitedAt((yield* a.sessionStore.getSession(a.id))!))
 
       const b = yield* idleSession(repo)
       const wb = yield* sessionWorktree(b.id)
@@ -193,13 +192,13 @@ describe.concurrent("Session", () => {
           [during, "interrupted"],
           [after, "lost"],
         ] as const) {
-          const { id, sessions, db } = entry
-          const row = (yield* db.session.getSession(id))!
+          const { id, sessions, sessionStore, inboxStore } = entry
+          const row = (yield* sessionStore.getSession(id))!
           assert.isTrue(archived(row), id)
           yield* sessions.check(id)
           assert.deepStrictEqual(yield* executionAndSentCounts(id), { executions: 1, sent: 0 }, id)
-          assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), expected, id)
-          const pending = yield* entryPending(db, row.projectId)
+          assert.strictEqual(executionStateOf((yield* sessionStore.getSession(id))!), expected, id)
+          const pending = yield* entryPending(sessionStore, inboxStore, row.projectId)
           assert.ok(pending.every((item) => item.message.includes("was not delivered")))
         }
       }),
@@ -210,20 +209,50 @@ describe.concurrent("Session", () => {
     "interrupt that does not take: SessionBusy, the execution stays open, so the late aborted turn.complete is delivered as an interrupted result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
+      const { id, sessions, sessionStore, inboxStore } = yield* spawnWorking(yield* makeRepository, "claude")
       const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
       yield* untilVirtual(
         Effect.sync(() => interrupting.pollUnsafe()),
         (exit) => exit !== undefined,
       )
       assert.strictEqual((yield* Effect.flip(Fiber.join(interrupting)))._tag, "SessionBusy")
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
+      assert.strictEqual(executionStateOf((yield* sessionStore.getSession(id))!), "open")
       yield* writeEnd(id, "claude", claudeEnd("aborted"))
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "interrupted")
-      assert.isUndefined(yield* db.inbox.latestInbox(id, "notice"))
+      assert.strictEqual(executionStateOf((yield* sessionStore.getSession(id))!), "interrupted")
+      assert.isUndefined(yield* inboxStore.latestInbox(id, "notice"))
     }),
     { interruptIgnored: true },
+  )
+
+  test(
+    "sessions of the same project share one VIBEST_SCRATCHPAD_DIR that exists on disk and survives archive",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const a = yield* idleSession(repo)
+      const b = yield* idleSession(repo)
+      const rowA = (yield* a.sessionStore.getSession(a.id))!
+      const rowB = (yield* b.sessionStore.getSession(b.id))!
+      assert.strictEqual(rowA.projectId, rowB.projectId)
+
+      const opens = yield* herdr.callsTo("open")
+      const openA = opens.find((call) => call.env?.VIBEST_SESSION_ID === a.id)
+      const openB = opens.find((call) => call.env?.VIBEST_SESSION_ID === b.id)
+      const scratchA = openA?.env?.VIBEST_SCRATCHPAD_DIR
+      const scratchB = openB?.env?.VIBEST_SCRATCHPAD_DIR
+      assert.isDefined(scratchA)
+      assert.strictEqual(scratchA, scratchB)
+      assert.isTrue(scratchA!.endsWith(`/${rowA.projectId}/scratchpad`))
+      assert.isTrue(yield* fs.exists(scratchA!))
+
+      const handoff = `${scratchA}/handoff.md`
+      yield* fs.writeFileString(handoff, "shared notes")
+      yield* a.sessions.archive(a.id)
+      assert.isTrue(yield* fs.exists(handoff))
+      assert.strictEqual(yield* fs.readFileString(handoff), "shared notes")
+    }),
   )
 })

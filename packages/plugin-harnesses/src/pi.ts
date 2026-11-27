@@ -111,4 +111,5 @@ export const pi: Harness.HarnessDefinition = {
       ...(Predicate.isNumber(event.execution) && { execution: event.execution }),
     }
   },
+  guardAnswer: (reason) => (reason ? { deny: reason } : {}),
 }

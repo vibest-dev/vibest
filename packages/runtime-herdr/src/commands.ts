@@ -2,7 +2,7 @@ import readline from "node:readline"
 
 import { Claim, type VibestClient, type VibestClients } from "@vibest/client/client"
 import { Host } from "@vibest/plugin/host"
-import type { SessionInfo } from "@vibest/protocol/rpc"
+import type { SessionInfo } from "@vibest/protocol/schemas"
 import { shortId } from "@vibest/schema/id"
 import { Config, Console, Effect, Option, Predicate, Schema } from "effect"
 import { Command } from "effect/cli"
@@ -239,54 +239,53 @@ const daemonOn = ({ withVibest }: VibestClients) => {
     withVibest(claim(directory), f)
 
   return {
-    republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
+    republish: (directory: string | undefined) =>
+      ask(directory ?? "/", (client) => client["server.daemon"]["daemon.republish"]()),
     openEntry: (directory: string) =>
       Effect.gen(function* () {
-        const env = callerEnvOf()
+        const focused = yield* ask(directory, (client) => client["server.session"]["session.focus"]())
+
+        if (focused !== null)
+          return {
+            action: focused.focused ? ("focused" as const) : ("runs in" as const),
+            place: focused.place,
+          }
 
         const opened = yield* ask(directory, (client) =>
-          client
-            .Launch({
+          client["server.session"]["session.launch"]({
+            payload: {
               agent: "coordinator",
               focus: true,
               runtime: KIND,
-              callerEnv: env,
-            })
-            .pipe(
-              Effect.catchTag("Forbidden", () =>
-                client["Session.Attach"]({ callerEnv: env, runtime: KIND }).pipe(
-                  Effect.flatMap((attached) =>
-                    client.Launch({
-                      projectId: attached.projectId,
-                      agent: "coordinator",
-                      fresh: true,
-                      ...(attached.running !== null && { harness: attached.running.harness }),
-                      focus: true,
-                      runtime: KIND,
-                      callerEnv: env,
-                    }),
-                  ),
-                ),
-              ),
-            ),
+              callerEnv: callerEnvOf(),
+            },
+          }),
         )
 
         return { action: "opened" as const, place: opened.place }
       }),
     spawn: (directory: string, prompt: string) =>
       Effect.gen(function* () {
-        return (yield* ask(directory, (client) => client.Spawn({ prompt, agent: "general", callerEnv: callerEnvOf() })))
-          .id
+        return (yield* ask(directory, (client) =>
+          client["server.session"]["session.spawn"]({
+            payload: { prompt, agent: "general", callerEnv: callerEnvOf() },
+          }),
+        )).id
       }),
-    interrupt: (id: string) => ask("/", (client) => client.Interrupt({ id })).pipe(Effect.asVoid),
+    interrupt: (id: string) =>
+      ask("/", (client) => client["server.session"]["session.interrupt"]({ params: { id }, query: {} })).pipe(
+        Effect.asVoid,
+      ),
     list: (directory: string | undefined) =>
-      ask(directory ?? "/", (client) => client.List(directory === undefined ? { all: true } : {})).pipe(
+      ask(directory ?? "/", (client) =>
+        client["server.session"]["session.list"]({ query: directory === undefined ? { all: true } : {} }),
+      ).pipe(
         Effect.map((listed) =>
           listed.sessions.filter((row) => row.exitedAt === null && row.machine === undefined).map(toLive),
         ),
       ),
     usage: () =>
-      ask("/", (client) => client.Subscriptions()).pipe(
+      ask("/", (client) => client["server.subscription"]["subscription.list"]()).pipe(
         Effect.map((rows) =>
           rows.flatMap((row) =>
             row.limits.map((limit): UsageWindow => ({

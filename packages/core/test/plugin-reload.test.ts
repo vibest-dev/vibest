@@ -1,8 +1,8 @@
 import module from "node:module"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Agents } from "@vibest/core/agents"
-import { Concurrency } from "@vibest/core/concurrency"
+import { Agents } from "@vibest/core/agent/registry"
+import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import {
   Builtins,
   type Candidate,
@@ -14,9 +14,12 @@ import {
   RECHECK,
 } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
+import { memoryPluginHost } from "@vibest/testkit/bun"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "@vibest/testkit/harnesses"
+import * as Platform from "@vibest/testkit/platform"
 import {
   Clock,
   Context,
@@ -31,10 +34,6 @@ import {
   type Schema,
 } from "effect"
 import { TestClock } from "effect/testing"
-
-import * as Platform from "../../platform-bun/src/bun.ts"
-import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { memoryPluginHost } from "./platform/bun.ts"
 
 const events: Array<string> = []
 
@@ -499,6 +498,7 @@ describe("plugins: supervisor", () => {
           supervise(dir).pipe(Effect.provideService(FileSystem.FileSystem, pausingConfigReads(fs, config, pause))),
         )
 
+        yield* TestClock.withLive(eventually(service.settled, (ready) => ready, "initial plugins to settle"))
         assert.strictEqual((yield* TestClock.withLive(service.start(event))).model, "a1")
         const setups = count("setup:slow-scan-a")
         watchGate.hold = true

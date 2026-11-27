@@ -5,12 +5,13 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./scripts/*": "./scripts/*.ts",
+    "./script/*": "./script/*.ts",
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.scripts.json",
-    "contract": "bun scripts/contract.ts"
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.script.json && tsrs --noEmit --fast -p test/tsconfig.json",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/protocol",
+    "contract": "bun script/contract.ts"
   },
   "dependencies": {
     "@vibest/schema": "workspace:*",

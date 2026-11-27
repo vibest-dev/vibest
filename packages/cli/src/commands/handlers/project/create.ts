@@ -7,7 +7,10 @@ import { Commands } from "../../commands.ts"
 export default Runtime.handler(Commands.commands.project.commands.create, (o) =>
   Effect.gen(function* () {
     yield* userOnly("project create")
-    const created = yield* vibest((client) => client["Project.Create"]({ directory: o.directory, from: [...o.from] }))
+
+    const created = yield* vibest((client) =>
+      client["server.project"]["project.create"]({ payload: { directory: o.directory, from: [...o.from] } }),
+    )
 
     for (const folder of created.folders) {
       if (folder.uncommitted.length === 0) continue

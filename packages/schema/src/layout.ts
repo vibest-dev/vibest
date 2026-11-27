@@ -1,12 +1,19 @@
 import { Config, Context, Effect, Layer, Path } from "effect"
 
+export const UserUid = Context.Reference<number | undefined>("vibest/UserUid", {
+  defaultValue: () => undefined,
+})
+
+export const EmbeddedHarnesses = Context.Reference<(home: string) => string | undefined>("vibest/EmbeddedHarnesses", {
+  defaultValue: () => () => undefined,
+})
+
 export class Layout extends Context.Service<
   Layout,
   {
     readonly home: string
     readonly database: string
     readonly socket: string
-    readonly httpSocket: string
     readonly daemonInfo: string
     readonly log: string
     readonly identity: string
@@ -14,21 +21,30 @@ export class Layout extends Context.Service<
     readonly projects: string
     readonly config: string
     readonly plugins: string
+    readonly scratchRoot: string
     readonly allocationWorktree: (repository: string, name: string) => string
     readonly project: (projectId: string) => string
     readonly artifacts: (projectId: string) => string
     readonly sessionFolder: (projectId: string, sessionId: string) => string
+    readonly scratchpadDir: (projectId: string) => string
   }
 >()("vibest/Layout") {
-  static readonly make = (home: string) =>
+  static readonly make = (home: string, scratchRoot?: string) =>
     Effect.gen(function* () {
       const path = yield* Path.Path
+      const uid = yield* UserUid
+
+      const tmp = yield* Config.String("TMPDIR").pipe(
+        Config.withDefault("/tmp"),
+        Effect.orElseSucceed(() => "/tmp"),
+      )
+
+      const resolvedScratch = scratchRoot ?? path.join(tmp, uid === undefined ? "vibest" : `vibest-${uid}`)
 
       return Layout.of({
         home,
         database: path.join(home, "vibest.db"),
         socket: path.join(home, "vibest.sock"),
-        httpSocket: path.join(home, "vibest-http.sock"),
         daemonInfo: path.join(home, "vibestd.pid"),
         log: path.join(home, "vibestd.log"),
         identity: path.join(home, "identity.json"),
@@ -36,10 +52,12 @@ export class Layout extends Context.Service<
         projects: path.join(home, "projects"),
         config: path.join(home, "vibest.json"),
         plugins: path.join(home, "plugins"),
+        scratchRoot: resolvedScratch,
         allocationWorktree: (repository, name) => path.join(home, "worktrees", repository, name),
         project: (projectId) => path.join(home, "projects", projectId),
         artifacts: (projectId) => path.join(home, "projects", projectId, "artifacts"),
         sessionFolder: (projectId, sessionId) => path.join(home, "projects", projectId, "sessions", sessionId),
+        scratchpadDir: (projectId) => path.join(resolvedScratch, projectId, "scratchpad"),
       })
     })
 

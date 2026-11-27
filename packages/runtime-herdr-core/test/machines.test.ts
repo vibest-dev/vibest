@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
+import { type api, HcError, type HcClient, HcTransportError } from "@vibest/herdr-core-sdk"
 import { type MachineEvent, type MachineNote, Plugin } from "@vibest/plugin/effect"
 import { machineHooks } from "@vibest/plugin/testing"
 import { Effect, Queue, Stream } from "effect"
-import { type api, HcError, type HcClient, HcTransportError } from "effect-herdr-core-sdk"
 
 import * as Mirror from "../src/machines.ts"
 import { locate, mirror } from "../src/machines.ts"

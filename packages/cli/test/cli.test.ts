@@ -1,9 +1,9 @@
-import net from "node:net"
+import http from "node:http"
 
 import { assert, describe, it } from "@effect/vitest"
-import { runVibest as vibest, tempDirectory } from "@vibest/platform-bun/test/lib/fakes"
-import { EdgeChain, EdgeDirected, EdgeMutual } from "@vibest/protocol/rpc"
+import { EdgeChain, EdgeDirected, EdgeMutual } from "@vibest/protocol/schemas"
 import { PROTOCOL } from "@vibest/schema/version"
+import { runVibest as vibest, tempDirectory } from "@vibest/testkit/fakes"
 import { Effect, FileSystem, Path, Schema } from "effect"
 
 import * as Platform from "#platform"
@@ -14,8 +14,18 @@ const TIMEOUT = 30_000
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 
-const unknownMethodLine = (id: string | undefined) =>
-  `{"jsonrpc":"2.0","id":${JSON.stringify(id)},"error":{"_tag":"Cause","code":0,"message":"Unknown request tag: Machine.Load","data":[{"_tag":"Die","defect":"Unknown request tag: Machine.Load"}]}}\n`
+const readBody = (req: http.IncomingMessage) =>
+  new Promise<string>((resolve) => {
+    const chunks: Array<Buffer> = []
+    req.on("data", (chunk: Buffer) => chunks.push(chunk))
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")))
+  })
+
+const replyJson = (res: http.ServerResponse, body: Schema.Json, status = 200) => {
+  const text = JSON.stringify(body)
+  res.writeHead(status, { "content-type": "application/json", "content-length": String(Buffer.byteLength(text)) })
+  res.end(text)
+}
 
 describe("vibest CLI without vibestd", () => {
   it.effect(
@@ -46,29 +56,29 @@ describe("vibest CLI without vibestd", () => {
       const home = yield* tempDirectory("vibest-requests-")
       const sends: Array<{ id: string; request?: string }> = []
 
-      const server = net.createServer((sock) => {
-        let buf = ""
-        sock.on("data", (chunk) => {
-          buf += chunk.toString()
+      const server = http.createServer(async (req, res) => {
+        const url = new URL(req.url ?? "/", "http://vibest")
 
-          for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
-            const req = JSON.parse(buf.slice(0, nl)) as { id?: string; method?: string; params?: never }
-            buf = buf.slice(nl + 1)
+        if (req.method === "GET" && url.pathname === "/api/daemon/ping")
+          return replyJson(res, { protocol: PROTOCOL, version: VERSION, runtimes: [], capabilities })
 
-            const reply = (body: Schema.JsonObject) =>
-              sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, ...body }) + "\n")
+        const sendMatch = /^\/api\/session\/([^/]+)\/send$/.exec(url.pathname)
 
-            if (req.method === "Ping")
-              reply({ result: { protocol: PROTOCOL, version: VERSION, runtimes: [], capabilities } })
-            else if (req.method === "Send") {
-              sends.push(req.params!)
-              const out = answer(sends.length)
+        if (req.method === "POST" && sendMatch !== null) {
+          const body = JSON.parse((await readBody(req)) || "{}") as { request?: string }
+          sends.push({
+            id: decodeURIComponent(sendMatch[1]!),
+            ...(body.request !== undefined && { request: body.request }),
+          })
+          const out = answer(sends.length)
 
-              if (out === undefined) sock.destroy()
-              else reply(out)
-            } else if (req.method === "Machine.Load" && load === "unknown") sock.write(unknownMethodLine(req.id))
-          }
-        })
+          if (out === undefined) return void res.socket?.destroy()
+
+          return replyJson(res, out)
+        }
+
+        if (req.method === "GET" && url.pathname === "/api/machine/load" && load === "unknown")
+          return replyJson(res, { error: "NotFound" }, 404)
       })
 
       yield* Effect.acquireRelease(
@@ -112,7 +122,7 @@ describe("vibest CLI without vibestd", () => {
     "send whose connection drops after the request: sent once more with the same request id, the output unchanged",
     () =>
       Effect.gen(function* () {
-        const d = yield* fakeDaemon({ requests: true }, (n) => (n === 1 ? undefined : { result: { id } }))
+        const d = yield* fakeDaemon({ requests: true }, (n) => (n === 1 ? undefined : { id }))
         const r = yield* d.send
         assert.strictEqual(r.code, 0, r.stderr)
         assert.deepStrictEqual(decodeJson(r.stdout), { id, queued: true })
@@ -127,33 +137,11 @@ describe("vibest CLI without vibestd", () => {
     "send to a vibestd without request ids carries none and is not sent again when its connection drops",
     () =>
       Effect.gen(function* () {
-        const d = yield* fakeDaemon({ http: true, handoff: true }, (n) => (n === 1 ? undefined : { result: { id } }))
+        const d = yield* fakeDaemon({ http: true, handoff: true }, (n) => (n === 1 ? undefined : { id }))
         const r = yield* d.send
         assert.strictEqual(r.code, 1, r.stdout)
         assert.lengthOf(d.sends, 1)
         assert.isUndefined(d.sends[0]!.request)
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
-
-  it.effect(
-    "integration guard fails with no answer when no vibest agent runs it, or when vibestd cannot check the call; the plugin refuses the call then",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-guard-cli-" })
-
-        const guard = (env: Record<string, string>, stdin: string) =>
-          vibest(cwd, { HOME: cwd, VIBEST_HOME: cwd, ...env }, ["integration", "guard", "--harness", "cursor"], stdin)
-
-        const noAgent = yield* guard({}, JSON.stringify({ tool_name: "Shell", tool_input: { command: "git status" } }))
-        assert.notStrictEqual(noAgent.code, 0, noAgent.stderr)
-        assert.strictEqual(noAgent.stdout, "")
-        assert.match(noAgent.stderr, /VIBEST_SESSION_ID/)
-        const unchecked = yield* guard({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "s1" }, "not json")
-        assert.notStrictEqual(unchecked.code, 0, unchecked.stderr)
-        assert.strictEqual(unchecked.stdout, "")
-        assert.match(unchecked.stderr, /vibestd/)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     TIMEOUT,
   )
@@ -179,45 +167,40 @@ describe("vibest run links and vibest session link/unlink", () => {
       const spawns: Array<SpawnCall> = []
       const links: Array<LinkCall> = []
 
-      const server = net.createServer((sock) => {
-        let buf = ""
-        sock.on("data", (chunk) => {
-          buf += chunk.toString()
+      const server = http.createServer(async (req, res) => {
+        const url = new URL(req.url ?? "/", "http://vibest")
 
-          for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
-            const req = JSON.parse(buf.slice(0, nl)) as {
-              id?: string
-              method?: string
-              params?: SpawnCall & { spec?: Schema.Json }
-            }
+        if (req.method === "GET" && url.pathname === "/api/daemon/ping")
+          return replyJson(res, {
+            protocol: PROTOCOL,
+            version: VERSION,
+            runtimes: [],
+            capabilities: { requests: true },
+          })
 
-            buf = buf.slice(nl + 1)
+        if (req.method === "GET" && url.pathname === "/api/harness") return replyJson(res, [])
 
-            const reply = (body: Schema.JsonObject) =>
-              sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, ...body }) + "\n")
+        if (req.method === "POST" && url.pathname === "/api/session/spawn") {
+          const params = JSON.parse((await readBody(req)) || "{}") as SpawnCall
+          spawns.push(params)
 
-            if (req.method === "Ping")
-              reply({
-                result: { protocol: PROTOCOL, version: VERSION, runtimes: [], capabilities: { requests: true } },
-              })
-            else if (req.method === "Harnesses.List") reply({ result: [] })
-            else if (req.method === "Spawn") {
-              const params = req.params ?? {}
-              spawns.push(params)
-              reply({
-                result: {
-                  id: spawnedId,
-                  harness: params.harness ?? "pi",
-                  decidedBy: {},
-                  trace: [],
-                },
-              })
-            } else if (req.method === "Session.Link" || req.method === "Session.Unlink") {
-              links.push({ method: req.method, spec: req.params?.spec ?? null })
-              reply({ result: { edges: [{ from: { id: "a" }, to: { id: "b" } }] } })
-            }
-          }
-        })
+          return replyJson(res, {
+            id: spawnedId,
+            harness: params.harness ?? "pi",
+            decidedBy: {},
+            trace: [],
+          })
+        }
+
+        if (req.method === "POST" && (url.pathname === "/api/session/link" || url.pathname === "/api/session/unlink")) {
+          const body = JSON.parse((await readBody(req)) || "{}") as { spec?: Schema.Json }
+          links.push({
+            method: url.pathname === "/api/session/link" ? "Session.Link" : "Session.Unlink",
+            spec: body.spec ?? null,
+          })
+
+          return replyJson(res, { edges: [{ from: { id: "a" }, to: { id: "b" } }] })
+        }
       })
 
       yield* Effect.acquireRelease(

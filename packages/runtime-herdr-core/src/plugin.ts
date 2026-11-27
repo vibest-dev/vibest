@@ -1,8 +1,8 @@
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
+import { DEFAULT_SESSION, defaultSocketPath, Hc, SocketConnector } from "@vibest/herdr-core-sdk"
 import * as VibestPlugin from "@vibest/plugin/effect"
 import { Config, Effect, Layer, Option, Stream } from "effect"
-import { DEFAULT_SESSION, defaultSocketPath, Hc, SocketConnector } from "effect-herdr-core-sdk"
 
 import { CALLER_ENV, terminalFrom } from "./caller.ts"
 import * as Machines from "./machines.ts"

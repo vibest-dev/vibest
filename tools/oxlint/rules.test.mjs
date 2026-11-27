@@ -109,7 +109,7 @@ export const cpus = os.cpus()
     },
   )
 
-  it.each(["event-reads", "no-payload-sql", "projector-writes", "no-background-loop"])(
+  it.each(["event-reads", "no-payload-sql", "projector-writes", "no-background-loop", "sql-boundary"])(
     "refuses disabling vibest/%s",
     (rule) => {
       expect(oxlintFindings(`// oxlint-disable-next-line vibest/${rule}\nexport const one = 1\n`)).toContain(
@@ -181,25 +181,25 @@ export const one = 1
 
 describe("import policy", () => {
   const importing = (specifier) => `import * as m from "${specifier}"\nexport const v = m\n`
-  const herdr = importing("effect-herdr-sdk")
+  const herdr = importing("@vibest/herdr-sdk")
   const bun = importing("bun:sqlite")
   const core = importing("@vibest/core/x")
   const scopedFindings = (source, file) => oxlintFindings(source, file, { scoped: true })
   const refused = ["1 eslint(no-restricted-imports)"]
   const outside = ["1 vibest(package-imports)"]
 
-  it("neutral packages refuse herdr and Bun; bun.ts and platform/ accept Bun but not herdr", () => {
-    for (const file of ["a.ts", "bun.ts", "platform/a.ts"]) {
+  it("neutral packages refuse herdr and Bun; bun.ts, *.bun.ts and platform/ accept Bun but not herdr", () => {
+    for (const file of ["a.ts", "bun.ts", "a.bun.ts", "platform/a.ts"]) {
       const path = `packages/core/src/${file}`
       expect(scopedFindings(herdr, path)).toEqual(outside)
       expect(scopedFindings(bun, path)).toEqual(file === "a.ts" ? refused : [])
     }
   })
 
-  it.each(["integration/claude", "plugin-harnesses", "runtime-herdr", "runtime-herdr-core"])(
-    "%s refuses @vibest/core and Bun; bun.ts and platform/ accept only Bun",
+  it.each(["harness-claude", "plugin-harnesses", "runtime-herdr", "runtime-herdr-core"])(
+    "%s refuses @vibest/core and Bun; bun.ts, *.bun.ts and platform/ accept only Bun",
     (root) => {
-      for (const file of ["a.ts", "bun.ts", "platform/a.ts"]) {
+      for (const file of ["a.ts", "bun.ts", "a.bun.ts", "platform/a.ts"]) {
         const path = `packages/${root}/src/${file}`
         expect(scopedFindings(core, path)).toEqual(outside)
         expect(scopedFindings(bun, path)).toEqual(file === "a.ts" ? refused : [])
@@ -207,12 +207,36 @@ describe("import policy", () => {
     },
   )
 
-  it("the herdr SDKs and tools/verify refuse Bun outside bun.ts and platform/", () => {
-    for (const file of ["packages/effect-herdr-sdk/src/bun.ts", "packages/effect-herdr-core-sdk/src/platform/a.ts"])
+  it("the herdr SDKs and tools/verify refuse Bun outside bun.ts, *.bun.ts and platform/", () => {
+    for (const file of ["packages/herdr-sdk/src/bun.ts", "packages/herdr-core-sdk/src/platform/a.ts"])
       expect(scopedFindings(bun, file)).toEqual([])
 
-    for (const file of ["packages/effect-herdr-sdk/src/a.ts", "tools/verify/src/a.ts"])
+    for (const file of ["packages/herdr-sdk/src/a.ts", "tools/verify/src/a.ts"])
       expect(scopedFindings(bun, file)).toEqual(refused)
+  })
+
+  it("platform-bun accepts Bun in any source file", () => {
+    expect(scopedFindings(bun, "packages/platform-bun/src/helper.ts")).toEqual([])
+  })
+
+  it("util refuses every workspace package and Bun", () => {
+    expect(scopedFindings(importing("@vibest/schema/id"), "packages/util/src/a.ts")).toEqual(outside)
+    expect(scopedFindings(bun, "packages/util/src/a.ts")).toEqual(refused)
+  })
+
+  it("mcp imports only @vibest/util, @vibest/schema, and @vibest/core and refuses server and Bun", () => {
+    expect(scopedFindings(importing("@vibest/schema/mcp"), "packages/mcp/src/a.ts")).toEqual([])
+    expect(scopedFindings(importing("@vibest/util/keyed-mutex"), "packages/mcp/src/a.ts")).toEqual([])
+    expect(scopedFindings(core, "packages/mcp/src/a.ts")).toEqual([])
+    expect(scopedFindings(importing("@vibest/server/server"), "packages/mcp/src/a.ts")).toEqual(outside)
+    expect(scopedFindings(bun, "packages/mcp/src/a.ts")).toEqual(refused)
+  })
+
+  it("codemode imports only @vibest/util and @vibest/schema and refuses core and Bun", () => {
+    expect(scopedFindings(importing("@vibest/schema/codemode"), "packages/codemode/src/a.ts")).toEqual([])
+    expect(scopedFindings(importing("@vibest/util/layer-node"), "packages/codemode/src/a.ts")).toEqual([])
+    expect(scopedFindings(core, "packages/codemode/src/a.ts")).toEqual(outside)
+    expect(scopedFindings(bun, "packages/codemode/src/a.ts")).toEqual(refused)
   })
 
   it("the CLI refuses @vibest/core and herdr in every source file", () => {
@@ -227,14 +251,14 @@ describe("ledger access rules", () => {
 
   it("event-reads: only the bus reads the event table and position", () => {
     const source = "export const q = `SELECT * FROM event`\nexport const p = { position: 1 }\n"
-    expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(event-reads)", "2 vibest(event-reads)"])
+    expect(oxlintFindings(source, core("session/store.ts"))).toEqual(["1 vibest(event-reads)", "2 vibest(event-reads)"])
     expect(oxlintFindings(source, core("bus.ts"))).toEqual([])
-    expect(oxlintFindings(source, core("a.test.ts"))).toEqual([])
+    expect(oxlintFindings(source, "packages/core/test/a.test.ts")).toEqual([])
   })
 
   it("no-payload-sql: json_extract only in the v1 import", () => {
     const source = `export const q = "SELECT json_extract(data, '$.a') FROM x"\n`
-    expect(oxlintFindings(source, core("a.ts"))).toEqual(["1 vibest(no-payload-sql)"])
+    expect(oxlintFindings(source, core("session/store.ts"))).toEqual(["1 vibest(no-payload-sql)"])
     expect(oxlintFindings(source, core("import/v1.ts"))).toEqual([])
   })
 
@@ -247,17 +271,48 @@ describe("ledger access rules", () => {
       "4 vibest(projector-writes)",
     ])
     expect(oxlintFindings(source, core("session/projector.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("automation/sql.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("automation/store.ts"))).toEqual([
+      "1 vibest(projector-writes)",
+      "2 vibest(projector-writes)",
+      "3 vibest(projector-writes)",
+      "4 vibest(projector-writes)",
+    ])
   })
 
-  it("projector-writes: db.ts may hold only its one opening write", () => {
-    const opening = "export const a = `UPDATE meta SET value = value WHERE key = ''`\n"
-    expect(oxlintFindings(opening, core("database/db.ts"))).toEqual([])
-    expect(oxlintFindings(opening + opening.replace("const a", "const b"), core("database/db.ts"))).toEqual([
+  it("projector-writes: database.ts may hold only its one opening write", () => {
+    const opening = "export const a = `UPDATE kv SET value = value WHERE key = ''`\n"
+    expect(oxlintFindings(opening, core("database/database.ts"))).toEqual([])
+    expect(oxlintFindings(opening + opening.replace("const a", "const b"), core("database/database.ts"))).toEqual([
       "2 vibest(projector-writes)",
     ])
-    expect(oxlintFindings(`export const a = "DELETE FROM meta"\n`, core("database/db.ts"))).toEqual([
+    expect(oxlintFindings(`export const a = "DELETE FROM kv"\n`, core("database/database.ts"))).toEqual([
       "1 vibest(projector-writes)",
     ])
+  })
+
+  it("sql-boundary: SQL and SqlClient only in database/**, */sql*.ts, */store.ts, */projector.ts, bus.ts, and import/**", () => {
+    const source = `import { SqlClient } from "effect/sql"\nexport const a = SqlClient\nexport const b = "SELECT id FROM session"\nexport const c = "PRAGMA foreign_keys = ON"\nexport const d = sql\`1\`\n`
+    expect(oxlintFindings(source, core("session/spawn.ts"))).toEqual([
+      "1 vibest(sql-boundary)",
+      "3 vibest(sql-boundary)",
+      "4 vibest(sql-boundary)",
+      "5 vibest(sql-boundary)",
+    ])
+    expect(oxlintFindings(source, core("session/sends.ts"))).toEqual([
+      "1 vibest(sql-boundary)",
+      "3 vibest(sql-boundary)",
+      "4 vibest(sql-boundary)",
+      "5 vibest(sql-boundary)",
+    ])
+    expect(oxlintFindings(source, core("session/sql.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("session/sql-reads.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("session/store.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("session/projector.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("automation/sql.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("automation/store.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("database/database.ts"))).toEqual([])
+    expect(oxlintFindings(source, core("bus.ts"))).toEqual([])
   })
 
   it("no-background-loop: unbounded loops in core and server only", () => {
@@ -345,5 +400,38 @@ export { f } from "@vibest/server/server"
       `import { x } from "@vibest/server/server/x"\nexport const v = x\n`,
     ])
       expect(oxlintFindings(other, handler)).toEqual(["1 vibest(package-imports)"])
+  })
+
+  it("forbids @vibest/testkit in every packages/*/src/** and allows it in **/test/** and **/*.test.ts", () => {
+    const tk = `import { tempDirectory } from "@vibest/testkit/fakes"\nexport const v = tempDirectory\n`
+
+    for (const file of [
+      "packages/core/src/a.ts",
+      "packages/server/src/a.ts",
+      "packages/cli/src/a.ts",
+      "packages/platform-bun/src/a.ts",
+      "packages/unknown-pkg/src/a.ts",
+      "packages/foo/src/test/helper.ts",
+      "tools/verify/src/a.ts",
+    ])
+      expect(oxlintFindings(tk, file)).toEqual(["1 vibest(package-imports)"])
+
+    for (const file of [
+      "packages/core/test/a.test.ts",
+      "packages/server/test/a.test.ts",
+      "packages/cli/test/a.test.ts",
+      "packages/platform-bun/test/a.test.ts",
+      "packages/testkit/src/a.ts",
+    ])
+      expect(oxlintFindings(tk, file)).toEqual([])
+  })
+})
+
+describe("no-src-tests", () => {
+  it("forbids *.test.ts inside packages/*/src/** and allows them under packages/*/test/**", () => {
+    const source = `export const ok = true\n`
+    expect(oxlintFindings(source, "packages/core/src/plugin/registry.test.ts")).toEqual(["1 vibest(no-src-tests)"])
+    expect(oxlintFindings(source, "packages/cli/src/foo.test.ts")).toEqual(["1 vibest(no-src-tests)"])
+    expect(oxlintFindings(source, "packages/core/test/plugin/registry.test.ts")).toEqual([])
   })
 })

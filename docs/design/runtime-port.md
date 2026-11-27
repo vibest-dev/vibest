@@ -208,8 +208,8 @@ blocked on herdr-core. What follows from that on herdr-core, which has no state 
 Antigravity (`agy`) loads a workspace plugin from a folder added with `--add-dir`: vibest adds the install's `harnesses/agy`
 folder, whose `.agents/plugins/vibest/` holds `plugin.json`, `hooks.json`, `hook.sh` and the builtin skills. Its hooks run
 `hook.sh` with the plugin root as working directory: `SessionStart` (agy runs it after the first input, with the
-`conversationId`) and `PreInvocation` (before each model call) go to `vibest integration prompt --harness agy`, which records
-the conversation and opens or accepts the execution as working; `Stop` goes to `vibest integration stop --harness agy`, the
+`conversationId`) and `PreInvocation` (before each model call) post to `POST /api/hook/agy/prompt` on `$VIBEST_HOME/vibest.sock`, which records
+the conversation and opens or accepts the execution as working; `Stop` posts to `POST /api/hook/agy/execution-end`, the
 execution end, `failed` when agy names an `error`, with no reply text (agy's `Stop` carries none; `vibest peek` shows the
 answer). Hooks carry no marker for agy's own subagents, which run their own conversations in the same process: `hook.sh`
 forwards `prompt` and `stop` only for the first conversation the process reports (kept in
@@ -218,7 +218,7 @@ becomes `lost` after 10 s of idle, on herdr-core it stays open until the next `S
 nothing to the terminal for agy and sets no `--settings`: classic herdr detects agy's state from its screen (it finds agy by
 process name: vibest types every command line), and on herdr-core the session's state is the one its hooks
 last reported. The added folder shows in agy's workspace list and the agent can read it, as Claude's `--plugin-dir`
-files. `PreToolUse` goes to `vibest integration guard --harness agy`; the definition's `guardCall` turns agy's tool call
+files. `PreToolUse` posts to `POST /api/hook/agy/guard`; the definition's `guardCall` turns agy's tool call
 into the guard's shape (`run_command` as `Bash`, `read_file` as `Read`, `write_file` as `Write`, `edit_file` as `Edit`,
 and the older names agy documents), and `deny` stops the call (agy shows the reason only in the expanded tool row). A
 failed `vibest` answers `deny` from `hook.sh`, but the guard is fail-open where agy is: a hook agy cannot start, or one
@@ -258,7 +258,7 @@ machine, and vibest never installs, prepares or reaches another machine through 
   runtime on A needs to reach B's terminals, sent in `Remote.Hello`), `locate(remote, sessions)` (§3), and the machine hooks
   `connect` and `remove`, with which a runtime plugin keeps its own record of B (an hc machine, a saved herdr
   machine) in step with vibest's machine list. Without them B's rows read "cannot be shown here", and
-  `vibest peek <name>/<id>` reads B's terminal through B's vibestd.
+  `vibest peek <id> --machine <name>` reads B's terminal through B's vibestd.
 
 ## 7. Running an Agent on another machine
 
@@ -270,8 +270,7 @@ machine, and vibest never installs, prepares or reaches another machine through 
   `session.start.before` hooks. B finds its checkout of the project by repository identity, needs the `HEAD` commit
   there ("push first"), and makes the worktree as for a local agent; work comes back by the agent pushing its branch.
   herdr opens an agent another machine started in its default session `default` (`open`'s `remote`).
-- B reports the agent's results to A's entry session through B's outbox; `vibest result|send|interrupt|archive|peek
-  <name>/<id>` are forwarded to B. A call to a machine that is not connected fails at once; nothing is queued.
+- B reports the agent's results to A's session through B's outbox; `vibest result|send|interrupt|stop|archive|peek <id> --machine <name>` are forwarded to B. A call to a machine that is not connected fails at once; nothing is queued.
 - `session.start.before` on A lists only this machine in `machines[]`, with its runtimes and their `status()`; a hook
   that returns another `machine` does not move the start there. Core checks after the chain that the chosen runtime is
   online here, else refuses with the runtime's reason.

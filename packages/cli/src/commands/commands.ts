@@ -1,3 +1,5 @@
+import { Automation } from "@vibest/schema/automation"
+import { Mcp } from "@vibest/schema/mcp"
 import { ProjectKind } from "@vibest/schema/project"
 import { Argument, Flag } from "effect/cli"
 
@@ -12,6 +14,11 @@ const id = Argument.String("id").pipe(
   Argument.withDescription("A session id, or a unique prefix of at least 8 characters"),
 )
 
+const sessionMachine = Flag.String("machine").pipe(
+  Flag.withDescription("Target a session on another machine (vibest machine ls)"),
+  Flag.optional,
+)
+
 const sessionFlag = Flag.String("session").pipe(
   Flag.withDescription(
     "The runtime's session to use, instead of the one this terminal is in. Bare vibest refuses it inside a runtime's terminal",
@@ -23,8 +30,6 @@ const providerFlag = Flag.String("provider").pipe(
   Flag.withDescription("Only this provider's models. A harness with no provider option refuses it"),
   Flag.optional,
 )
-
-const hookHarness = Flag.String("harness").pipe(Flag.withDescription("Which harness this hook is for"))
 
 export const entryFlags = {
   fresh: Flag.Boolean("new").pipe(
@@ -135,7 +140,7 @@ const run = Spec.make("run", {
     ),
     machine: Flag.String("machine").pipe(
       Flag.withDescription(
-        "Run it on another machine (vibest machine ls), in that machine's checkout of this repository at this commit. Its address is <machine>/<id>. Results come to this project's entry session, or stay for vibest result <machine>/<id> when there is none",
+        "Run it on another machine (vibest machine ls), in that machine's checkout of this repository at this commit. Results come to this project's session, or stay for vibest result <id> --machine <machine> when there is none",
       ),
       Flag.optional,
     ),
@@ -178,7 +183,7 @@ const run = Spec.make("run", {
 const send = Spec.make("send", {
   description:
     "Queue a message for a session and print at once. It is delivered when the session is idle, and does not interrupt a running execution. For a resumable session started with vibest run, sending after its pane closes or its harness exits reopens the conversation in a new pane",
-  params: { id, message: text("message") },
+  params: { id, machine: sessionMachine, message: text("message") },
 })
 
 const status = Spec.make("status", {
@@ -189,18 +194,18 @@ const status = Spec.make("status", {
 const result = Spec.make("result", {
   description:
     "A session, as JSON. For an id that exists the object is always returned; reply is null until the first result. Test reply, not the object",
-  params: { id },
+  params: { id, machine: sessionMachine },
 })
 
 const interrupt = Spec.make("interrupt", {
   description:
     "Stop a session's running execution. The session stays, and that execution sends no reply. Not the entry session: end that one in its terminal",
-  params: { id },
+  params: { id, machine: sessionMachine },
 })
 
 const stop = Spec.make("stop", {
   description: "End the session process and keep the session; the next vibest send resumes it",
-  params: { id },
+  params: { id, machine: sessionMachine },
 })
 
 const peek = Spec.make("peek", {
@@ -208,6 +213,7 @@ const peek = Spec.make("peek", {
     "Print the last lines of a session's terminal, as plain text, read now. Look here when a result says the execution ended without a reply or did not start. Not the entry session",
   params: {
     id,
+    machine: sessionMachine,
     lines: Flag.Int("lines").pipe(
       Flag.withAlias("n"),
       Flag.withDescription("How many of the last lines to print, at most 500. Default 30"),
@@ -221,6 +227,7 @@ const archive = Spec.make("archive", {
     "End a session for good. Closes its terminal and removes a clean worktree. Keeps the record, its messages, replies and branch. Not the entry session: end that one in its terminal",
   params: {
     id,
+    machine: sessionMachine,
     keepWorktree: Flag.Boolean("keep-worktree").pipe(
       Flag.withDescription("End the session and keep its worktree"),
       Flag.withDefault(false),
@@ -245,9 +252,14 @@ const linkParams = {
     Argument.withDescription("Session ids, or unique prefixes of at least 8 characters"),
     Argument.atLeast(1),
   ),
+  machine: sessionMachine,
   to: Flag.String("to").pipe(
     Flag.withDescription("Link or unlink directed edges from the positional sessions to each --to session"),
     Flag.atLeast(0),
+  ),
+  toMachine: Flag.String("to-machine").pipe(
+    Flag.withDescription("With --to: target --to sessions on another machine"),
+    Flag.optional,
   ),
   chain: Flag.Boolean("chain").pipe(
     Flag.withDescription("Link or unlink directed edges in sequence: id1 -> id2 -> id3"),
@@ -411,33 +423,6 @@ const subscriptions = Spec.make("subscriptions", {
   description: "Each harness login and its usage limits, as last read",
 })
 
-const integration = Spec.make("integration", {
-  description:
-    "What vibest's plugin in a harness calls: a prompt, an execution end, the pre-tool guard. Not for direct use",
-  commands: [
-    Spec.make("guard", {
-      description:
-        "Pre-tool hook. Reads the harness's pre-tool input on stdin and prints a refusal when this session's rules refuse the call",
-      params: { harness: hookHarness },
-    }),
-    Spec.make("prompt", {
-      description:
-        "Execution-start report: the harness's prompt or activity event as JSON on stdin. Exits non-zero when vibestd did not get it. Does not start vibestd",
-      params: { harness: hookHarness },
-    }),
-    Spec.make("stop", {
-      description:
-        "Execution-end report: the harness's execution-end event as JSON on stdin. Exits non-zero when vibestd did not get it. Does not start vibestd",
-      params: { harness: hookHarness },
-    }),
-    Spec.make("ready", {
-      description:
-        "Session-start report: tells vibestd the session takes input. Exits non-zero when vibestd did not get it. Does not start vibestd",
-      params: { harness: hookHarness },
-    }),
-  ],
-})
-
 const onboard = Spec.make("onboard", {
   description:
     "Set up where vibest runs agents and which coding agent it starts: pick a terminal runtime (offering to install herdr-core when none is found) and a harness, and save both as defaults in vibest.json. Works outside a git repository. Only the user runs this",
@@ -478,6 +463,7 @@ const worktree = Spec.make("worktree", {
   description: "Worktrees vibest made for projects on this machine",
   commands: [
     Spec.make("list", {
+      alias: "ls",
       description:
         "The worktrees vibest made, grouped by project, as JSON. Each has its path, and for every repository in it (one, or one folder each in a project of several) that repository's folder, its branch or detached commit, and its state computed now with git: dirty with the number of changed files, unsaved (commits on no branch, lost if the worktree is removed), or clean. Sessions whose recorded directory is that worktree are listed with their id, title, and whether they are live or archived. --project limits the list to one project. --machine asks another machine, which answers for its own projects",
       params: {
@@ -486,7 +472,7 @@ const worktree = Spec.make("worktree", {
           Flag.optional,
         ),
         machine: Flag.String("machine").pipe(
-          Flag.withDescription("Ask another machine (vibest machine ls); it lists its own worktrees"),
+          Flag.withDescription("Ask another machine (vibest machine list); it lists its own worktrees"),
           Flag.optional,
         ),
       },
@@ -501,22 +487,274 @@ const machine = Spec.make("machine", {
     Spec.make("add", {
       description: "Connect to a machine's vibestd over ssh and keep it",
       params: {
-        name: Argument.String("name").pipe(
-          Argument.withDescription("The name --machine and addresses <name>/<id> use"),
-        ),
+        name: Argument.String("name").pipe(Argument.withDescription("The name --machine uses")),
         target: Argument.String("target").pipe(
           Argument.withDescription("An ssh target: user@host, user@host:port, or a Host from the ssh config"),
         ),
       },
     }),
-    Spec.make("ls", {
+    Spec.make("list", {
+      alias: "ls",
       description:
         "The machines this vibestd connects to: connection, runtimes, whether this machine shows their terminals, and their load (cores, CPU in use, memory, working executions; loadError when it cannot be read). JSON",
     }),
-    Spec.make("rm", {
+    Spec.make("remove", {
+      alias: "rm",
       description:
         "Forget a machine and stop its connection. Agents there keep running; adding it again delivers their results",
       params: { name: Argument.String("name") },
+    }),
+  ],
+})
+
+const mcp = Spec.make("mcp", {
+  description: "Manage MCP servers, tools, SEP-2640 skills, SEP-3415 events, resources, and OAuth credentials",
+  commands: [
+    Spec.make("list", {
+      alias: "ls",
+      description: "List MCP servers, inspect a server (tools/skills/events), or describe one tool",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Optional server name"), Argument.optional),
+        tool: Argument.String("tool").pipe(
+          Argument.withDescription("Optional tool name to describe"),
+          Argument.optional,
+        ),
+        events: Flag.Boolean("events").pipe(
+          Flag.withDescription("List only SEP-3415 event types for the server"),
+          Flag.withDefault(false),
+        ),
+        skills: Flag.Boolean("skills").pipe(
+          Flag.withDescription("List only SEP-2640 skills for the server"),
+          Flag.withDefault(false),
+        ),
+        types: Flag.Boolean("types").pipe(
+          Flag.withDescription("Print TypeScript declarations for CodeMode (all servers or one server)"),
+          Flag.withDefault(false),
+        ),
+      },
+    }),
+    Spec.make("add", {
+      description: "Add or update a local or remote MCP server in ~/.vibest/mcp.json",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+        args: Argument.String("command").pipe(
+          Argument.withDescription(
+            "Local MCP server command and arguments after -- (for example: vibest mcp add fs -- npx -y @modelcontextprotocol/server-filesystem /dir)",
+          ),
+          Argument.withMetavar("[-- <command> <args...>]"),
+          Argument.atLeast(0),
+        ),
+        url: Flag.String("url").pipe(Flag.withDescription("Remote MCP server URL"), Flag.optional),
+        command: Flag.String("command").pipe(
+          Flag.withDescription("Local MCP server command and arguments (repeat for each arg)"),
+          Flag.atLeast(0),
+        ),
+        cwd: Flag.String("cwd").pipe(Flag.withDescription("Working directory for a local MCP server"), Flag.optional),
+        exposure: Flag.Literals("exposure", Mcp.ExposureMode.literals).pipe(
+          Flag.withDescription("Tool exposure mode: skill, router, or direct (default skill)"),
+          Flag.optional,
+        ),
+        bearerToken: Flag.String("bearer-token").pipe(
+          Flag.withDescription("Bearer token or !command for a remote MCP server"),
+          Flag.optional,
+        ),
+        idleTimeout: Flag.Int("idle-timeout").pipe(
+          Flag.withDescription("Idle timeout in milliseconds before scale-to-zero eviction"),
+          Flag.optional,
+        ),
+      },
+    }),
+    Spec.make("remove", {
+      alias: "rm",
+      description: "Remove a configured MCP server and stop its connection",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+      },
+    }),
+    Spec.make("search", {
+      description: "Search cached MCP tools across all configured servers",
+      params: {
+        query: Argument.String("query").pipe(Argument.withDescription("Search text")),
+      },
+    }),
+    Spec.make("read", {
+      description: "Read a SEP-2640 skill:// URI (with SHA-256 verification) or MCP resource",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+        uri: Argument.String("uri").pipe(Argument.withDescription("Resource or skill:// URI")),
+      },
+    }),
+    Spec.make("call", {
+      description: "Invoke an MCP tool (<server> <tool> [json] or <server.tool> [json])",
+      params: {
+        server: Argument.String("server").pipe(Argument.withDescription("Server name or server.tool")),
+        tool: Argument.String("tool").pipe(
+          Argument.withDescription("Tool name (or JSON object when using server.tool)"),
+          Argument.optional,
+        ),
+        json: Argument.String("json").pipe(
+          Argument.withDescription("JSON object of tool arguments"),
+          Argument.optional,
+        ),
+      },
+    }),
+    Spec.make("exec", {
+      description: "Execute JavaScript in the confined Psychoscript CodeMode sandbox with mounted MCP tools",
+      params: {
+        code: Argument.String("code").pipe(
+          Argument.withDescription("JavaScript async body to execute"),
+          Argument.optional,
+        ),
+        file: Flag.String("file").pipe(Flag.withDescription("Read JavaScript source from a file path"), Flag.optional),
+        input: Flag.String("input").pipe(
+          Flag.withDescription("JSON value bound to the global `input` variable"),
+          Flag.optional,
+        ),
+        server: Flag.String("server").pipe(
+          Flag.withDescription("Restrict mounted MCP servers (repeat for multiple servers)"),
+          Flag.atLeast(0),
+        ),
+        timeout: Flag.Int("timeout").pipe(
+          Flag.withDescription("Execution timeout in milliseconds (default 30000)"),
+          Flag.optional,
+        ),
+      },
+    }),
+    Spec.make("auth", {
+      description: "Manage OAuth and static token credentials for remote MCP servers",
+      commands: [
+        Spec.make("start", {
+          description: "Start an OAuth 2.1 PKCE login flow for a remote MCP server",
+          params: {
+            server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+          },
+        }),
+        Spec.make("complete", {
+          description: "Complete a pending OAuth flow by pasting the callback URL or authorization code",
+          params: {
+            server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+            redirect: Argument.String("redirect-url-or-code").pipe(
+              Argument.withDescription("Full callback URL or authorization code"),
+            ),
+            state: Flag.String("state").pipe(
+              Flag.withDescription("Explicit OAuth state when passing only the code"),
+              Flag.optional,
+            ),
+          },
+        }),
+        Spec.make("set-token", {
+          description: "Store an access token in the encrypted MCP credential vault",
+          params: {
+            server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+            token: Argument.String("token").pipe(Argument.withDescription("Access token")),
+            refreshToken: Flag.String("refresh-token").pipe(Flag.optional),
+            scope: Flag.String("scope").pipe(Flag.optional),
+          },
+        }),
+        Spec.make("logout", {
+          description: "Remove stored OAuth credentials for a remote MCP server",
+          params: {
+            server: Argument.String("server").pipe(Argument.withDescription("Server name")),
+          },
+        }),
+      ],
+    }),
+  ],
+})
+
+const automationId = Argument.String("id").pipe(Argument.withDescription("Automation id (aut_...)"))
+
+const automation = Spec.make("automation", {
+  description: "Manage scheduled and MCP event automations",
+  commands: [
+    Spec.make("create", {
+      description: "Create a scheduled (at/every/cron) or MCP event automation",
+      params: {
+        name: Argument.String("name").pipe(Argument.withDescription("Short label for this automation")),
+        at: Flag.String("at").pipe(
+          Flag.withDescription('Run once at an ISO time, zoned wall-clock time, or "in 10 minutes"'),
+          Flag.optional,
+        ),
+        every: Flag.String("every").pipe(
+          Flag.withDescription('Run periodically on a duration such as "30 seconds" or "5 minutes"'),
+          Flag.optional,
+        ),
+        cron: Flag.String("cron").pipe(
+          Flag.withDescription('Run on a cron schedule such as "0 9 * * 1-5"'),
+          Flag.optional,
+        ),
+        eventServer: Flag.String("event-server").pipe(
+          Flag.withDescription("MCP server name for a SEP-3415 push event trigger"),
+          Flag.optional,
+        ),
+        event: Flag.String("event").pipe(
+          Flag.withDescription("MCP event name for a SEP-3415 push event trigger"),
+          Flag.optional,
+        ),
+        eventArgs: Flag.String("event-args").pipe(
+          Flag.withDescription("JSON object of arguments for an MCP event subscription"),
+          Flag.optional,
+        ),
+        tz: Flag.String("tz").pipe(Flag.withDescription("IANA time zone"), Flag.optional),
+        expires: Flag.String("expires").pipe(
+          Flag.withDescription('Expiration time (ISO, zoned wall-clock, or "in 8 hours")'),
+          Flag.optional,
+        ),
+        prompt: Flag.String("prompt").pipe(
+          Flag.withDescription("Prompt text to deliver when triggered"),
+          Flag.optional,
+        ),
+        code: Flag.String("code").pipe(
+          Flag.withDescription("CodeMode JavaScript gate body to run with 0 LLM tokens"),
+          Flag.optional,
+        ),
+        codeFile: Flag.String("code-file").pipe(
+          Flag.withDescription("Read CodeMode JavaScript gate body from a file"),
+          Flag.optional,
+        ),
+        args: Flag.String("args").pipe(
+          Flag.withDescription("JSON value passed to CodeMode gate as input.args"),
+          Flag.optional,
+        ),
+        session: Flag.String("session").pipe(Flag.withDescription("Target existing session id"), Flag.optional),
+        agent: Flag.String("agent").pipe(
+          Flag.withDescription("Target agent definition to spawn a child session"),
+          Flag.optional,
+        ),
+      },
+    }),
+    Spec.make("list", {
+      alias: "ls",
+      description: "List automations as JSON",
+      params: {
+        status: Flag.Literals("status", Automation.Status.literals).pipe(
+          Flag.withDescription("Filter by status: active, paused, or done"),
+          Flag.optional,
+        ),
+        session: Flag.String("session").pipe(Flag.withDescription("Filter by creating session id"), Flag.optional),
+        project: Flag.String("project").pipe(Flag.withDescription("Filter by project id"), Flag.optional),
+      },
+    }),
+    Spec.make("get", {
+      description: "Show one automation as JSON",
+      params: { id: automationId },
+    }),
+    Spec.make("pause", {
+      description: "Pause an active automation",
+      params: { id: automationId },
+    }),
+    Spec.make("resume", {
+      description: "Resume a paused automation",
+      params: { id: automationId },
+    }),
+    Spec.make("remove", {
+      alias: "rm",
+      description: "Delete an automation",
+      params: { id: automationId },
+    }),
+    Spec.make("run-now", {
+      description: "Execute an automation immediately once",
+      params: { id: automationId },
     }),
   ],
 })
@@ -543,8 +781,9 @@ export const Commands = Spec.make("vibest", {
     project,
     worktree,
     plugins,
+    mcp,
+    automation,
     subscriptions,
-    integration,
     onboard,
     doctor,
     update,

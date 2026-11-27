@@ -1,15 +1,14 @@
+import { withHeaders } from "@vibest/client/client"
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
-import { Db } from "@vibest/core/database/db"
-import type { MachineRow } from "@vibest/core/database/remote"
-import { KeyedMutex } from "@vibest/core/effect/keyed-mutex"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Identity } from "@vibest/core/identity"
 import { errorMessage, type MachineHook, type PluginNote, Plugins } from "@vibest/core/plugin"
-import { Runtimes } from "@vibest/core/runtimes"
+import type { MachineRow } from "@vibest/core/remote/sql"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { type Runtime } from "@vibest/plugin/effect"
 import { Host } from "@vibest/plugin/host"
+import type { DaemonStopping, InvalidCaller, InvalidRequestError, ProtocolRejected } from "@vibest/protocol/errors"
 import { REMOTE_BY_USER, remoteHeaders } from "@vibest/protocol/protocol"
-import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import {
   AlreadyAdded,
@@ -26,7 +25,10 @@ import {
 } from "@vibest/schema/machine"
 import type { Terminal, TerminalTarget } from "@vibest/schema/terminal"
 import { PROTOCOL } from "@vibest/schema/version"
+import { KeyedMutex } from "@vibest/util/keyed-mutex"
+import { LayerNode } from "@vibest/util/layer-node"
 import {
+  Cause,
   Clock,
   Context,
   Data,
@@ -44,7 +46,8 @@ import {
   Scope,
   Stream,
 } from "effect"
-import { RpcClient, type RpcClientError } from "effect/rpc"
+import type * as Sse from "effect/encoding/Sse"
+import type { HttpClientError } from "effect/http"
 import type * as Socket from "effect/socket/Socket"
 
 export * as Machines from "./machines.ts"
@@ -73,7 +76,7 @@ const EXIT_WAIT = Duration.seconds(1)
 export const REPAIR_PAUSE = Duration.seconds(30)
 
 const cannotShow = (name: string, kind: string) =>
-  `${name}'s ${kind} agents cannot be shown here; vibest peek ${name}/<id> reads them`
+  `${name}'s ${kind} agents cannot be shown here; vibest peek <id> --machine ${name} reads them`
 
 const shownKind = (here: ReadonlyArray<{ readonly id: string; readonly name?: string }>, kind: string) =>
   here.find((runtime) => runtime.id === kind)?.name ?? kind
@@ -145,10 +148,23 @@ const exitReason = (name: string, exit: PipeExit) => {
   return last || `ssh exited ${exit.code ?? "on a signal"}`
 }
 
-type LineError = RpcClientError.RpcClientError | ProtocolRejected | DaemonStopping | InvalidCaller | MachineDown
+type LineError =
+  | HttpClientError.HttpClientError
+  | Schema.SchemaError
+  | Sse.Retry
+  | Sse.SseError
+  | InvalidRequestError
+  | ProtocolRejected
+  | DaemonStopping
+  | InvalidCaller
+  | MachineDown
 
 const LINE_TAGS: Record<LineError["_tag"], true> = {
-  RpcClientError: true,
+  HttpClientError: true,
+  SchemaError: true,
+  Retry: true,
+  SseError: true,
+  InvalidRequestError: true,
   ProtocolRejected: true,
   DaemonStopping: true,
   InvalidCaller: true,
@@ -159,7 +175,7 @@ const isLineError = (e: unknown): e is LineError =>
   Predicate.hasProperty(e, "_tag") && Predicate.isString(e._tag) && Object.hasOwn(LINE_TAGS, e._tag)
 
 const alreadyNamed = (name: string) =>
-  `a machine named ${name} is already added; remove it first (vibest machine rm ${name})`
+  `a machine named ${name} is already added; remove it first (vibest machine remove ${name})`
 
 export interface Link {
   readonly client: PipeClient
@@ -196,7 +212,7 @@ type Entry = {
 }
 
 const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const remoteStore = yield* RemoteStore.Service
   const self = yield* Identity.Service
   const transport = yield* MachineTransport
   const scope = yield* Effect.scope
@@ -249,7 +265,7 @@ const make = Effect.gen(function* () {
     (name: string, kind: string, sessions: ReadonlyMap<string, TerminalTarget>, always = false) =>
       lock.withLock(name)(
         Effect.gen(function* (): Effect.fn.Return<View> {
-          const row = yield* db.remote.machineNamed(name)
+          const row = yield* remoteStore.machineNamed(name)
           const here = yield* runtimes.all
           const locate = here.find((r) => r.id === kind)?.locate
           const label = shownKind(here, kind)
@@ -362,7 +378,11 @@ const make = Effect.gen(function* () {
         (e: LineError): Effect.Effect<never, MachineUnavailable | MachineIncompatible> =>
           Match.value(e).pipe(
             Match.tagsExhaustive({
-              RpcClientError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+              HttpClientError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+              SchemaError: (e) => unavailable(`${name}: ${e.message}`),
+              Retry: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+              SseError: (e) => Effect.flatMap(down(e), (reason) => unavailable(lost(reason))),
+              InvalidRequestError: (e) => unavailable(`${name}: ${e.message}`),
               MachineDown: (e) => unavailable(lost(e.message)),
               ProtocolRejected: (e) =>
                 Effect.fail(new MachineIncompatible({ machine: name, message: `${name}: ${e.message}` })),
@@ -397,19 +417,35 @@ const make = Effect.gen(function* () {
       )
 
       const opening = line((reason) => reason)
-      const client = yield* connectPipe(pipe.socket)
+
+      const client = yield* Effect.raceFirst(connectPipe(pipe.socket), gone).pipe(
+        Effect.catch((e) => {
+          if (Predicate.isTagged(e, "MachineDown")) return Effect.fail(e)
+
+          if (Predicate.isTagged(e, "PipeIncompatible") && !e.message.startsWith("pipe closed"))
+            return Effect.fail(
+              new MachineDown({
+                stop: "mismatch",
+                message: `${name} runs an older vibest; run vibest update there`,
+              }),
+            )
+
+          return Effect.flatMap(down(e), (reason) => Effect.fail(new MachineDown({ message: reason })))
+        }),
+      )
+
       const failed = (e: { readonly message: string }) => new MachineDown({ message: e.message })
-      const ping = yield* opening(client.Ping(undefined)).pipe(Effect.mapError(failed))
+      const ping = yield* opening(client["server.daemon"]["daemon.ping"]()).pipe(Effect.mapError(failed))
 
       if (ping.protocol !== PROTOCOL)
         return yield* new MachineDown({
-          message: `${name} runs vibest ${ping.version} (protocol ${ping.protocol ?? "none"}); run vibest update there`,
+          message: `${name} runs vibest ${ping.version} (protocol ${ping.protocol ?? "none"}); run vibest update on ${name}`,
           stop: "mismatch",
         })
 
       const hello = yield* opening(
-        RpcClient.withHeaders(
-          client["Remote.Hello"]({ id: self.id, name: self.name, callsMe: name }),
+        withHeaders(
+          client["server.remote"]["remote.hello"]({ payload: { id: self.id, name: self.name, callsMe: name } }),
           remoteHeaders(self.id),
         ),
       ).pipe(Effect.mapError(failed))
@@ -423,31 +459,37 @@ const make = Effect.gen(function* () {
 
   const receive = (row: MachineRow, link: Link, item: OutboxItem) =>
     Effect.gen(function* () {
-      const name = (yield* db.remote.nameForRemote(row.remoteId)) ?? row.name
-      const address = `${name}/${shortId(item.session)}`
-      const content = `${item.content}${item.cut ? `… (full text: vibest result ${address})` : ""}`
+      const name = (yield* remoteStore.nameForRemote(row.remoteId)) ?? row.name
+      const sender = shortId(item.session)
+      const content = `${item.content}${item.cut ? `… (full text: vibest result ${sender} --machine ${name})` : ""}`
       const from = { machine: name, ...(item.from ?? { session: item.session }) }
       const sep = item.recipient.indexOf(":")
 
       if (sep > 0) {
         const targetRemoteId = item.recipient.slice(0, sep)
         const targetSessionId = item.recipient.slice(sep + 1)
-        const targetMachine = yield* db.remote.machineWithRemote(targetRemoteId)
+        const targetMachine = yield* remoteStore.machineWithRemote(targetRemoteId)
         const targetEntry = targetMachine === undefined ? undefined : entries.get(targetMachine.name)
         const targetLink = targetEntry?.state === "connected" ? targetEntry.link : undefined
 
         if (targetLink !== undefined) {
           const outcome = yield* Effect.result(
             targetLink.call(
-              targetLink.client.Send(
-                { id: targetSessionId, message: content, request: item.id, from },
-                { headers: remoteHeaders(self.id, "relay", REMOTE_BY_USER) },
+              withHeaders(
+                targetLink.client["server.session"]["session.send"]({
+                  params: { id: targetSessionId },
+                  payload: { message: content, request: item.id, from },
+                }),
+                remoteHeaders(self.id, "relay", REMOTE_BY_USER),
               ),
             ),
           )
 
           if (Predicate.isTagged(outcome, "Success")) {
-            yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+            yield* withHeaders(
+              link.client["server.remote"]["remote.ack"]({ payload: { ids: [item.id] } }),
+              remoteHeaders(self.id),
+            )
 
             return
           }
@@ -456,7 +498,10 @@ const make = Effect.gen(function* () {
 
           if (Predicate.isTagged(err, "NoSuchSession") || Predicate.isTagged(err, "Forbidden")) {
             yield* Effect.logWarning(`${name}: dropped relayed ${item.kind} for ${targetSessionId}: ${err.message}`)
-            yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+            yield* withHeaders(
+              link.client["server.remote"]["remote.ack"]({ payload: { ids: [item.id] } }),
+              remoteHeaders(self.id),
+            )
 
             return
           }
@@ -470,16 +515,19 @@ const make = Effect.gen(function* () {
 
         if (targetMachine !== undefined) return
         yield* Effect.logWarning(`${name}: dropped a ${item.kind} for unknown remote ${targetRemoteId}`)
-        yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+        yield* withHeaders(
+          link.client["server.remote"]["remote.ack"]({ payload: { ids: [item.id] } }),
+          remoteHeaders(self.id),
+        )
 
         return
       }
 
-      const outcome = yield* db.remote.receiveRemoteItem({
+      const outcome = yield* remoteStore.receiveRemoteItem({
         id: item.id,
         recipient: item.recipient,
         kind: item.kind,
-        sender: address,
+        sender,
         from,
         content,
       })
@@ -488,7 +536,10 @@ const make = Effect.gen(function* () {
         yield* Effect.logWarning(
           `${name}: dropped a ${item.kind} for session ${item.recipient}, which this vibestd does not have`,
         )
-      yield* link.client["Remote.Ack"]({ ids: [item.id] }, { headers: remoteHeaders(self.id) })
+      yield* withHeaders(
+        link.client["server.remote"]["remote.ack"]({ payload: { ids: [item.id] } }),
+        remoteHeaders(self.id),
+      )
     })
 
   type First = {
@@ -509,7 +560,7 @@ const make = Effect.gen(function* () {
           stop: "different",
           answered: opened.hello.id,
         })
-      yield* db.remote.machineConnected(row.name)
+      yield* remoteStore.machineConnected(row.name)
       yield* heard(row.name, opened.hello.runtimes)
       yield* set(row.name, {
         state: "connected",
@@ -521,11 +572,14 @@ const make = Effect.gen(function* () {
       if (first === undefined) yield* Effect.forkScoped(lock.withLock(row.name)(fire(row, "connect")))
       const link = opened.link
 
-      const outbox = link.client["Remote.Outbox"](undefined, { headers: remoteHeaders(self.id) }).pipe(
+      const outbox = Stream.unwrap(
+        withHeaders(link.client["server.remote"]["remote.outbox"](), remoteHeaders(self.id)),
+      ).pipe(
         Stream.runForEach((item) => receive(row, link, item)),
-        Effect.matchCause({
-          onSuccess: () => `${row.name} closed the connection`,
-          onFailure: () => `${row.name} stopped answering`,
+        Effect.matchCauseEffect({
+          onSuccess: () => Effect.succeed(`${row.name} closed the connection`),
+          onFailure: (cause) =>
+            Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.succeed(`${row.name} stopped answering`),
         }),
       )
 
@@ -554,7 +608,7 @@ const make = Effect.gen(function* () {
       let given = first
 
       while (true) {
-        const row = given?.row ?? (yield* db.remote.machineNamed(name))
+        const row = given?.row ?? (yield* remoteStore.machineNamed(name))
 
         if (row === undefined) return
         const down = yield* connection(row, given).pipe(Effect.flip)
@@ -590,7 +644,7 @@ const make = Effect.gen(function* () {
 
   yield* runtimes.added.pipe(
     Stream.runForEach((started) =>
-      Effect.flatMap(db.remote.machines, (rows) =>
+      Effect.flatMap(remoteStore.machines, (rows) =>
         Effect.forEach(
           rows.filter((row) => entries.get(row.name)?.state === "connected"),
           (row) => Effect.forEach(started, (runtime) => lock.withLock(row.name)(fire(row, "connect", runtime))),
@@ -601,7 +655,7 @@ const make = Effect.gen(function* () {
     Effect.forkIn(scope, { startImmediately: true }),
   )
 
-  for (const row of yield* db.remote.machines) yield* start(row.name)
+  for (const row of yield* remoteStore.machines) yield* start(row.name)
 
   const failed = (message: string) => new MachineFailed({ message })
 
@@ -616,7 +670,7 @@ const make = Effect.gen(function* () {
               : `${name} is ${entry.state}${entry.reason ? `: ${entry.reason}` : ""}`,
         })
 
-  const states = Effect.map(db.remote.machines, (rows) =>
+  const states = Effect.map(remoteStore.machines, (rows) =>
     rows.map((row) => {
       const entry = entries.get(row.name) ?? { state: "connecting" as const, since: row.connectedAt }
       const connected = entry.state === "connected"
@@ -687,7 +741,7 @@ const make = Effect.gen(function* () {
 
       if (problem !== undefined) return yield* failed(problem)
 
-      if ((yield* db.remote.machineNamed(name)) !== undefined) return yield* failed(alreadyNamed(name))
+      if ((yield* remoteStore.machineNamed(name)) !== undefined) return yield* failed(alreadyNamed(name))
       const pipe = yield* Scope.make()
 
       const opened = yield* open(name, target).pipe(
@@ -703,13 +757,13 @@ const make = Effect.gen(function* () {
       )
 
       const id = opened.hello.id
-      const added = id === self.id ? undefined : yield* db.remote.addMachine({ name, target, remoteId: id })
+      const added = id === self.id ? undefined : yield* remoteStore.addMachine({ name, target, remoteId: id })
 
       if (added === undefined) {
         yield* Scope.close(pipe, Exit.void)
 
         if (id === self.id) return yield* failed(`${name} is this vibestd`)
-        const same = yield* db.remote.machineWithRemote(id)
+        const same = yield* remoteStore.machineWithRemote(id)
 
         if (same !== undefined) return yield* new AlreadyAdded({ machine: same.name, id })
 
@@ -790,17 +844,17 @@ const make = Effect.gen(function* () {
     }),
 
     remove: Effect.fn("Machines.remove")(function* (name: string) {
-      const row = yield* db.remote.machineNamed(name)
+      const row = yield* remoteStore.machineNamed(name)
       const fiber = fibers.get(name)
       fibers.delete(name)
 
       if (fiber !== undefined) yield* Fiber.interrupt(fiber)
       entries.delete(name)
 
-      if (row === undefined || !(yield* db.remote.removeMachine(name)))
+      if (row === undefined || !(yield* remoteStore.removeMachine(name)))
         return yield* new UnknownMachine({
           machine: name,
-          machines: (yield* db.remote.machines).map((row) => row.name),
+          machines: (yield* remoteStore.machines).map((row) => row.name),
         })
       yield* PubSub.publish(changes, MachineChanges.Removed({ name }))
       const notes = yield* lock.withLock(name)(fire(row, "remove"))
@@ -813,12 +867,12 @@ const make = Effect.gen(function* () {
     }),
 
     reading: Effect.fn("Machines.reading")(function* (name: string) {
-      const row = yield* db.remote.machineNamed(name)
+      const row = yield* remoteStore.machineNamed(name)
 
       if (row === undefined)
         return yield* new UnknownMachine({
           machine: name,
-          machines: (yield* db.remote.machines).map((known) => known.name),
+          machines: (yield* remoteStore.machines).map((known) => known.name),
         })
       const entry = entries.get(name)
       const link = entry?.state === "connected" ? entry.link : undefined
@@ -831,23 +885,25 @@ const make = Effect.gen(function* () {
           message: `${name} runs a vibestd that cannot read its load; run vibest update there`,
         })
 
-      return yield* link.call(RpcClient.withHeaders(link.client["Machine.Load"]({}), remoteHeaders(self.id))).pipe(
-        Effect.catchTag("NoSuchSession", (e) =>
-          Effect.fail(new MachineUnavailable({ machine: name, message: e.message })),
-        ),
-        Effect.timeoutOrElse({
-          duration: LOAD_TIMEOUT,
-          orElse: () =>
-            Effect.fail(new MachineUnavailable({ machine: name, message: `${name} did not answer in 3 s` })),
-        }),
-      )
+      return yield* link
+        .call(withHeaders(link.client["server.machine"]["machine.load"]({ query: {} }), remoteHeaders(self.id)))
+        .pipe(
+          Effect.catchTag("NoSuchSession", (e) =>
+            Effect.fail(new MachineUnavailable({ machine: name, message: e.message })),
+          ),
+          Effect.timeoutOrElse({
+            duration: LOAD_TIMEOUT,
+            orElse: () =>
+              Effect.fail(new MachineUnavailable({ machine: name, message: `${name} did not answer in 3 s` })),
+          }),
+        )
     }),
 
     link: Effect.fn("Machines.link")(function* (name: string) {
-      if ((yield* db.remote.machineNamed(name)) === undefined)
+      if ((yield* remoteStore.machineNamed(name)) === undefined)
         return yield* new UnknownMachine({
           machine: name,
-          machines: (yield* db.remote.machines).map((row) => row.name),
+          machines: (yield* remoteStore.machines).map((row) => row.name),
         })
       const entry = entries.get(name)
 
@@ -867,5 +923,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Db.node, machineTransportNode, Plugins.node, Runtimes.node, Identity.node],
+  deps: [RemoteStore.node, machineTransportNode, Plugins.node, Runtimes.node, Identity.node],
 })

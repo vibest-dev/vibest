@@ -1,14 +1,16 @@
-import { ProcessEnded, SessionEnded } from "@vibest/schema/event"
+import { ProcessEvent } from "@vibest/schema/process-event"
+import { SessionEvent } from "@vibest/schema/session-event"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer, Semaphore, Stream } from "effect"
 
 import { Bus } from "../bus.ts"
-import { Concurrency } from "../concurrency.ts"
-import { archived, type ProcessStart } from "../database/db-rows.ts"
-import { Db } from "../database/db.ts"
-import { LayerNode } from "../effect/layer-node.ts"
+import { archived, type ProcessStart } from "../database/rows.ts"
 import { Inbox } from "../inbox.ts"
+import { InboxStore } from "../inbox/store.ts"
 import * as Reactor from "../reactor.ts"
+import { Concurrency } from "../runtime/concurrency.ts"
 import { Placement } from "./placement.ts"
+import { SessionStore } from "./store.ts"
 
 export * as Starts from "./starts.ts"
 
@@ -19,7 +21,8 @@ export interface Waiting {
 }
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
+  const inboxStore = yield* InboxStore.Service
   const placement = yield* Placement.Service
   const inbox = yield* Inbox.Service
   const concurrency = yield* Concurrency.Service
@@ -32,7 +35,7 @@ export const make = Effect.gen(function* () {
 
   const closeLeft = (id: string) =>
     Effect.gen(function* () {
-      const session = yield* db.session.getSession(id)
+      const session = yield* sessionStore.getSession(id)
 
       if (session !== undefined) yield* placement.closeLeftTerminal(session)
     })
@@ -45,7 +48,7 @@ export const make = Effect.gen(function* () {
         if (max === 0) return false
         yield* closeLeft(id)
 
-        return yield* db.session.admitProcess(id, start, max)
+        return yield* sessionStore.admitProcess(id, start, max)
       }),
     )
 
@@ -53,7 +56,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       while (list.length > 0) {
         const next = list[0]!
-        const session = yield* db.session.getSession(next.id)
+        const session = yield* sessionStore.getSession(next.id)
 
         if (session === undefined || archived(session)) {
           list.shift()
@@ -67,16 +70,16 @@ export const make = Effect.gen(function* () {
 
         if (failedClose !== undefined) {
           list.shift()
-          yield* db.session.startProcess(next.id, next.start)
-          yield* db.session.endProcess(next.id, "launch_failed")
-          const session = yield* db.session.getSession(next.id)
-          const pending = session === undefined ? [] : yield* db.inbox.pendingInbox(next.id)
+          yield* sessionStore.startProcess(next.id, next.start)
+          yield* sessionStore.endProcess(next.id, "launch_failed")
+          const session = yield* sessionStore.getSession(next.id)
+          const pending = session === undefined ? [] : yield* inboxStore.pendingInbox(next.id)
 
           if (session !== undefined && pending.length > 0) yield* inbox.undelivered(session, pending, failedClose)
           continue
         }
 
-        if (!(yield* db.session.admitProcess(next.id, next.start, yield* concurrency.limit))) return
+        if (!(yield* sessionStore.admitProcess(next.id, next.start, yield* concurrency.limit))) return
         list.shift()
         yield* Effect.forkIn(next.launch, scope)
       }
@@ -99,7 +102,7 @@ export const make = Effect.gen(function* () {
       }),
     )
 
-  yield* reactor.on([ProcessEnded, SessionEnded], () => walk)
+  yield* reactor.on([ProcessEvent.Ended, SessionEvent.Archived], () => walk)
   yield* concurrency.limits.pipe(
     Stream.runForEach(() => walk),
     Effect.forkScoped,
@@ -125,5 +128,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Bus.node, Concurrency.node, Db.node, Inbox.node, Placement.node],
+  deps: [Bus.node, Concurrency.node, SessionStore.node, InboxStore.node, Inbox.node, Placement.node],
 })

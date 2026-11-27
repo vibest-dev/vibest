@@ -68,16 +68,16 @@ does not set it up again; editing the plugin itself does.
 
 ## G12. A plugin observes the ledger's facts
 
-A plugin that subscribes with `ctx.event.subscribe` to `session.created`, `process.started`, `execution.started` and
-`execution.succeeded` gets those facts of a real Pi subagent, in that order, and none it did not ask for. A plugin that
-subscribes to every fact gets no signal. After the plugin is edited, the new revision gets the next agent's
+A plugin that subscribes with `ctx.event.subscribe` to `session.inbox.enqueued`, `session.created`, `session.execution.started` and
+`session.execution.succeeded` gets those facts of a real Pi subagent, in that order, and none it did not ask for. A plugin that
+subscribes to every fact gets only public facts (`PublicEvents`: `project.*`, `session.*` including `session.execution.*` and public `session.inbox.*`, and `machine.added` / `machine.removed` — excluding `process.*`, internal bookkeeping/transport facts, and ephemeral events). After the plugin is edited, the new revision gets the next agent's
 facts and the old one gets nothing more.
 
 ## G13. A plugin written with Promises
 
 A plugin defined as `{ id, setup }` with Promises loads like an Effect plugin: its `session.start.before` callback routes
 `vibest run -- <task>` to a real Pi and `vibest ls` names it as the decider, its `event.subscribe` iterator gets the
-agent's `execution.succeeded`, and deleting its file unloads it and runs the cleanup its `setup` returned. Editing an Effect
+agent's `session.execution.succeeded`, and deleting its file unloads it and runs the cleanup its `setup` returned. Editing an Effect
 plugin into the `setup` form reloads it like any edit (G2).
 
 ## G14. A builtin plugin can be removed
@@ -135,4 +135,4 @@ plugin keeps no state of its own: it reads each session's last activity, so a vi
 
 ## G21. A plugin guards tool calls with `session.tool.execute.before`
 
-Both an Effect plugin and a Promise plugin can register `ctx.session.hook("tool.execute.before", ...)`. Each receives `{ session, tool, input, cwd }`, can refuse a tool call with `ToolRefused({ reason })` (surfacing that exact reason to the harness pre-tool hook), and increments `calls` and `refused` in `vibest plugins`. The builtin `vibest.guard` enforces only `VIBEST_SESSION_ID` tampering and `vibest integration stop|prompt|ready`; other commands are allowed by default unless a plugin refuses them.
+Both an Effect plugin and a Promise plugin can register `ctx.session.hook("tool.execute.before", ...)`. Each receives `{ session, tool, input, cwd }`, can refuse a tool call with `ToolRefused({ reason })` (surfacing that exact reason to the harness pre-tool hook), and increments `calls` and `refused` in `vibest plugins`. The builtin `vibest.guard` enforces only `VIBEST_SESSION_ID` tampering and direct `vibest.sock` requests; other commands are allowed by default unless a plugin refuses them.

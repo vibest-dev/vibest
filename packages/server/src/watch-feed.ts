@@ -1,6 +1,16 @@
-import { Bus, type BusEvent } from "@vibest/core/bus"
-import { LayerNode } from "@vibest/core/effect/layer-node"
-import { WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
+import {
+  Bus,
+  type BusEvent,
+  ProjectChanged,
+  RuntimeReset,
+  SessionChanged,
+  TerminalExited,
+  TerminalSeen,
+  TerminalState,
+} from "@vibest/core/bus"
+import { WatchLagged } from "@vibest/protocol/errors"
+import type { WatchEvent } from "@vibest/protocol/schemas"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Cause, Context, Effect, Layer, PubSub, Queue, type Scope, Stream } from "effect"
 
 import * as Listing from "./listing.ts"
@@ -9,14 +19,7 @@ export * as WatchFeed from "./watch-feed.ts"
 
 export const WATCH_BACKLOG = 10_000
 
-const watched = [
-  { type: "session.changed" },
-  { type: "project.changed" },
-  { type: "terminal.state" },
-  { type: "terminal.exited" },
-  { type: "terminal.seen" },
-  { type: "runtime.reset" },
-] as const
+const watched = [SessionChanged, ProjectChanged, TerminalState, TerminalExited, TerminalSeen, RuntimeReset] as const
 
 export const watchFanout = () => {
   const watchers = new Set<Queue.Queue<WatchEvent, WatchLagged>>()

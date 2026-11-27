@@ -1,22 +1,21 @@
 import path from "node:path"
 
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
 import { SessionLaunch } from "@vibest/core/session/entry"
 import { Placement } from "@vibest/core/session/placement"
+import { SessionStore } from "@vibest/core/session/store"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { makeRepository } from "@vibest/testkit/session"
+import { test } from "@vibest/testkit/sessions-helpers"
 import { Effect } from "effect"
-
-import { projectOf } from "./lib/directory.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { makeRepository } from "./lib/session.ts"
-import { test } from "./lib/sessions-helpers.ts"
 
 const insertTopLevel = (projectId: string, name: string, cwd: string) =>
   Effect.gen(function* () {
-    const db = yield* Db.Service
-    const id = yield* db.session.newSessionId
+    const sessionStore = yield* SessionStore.Service
+    const id = yield* sessionStore.newSessionId
 
-    yield* db.session.insertSession(
+    yield* sessionStore.insertSession(
       {
         id,
         agent: "general",
@@ -39,14 +38,14 @@ const insertTopLevel = (projectId: string, name: string, cwd: string) =>
       { cwd },
     )
 
-    return (yield* db.session.getSession(id))!
+    return (yield* sessionStore.getSession(id))!
   })
 
 describe.concurrent("Placement project near-terminal", () => {
   test(
     "reuses the project's last terminal for top-level sessions while live and after exit, and isolates projects",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const placement = yield* Placement.Service
       const fake = yield* FakeRuntime
       const repoA = yield* makeRepository
@@ -77,8 +76,8 @@ describe.concurrent("Placement project near-terminal", () => {
       assert.strictEqual(opensAfter2.at(-1)?.near, t1.id)
       assert.isUndefined(opensAfter2.at(-1)?.parent)
 
-      yield* db.session.endProcess(s1.id, "exited")
-      yield* db.session.endProcess(s2.id, "exited")
+      yield* sessionStore.endProcess(s1.id, "exited")
+      yield* sessionStore.endProcess(s2.id, "exited")
 
       const s3 = yield* insertTopLevel(projectA, "third", repoA)
       yield* placement.openTerminal(fake.runtime, undefined, s3, {
@@ -135,12 +134,12 @@ describe.concurrent("Placement project near-terminal", () => {
   test(
     "lastProjectTerminal prefers live over ended and excludes remote peer sessions",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
 
-      const liveId = yield* db.session.newSessionId
-      yield* db.session.insertSession(
+      const liveId = yield* sessionStore.newSessionId
+      yield* sessionStore.insertSession(
         {
           id: liveId,
           agent: "general",
@@ -163,8 +162,8 @@ describe.concurrent("Placement project near-terminal", () => {
         { cwd: repo },
       )
 
-      const endedId = yield* db.session.newSessionId
-      yield* db.session.insertSession(
+      const endedId = yield* sessionStore.newSessionId
+      yield* sessionStore.insertSession(
         {
           id: endedId,
           agent: "general",
@@ -187,8 +186,8 @@ describe.concurrent("Placement project near-terminal", () => {
         { cwd: repo },
       )
 
-      const remoteId = yield* db.session.newSessionId
-      yield* db.session.insertSession(
+      const remoteId = yield* sessionStore.newSessionId
+      yield* sessionStore.insertSession(
         {
           id: remoteId,
           agent: "general",
@@ -211,14 +210,14 @@ describe.concurrent("Placement project near-terminal", () => {
         { cwd: repo, origin: { remote: "remote-1", project: "remote-proj" } },
       )
 
-      assert.deepStrictEqual(yield* db.session.lastProjectTerminal(projectId, "rex"), {
+      assert.deepStrictEqual(yield* sessionStore.lastProjectTerminal(projectId, "rex"), {
         session: "session:live",
         block: "block:1",
       })
 
-      yield* db.session.endProcess(liveId, "exited")
+      yield* sessionStore.endProcess(liveId, "exited")
 
-      assert.deepStrictEqual(yield* db.session.lastProjectTerminal(projectId, "rex"), {
+      assert.deepStrictEqual(yield* sessionStore.lastProjectTerminal(projectId, "rex"), {
         session: "session:ended",
         block: "block:2",
       })
@@ -228,7 +227,7 @@ describe.concurrent("Placement project near-terminal", () => {
   test(
     "SessionLaunch.launch reuses lastProjectTerminal when target is omitted and respects explicit target",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const entry = yield* SessionLaunch.Service
       const fake = yield* FakeRuntime
       const repo = yield* makeRepository
@@ -248,10 +247,10 @@ describe.concurrent("Placement project near-terminal", () => {
         agent: { id: "coordinator", named: false },
       })
 
-      const entryRow = (yield* db.session.latestRoot(projectId))!
+      const entryRow = (yield* sessionStore.latestRoot(projectId))!
       assert.strictEqual(entryRow.name, `Vibest/${path.basename(repo)}`)
       assert.strictEqual((yield* fake.callsTo("open")).at(-1)?.label, entryRow.name)
-      yield* db.session.endProcess(entryRow.id, "exited")
+      yield* sessionStore.endProcess(entryRow.id, "exited")
 
       yield* entry.launch({
         projectId,
@@ -271,8 +270,8 @@ describe.concurrent("Placement project near-terminal", () => {
       assert.strictEqual(secondOpen?.near, first.terminal["id"])
       assert.isUndefined(secondOpen?.parent)
 
-      const secondEntryRow = (yield* db.session.latestRoot(projectId))!
-      yield* db.session.endProcess(secondEntryRow.id, "exited")
+      const secondEntryRow = (yield* sessionStore.latestRoot(projectId))!
+      yield* sessionStore.endProcess(secondEntryRow.id, "exited")
 
       yield* entry.launch({
         projectId,
@@ -298,7 +297,7 @@ describe.concurrent("Placement project near-terminal", () => {
   test(
     "child session passes creator terminal as parent and near, while top-level sessions pass no parent",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const placement = yield* Placement.Service
       const fake = yield* FakeRuntime
       const repo = yield* makeRepository
@@ -312,8 +311,8 @@ describe.concurrent("Placement project near-terminal", () => {
         launch: () => ({ argv: [], env: {} }),
       })
 
-      const childId = yield* db.session.newSessionId
-      yield* db.session.insertSession(
+      const childId = yield* sessionStore.newSessionId
+      yield* sessionStore.insertSession(
         {
           id: childId,
           agent: "general",
@@ -335,7 +334,7 @@ describe.concurrent("Placement project near-terminal", () => {
         projectId,
         { cwd: repo, parentSessionId: creator.id },
       )
-      const child = (yield* db.session.getSession(childId))!
+      const child = (yield* sessionStore.getSession(childId))!
 
       yield* placement.openTerminal(fake.runtime, undefined, child, {
         project: repo,

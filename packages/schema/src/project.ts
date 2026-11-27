@@ -21,9 +21,13 @@ export const ProjectActivity = Schema.Literals(["blocked", "done", "working", "i
 
 export type ProjectActivity = typeof ProjectActivity.Type
 
-export class ProjectCloneFailed extends Schema.TaggedError<ProjectCloneFailed>()("ProjectCloneFailed", {
-  message: Schema.String,
-}) {}
+export class ProjectCloneFailed extends Schema.TaggedError<ProjectCloneFailed>()(
+  "ProjectCloneFailed",
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 500 },
+) {}
 
 export const CloneFailed = Schema.Union([
   ProjectCloneFailed,
@@ -44,13 +48,21 @@ export const CloneStep = Schema.Union([
   Schema.Struct({ projectId: Schema.String, directory: Schema.String }),
 ])
 
-export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()("ProjectCreateFailed", {
-  message: Schema.String,
-}) {}
+export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()(
+  "ProjectCreateFailed",
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 500 },
+) {}
 
-export class NoSuchProject extends Schema.TaggedError<NoSuchProject>()("NoSuchProject", {
-  project: Schema.String,
-}) {
+export class NoSuchProject extends Schema.TaggedError<NoSuchProject>()(
+  "NoSuchProject",
+  {
+    project: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {
   override get message() {
     return `no project ${this.project} on this machine`
   }

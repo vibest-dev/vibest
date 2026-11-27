@@ -1,0 +1,5 @@
+{
+  "extends": "@vibest/tsconfig/base.json",
+  "include": ["src", "test", "script"],
+  "exclude": ["src/plugin.ts"]
+}

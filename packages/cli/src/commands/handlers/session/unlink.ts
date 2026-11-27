@@ -7,7 +7,7 @@ import { edgeSpecOf } from "./spec.ts"
 
 export default Runtime.handler(Commands.commands.session.commands.unlink, (o) =>
   edgeSpecOf(o).pipe(
-    Effect.flatMap((spec) => vibest((client) => client["Session.Unlink"]({ spec }))),
+    Effect.flatMap((spec) => vibest((client) => client["server.session"]["session.unlink"]({ payload: { spec } }))),
     Effect.flatMap(json),
   ),
 )

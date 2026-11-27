@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Agents } from "@vibest/core/agents"
-import { definitionIn } from "@vibest/core/launch"
+import { definitionIn } from "@vibest/core/agent/launch"
+import { Agents } from "@vibest/core/agent/registry"
 import { Effect } from "effect"
 
 const builtin = { id: "general", description: "builtin", system: "builtin prompt" }

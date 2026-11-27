@@ -1,21 +1,21 @@
 import { assert, describe } from "@effect/vitest"
-import { Concurrency } from "@vibest/core/concurrency"
-import { Db } from "@vibest/core/database/db"
-import { executionStateOf, exitedAt } from "@vibest/core/database/db-rows"
-import { LIVE_PROCESS_COUNT } from "@vibest/core/database/session"
-import { Drain } from "@vibest/core/drain"
-import { Runtimes } from "@vibest/core/runtimes"
+import { executionStateOf, exitedAt } from "@vibest/core/database/rows"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
+import { Drain } from "@vibest/core/runtime/drain"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { Session } from "@vibest/core/session"
 import { SessionLaunch } from "@vibest/core/session/entry"
 import { Starts } from "@vibest/core/session/starts"
+import { SessionStore } from "@vibest/core/session/store"
+import { LIVE_PROCESS_COUNT } from "@vibest/core/session/store"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { settled, until, untilVirtual, writeEnd } from "@vibest/testkit/observe"
+import { makeRepository, restartSessions, type TestOptions } from "@vibest/testkit/session"
+import { entryOfProject, spawnInput, spawnWorking, sqlNotices, test } from "@vibest/testkit/sessions-helpers"
 import { Deferred, Effect, Fiber, PubSub, Ref } from "effect"
 import { SqlClient } from "effect/sql"
-
-import { projectOf } from "./lib/directory.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { settled, until, untilVirtual, writeEnd } from "./lib/observe.ts"
-import { makeRepository, restartSessions, type TestOptions } from "./lib/session.ts"
-import { entryOfProject, spawnInput, spawnWorking, sqlNotices, test } from "./lib/sessions-helpers.ts"
 
 const limitTo = (rules: ReadonlyArray<{ readonly max: number }> | undefined) =>
   Effect.flatMap(Concurrency.Service, (c) => c.configure(rules))
@@ -26,9 +26,9 @@ const live = Effect.flatMap(
 ).pipe(Effect.map((rows) => rows.map((row) => row.id)))
 
 const placed = (id: string) =>
-  Effect.flatMap(Db.Service, (db) =>
+  Effect.flatMap(SessionStore.Service, (sessionStore) =>
     Effect.map(
-      db.session.getSession(id),
+      sessionStore.getSession(id),
       (row) => (row?.process?.placedAt ?? null) !== null && (row?.process?.endedAt ?? null) === null,
     ),
   )
@@ -101,19 +101,16 @@ const parkedAdmission = () => {
 
   const options: TestOptions = {
     ...hooked,
-    db: (db) => ({
-      ...db,
-      session: {
-        ...db.session,
-        admitProcess: (id, start, max) =>
-          targets.has(id) && max === 2
-            ? Effect.sync(() => targets.delete(id)).pipe(
-                Effect.andThen(Deferred.succeed(reached, undefined)),
-                Effect.andThen(Deferred.await(go)),
-                Effect.andThen(db.session.admitProcess(id, start, max)),
-              )
-            : db.session.admitProcess(id, start, max),
-      },
+    sessionStore: (sessionStore) => ({
+      ...sessionStore,
+      admitProcess: (id, start, max) =>
+        targets.has(id) && max === 2
+          ? Effect.sync(() => targets.delete(id)).pipe(
+              Effect.andThen(Deferred.succeed(reached, undefined)),
+              Effect.andThen(Deferred.await(go)),
+              Effect.andThen(sessionStore.admitProcess(id, start, max)),
+            )
+          : sessionStore.admitProcess(id, start, max),
     }),
   }
 
@@ -192,7 +189,7 @@ describe("a cap on live harness processes", () => {
     "a start that never becomes ready holds only its own place, and a failed start frees its place",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
       yield* liveEntry(repo)
@@ -208,7 +205,7 @@ describe("a cap on live harness processes", () => {
       yield* until(waiting, (keys) => keys.length === 1 && keys[0] === next)
 
       yield* opening.release("failed")
-      yield* until(db.session.getSession(failing), (row) => row !== undefined && exitedAt(row) !== null)
+      yield* until(sessionStore.getSession(failing), (row) => row !== undefined && exitedAt(row) !== null)
       yield* until(placed(next!), (yes) => yes)
     }),
     hooked,
@@ -218,14 +215,14 @@ describe("a cap on live harness processes", () => {
     "a running session takes sends while the cap is full",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const { id, sessions, sessionStore, inboxStore } = yield* spawnWorking(yield* makeRepository)
       yield* limitTo([{ max: 1 }])
       yield* sessions.send(id, "while full")
       yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      yield* until(db.inbox.pendingInbox(id), (rows) => rows.length === 0)
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
+      yield* until(inboxStore.pendingInbox(id), (rows) => rows.length === 0)
+      assert.strictEqual(executionStateOf((yield* sessionStore.getSession(id))!), "open")
       assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "while full")
     }),
     hooked,
@@ -300,7 +297,8 @@ describe("a cap on live harness processes", () => {
     "a runtime reset leaves a waiting run waiting",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
+      const inboxStore = yield* InboxStore.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
       yield* liveEntry(repo)
@@ -312,8 +310,8 @@ describe("a cap on live harness processes", () => {
       yield* until(sessions.inMemory, (m) => m.reconciles > before)
 
       assert.deepStrictEqual(yield* waiting, [b])
-      assert.isNull((yield* db.session.getSession(b!))!.process?.endedAt ?? null)
-      assert.isUndefined(yield* db.inbox.latestInbox(b!, "notice"))
+      assert.isNull((yield* sessionStore.getSession(b!))!.process?.endedAt ?? null)
+      assert.isUndefined(yield* inboxStore.latestInbox(b!, "notice"))
     }),
     hooked,
   )
@@ -364,7 +362,7 @@ describe("a cap on live harness processes", () => {
   test(
     "a send waiting for a slot when vibestd stops is delivered after the restart",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const inboxStore = yield* InboxStore.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
       yield* limitTo([{ max: 2 }])
@@ -376,7 +374,7 @@ describe("a cap on live harness processes", () => {
       const fresh = yield* restartSessions
       yield* until(fresh.inMemory, (m) => m.reconciles >= 1)
       yield* until(placed(a), (yes) => yes)
-      yield* until(db.inbox.pendingInbox(a), (rows) => rows.length === 0)
+      yield* until(inboxStore.pendingInbox(a), (rows) => rows.length === 0)
     }),
     hooked,
   )
@@ -384,7 +382,7 @@ describe("a cap on live harness processes", () => {
   test(
     "a waiting run can be interrupted and another archived at once, and vibestd can stop while runs wait",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
       yield* liveEntry(repo)
@@ -393,7 +391,7 @@ describe("a cap on live harness processes", () => {
       yield* until(waiting, (keys) => keys.length === 3)
 
       assert.match((yield* sessions.interrupt(b!)).message, /will not start/)
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(b!))!), "not_started")
+      assert.strictEqual(executionStateOf((yield* sessionStore.getSession(b!))!), "not_started")
       yield* sessions.archive(c!)
       assert.deepStrictEqual(yield* waiting, [d])
 
@@ -407,7 +405,8 @@ describe("a cap on live harness processes", () => {
   test(
     "a run still waiting when vibestd restarts ends not_started and its creator is told",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
+      const inboxStore = yield* InboxStore.Service
       const repo = yield* makeRepository
       yield* liveEntry(repo)
       yield* limitTo([{ max: 1 }])
@@ -415,10 +414,10 @@ describe("a cap on live harness processes", () => {
       yield* until(waiting, (keys) => keys.length === 1 && keys[0] === b)
 
       yield* restartSessions
-      yield* until(db.session.getSession(b!), (row) => executionStateOf(row!) === "not_started")
-      const notice = yield* db.inbox.latestInbox(b!, "notice")
+      yield* until(sessionStore.getSession(b!), (row) => executionStateOf(row!) === "not_started")
+      const notice = yield* inboxStore.latestInbox(b!, "notice")
       assert.include(JSON.stringify(notice), "did not start: vibestd restarted while it was waiting for a free slot")
-      assert.isNull((yield* db.session.getSession(b!))!.process)
+      assert.isNull((yield* sessionStore.getSession(b!))!.process)
     }),
     hooked,
   )
@@ -469,7 +468,7 @@ describe("a cap on live harness processes", () => {
     "a waiting relaunch whose runtime is gone frees its place for the next run",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const sessions = yield* Session.Service
       const registry = yield* Runtimes.Service
       const repo = yield* makeRepository
@@ -485,7 +484,7 @@ describe("a cap on live harness processes", () => {
       yield* temporary.dispose
       yield* limitTo([{ max: 2 }])
       yield* until(placed(next!), (yes) => yes)
-      assert.isNotNull((yield* db.session.getSession(a))!.process?.endedAt ?? null)
+      assert.isNotNull((yield* sessionStore.getSession(a))!.process?.endedAt ?? null)
     }),
     hooked,
   )
@@ -510,7 +509,7 @@ describe("a cap on live harness processes", () => {
   test(
     "the default list shows a waiting relaunch and hides an archived waiting run",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const sessions = yield* Session.Service
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
@@ -523,7 +522,7 @@ describe("a cap on live harness processes", () => {
       yield* until(waiting, (keys) => keys.length === 2)
       yield* sessions.archive(b!)
 
-      const listed = (yield* db.session.listSessions({ projectId, waiting: yield* waiting })).map((row) => row.id)
+      const listed = (yield* sessionStore.listSessions({ projectId, waiting: yield* waiting })).map((row) => row.id)
       assert.include(listed, a)
       assert.notInclude(listed, b)
     }),
@@ -574,7 +573,7 @@ describe("a cap on live harness processes", () => {
     Effect.gen(function* () {
       const h = yield* FakeRuntime
       const sessions = yield* Session.Service
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const repo = yield* makeRepository
       yield* liveEntry(repo)
       const a = yield* exitedChild(repo)
@@ -615,7 +614,7 @@ describe("a cap on live harness processes", () => {
       )
 
       assert.strictEqual(reason, "launch_failed")
-      const kept = (yield* db.session.getSession(a))!
+      const kept = (yield* sessionStore.getSession(a))!
       assert.notStrictEqual(kept.process?.terminal ?? null, null)
       assert.notStrictEqual(kept.process?.endedAt ?? null, null)
     }),

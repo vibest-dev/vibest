@@ -1,3 +1,4 @@
+import { type HttpConnector } from "@vibest/client/client"
 import { type SocketConnector } from "@vibest/client/socket-connector"
 import { type Layout } from "@vibest/schema/layout"
 import { Effect, Predicate, Stdio } from "effect"
@@ -8,7 +9,13 @@ import { type Host } from "../host.ts"
 import { withErasedInput } from "./runtime-erased.ts"
 import type { Spec } from "./spec.ts"
 
-export type Environment = Command.Environment | Host | Layout | SocketConnector.Service | HttpClient.HttpClient
+export type Environment =
+  | Command.Environment
+  | Host
+  | Layout
+  | SocketConnector.Service
+  | HttpConnector.Service
+  | HttpClient.HttpClient
 
 export type Input<Value> =
   Value extends Spec.Node<infer _Name, infer Command, infer _Commands>

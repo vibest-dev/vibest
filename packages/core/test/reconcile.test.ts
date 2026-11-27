@@ -1,15 +1,14 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
-import { exitedAt } from "@vibest/core/database/db-rows"
+import { exitedAt } from "@vibest/core/database/rows"
 import { Session, START_TIMEOUT } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
+import { projectOf } from "@vibest/testkit/directory"
+import { testEffect } from "@vibest/testkit/effect"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { until } from "@vibest/testkit/observe"
+import { makeRepository, restartSessions, sessionFrom } from "@vibest/testkit/session"
 import { Effect } from "effect"
 import { TestClock } from "effect/testing"
-
-import { projectOf } from "./lib/directory.ts"
-import { testEffect } from "./lib/effect.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until } from "./lib/observe.ts"
-import { makeRepository, restartSessions, sessionFrom } from "./lib/session.ts"
 
 const TEST_HERDR = "herdr"
 
@@ -22,14 +21,14 @@ describe("reconcile: a terminal whose agent has not started", () => {
   test(
     "a pending launch is checked again after the start timeout, and ended once the runtime says it is gone",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
       const id = "cccccccc-cccc-4ccc-8ccc-000000000001"
       yield* herdr.addPane("w8:pending", "w8", repo)
       yield* startupSettled(yield* Session.Service)
-      yield* db.session.insertSession(
+      yield* sessionStore.insertSession(
         {
           id,
           agent: "general",
@@ -53,12 +52,12 @@ describe("reconcile: a terminal whose agent has not started", () => {
       )
       const sessions = yield* restartSessions
       yield* startupSettled(sessions)
-      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.isNull(exitedAt((yield* sessionStore.getSession(id))!))
       yield* herdr.seedAgent("w8:pending")
       yield* herdr.updateAgent("w8:pending", (agent) => ({ ...agent, alive: false }))
-      assert.isNull(exitedAt((yield* db.session.getSession(id))!))
+      assert.isNull(exitedAt((yield* sessionStore.getSession(id))!))
       yield* TestClock.adjust(START_TIMEOUT)
-      yield* until(db.session.getSession(id), (session) => (session ? exitedAt(session) : undefined) != null)
+      yield* until(sessionStore.getSession(id), (session) => (session ? exitedAt(session) : undefined) != null)
     }),
   )
 })

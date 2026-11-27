@@ -52,20 +52,14 @@ export const remoteHeaders = (remote: string, project?: string, by?: string) => 
   ...(by !== undefined && { [REMOTE_BY_HEADER]: by }),
 })
 
-export const TAKE_ROUTE = "/inbox/take"
+export const TAKE_ROUTE = "/api/inbox/take"
+export const READY_ROUTE = "/api/hook/ready"
 
 const HOOK_KINDS = ["execution-end", "prompt", "guard"] as const
 
 export type HookKind = (typeof HOOK_KINDS)[number]
 
-export const hookRoute = (harness: string, hook: HookKind) => `/hooks/${harness}/${hook}`
-
-export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
-  const m = /^\/hooks\/([a-z]+)\/(execution-end|prompt|guard)$/.exec(path)
-  const hook = HOOK_KINDS.find((kind) => kind === m?.[2])
-
-  return m && hook ? { harness: m[1]!, hook } : undefined
-}
+export const hookRoute = (harness: string, hook: HookKind) => `/api/hook/${harness}/${hook}`
 
 const decodeTaken = Schema.decodeUnknownOption(Taken)
 
@@ -120,4 +114,7 @@ export const CAPABILITIES = {
   agents: true,
   worktrees: true,
   stop: true,
+  mcp: true,
+  codemode: true,
+  automation: true,
 } as const

@@ -1,0 +1,5 @@
+{
+  "extends": "@vibest/tsconfig/neutral.json",
+  "include": ["src"],
+  "exclude": ["src/**/*.node.ts"]
+}

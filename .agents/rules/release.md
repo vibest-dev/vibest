@@ -82,28 +82,21 @@ Settings the workflow needs and cannot set itself. Check them before the first r
       the run); deployment branches: selected, `main` only; "Allow administrators to bypass" off.
 - [ ] Immutable releases on (Settings, General, Releases): a published release's tag and assets cannot change, and the
       release gets an attestation. Drafts stay editable, which recovery relies on.
-- [ ] npm trusted publisher on each published package, `@vibest/cli`, `@vibest/cli-darwin-arm64`,
-      `@vibest/cli-linux-x64`, `@vibest/schema`, `@vibest/plugin` and `effect-herdr-sdk`: GitHub Actions, repository
-      `vibest-dev/vibest`, workflow `release.yml`, environment `release`, "Allow npm publish" on (a new configuration otherwise only
-      allows staged publishing), for example
-      `npm trust github @vibest/cli --file release.yml --repo vibest-dev/vibest --env release --allow-publish`.
+- [ ] npm trusted publisher on each published package (8 packages total: `@vibest/cli`, `@vibest/plugin`, and all 6 platform packages `@vibest/cli-darwin-arm64`, `@vibest/cli-darwin-x64`, `@vibest/cli-linux-arm64`, `@vibest/cli-linux-arm64-musl`, `@vibest/cli-linux-x64`, `@vibest/cli-linux-x64-musl`; `@vibest/schema` and `@vibest/herdr-sdk` are `"private": true` and not published): GitHub Actions, repository `vibest-dev/vibest`, workflow `release.yml`, environment `release`, "Allow npm publish" on (a new configuration otherwise only allows staged publishing). npm OIDC cannot create brand-new package names, so before the first release with the 4 new platform targets, pre-create and trust each one:
+
+      ```sh
+      for pkg in \
+        @vibest/cli @vibest/plugin \
+        @vibest/cli-darwin-arm64 @vibest/cli-darwin-x64 \
+        @vibest/cli-linux-arm64 @vibest/cli-linux-arm64-musl \
+        @vibest/cli-linux-x64 @vibest/cli-linux-x64-musl; do
+        npm trust github "$pkg" --file release.yml --repo vibest-dev/vibest --env release --allow-publish
+      done
+      ```
+
       Each package.json `repository.url` is `git+https://github.com/vibest-dev/vibest.git`, which provenance requires.
+
 - [ ] Once a release has published with OIDC: revoke any npm token that could publish these packages.
-- [ ] The move to two channels (owner, 2026-11-17). `0.0.1` is taken on npm (an unrelated 2025 `@vibest/cli@0.0.1`),
-      so the beta line moves to `0.0.2-beta.n` and the first stable is `0.0.2`:
-  - [ ] Before the first release on this workflow: point every published package's npm `latest` at its newest beta,
-        `npm dist-tag add <package>@<newest beta> latest` for `@vibest/cli`, `@vibest/cli-darwin-arm64`,
-        `@vibest/cli-linux-x64`, `@vibest/schema`, `@vibest/plugin` and `effect-herdr-sdk`. npm set `latest` on each
-        package's first publish (`@vibest/cli` names `0.0.1`), and an npm beta user's `vibest update` reads the newer of
-        `latest` and `beta`, so a stale `latest` would offer that `0.0.1`. The first stable release moves `latest`.
-  - [ ] The first release on this workflow is started with `-f version=0.0.2-beta.1`; later betas leave the version
-        empty and continue from the highest beta tag (`0.0.2-beta.2` and on).
-  - [ ] Once `0.0.2-beta.1` is published, make it GitHub Latest by hand once, which also unmarks it as a prerelease
-        (GitHub never makes a prerelease Latest):
-        `gh release edit v0.0.2-beta.1 -R vibest-dev/vibest --prerelease=false --latest`. `0.0.1-beta.20` and older
-        follow Latest, and a beta is otherwise a prerelease, so without it they never see a newer version; their next
-        `vibest update` installs a vibest that reads the release list itself. The first stable release takes Latest
-        back.
 - [ ] npm 11.5.1 or later in the publish job (Node 26.13.0 ships 11.20.0; the job checks it), Node 22.14.0 or later.
 - [ ] No deploy key, no `RELEASE_PUSH_KEY` secret and no DeployKey bypass on "CI required on main": the workflow never
       pushes to `main`.

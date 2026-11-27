@@ -1,6 +1,12 @@
 import { Cause, type Duration, Effect, FiberMap, FiberSet, Stream } from "effect"
 
 import { Bus, type BusEvent } from "./bus.ts"
+import { projectorsOf } from "./database/ledger.ts"
+import * as ProjectProjector from "./project/projector.ts"
+import * as RemoteProjector from "./remote/projector.ts"
+import * as SessionProjector from "./session/projector.ts"
+
+export const Projectors = projectorsOf([ProjectProjector.layer, SessionProjector.layer, RemoteProjector.layer])
 
 type EventOf<T extends BusEvent["type"]> = Extract<BusEvent, { readonly type: T }>
 

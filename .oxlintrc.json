@@ -23,7 +23,9 @@
     "vibest/no-payload-sql": "error",
     "vibest/projector-writes": "error",
     "vibest/no-background-loop": "error",
+    "vibest/sql-boundary": "error",
     "vibest/no-module-let": "error",
+    "vibest/no-src-tests": "error",
     "vibest/package-imports": "error",
     "eslint/no-unused-vars": "error",
     "eslint/no-unused-expressions": [
@@ -73,23 +75,7 @@
   },
   "overrides": [
     {
-      "files": [
-        "packages/schema/src/**",
-        "packages/plugin/src/**",
-        "packages/protocol/src/**",
-        "packages/client/src/**",
-        "packages/core/src/**",
-        "packages/server/src/**",
-        "packages/plugin-harnesses/src/**",
-        "packages/runtime-herdr/src/**",
-        "packages/runtime-herdr-core/src/**",
-        "packages/runtime-rex/src/**",
-        "packages/integration/*/src/**",
-        "packages/plugins/*/src/**",
-        "packages/effect-herdr-sdk/src/**",
-        "packages/effect-herdr-core-sdk/src/**",
-        "tools/verify/src/**"
-      ],
+      "files": ["packages/*/src/**", "tools/verify/src/**"],
       "rules": {
         "eslint/no-restricted-imports": [
           "error",
@@ -97,7 +83,7 @@
             "patterns": [
               {
                 "regex": "^(@effect/(platform|sql-sqlite)-bun(/|$)|bun:)",
-                "message": "Bun-specific imports belong in platform folders and bun.ts files."
+                "message": "Bun-specific imports belong in platform folders, bun.ts, and *.bun.ts files."
               }
             ]
           }
@@ -106,35 +92,12 @@
     },
     {
       "files": [
-        "packages/schema/src/**/bun.ts",
-        "packages/plugin/src/**/bun.ts",
-        "packages/protocol/src/**/bun.ts",
-        "packages/client/src/**/bun.ts",
-        "packages/core/src/**/bun.ts",
-        "packages/server/src/**/bun.ts",
-        "packages/plugin-harnesses/src/**/bun.ts",
-        "packages/runtime-herdr/src/**/bun.ts",
-        "packages/runtime-herdr-core/src/**/bun.ts",
-        "packages/runtime-rex/src/**/bun.ts",
-        "packages/integration/*/src/**/bun.ts",
-        "packages/plugins/*/src/**/bun.ts",
-        "packages/effect-herdr-sdk/src/**/bun.ts",
-        "packages/effect-herdr-core-sdk/src/**/bun.ts",
+        "packages/platform-bun/src/**",
+        "packages/*/src/**/bun.ts",
+        "packages/*/src/**/*.bun.ts",
+        "packages/*/src/platform/**",
         "tools/verify/src/**/bun.ts",
-        "packages/schema/src/platform/**",
-        "packages/plugin/src/platform/**",
-        "packages/protocol/src/platform/**",
-        "packages/client/src/platform/**",
-        "packages/core/src/platform/**",
-        "packages/server/src/platform/**",
-        "packages/plugin-harnesses/src/platform/**",
-        "packages/runtime-herdr/src/platform/**",
-        "packages/runtime-herdr-core/src/platform/**",
-        "packages/runtime-rex/src/platform/**",
-        "packages/integration/*/src/platform/**",
-        "packages/plugins/*/src/platform/**",
-        "packages/effect-herdr-sdk/src/platform/**",
-        "packages/effect-herdr-core-sdk/src/platform/**",
+        "tools/verify/src/**/*.bun.ts",
         "tools/verify/src/platform/**"
       ],
       "rules": {
@@ -159,18 +122,18 @@
     },
     {
       "files": [
-        "packages/core/src/effect/layer-node-erased.ts",
+        "packages/util/src/layer-node-erased.ts",
         "packages/schema/src/event-fact.ts",
         "packages/cli/src/framework/spec-erased.ts",
         "packages/cli/src/framework/runtime-erased.ts",
-        "packages/effect-herdr-sdk/src/herdr-result.ts"
+        "packages/herdr-sdk/src/herdr-result.ts"
       ],
       "rules": {
         "typescript/consistent-type-assertions": "off"
       }
     },
     {
-      "files": ["**/test/**", "**/*.test.ts", "e2e/**"],
+      "files": ["**/test/**", "**/*.test.ts", "packages/testkit/src/**", "e2e/**"],
       "rules": {
         "typescript/consistent-type-assertions": "off"
       }
@@ -182,8 +145,8 @@
     "dist",
     "node_modules",
     ".cache",
-    "packages/effect-herdr-sdk/src/generated",
-    "packages/effect-herdr-core-sdk/src/generated",
+    "packages/herdr-sdk/src/generated",
+    "packages/herdr-core-sdk/src/generated",
     "tools/oxlint/anti-slop"
   ]
 }

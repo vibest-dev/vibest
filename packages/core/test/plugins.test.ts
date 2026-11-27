@@ -1,11 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Agents } from "@vibest/core/agents"
-import { Concurrency } from "@vibest/core/concurrency"
-import { Db } from "@vibest/core/database/db"
-import { harnessIdOf } from "@vibest/core/database/db-rows"
+import { Agents } from "@vibest/core/agent/registry"
+import { harnessIdOf } from "@vibest/core/database/rows"
 import { Builtins, makePlugins, PluginLoader, Plugins } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
 import { Session } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
 import { mainCheckout } from "@vibest/core/worktree"
 import { Plugin as PromisePlugin, ToolRefused as PromiseToolRefused } from "@vibest/plugin"
 import {
@@ -16,18 +16,17 @@ import {
   type SessionToolExecuteBefore,
   type Registration,
 } from "@vibest/plugin/effect"
-import type { Fact } from "@vibest/schema/event"
+import { isPublicEventType, type PublicDurableEvent } from "@vibest/schema/durable-event-manifest"
 import { Layout } from "@vibest/schema/layout"
+import { memoryPluginHost } from "@vibest/testkit/bun"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "@vibest/testkit/harnesses"
+import { until, yieldToIo } from "@vibest/testkit/observe"
+import * as Platform from "@vibest/testkit/platform"
+import { makeRepository, testLayer, type TestOptions, type TestServices } from "@vibest/testkit/session"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
-
-import * as Platform from "../../platform-bun/src/bun.ts"
-import { projectOf } from "./lib/directory.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { until, yieldToIo } from "./lib/observe.ts"
-import { makeRepository, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
-import { memoryPluginHost } from "./platform/bun.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(projectOf(repo), (projectId) => ({
@@ -54,10 +53,10 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ models: HARNESS_MODELS, ...options }))))
 
 const sessionRowsAndRuntimeOpens = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const herdr = yield* FakeRuntime
 
-  return { rows: (yield* db.session.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
+  return { rows: (yield* sessionStore.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
 })
 
 describe("plugins: spawn hook", () => {
@@ -65,7 +64,7 @@ describe("plugins: spawn hook", () => {
     "P5/P8: the event has the resolved root; writes reach the row and the launch args",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const herdr = yield* FakeRuntime
       const nested = `${repo}/sub`
       yield* (yield* FileSystem.FileSystem).makeDirectory(nested)
@@ -77,7 +76,7 @@ describe("plugins: spawn hook", () => {
       assert.strictEqual(s.harness, "claude")
       assert.strictEqual(s.model, "claude-haiku-5-5")
       assert.deepStrictEqual(s.decidedBy, { harness: "route", model: "route" })
-      const row = (yield* db.session.getSession(s.id))!
+      const row = (yield* sessionStore.getSession(s.id))!
       assert.strictEqual(harnessIdOf(row), "claude")
       assert.strictEqual(row.process?.model ?? null, "claude-haiku-5-5")
       assert.deepStrictEqual(row.process?.routing?.decidedBy, {
@@ -522,15 +521,15 @@ describe("plugins: loading", () => {
   )
 })
 
-const held: Array<Fact> = []
+const held: Array<PublicDurableEvent> = []
 const { promise: gate, resolve: release } = Promise.withResolvers<void>()
 
 const watcher = Plugin.define({
   id: "watcher",
   effect: (ctx) =>
     ctx.event.subscribe().pipe(
-      Stream.runForEach((fact) =>
-        Effect.promise(() => gate).pipe(Effect.andThen(Effect.sync(() => void held.push(fact)))),
+      Stream.runForEach((event) =>
+        Effect.promise(() => gate).pipe(Effect.andThen(Effect.sync(() => void held.push(event)))),
       ),
       Effect.forkScoped,
       Effect.asVoid,
@@ -539,7 +538,7 @@ const watcher = Plugin.define({
 
 describe("plugins: event.subscribe", () => {
   test(
-    "a consumer that holds up its facts does not hold up the commits, and gets every fact in order once it goes on",
+    "a consumer that holds up its events does not hold up the commits, and gets every event in order once it goes on",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const sessions = yield* Session.Service
@@ -550,18 +549,20 @@ describe("plugins: event.subscribe", () => {
       release()
       yield* until(
         Effect.sync(() => held),
-        (facts) => facts.some((fact) => fact.sessionId === second.id && fact.type === "process.started"),
+        (events) =>
+          events.some(
+            (event) => event.durable.aggregateId === second.id && event.type === "session.execution.allocated",
+          ),
       )
 
-      for (const aggregate of new Set(held.map((fact) => fact.aggregate))) {
-        const seqs = held.flatMap((fact) => (fact.aggregate === aggregate ? [fact.seq] : []))
-        assert.deepStrictEqual(
-          seqs,
-          seqs.map((_, i) => seqs[0]! + i),
-        )
+      assert.isTrue(held.every((event) => isPublicEventType(event.type)))
+
+      for (const aggregate of new Set(held.map((event) => event.durable.aggregateId))) {
+        const seqs = held.flatMap((event) => (event.durable.aggregateId === aggregate ? [event.durable.seq] : []))
+        assert.isTrue(seqs.every((seq, i) => i === 0 || seq > seqs[i - 1]!))
       }
 
-      assert.isTrue(held.some((fact) => fact.sessionId === second.id && fact.type === "session.created"))
+      assert.isTrue(held.some((event) => event.durable.aggregateId === second.id && event.type === "session.created"))
     }),
     { plugins: [watcher] },
   )

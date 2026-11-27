@@ -3,11 +3,18 @@ import { Console, Effect, Option } from "effect"
 
 import { vibest } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
-import { parseSessionRef } from "../../session-ref.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.peek, (o) =>
-  vibest((client) => client.Peek({ ...parseSessionRef(o.id), lines: Option.getOrUndefined(o.lines) })).pipe(
+  vibest((client) =>
+    client["server.session"]["session.peek"]({
+      params: { id: o.id },
+      query: {
+        ...(Option.isSome(o.machine) && { machine: o.machine.value }),
+        ...(Option.isSome(o.lines) && { lines: o.lines.value }),
+      },
+    }),
+  ).pipe(
     Effect.flatMap((r) =>
       Effect.gen(function* () {
         if (r.terminal !== undefined && r.terminal.machine === undefined)

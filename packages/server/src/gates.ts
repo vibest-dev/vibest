@@ -1,8 +1,17 @@
 import { App } from "@vibest/core/app"
-import { Db } from "@vibest/core/database/db"
-import { Drain } from "@vibest/core/drain"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Drain } from "@vibest/core/runtime/drain"
 import { NoSuchSession } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
 import { FORWARDED_CALLS, REMOTE_CALLS } from "@vibest/protocol/access"
+import { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/errors"
+import {
+  AdmissionMiddleware,
+  Caller,
+  CallerMiddleware,
+  ProtocolMiddleware,
+  type CallerIdentity,
+} from "@vibest/protocol/middleware"
 import {
   CALLER_HEADER,
   CWD_HEADER,
@@ -21,22 +30,13 @@ import {
   RUNTIME_HEADER,
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
-import {
-  Admission,
-  Caller,
-  CallerGate,
-  DaemonStopping,
-  InvalidCaller,
-  ProtocolGate,
-  ProtocolRejected,
-  type CallerIdentity,
-} from "@vibest/protocol/rpc"
 import { ID } from "@vibest/schema/id"
 import { PROTOCOL } from "@vibest/schema/version"
 import { Data, Effect, Layer, Option, Predicate } from "effect"
 import * as Headers from "effect/http/Headers"
+import * as HttpServerRequest from "effect/http/HttpServerRequest"
 
-const SETTLEMENTS: ReadonlySet<string> = new Set(["ExecutionEnd", "Prompt"])
+const SETTLEMENTS: ReadonlySet<string> = new Set(["hook.executionEnd", "hook.prompt"])
 
 export type Read = (name: string) => string | undefined
 
@@ -65,27 +65,33 @@ export const admit = <A, E, R, A2, E2>(
   )
 
 export const AdmissionLive = Layer.effect(
-  Admission,
+  AdmissionMiddleware,
   Effect.gen(function* () {
     const drain = yield* Drain.Service
 
-    return Admission.of((effect, { rpc }) =>
-      admit(drain, rpc._tag, SETTLEMENTS.has(rpc._tag), effect, Effect.fail(new DaemonStopping({ method: rpc._tag }))),
+    return AdmissionMiddleware.of((effect, { endpoint }) =>
+      admit(
+        drain,
+        endpoint.identifier,
+        SETTLEMENTS.has(endpoint.identifier),
+        effect,
+        Effect.fail(new DaemonStopping({ method: endpoint.identifier })),
+      ),
     )
   }),
 )
 
-const noteConversation = (db: Db.Interface, read: Read, row: { id: string; harness: string }) =>
+const noteConversation = (sessionStore: SessionStore.Interface, read: Read, row: { id: string; harness: string }) =>
   Effect.gen(function* () {
     const conversation = read(HARNESS_SESSION_HEADER)
 
     if (!conversation || read(HARNESS_HEADER) !== row.harness) return
 
-    if (yield* db.session.noteConversation(row.id, conversation, processOf(read)))
+    if (yield* sessionStore.noteConversation(row.id, conversation, processOf(read)))
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
   })
 
-type IdentityRow = NonNullable<Effect.Success<ReturnType<Db.Interface["session"]["sessionIdentity"]>>>
+type IdentityRow = NonNullable<Effect.Success<ReturnType<SessionStore.Interface["sessionIdentity"]>>>
 
 type Identity = Data.TaggedEnum<{
   NoSession: { readonly id: string | undefined }
@@ -98,10 +104,10 @@ const Identity = Data.taggedEnum<Identity>()
 
 const Callers = Data.taggedEnum<CallerIdentity>()
 
-export const identify = (db: Db.Interface, read: Read) =>
+export const identify = (sessionStore: SessionStore.Interface, read: Read) =>
   Effect.gen(function* () {
     const id = read(SESSION_HEADER)
-    const row = id ? yield* db.session.sessionIdentity(id) : undefined
+    const row = id ? yield* sessionStore.sessionIdentity(id) : undefined
 
     if (!row) return Identity.NoSession({ id })
     const project = read(PROJECT_HEADER)
@@ -109,17 +115,17 @@ export const identify = (db: Db.Interface, read: Read) =>
     if (project === undefined) return Identity.NoProject({ row })
 
     if (project !== row.projectId) return Identity.WrongProject({ row, project })
-    yield* noteConversation(db, read, row)
+    yield* noteConversation(sessionStore, read, row)
 
     return Identity.Known({ row })
   })
 
-export const noteOpen = (db: Db.Interface, read: Read, sessionId: string) =>
-  read(SESSION_HEADER) === sessionId ? Effect.asVoid(identify(db, read)) : Effect.void
+export const noteOpen = (sessionStore: SessionStore.Interface, read: Read, sessionId: string) =>
+  read(SESSION_HEADER) === sessionId ? Effect.asVoid(identify(sessionStore, read)) : Effect.void
 
-export const checkProtocol = (db: Db.Interface, read: Read, version: string) =>
+export const checkProtocol = (sessionStore: SessionStore.Interface, read: Read, version: string) =>
   Effect.gen(function* () {
-    yield* noteIntegration(db, read)
+    yield* noteIntegration(sessionStore, read)
     const sent = read(PROTOCOL_HEADER)
 
     if (sent === String(PROTOCOL)) return undefined
@@ -135,7 +141,12 @@ export const checkProtocol = (db: Db.Interface, read: Read, version: string) =>
     }
   })
 
-export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method: string) =>
+export const resolveCaller = (
+  sessionStore: SessionStore.Interface,
+  remoteStore: RemoteStore.Interface,
+  headers: Headers.Headers,
+  method: string,
+) =>
   Effect.gen(function* () {
     const read = reader(headers)
     const kind = Headers.get(headers, CALLER_HEADER)
@@ -156,8 +167,8 @@ export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method
 
       if (!REMOTE_CALLS.has(method)) return yield* bad(`a remote vibestd may not call ${method}`)
 
-      if (method !== "Remote.Hello" && !(yield* db.remote.remoteKnown(remote)))
-        return yield* bad(`remote ${remote} has not said Remote.Hello; call it first`)
+      if (method !== "remote.hello" && !(yield* remoteStore.remoteKnown(remote)))
+        return yield* bad(`remote ${remote} has not said remote.hello; call it first`)
       const by = read(REMOTE_BY_HEADER)
 
       if (
@@ -189,7 +200,7 @@ export const resolveCaller = (db: Db.Interface, headers: Headers.Headers, method
 
       if (Option.isSome(repository) && repository.value.trim() === "")
         return yield* bad(`${method} has an empty repository`)
-      const who = yield* identify(db, read)
+      const who = yield* identify(sessionStore, read)
 
       if (Predicate.isTagged(who, "NoSession"))
         return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
@@ -221,37 +232,50 @@ export const integrationOf = (read: Read) => {
   return { version, protocol: Number.isFinite(protocol) ? protocol : 0 }
 }
 
-const noteIntegration = (db: Db.Interface, read: Read): Effect.Effect<void> =>
+const safeDecodeUri = (value: string) => {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+const noteIntegration = (sessionStore: SessionStore.Interface, read: Read): Effect.Effect<void> =>
   Effect.gen(function* () {
     const sessionId = read(SESSION_HEADER)
     const integration = integrationOf(read)
 
     if (!sessionId || !integration) return
 
-    if (yield* db.session.noteIntegration(sessionId, integration, processOf(read)))
+    if (yield* sessionStore.noteIntegration(sessionId, integration, processOf(read)))
       yield* Effect.logInfo(
         `session ${sessionId} runs integration ${integration.version} (protocol ${integration.protocol})`,
       ).pipe(
         Effect.annotateLogs({
           harness: read(HARNESS_HEADER) ?? "",
-          cwd: decodeURIComponent(read(CWD_HEADER) ?? ""),
+          cwd: safeDecodeUri(read(CWD_HEADER) ?? ""),
           runtime: read(RUNTIME_HEADER) ?? "",
         }),
       )
   })
 
-export const ProtocolGateLive = Layer.effect(
-  ProtocolGate,
+export const ProtocolMiddlewareLive = Layer.effect(
+  ProtocolMiddleware,
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
     const { version } = yield* App.Service
 
-    return ProtocolGate.of((effect, { headers, rpc }) =>
+    return ProtocolMiddleware.of((effect, { endpoint }) =>
       Effect.gen(function* () {
-        const rejected = yield* checkProtocol(db, reader(headers), version)
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const rejected = yield* checkProtocol(sessionStore, reader(request.headers), version)
 
         if (rejected)
-          return yield* new ProtocolRejected({ method: rpc._tag, protocol: rejected.sent, mismatch: rejected.mismatch })
+          return yield* new ProtocolRejected({
+            ...rejected.mismatch,
+            method: endpoint.identifier,
+            callerProtocol: rejected.sent,
+          })
 
         return yield* effect
       }),
@@ -259,15 +283,19 @@ export const ProtocolGateLive = Layer.effect(
   }),
 )
 
-export const CallerGateLive = Layer.effect(
-  CallerGate,
+export const CallerMiddlewareLive = Layer.effect(
+  CallerMiddleware,
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
+    const remoteStore = yield* RemoteStore.Service
 
-    return CallerGate.of((effect, { headers, rpc }) =>
-      resolveCaller(db, headers, rpc._tag).pipe(
-        Effect.flatMap((caller) => Effect.provideService(effect, Caller, caller)),
-      ),
+    return CallerMiddleware.of((effect, { endpoint }) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const caller = yield* resolveCaller(sessionStore, remoteStore, request.headers, endpoint.identifier)
+
+        return yield* Effect.provideService(effect, Caller, caller)
+      }),
     )
   }),
 )

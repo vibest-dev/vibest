@@ -6,6 +6,7 @@ import type { Transform } from "./registration.ts"
 export interface LaunchInput {
   readonly worktree: string
   readonly projectDir: string
+  readonly scratchpadDir?: string | undefined
   readonly systemPromptFile: string
   readonly provider: string | null
   readonly model: string | null

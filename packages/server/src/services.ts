@@ -1,17 +1,22 @@
+import { Automation, AutomationStore } from "@vibest/core/automation"
 import { Bus } from "@vibest/core/bus"
-import { Concurrency } from "@vibest/core/concurrency"
-import { Db } from "@vibest/core/database/db"
-import { Drain } from "@vibest/core/drain"
-import { LayerNode } from "@vibest/core/effect/layer-node"
-import { Git } from "@vibest/core/git"
+import { CodeMode } from "@vibest/core/codemode"
+import { Database } from "@vibest/core/database/database"
 import { Harness } from "@vibest/core/harness"
-import { Harnesses } from "@vibest/core/harnesses"
+import { Integration } from "@vibest/core/harness/integration"
+import { Harnesses } from "@vibest/core/harness/registry"
+import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import { Inbox } from "@vibest/core/inbox"
-import { Integration } from "@vibest/core/integration"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { Mcp } from "@vibest/core/mcp"
 import { Plugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
-import { RepositoryUrl } from "@vibest/core/repository-url"
-import { Runtimes } from "@vibest/core/runtimes"
+import { RepositoryUrl } from "@vibest/core/project/repository-url"
+import { ProjectStore } from "@vibest/core/project/store"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
+import { Drain } from "@vibest/core/runtime/drain"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { Session } from "@vibest/core/session"
 import { Archive } from "@vibest/core/session/archive"
 import { Delivery } from "@vibest/core/session/delivery"
@@ -25,7 +30,10 @@ import { Reconcile } from "@vibest/core/session/reconcile"
 import { Restart } from "@vibest/core/session/restart"
 import { Spawn } from "@vibest/core/session/spawn"
 import { Starts } from "@vibest/core/session/starts"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { SessionStore } from "@vibest/core/session/store"
+import { ToolOutput } from "@vibest/core/tool-output"
+import { Git } from "@vibest/core/worktree/git"
+import { LayerNode } from "@vibest/util/layer-node"
 
 import * as Listing from "./listing.ts"
 import { Inbound } from "./machine/inbound.ts"
@@ -43,12 +51,21 @@ export const services = LayerNode.group([
   Drain.node,
   Harnesses.node,
   Runtimes.node,
-  Db.node,
+  Database.node,
+  ProjectStore.node,
+  SessionStore.node,
+  InboxStore.node,
+  RemoteStore.node,
   Harness.node,
   Project.node,
   Inbox.node,
   Subscriptions.node,
   Plugins.node,
+  Mcp.node,
+  ToolOutput.node,
+  CodeMode.node,
+  AutomationStore.node,
+  Automation.node,
   RepositoryUrl.node,
   Git.node,
   SessionLocks.node,

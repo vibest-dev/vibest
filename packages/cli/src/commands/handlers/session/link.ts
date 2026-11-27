@@ -7,7 +7,7 @@ import { edgeSpecOf } from "./spec.ts"
 
 export default Runtime.handler(Commands.commands.session.commands.link, (o) =>
   edgeSpecOf(o).pipe(
-    Effect.flatMap((spec) => vibest((client) => client["Session.Link"]({ spec }))),
+    Effect.flatMap((spec) => vibest((client) => client["server.session"]["session.link"]({ payload: { spec } }))),
     Effect.flatMap(json),
   ),
 )

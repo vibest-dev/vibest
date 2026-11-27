@@ -1,105 +1,133 @@
-import { Db } from "@vibest/core/database/db"
+import { withHeaders } from "@vibest/client/client"
 import { Identity } from "@vibest/core/identity"
 import { Project } from "@vibest/core/project"
 import { createProject } from "@vibest/core/project/create"
 import { moveProjectHere, resolveProject } from "@vibest/core/project/identity"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Git } from "@vibest/core/worktree/git"
+import { VibestApi } from "@vibest/protocol/api"
+import { Forbidden } from "@vibest/protocol/errors"
+import { Caller } from "@vibest/protocol/middleware"
 import { remoteHeaders } from "@vibest/protocol/protocol"
-import { Caller, Forbidden } from "@vibest/protocol/rpc"
-import { Effect, Predicate } from "effect"
+import { Layout } from "@vibest/schema/layout"
+import { Effect, FileSystem, Path, Predicate } from "effect"
+import { HttpApiBuilder } from "effect/http-api"
 
 import { Machines } from "../machine/machines.ts"
+import { Remote } from "../machine/remote.ts"
 import * as CallerChecks from "./caller.ts"
-import type { Handlers } from "./caller.ts"
-import { group } from "./group.ts"
 
-export const make = Effect.gen(function* () {
-  const { scope, cliOnly, userOnly, atProject } = yield* CallerChecks.Service
-  const db = yield* Db.Service
-  const self = yield* Identity.Service
-  const machines = yield* Machines.Service
-  const project = yield* Project.Service
+export const ProjectHandler = HttpApiBuilder.group(VibestApi, "server.project", (handlers) =>
+  Effect.gen(function* () {
+    const { scope, cliOnly, userOnly, atProject } = yield* CallerChecks.Service
+    const projectStore = yield* ProjectStore.Service
+    const self = yield* Identity.Service
+    const machines = yield* Machines.Service
+    const project = yield* Project.Service
+    const remote = yield* Remote.Service
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const git = yield* Git.Service
+    const layout = yield* Layout
 
-  return {
-    "Project.Open": ({ directory, machine }) =>
-      Effect.gen(function* () {
-        const caller = yield* Caller
-        const away = machine !== undefined
+    const withProjectPlatform = <A, E>(
+      effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git.Service | Layout>,
+    ) =>
+      effect.pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+        Effect.provideService(Git.Service, git),
+        Effect.provideService(Layout, layout),
+      )
 
-        if (away) {
-          if (Predicate.isTagged(caller, "Remote"))
-            return yield* new Forbidden({
-              method: "Project.Open",
-              message: "a remote opens projects only on this machine",
-            })
-          const link = yield* machines.link(machine!)
+    return handlers
+      .handle("project.open", ({ payload: { directory, machine } }) =>
+        Effect.gen(function* () {
+          const caller = yield* Caller
+          const away = machine !== undefined
 
-          return yield* link
-            .call(
-              link.client["Project.Open"](directory === undefined ? {} : { directory }, {
-                headers: remoteHeaders(self.id),
-              }),
-            )
-            .pipe(Effect.catchTag("NoSuchSession", (e) => Effect.die(e)))
-        }
+          if (away) {
+            if (Predicate.isTagged(caller, "Remote"))
+              return yield* new Forbidden({
+                method: "project.open",
+                message: "a remote opens projects only on this machine",
+              })
+            const link = yield* machines.link(machine!)
 
-        if (!Predicate.isTagged(caller, "Remote")) yield* userOnly("Project.Open")
-        const target = directory ?? (Predicate.isTagged(caller, "Cli") ? caller.repositoryRoot : undefined)
+            return yield* link
+              .call(
+                withHeaders(
+                  link.client["server.project"]["project.open"]({
+                    payload: directory === undefined ? {} : { directory },
+                  }),
+                  remoteHeaders(self.id),
+                ),
+              )
+              .pipe(Effect.catchTag("NoSuchSession", (e) => Effect.die(e)))
+          }
 
-        if (target === undefined)
-          return yield* new Forbidden({ method: "Project.Open", message: "Project.Open needs directory" })
+          if (!Predicate.isTagged(caller, "Remote")) yield* userOnly("project.open")
+          const target = directory ?? (Predicate.isTagged(caller, "Cli") ? caller.repositoryRoot : undefined)
 
-        const opened = yield* resolveProject(db, yield* atProject(target))
+          if (target === undefined)
+            return yield* new Forbidden({ method: "project.open", message: "project.open needs directory" })
 
-        return { projectId: opened.id, directory: opened.directory }
-      }),
+          const opened = yield* resolveProject(projectStore, yield* atProject(target))
 
-    "Project.Move": ({ from }) =>
-      Effect.gen(function* () {
-        const c = yield* cliOnly("Project.Move")
-        const moved = yield* moveProjectHere(db, yield* atProject(c.repositoryRoot), from)
+          return { projectId: opened.id, directory: opened.directory }
+        }),
+      )
+      .handle("project.move", ({ payload: { from } }) =>
+        Effect.gen(function* () {
+          const c = yield* cliOnly("project.move")
 
-        return {
-          projectId: moved.id,
-          directory: moved.directory,
-          from: moved.from,
-          repaired: moved.repaired,
-          manual: moved.manual,
-        }
-      }),
+          const moved = yield* withProjectPlatform(
+            moveProjectHere(projectStore, yield* atProject(c.repositoryRoot), from),
+          )
 
-    "Project.Create": ({ directory, from }) =>
-      Effect.gen(function* () {
-        const c = yield* userOnly("Project.Create")
+          return {
+            projectId: moved.id,
+            directory: moved.directory,
+            from: moved.from,
+            repaired: moved.repaired,
+            manual: moved.manual,
+          }
+        }),
+      )
+      .handle("project.create", ({ payload: { directory, from } }) =>
+        Effect.gen(function* () {
+          const c = yield* userOnly("project.create")
 
-        const created = yield* createProject(
-          directory,
-          from,
-          Predicate.isTagged(c, "Cli") ? c.repositoryRoot : directory,
-        )
+          const created = yield* withProjectPlatform(
+            createProject(directory, from, Predicate.isTagged(c, "Cli") ? c.repositoryRoot : directory),
+          )
 
-        return {
-          directory: created.directory,
-          folders: created.folders.map((folder) => ({
-            name: folder.name,
-            source: folder.source,
-            path: folder.path,
-            branch: folder.branch,
-            uncommitted: [...folder.uncommitted],
-            ...(folder.origin !== undefined && { origin: folder.origin }),
-          })),
-        }
-      }),
+          return {
+            directory: created.directory,
+            folders: created.folders.map((folder) => ({
+              name: folder.name,
+              source: folder.source,
+              path: folder.path,
+              branch: folder.branch,
+              uncommitted: [...folder.uncommitted],
+              ...(folder.origin !== undefined && { origin: folder.origin }),
+            })),
+          }
+        }),
+      )
+      .handle("project.info", () => scope("project.info").pipe(Effect.flatMap(project.info)))
+      .handle("project.search", ({ query }) =>
+        scope("project.search").pipe(Effect.flatMap((s) => project.search(s, query))),
+      )
+      .handle("project.clone", ({ payload: { url, directory, machine } }) =>
+        Effect.gen(function* () {
+          const away = machine !== undefined
 
-    "Project.Info": () => scope("Project.Info").pipe(Effect.flatMap(project.info)),
+          if (away && Predicate.isTagged(yield* Caller, "Remote"))
+            return yield* new Forbidden({ method: "project.clone", message: "a remote clones only on this machine" })
 
-    "Project.Search": (input) => scope("Project.Search").pipe(Effect.flatMap((s) => project.search(s, input))),
-  } satisfies Handlers
-})
-
-export const layer = group([
-  "Project.Open",
-  "Project.Move",
-  "Project.Create",
-  "Project.Info",
-  "Project.Search",
-]).toLayer(make)
+          return remote.clone(away ? machine : undefined, { url, directory })
+        }),
+      )
+  }),
+)

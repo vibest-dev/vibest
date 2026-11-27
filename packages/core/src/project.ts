@@ -1,14 +1,16 @@
 import { Layout } from "@vibest/schema/layout"
 import { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 
-import { LayerNode } from "./effect/layer-node.ts"
 import { PlatformNode } from "./effect/platform.ts"
-import { Git } from "./git.ts"
 import { listProjectRepositories } from "./project/create.ts"
-import { RepositoryUrl, repositoryIdentity } from "./repository-url.ts"
+import { RepositoryUrl, repositoryIdentity } from "./project/repository-url.ts"
+import { Git } from "./worktree/git.ts"
 
 export * as Project from "./project.ts"
+
+export { ProjectStore } from "./project/store.ts"
 
 export { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
 

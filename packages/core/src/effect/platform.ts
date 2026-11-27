@@ -1,12 +1,12 @@
 import { Layout } from "@vibest/schema/layout"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, HttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import type { DatabaseOpenFailed, SchemaMismatch } from "../database/db-schema.ts"
-import { LayerNode } from "./layer-node.ts"
+import type { DatabaseOpenFailed, SchemaMismatch } from "../database/schema.sql.ts"
 
 export * as PlatformNode from "./platform.ts"
 
@@ -31,3 +31,4 @@ export const sqlClient = LayerNode.make({
 
 export const layout = LayerNode.unbound(Layout)
 export const httpClient = LayerNode.make({ service: HttpClient.HttpClient, layer: FetchHttpClient.layer, deps: [] })
+export const fetch = LayerNode.unbound(FetchHttpClient.Fetch)

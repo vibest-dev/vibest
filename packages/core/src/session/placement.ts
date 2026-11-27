@@ -3,10 +3,12 @@ import { messageOf } from "@vibest/schema/error"
 import { sessionLabel } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import { NoSuchSession } from "@vibest/schema/session"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Cause, Clock, Context, Effect, Exit, FileSystem, Layer, Path, Ref } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import { Agents } from "../agents.ts"
+import { definitionIn, withExecution, withProcess, type Launch } from "../agent/launch.ts"
+import { Agents } from "../agent/registry.ts"
 import {
   type SessionRow,
   harnessIdOf,
@@ -19,15 +21,13 @@ import {
   limitText,
   type ExecutionFailure,
   type LimitAbout,
-} from "../database/db-rows.ts"
-import { Db } from "../database/db.ts"
-import { LayerNode } from "../effect/layer-node.ts"
+} from "../database/rows.ts"
 import { PlatformNode } from "../effect/platform.ts"
-import { Git } from "../git.ts"
 import { cliEnv, Harness } from "../harness.ts"
-import { Harnesses } from "../harnesses.ts"
+import { Harnesses } from "../harness/registry.ts"
+import { limitSeen, Subscriptions } from "../harness/subscriptions.ts"
 import { Inbox } from "../inbox.ts"
-import { definitionIn, withExecution, withProcess, type Launch } from "../launch.ts"
+import { InboxStore } from "../inbox/store.ts"
 import {
   createIsolatedWorktrees,
   discardIsolatedWorktrees,
@@ -35,13 +35,22 @@ import {
   type PinnedFolder,
   projectRoot,
 } from "../project/create.ts"
-import { isUsageLimitError } from "../replies.ts"
-import { Runtimes, type Runtime, type Terminal } from "../runtimes.ts"
-import { limitSeen, Subscriptions } from "../subscriptions/service.ts"
-import { projectText, removeSystemPrompt, systemPrompt, withTask, writeSystemPrompt } from "../system-prompt.ts"
+import { ProjectStore } from "../project/store.ts"
+import { Runtimes, type Runtime, type Terminal } from "../runtime/registry.ts"
 import { addWorktree, copyIncluded, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
+import { Git } from "../worktree/git.ts"
 import { Executions, notStartedMessage, Pickup } from "./executions.ts"
 import { SessionLocks, terminalLock } from "./locks.ts"
+import { isUsageLimitError } from "./replies.ts"
+import { SessionStore } from "./store.ts"
+import {
+  configuredMcpServers,
+  projectText,
+  removeSystemPrompt,
+  systemPrompt,
+  withTask,
+  writeSystemPrompt,
+} from "./system-prompt.ts"
 
 export * as Placement from "./placement.ts"
 
@@ -61,7 +70,9 @@ export type LaunchOptions = {
 }
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const projectStore = yield* ProjectStore.Service
+  const sessionStore = yield* SessionStore.Service
+  const inboxStore = yield* InboxStore.Service
   const subscriptions = yield* Subscriptions.Service
   const runtimes = yield* Runtimes.Service
   const harness = yield* Harness.Service
@@ -96,7 +107,7 @@ export const make = Effect.gen(function* () {
   )
 
   const worktreeOf = Effect.fn("Placement.worktreeOf")((session: SessionRow) =>
-    db.session.sessionDirectory(session.id).pipe(
+    sessionStore.sessionDirectory(session.id).pipe(
       Effect.flatMap((directory) =>
         directory
           ? Effect.succeed(directory)
@@ -115,15 +126,16 @@ export const make = Effect.gen(function* () {
     VIBEST_SESSION_ID: session.id,
     VIBEST_PROJECT_ID: session.projectId,
     VIBEST_PROJECT_DIR: layout.project(session.projectId),
+    VIBEST_SCRATCHPAD_DIR: layout.scratchpadDir(session.projectId),
     VIBEST_HARNESS: harnessIdOf(session),
     VIBEST_RUNTIME: runtimeEnv(runtimeOf(session)),
     VIBEST_HOME: layout.home,
   })
 
   const systemPromptOf = Effect.fn("Placement.systemPromptOf")(function* (session: SessionRow) {
-    const creator = yield* db.session.creatorLabel(session.id)
-    const directory = yield* db.session.sessionDirectory(session.id)
-    const projectDirectory = yield* db.project.projectDirectory(session.projectId)
+    const creator = yield* sessionStore.creatorLabel(session.id)
+    const directory = yield* sessionStore.sessionDirectory(session.id)
+    const projectDirectory = yield* projectStore.projectDirectory(session.projectId)
 
     const checkout =
       directory !== undefined &&
@@ -133,17 +145,19 @@ export const make = Effect.gen(function* () {
       !directory.startsWith(`${layout.worktrees}/`)
 
     const creatorLinked =
-      creator !== undefined && (yield* db.inbox.maySend(session.id, creator.id, creator.remote ?? ""))
+      creator !== undefined && (yield* inboxStore.maySend(session.id, creator.id, creator.remote ?? ""))
 
     return systemPrompt({
       system: (yield* definitionIn(agents, session.agent)).system,
       id: session.id,
       checkout,
-      sharer: yield* db.session.earlierSharer(session.id),
+      sharer: yield* sessionStore.earlierSharer(session.id),
       creator: creator === undefined ? undefined : { id: creator.id, label: creator.label, linked: creatorLinked },
-      linkedTo: yield* db.session.linkedTargets(session.id, creator?.id),
+      linkedTo: yield* sessionStore.linkedTargets(session.id, creator?.id),
       projectDir: layout.project(session.projectId),
+      scratchpadDir: layout.scratchpadDir(session.projectId),
       agents: agents.all,
+      mcpServers: yield* configuredMcpServers(layout.home, directory || projectDirectory || undefined),
       ...(yield* projectText(layout.project(session.projectId))),
     })
   }, provided)
@@ -153,16 +167,20 @@ export const make = Effect.gen(function* () {
     const adapter = yield* harnesses.get(harnessIdOf(session))
     const pluginDir = yield* harness.plugin(adapter.id)
     const id = session.process?.harnessSessionId ?? null
-    const resumeThis = resume && id !== null && (yield* db.session.canResumeConversation(session.id, id))
+    const resumeThis = resume && id !== null && (yield* sessionStore.canResumeConversation(session.id, id))
     const env = { ...vibestEnv(session), ...(yield* cliEnv(vibest, adapter.id)) }
 
     const worktree = yield* worktreeOf(session).pipe(
       Effect.catchTag("NoSuchSession", (error) =>
-        db.project
+        projectStore
           .projectDirectory(session.projectId)
           .pipe(Effect.flatMap((dir) => (dir ? Effect.succeed(dir) : Effect.fail(error)))),
       ),
     )
+
+    const scratchpadDir = layout.scratchpadDir(session.projectId)
+    yield* fs.makeDirectory(layout.scratchRoot, { recursive: true, mode: 0o700 }).pipe(Effect.ignore)
+    yield* fs.makeDirectory(scratchpadDir, { recursive: true, mode: 0o700 }).pipe(Effect.ignore)
 
     return {
       harness: adapter.id,
@@ -171,6 +189,7 @@ export const make = Effect.gen(function* () {
         {
           worktree,
           projectDir: layout.project(session.projectId),
+          scratchpadDir,
           systemPromptFile: yield* writeSystemPrompt(session.id, system),
           provider: session.process?.provider ?? null,
           model: session.process?.model ?? null,
@@ -195,7 +214,7 @@ export const make = Effect.gen(function* () {
   }, provided)
 
   const taskInput = (session: SessionRow, task: string) =>
-    Effect.map(firstText(session, task), (text): FirstInput => ({ text, onHandover: db.inbox.linkTask(session.id) }))
+    Effect.map(firstText(session, task), (text): FirstInput => ({ text, onHandover: inboxStore.linkTask(session.id) }))
 
   const limitOf = (
     session: SessionRow,
@@ -239,10 +258,10 @@ export const make = Effect.gen(function* () {
 
         if (opened === undefined) return
         const failure = (yield* limitOf(session, messageOf(Cause.squash(cause))))?.failure
-        yield* db.session.closeExecution(session.id, opened, failure === undefined ? "not_started" : "failed", {
+        yield* sessionStore.closeExecution(session.id, opened, failure === undefined ? "not_started" : "failed", {
           failure,
         })
-        yield* db.inbox.dropUnsent(session.id, failure?.message ?? "the session did not start")
+        yield* inboxStore.dropUnsent(session.id, failure?.message ?? "the session did not start")
       })
 
     const starting = <A, E, R>(start: Effect.Effect<A, E, R>) => start.pipe(Effect.onError((cause) => abandoned(cause)))
@@ -256,7 +275,7 @@ export const make = Effect.gen(function* () {
     )
 
   const liveCount = (projectId: string) =>
-    db.session.listSessions({ projectId }).pipe(Effect.map((rows) => rows.filter((row) => !archived(row)).length))
+    sessionStore.listSessions({ projectId }).pipe(Effect.map((rows) => rows.filter((row) => !archived(row)).length))
 
   const show = Effect.fn("Placement.show")(
     function* (h: Runtime, session: SessionRow, terminal: Terminal, root: string) {
@@ -282,10 +301,10 @@ export const make = Effect.gen(function* () {
 
   const nearCreator = (session: SessionRow, kind: string) =>
     Effect.gen(function* () {
-      const creator = yield* db.session.creatorOf(session.id)
+      const creator = yield* sessionStore.creatorOf(session.id)
 
       const parent =
-        creator !== undefined && "local" in creator ? yield* db.session.getSession(creator.local) : undefined
+        creator !== undefined && "local" in creator ? yield* sessionStore.getSession(creator.local) : undefined
 
       const terminal = parent === undefined ? null : terminalOf(parent)
 
@@ -299,7 +318,7 @@ export const make = Effect.gen(function* () {
 
     if (recorded === null) return undefined
 
-    return (yield* db.session.lastSessionAt(recorded.runtime, recorded.target)) === session.id
+    return (yield* sessionStore.lastSessionAt(recorded.runtime, recorded.target)) === session.id
       ? recorded.target
       : undefined
   })
@@ -346,7 +365,7 @@ export const make = Effect.gen(function* () {
       readonly beforeStart?: Effect.Effect<void>
     },
   ) {
-    const remote = yield* db.session.startedByRemote(session.id)
+    const remote = yield* sessionStore.startedByRemote(session.id)
     const creator = yield* nearCreator(session, h.id)
 
     const near =
@@ -354,13 +373,13 @@ export const make = Effect.gen(function* () {
         ? input.near
         : (creator ??
           (!remote && (target === undefined || target === "")
-            ? yield* db.session.lastProjectTerminal(session.projectId, h.id)
+            ? yield* sessionStore.lastProjectTerminal(session.projectId, h.id)
             : undefined))
 
-    yield* db.session.startProcess(session.id, startOf(session))
+    yield* sessionStore.startProcess(session.id, startOf(session))
 
     if (input.beforeStart !== undefined) yield* input.beforeStart
-    const started = yield* db.session.currentProcessId(session.id)
+    const started = yield* sessionStore.currentProcessId(session.id)
     const launch = input.launch(started)
 
     const opened = yield* h
@@ -376,17 +395,19 @@ export const make = Effect.gen(function* () {
         ...(target !== undefined && { target }),
       })
       .pipe(
-        Effect.onError(() => (input.endedByCaller ? Effect.void : db.session.endProcess(session.id, "launch_failed"))),
+        Effect.onError(() =>
+          input.endedByCaller ? Effect.void : sessionStore.endProcess(session.id, "launch_failed"),
+        ),
       )
 
-    yield* db.session.placeProcess(session.id, opened)
+    yield* sessionStore.placeProcess(session.id, opened)
 
     return opened
   }, provided)
 
   const shareRow = (session: SessionRow, splitFrom: string) =>
     Effect.gen(function* () {
-      const sharedFrom = yield* db.session.getSession(splitFrom)
+      const sharedFrom = yield* sessionStore.getSession(splitFrom)
 
       if (sharedFrom === undefined)
         return yield* new NoSuchSession({ id: splitFrom, message: `--share ${splitFrom}: no session ${splitFrom}` })
@@ -462,11 +483,11 @@ export const make = Effect.gen(function* () {
   ) {
     const error = messageOf(Cause.squash(cause))
     const limit = yield* limitOf(session, error)
-    const execution = yield* db.session.openExecution(session.id)
+    const execution = yield* sessionStore.openExecution(session.id)
 
     if (execution !== undefined)
-      yield* db.session.closeExecution(session.id, execution, "failed", { failure: limit?.failure })
-    yield* db.session.endProcess(session.id, "launch_failed")
+      yield* sessionStore.closeExecution(session.id, execution, "failed", { failure: limit?.failure })
+    yield* sessionStore.endProcess(session.id, "launch_failed")
     yield* notice(
       session,
       `${sessionLabel(session)} failed to start ${harnessIdOf(session)}: ${limit === undefined ? error : limitText(limit.failure, limit.about)}`,
@@ -489,14 +510,14 @@ export const make = Effect.gen(function* () {
   )
 
   const storedDirectory = (projectId: string) =>
-    db.project.projectDirectory(projectId).pipe(Effect.map((directory) => directory || undefined))
+    projectStore.projectDirectory(projectId).pipe(Effect.map((directory) => directory || undefined))
 
   const recount = Effect.fn("Placement.recount")(function* (kind: string, projectId: string) {
     const h = runtimes.find(kind)
 
     if (h === undefined) return
 
-    const rows = (yield* db.session.listSessions({ projectId })).filter(
+    const rows = (yield* sessionStore.listSessions({ projectId })).filter(
       (row) => runtimeOf(row) === kind && !archived(row),
     )
 
@@ -543,7 +564,7 @@ export const make = Effect.gen(function* () {
   )
 
   const republish = Effect.fn("Placement.republish")(function* () {
-    const rows = (yield* db.session.listSessions()).filter((row) => !archived(row) && terminalOf(row) !== null)
+    const rows = (yield* sessionStore.listSessions()).filter((row) => !archived(row) && terminalOf(row) !== null)
 
     const labelled = yield* Effect.forEach(rows, (session) =>
       Effect.gen(function* () {
@@ -595,7 +616,9 @@ export const node = LayerNode.make({
   layer,
   deps: [
     Agents.node,
-    Db.node,
+    ProjectStore.node,
+    SessionStore.node,
+    InboxStore.node,
     Executions.node,
     Git.node,
     Harness.node,

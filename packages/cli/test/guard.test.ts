@@ -1,26 +1,30 @@
+import http from "node:http"
+
 import { assert, describe, it } from "@effect/vitest"
+import { HttpConnector } from "@vibest/client/client"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
-import { Db } from "@vibest/core/database/db"
-import { check } from "@vibest/core/guard"
+import { check } from "@vibest/core/agent/guard"
 import { Plugins } from "@vibest/core/plugin"
 import { Project } from "@vibest/core/project"
-import { spawnWorking } from "@vibest/core/test/lib/sessions-helpers"
-import { FakeGit, HARNESSES, makeRepository, runVibest, testLayer } from "@vibest/platform-bun/test/lib/fakes"
+import { SessionStore } from "@vibest/core/session/store"
+import { SocketConnector } from "@vibest/herdr-sdk"
 import { Plugin as PromisePlugin, ToolRefused as PromiseToolRefused } from "@vibest/plugin"
 import { Plugin, ToolRefused } from "@vibest/plugin/effect"
-import { Forbidden } from "@vibest/protocol/rpc"
+import { Forbidden } from "@vibest/protocol/errors"
+import { sessionHeaders } from "@vibest/protocol/protocol"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
 import type { Host } from "@vibest/server/daemon"
 import * as Server from "@vibest/server/server"
+import { FakeGit, HARNESSES, makeRepository, testLayer } from "@vibest/testkit/fakes"
+import { spawnWorking } from "@vibest/testkit/sessions-helpers"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Option, Path, Queue, Stdio, Terminal } from "effect"
-import { SocketConnector } from "effect-herdr-sdk"
 import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import { shellRefusal, splitCommand } from "../../builtins/src/guard.ts"
+import { shellRefusal, splitCommand } from "../../plugin-builtins/src/guard.ts"
 import { Commands, entryFlags } from "../src/commands/commands.ts"
 import { Runtime as CliRuntime } from "../src/framework/runtime.ts"
 import { Spec } from "../src/framework/spec.ts"
@@ -49,16 +53,19 @@ describe("vibest.guard shell rules", () => {
       "claude -p x",
       "vibest connect",
       "vibest machine ls",
-      "vibest run pi 'vibest integration stop'",
-      "git commit -m 'vibest integration stop'",
-      'rg "vibest integration stop" src',
-      "vibest run pi - <<'EOF'\nvibest integration stop\nEOF",
-      "ls # vibest integration stop",
+      "rg vibest.sock src",
+      "grep vibest.sock src/server.ts",
+      'git commit -m "vibest.sock"',
+      "ls ~/.vibest/vibest.sock",
+      "cat ~/.vibest/vibestd.log",
+      "echo ~/.vibest/vibest.sock",
+      "curl https://example.com",
+      "vibest run pi 'curl --unix-socket ~/.vibest/vibest.sock http://vibest/api/hook/ready'",
+      "vibest run pi - <<'EOF'\ncurl --unix-socket ~/.vibest/vibest.sock http://vibest/api/hook/ready\nEOF",
+      "ls # curl --unix-socket ~/.vibest/vibest.sock",
       "vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "vibest send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
       "vibest ls",
-      "vibest integration guard",
-      "vibest send x -- integration stop",
       "echo $VIBEST_SESSION_ID",
       "env -u VIBEST_AGENT vibest ls",
     ])
@@ -97,37 +104,27 @@ describe("vibest.guard shell rules", () => {
       )
   })
 
-  it("refuses vibest integration stop, prompt and ready, however they are wrapped", () => {
+  it("refuses socket and HTTP tools targeting vibest.sock, however they are wrapped", () => {
     for (const command of [
-      "vibest integration stop",
-      '"$VIBEST_CLI" integration stop',
-      "vibest --log-level debug integration stop < x.json",
-      "echo '{}' | vibest integration stop",
-      "x=`vibest integration stop`",
-      "nohup timeout 5 vibest integration stop",
-      "bash -c 'vibest integration stop'",
+      'curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready',
+      "curl --unix-socket=vibest.sock http://vibest/api/hook/cursor/guard",
+      "curl --unix-socket=/tmp/vibest.sock http://vibest/api/hook/ready",
+      "nc -U ~/.vibest/vibest.sock",
+      "ncat -U vibest.sock",
+      "netcat -U ~/.vibest/vibest.sock",
+      "socat - UNIX-CONNECT:/tmp/vibest.sock",
+      "socat - UNIX-CONNECT:vibest.sock",
+      "socat - UNIX-CONNECT:/tmp/vibest.sock,crnl",
+      "wget --unix-socket=/tmp/vibest.sock http://vibest/api/hook/ready",
+      "nohup timeout 5 curl --unix-socket ~/.vibest/vibest.sock http://vibest/api/hook/ready",
+      "bash -c 'curl --unix-socket ~/.vibest/vibest.sock http://vibest/api/hook/ready'",
+      "x=$(curl --unix-socket ~/.vibest/vibest.sock http://vibest/api/hook/ready)",
     ])
       assert.strictEqual(
         shellRefusal(command),
-        "vibest integration stop is the harness's hook, not an agent command.",
+        "vibest.sock is the vibestd daemon socket, not for agent commands.",
         command,
       )
-    assert.strictEqual(
-      shellRefusal("vibest integration prompt --harness claude"),
-      "vibest integration prompt is the harness's hook, not an agent command.",
-    )
-    assert.strictEqual(
-      shellRefusal("$VIBEST_CLI integration prompt"),
-      "vibest integration prompt is the harness's hook, not an agent command.",
-    )
-    assert.strictEqual(
-      shellRefusal("vibest integration ready --harness cursor"),
-      "vibest integration ready is the harness's hook, not an agent command.",
-    )
-    assert.strictEqual(
-      shellRefusal('"${VIBEST_CLI}" integration ready'),
-      "vibest integration ready is the harness's hook, not an agent command.",
-    )
   })
 
   it("splits at unquoted separators, leaves out redirections and here-documents, and adds substitutions", () => {
@@ -354,6 +351,11 @@ describe("wizard entry", () => {
 
             return Effect.die("socket")
           }),
+          Effect.provideService(HttpConnector.Service, () => {
+            touched.socket = true
+
+            return Effect.die("http") as never
+          }),
           Effect.provide(Digest.layerWebCrypto),
           Effect.provide(SecureRandom.layerWebCrypto),
           Effect.provide(FileSystem.layerNoop({})),
@@ -426,6 +428,11 @@ describe("vibest --session inside herdr", () => {
 
             return Effect.die("socket")
           }),
+          Effect.provideService(HttpConnector.Service, () => {
+            touched.socket = true
+
+            return Effect.die("http") as never
+          }),
           Effect.provide(Platform.services),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(Path.layer),
@@ -492,12 +499,12 @@ describe("vibest --session inside herdr", () => {
   )
 })
 
-describe("vibest integration guard through vibestd", () => {
+describe("HTTP guard through vibestd", () => {
   const cursorAnswer = (reason: string | undefined) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" }
 
   const served = Server.layer.pipe(
-    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(
       testLayer({
@@ -508,42 +515,63 @@ describe("vibest integration guard through vibestd", () => {
     ),
   )
 
-  it.effect(
-    "--harness cursor prints Cursor's deny shape for a refused call and its allow shape otherwise",
+  it.live(
+    "/api/hook/cursor/guard returns Cursor's deny shape for a refused call and its allow shape otherwise",
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout
         const repo = yield* makeRepository
-        const { id } = yield* spawnWorking(repo)
-        const identity = (yield* (yield* Db.Service).session.sessionIdentity(id))!
+        const { id } = yield* spawnWorking(repo, "cursor")
+        const identity = (yield* (yield* SessionStore.Service).sessionIdentity(id))!
 
         const guard = (command: string) =>
-          runVibest(
-            repo,
-            {
-              HOME: layout.home,
-              VIBEST_HOME: layout.home,
-              VIBEST_SESSION_ID: id,
-              VIBEST_PROJECT_ID: String(identity.projectId),
-            },
-            ["integration", "guard", "--harness", "cursor"],
-            JSON.stringify({ tool_name: "Shell", tool_input: { command }, cwd: repo }),
+          Effect.promise(
+            () =>
+              new Promise<{ readonly status: number; readonly body: unknown }>((resolve, reject) => {
+                const req = http.request(
+                  {
+                    socketPath: layout.socket,
+                    method: "POST",
+                    path: "/api/hook/cursor/guard",
+                    headers: {
+                      "content-type": "text/plain",
+                      ...sessionHeaders({
+                        sessionId: id,
+                        projectId: String(identity.projectId),
+                        harness: "cursor",
+                      }),
+                    },
+                  },
+                  (res) => {
+                    let out = ""
+                    res.setEncoding("utf8")
+                    res.on("data", (chunk: string) => {
+                      out += chunk
+                    })
+                    res.on("end", () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(out) }))
+                  },
+                )
+
+                req.on("error", reject)
+                req.write(JSON.stringify({ tool_name: "Shell", tool_input: { command }, cwd: repo }))
+                req.end()
+              }),
           )
 
-        const refused = yield* guard("vibest integration stop")
-        assert.strictEqual(refused.code, 0, refused.stderr)
+        const refused = yield* guard('curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready')
+        assert.strictEqual(refused.status, 200)
 
-        const reason = "vibest integration stop is the harness's hook, not an agent command."
+        const reason = "vibest.sock is the vibestd daemon socket, not for agent commands."
 
-        assert.deepStrictEqual(JSON.parse(refused.stdout), {
+        assert.deepStrictEqual(refused.body, {
           permission: "deny",
           user_message: reason,
           agent_message: reason,
         })
         const allowed = yield* guard("herdr pane list")
-        assert.strictEqual(allowed.code, 0, allowed.stderr)
-        assert.deepStrictEqual(JSON.parse(allowed.stdout), { permission: "allow" })
-      }).pipe(Effect.provide(served)),
+        assert.strictEqual(allowed.status, 200)
+        assert.deepStrictEqual(allowed.body, { permission: "allow" })
+      }).pipe(Effect.scoped, Effect.provide(served)),
     30_000,
   )
 })

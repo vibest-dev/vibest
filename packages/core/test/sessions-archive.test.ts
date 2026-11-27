@@ -1,14 +1,21 @@
 import { assert, describe } from "@effect/vitest"
-import { exitedAt } from "@vibest/core/database/db-rows"
-import { Runtimes } from "@vibest/core/runtimes"
+import { exitedAt } from "@vibest/core/database/rows"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { Exits } from "@vibest/core/session/exits"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { settled, until } from "@vibest/testkit/observe"
+import { makeRepository } from "@vibest/testkit/session"
+import {
+  idleSession,
+  sessionWorktree,
+  spawnInput,
+  spawnWorking,
+  sqlNotices,
+  test,
+} from "@vibest/testkit/sessions-helpers"
 import { Effect, FileSystem } from "effect"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { settled, until } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
-import { idleSession, sessionWorktree, spawnInput, spawnWorking, sqlNotices, test } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("an exited session", () => {
   const exitedSession = Effect.gen(function* () {
@@ -16,7 +23,7 @@ describe.concurrent("an exited session", () => {
     const w = yield* idleSession(yield* makeRepository)
     yield* herdr.updateAgent(w.id, (a) => ({ ...a, alive: false }))
     yield* w.sessions.check(w.id)
-    yield* until(w.db.session.getSession(w.id), (row) => (row ? exitedAt(row) : null) !== null)
+    yield* until(w.sessionStore.getSession(w.id), (row) => (row ? exitedAt(row) : null) !== null)
     yield* settled
 
     return { ...w, herdr }
@@ -27,14 +34,14 @@ describe.concurrent("an exited session", () => {
     Effect.gen(function* () {
       const w = yield* exitedSession
       const target = w.row.process!.terminal!
-      yield* w.db.session.startRoot(
+      yield* w.sessionStore.startRoot(
         w.row.projectId,
         "claude",
         false,
         { runtime: RUNTIME, target },
         { agent: "general" },
       )
-      const [other] = yield* w.db.session.processesAt(RUNTIME, target)
+      const [other] = yield* w.sessionStore.processesAt(RUNTIME, target)
       const out = (yield* w.sessions.archive(w.id))!
       assert.deepStrictEqual(yield* w.herdr.callsTo("close"), [])
       assert.include(out.reasons.join("\n"), `left open: session ${other!.sessionId} runs in it`)
@@ -68,7 +75,7 @@ describe.concurrent("vibest archive", () => {
       const owner = yield* idleSession(repo)
       const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id })
       yield* until(
-        owner.db.session.getSession(id),
+        owner.sessionStore.getSession(id),
         (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
       )
       const worktree = yield* sessionWorktree(owner.id)

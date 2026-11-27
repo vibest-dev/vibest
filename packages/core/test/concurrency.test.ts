@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { rulesOf } from "@vibest/core/concurrency"
+import { rulesOf } from "@vibest/core/runtime/concurrency"
 
 describe("concurrency rules", () => {
   it("applies the smallest whole-machine max and no limit without the key", () => {

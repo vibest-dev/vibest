@@ -260,9 +260,9 @@ Notes on particular checks:
 - On macOS, Cursor model discovery and subscription probes need `Library/Keychains/login.keychain-db` as a regular file
   under HOME. H4 puts a sentinel Cursor CLI on PATH and fails if it runs; when a World changes HOME it removes the
   inherited SSH session variables, which H4 checks in a spawned process.
-- The guard rules themselves are `guard.test.ts`; without a vibest agent, or when vibestd cannot check the call,
-  `vibest integration guard` fails with no answer. Cursor's deny and allow answers through vibestd are
-  `guard.test.ts`; a stop refused with each unsettled daemon operation or delivery named (D7, and D8, whose handoff
+- The guard rules themselves are `guard.test.ts`; when vibestd is unreachable or rejects a guard call,
+  the harness hook script fails closed (`plugin.test.ts`). Cursor's and agy's deny and allow answers through vibestd are
+  `guard.test.ts` and `http.test.ts`; a stop refused with each unsettled daemon operation or delivery named (D7, and D8, whose handoff
   drains the same way) is `stop.test.ts`; an entry session restarting through
   `VIBEST_CLI` (I11) is `restart.test.ts`.
 - The machines checks run two vibest homes on one host: A's vibestd dials B through a fake `ssh` first on its PATH,

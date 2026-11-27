@@ -1,22 +1,23 @@
 import { assert } from "@effect/vitest"
-import { Concurrency } from "@vibest/core/concurrency"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
+import { Reconcile } from "@vibest/core/session/reconcile"
 import { Starts } from "@vibest/core/session/starts"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { until } from "@vibest/testkit/observe"
+import { makeRepository, PluginHost } from "@vibest/testkit/session"
+import { idleSession, spawnInput, test } from "@vibest/testkit/sessions-helpers"
 import { Effect, Fiber } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import idleStop from "../../plugins/idle-stop/src/index.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until } from "./lib/observe.ts"
-import { makeRepository, PluginHost } from "./lib/session.ts"
-import { idleSession, spawnInput, test } from "./lib/sessions-helpers.ts"
+import idleStop from "../../plugin-idle-stop/src/index.ts"
 
 for (const mode of ["direct", "plugin", "failed-close", "waiting"])
   test(
     mode,
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { id, sessions, db } = yield* idleSession(repo)
+      const { id, sessions, sessionStore } = yield* idleSession(repo)
       const concurrency = yield* Concurrency.Service
       yield* concurrency.configure([{ max: 2 }])
       const starts = yield* Starts.Service
@@ -41,7 +42,7 @@ for (const mode of ["direct", "plugin", "failed-close", "waiting"])
         yield* gate.release("failed")
         assert.equal((yield* Fiber.join(stop))._tag, "Failure")
         assert.deepStrictEqual(yield* starts.waiting, [b, c])
-        assert.isNull((yield* db.session.getSession(id))!.process!.endedAt)
+        assert.isNull((yield* sessionStore.getSession(id))!.process!.endedAt)
 
         return
       }
@@ -52,7 +53,7 @@ for (const mode of ["direct", "plugin", "failed-close", "waiting"])
         yield* (yield* PluginHost).load([idleStop])
       }
 
-      yield* until(db.session.getSession(b), (r) => !!r?.process?.placedAt || r?.process?.placedAt === 0)
+      yield* until(sessionStore.getSession(b), (r) => !!r?.process?.placedAt || r?.process?.placedAt === 0)
       assert.deepStrictEqual(yield* starts.waiting, [c])
       const sql = yield* SqlClient.SqlClient
       const count = yield* sql<{ n: number }>`SELECT count(*) AS n FROM process WHERE ended_at IS NULL`
@@ -65,3 +66,23 @@ for (const mode of ["direct", "plugin", "failed-close", "waiting"])
     }),
     { hooked: ["pi", "pulling-pi", "claude"] },
   )
+
+test(
+  "startup reconcile settles before test setup and spawnWorking seeds test/coord before startRoot",
+  Effect.gen(function* () {
+    const repo = yield* makeRepository
+    const { sessions, entryId } = yield* idleSession(repo)
+    assert.isAtLeast((yield* sessions.inMemory).reconciles, 1)
+    const reconcile = yield* Reconcile.Service
+    yield* reconcile.check(entryId)
+    const concurrency = yield* Concurrency.Service
+    yield* concurrency.configure([{ max: 2 }])
+    const starts = yield* Starts.Service
+    const spawn = yield* spawnInput(repo)
+    const { id: b } = yield* sessions.spawn({ ...spawn, name: "B" })
+    const { id: c } = yield* sessions.spawn({ ...spawn, name: "C" })
+    yield* until(starts.waiting, (ids) => ids.join() === [b, c].join())
+    assert.deepStrictEqual(yield* starts.waiting, [b, c])
+  }),
+  { hooked: ["pi", "pulling-pi", "claude"] },
+)

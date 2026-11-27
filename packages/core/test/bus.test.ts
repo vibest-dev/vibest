@@ -1,13 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus, equalToReplay } from "@vibest/core/bus"
-import { PROJECTION_VERSION } from "@vibest/core/database/db-schema"
-import { installLedger } from "@vibest/core/database/migration"
-import * as Projectors from "@vibest/core/database/projectors"
-import { Catalog, type Fact, type FactOf } from "@vibest/schema/event"
+import { installBaseline } from "@vibest/core/database/migration"
+import { Projectors } from "@vibest/core/reactor"
+import { type DurableEvent, type DurableEventOf } from "@vibest/schema/durable-event-manifest"
+import { MachineEvent } from "@vibest/schema/machine-event"
+import { ProcessEvent } from "@vibest/schema/process-event"
+import { ProjectEvent } from "@vibest/schema/project-event"
+import { SessionEvent } from "@vibest/schema/session-event"
+import { memorySqlite } from "@vibest/testkit/bun"
 import { Effect, Exit, Fiber, Layer, PubSub, Stream } from "effect"
 import { SqlClient } from "effect/sql"
-
-import { memorySqlite } from "./platform/bun.ts"
 
 const P = "11111111-1111-4111-8111-111111111111"
 const OTHER_PROJECT = "22222222-2222-4222-8222-222222222222"
@@ -22,7 +24,7 @@ const ITEM_2 = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e"
 const memory = () => Layer.fresh(Projectors.replay.pipe(Layer.provideMerge(memorySqlite)))
 
 const ledger = Effect.gen(function* () {
-  yield* installLedger
+  yield* installBaseline
   const bus = yield* Bus.Service
   const subscription = yield* bus.subscribe()
   const published = PubSub.takeUpTo(subscription, Number.MAX_SAFE_INTEGER)
@@ -42,66 +44,71 @@ const story = Effect.gen(function* () {
 
   const ids = yield* commit(
     Effect.gen(function* () {
-      yield* emit(Catalog["machine.added"], { at: 100, data: { name: "mb", target: "root@mb", remote: MACHINE } })
-      yield* emit(Catalog["machine.connected"], { at: 150, data: { name: "mb" } })
-      yield* emit(Catalog["remote.seen"], { at: 160, data: { id: PEER, name: "mac" } })
-      yield* emit(Catalog["remote.seen"], { at: 170, data: { id: PEER, name: "mac2" } })
-      yield* emit(Catalog["project.created"], {
-        projectId: P,
-        at: 200,
-        data: { directory: "/w/app", repositories: [{ path: "/w/app", remote: "git@x:app.git" }] },
-      })
-      yield* emit(Catalog["session.created"], {
-        sessionId: MAIN,
-        at: 210,
-        data: { project: P, agent: "main", name: "main", directory: "" },
-      })
-      yield* emit(Catalog["session.directory_changed"], { sessionId: MAIN, at: 212, data: { directory: "/w/app" } })
+      yield* emit(MachineEvent.Added, { name: "mb", target: "root@mb", remote: MACHINE }, { at: 100 })
+      yield* emit(MachineEvent.Connected, { name: "mb" }, { at: 150 })
+      yield* emit(MachineEvent.RemoteSeen, { remoteId: PEER, name: "mac" }, { at: 160 })
+      yield* emit(MachineEvent.RemoteSeen, { remoteId: PEER, name: "mac2" }, { at: 170 })
+      yield* emit(
+        ProjectEvent.Created,
+        { projectId: P, directory: "/w/app", repositories: [{ path: "/w/app", remote: "git@x:app.git" }] },
+        { at: 200 },
+      )
+      yield* emit(
+        SessionEvent.Created,
+        { sessionId: MAIN, project: P, agent: "main", name: "main", directory: "" },
+        { at: 210 },
+      )
+      yield* emit(SessionEvent.DirectoryChanged, { sessionId: MAIN, directory: "/w/app" }, { at: 212 })
 
-      const mainProcess = yield* emit(Catalog["process.started"], {
-        sessionId: MAIN,
-        at: 220,
-        data: { harness: "claude", runtime: "herdr" },
-      })
+      const mainProcess = 1
+      yield* emit(
+        ProcessEvent.Started,
+        { sessionId: MAIN, processId: mainProcess, harness: "claude", runtime: "herdr" },
+        { at: 220 },
+      )
+      yield* emit(
+        ProcessEvent.Updated,
+        { sessionId: MAIN, processId: mainProcess, terminal: { id: "w1:p1" }, pid: 10 },
+        { at: 225 },
+      )
+      yield* emit(
+        ProcessEvent.Ready,
+        { sessionId: MAIN, processId: mainProcess, pid: 11, integration: { version: "0.0.1", protocol: 8 } },
+        { at: 230 },
+      )
+      yield* emit(ProcessEvent.Ready, { sessionId: MAIN, processId: mainProcess }, { at: 235 })
+      yield* emit(ProcessEvent.Updated, { sessionId: MAIN, processId: mainProcess, pid: 12 }, { at: 236 })
+      yield* emit(
+        ProcessEvent.Updated,
+        { sessionId: MAIN, processId: mainProcess, conversation: "conv-main" },
+        { at: 237 },
+      )
 
-      yield* emit(Catalog["process.placed"], {
-        sessionId: MAIN,
-        at: 225,
-        data: { process: mainProcess, terminal: { id: "w1:p1" }, pid: 10 },
-      })
-      yield* emit(Catalog["process.ready"], {
-        sessionId: MAIN,
-        at: 230,
-        data: { process: mainProcess, pid: 11, integration: { version: "0.0.1", protocol: 8 } },
-      })
-      yield* emit(Catalog["process.ready"], { sessionId: MAIN, at: 235, data: { process: mainProcess } })
-      yield* emit(Catalog["process.pid"], { sessionId: MAIN, at: 236, data: { process: mainProcess, pid: 12 } })
-      yield* emit(Catalog["process.conversation"], {
-        sessionId: MAIN,
-        at: 237,
-        data: { process: mainProcess, conversation: "conv-main" },
-      })
+      yield* emit(
+        SessionEvent.Created,
+        { sessionId: SUB, project: P, agent: "subagent", name: "tests", directory: "/w/app/wt", parent: MAIN },
+        { at: 300 },
+      )
 
-      yield* emit(Catalog["session.created"], {
-        sessionId: SUB,
-        at: 300,
-        data: { project: P, agent: "subagent", name: "tests", directory: "/w/app/wt", parent: MAIN },
-      })
-
-      const task = yield* emit(Catalog["inbox.enqueued"], {
-        sessionId: SUB,
-        at: 301,
-        data: {
+      const task = 1
+      yield* emit(
+        SessionEvent.InboxEnqueued,
+        {
+          sessionId: SUB,
+          messageId: task,
           sender: { type: "agent", session: MAIN },
           content: "fix it",
           requestId: "r-1",
         },
-      })
+        { at: 301 },
+      )
 
-      const subProcess = yield* emit(Catalog["process.started"], {
-        sessionId: SUB,
-        at: 302,
-        data: {
+      const subProcess = 1
+      yield* emit(
+        ProcessEvent.Started,
+        {
+          sessionId: SUB,
+          processId: subProcess,
           harness: "pi",
           provider: "cpa",
           model: "grok",
@@ -110,122 +117,120 @@ const story = Effect.gen(function* () {
           terminal: { id: "w1:p2" },
           pid: 20,
         },
-      })
+        { at: 302 },
+      )
 
-      const execution = subProcess
-      yield* emit(Catalog["execution.allocated"], {
-        sessionId: SUB,
-        at: 309,
-        data: { executionId: execution, processId: subProcess },
-      })
-      yield* emit(Catalog["execution.started"], {
-        sessionId: SUB,
-        at: 310,
-        data: { executionId: execution, processId: subProcess },
-      })
+      const execution = 1
+      yield* emit(
+        SessionEvent.ExecutionAllocated,
+        { sessionId: SUB, executionId: execution, processId: subProcess },
+        { at: 309 },
+      )
+      yield* emit(
+        SessionEvent.ExecutionStarted,
+        { sessionId: SUB, executionId: execution, processId: subProcess },
+        { at: 310 },
+      )
+      yield* emit(
+        SessionEvent.InboxDelivered,
+        { sessionId: SUB, messageId: task, recipientExecutionId: execution },
+        { at: 311 },
+      )
+      yield* emit(
+        SessionEvent.ExecutionSucceeded,
+        { sessionId: SUB, executionId: execution, reply: "All tests pass." },
+        { at: 321 },
+      )
 
-      yield* emit(Catalog["inbox.delivered"], {
-        sessionId: SUB,
-        at: 311,
-        data: { messageId: task, recipientExecutionId: execution },
-      })
-      yield* emit(Catalog["execution.succeeded"], {
-        sessionId: SUB,
-        at: 321,
-        data: { executionId: execution, reply: "All tests pass." },
-      })
-
-      const result = yield* emit(Catalog["inbox.enqueued"], {
-        sessionId: MAIN,
-        at: 322,
-        data: {
+      const result = 1
+      yield* emit(
+        SessionEvent.InboxEnqueued,
+        {
+          sessionId: MAIN,
+          messageId: result,
           sender: { type: "vibest" },
           aboutSessionId: SUB,
           content: "",
         },
-      })
+        { at: 322 },
+      )
+      yield* emit(SessionEvent.InboxDelivering, { sessionId: MAIN, messageId: result }, { at: 323 })
+      yield* emit(ProcessEvent.Ended, { sessionId: SUB, processId: subProcess, reason: "restart" }, { at: 330 })
 
-      yield* emit(Catalog["inbox.delivery_started"], { sessionId: MAIN, at: 323, data: { messageId: result } })
+      const placeholder = 2
+      yield* emit(
+        ProcessEvent.Started,
+        { sessionId: SUB, processId: placeholder, harness: "claude", runtime: "herdr" },
+        { at: 331 },
+      )
+      yield* emit(ProcessEvent.Ended, { sessionId: SUB, processId: placeholder, reason: "launch_failed" }, { at: 332 })
+      yield* emit(SessionEvent.Renamed, { sessionId: SUB, name: "fix-tests" }, { at: 333 })
 
-      yield* emit(Catalog["process.ended"], {
-        sessionId: SUB,
-        at: 330,
-        data: { process: subProcess, reason: "restart" },
-      })
+      yield* emit(
+        ProjectEvent.RepositoriesChanged,
+        { projectId: P, repositories: [{ path: "/w/app/lib" }] },
+        { at: 400 },
+      )
+      yield* emit(
+        ProjectEvent.Moved,
+        { projectId: P, from: "/w/app", to: "/src/app", repositories: [{ path: "/src/app", remote: "git@x:app.git" }] },
+        { at: 410 },
+      )
 
-      const placeholder = yield* emit(Catalog["process.started"], {
-        sessionId: SUB,
-        at: 331,
-        data: { harness: "claude", runtime: "herdr" },
-      })
-
-      yield* emit(Catalog["process.ended"], {
-        sessionId: SUB,
-        at: 332,
-        data: { process: placeholder, reason: "launch_failed" },
-      })
-      yield* emit(Catalog["session.renamed"], { sessionId: SUB, at: 333, data: { name: "fix-tests" } })
-
-      yield* emit(Catalog["project.repositories_changed"], {
-        projectId: P,
-        at: 400,
-        data: { repositories: [{ path: "/w/app/lib" }] },
-      })
-      yield* emit(Catalog["project.moved"], {
-        projectId: P,
-        at: 410,
-        data: { from: "/w/app", to: "/src/app", repositories: [{ path: "/src/app", remote: "git@x:app.git" }] },
-      })
-
-      yield* emit(Catalog["session.created"], {
-        sessionId: REMOTE,
-        at: 500,
-        data: {
+      yield* emit(
+        SessionEvent.Created,
+        {
+          sessionId: REMOTE,
           project: P,
           agent: "subagent",
           name: "remote",
           directory: "/src/app",
           origin: { remote: PEER, project: OTHER_PROJECT, session: MAIN },
         },
-      })
-      yield* emit(Catalog["outbox.queued"], {
-        at: 510,
-        data: { id: ITEM, remote: PEER, session: REMOTE, content: "done" },
-      })
-      yield* emit(Catalog["outbox.queued"], {
-        at: 511,
-        data: { id: ITEM_2, remote: PEER, session: REMOTE, kind: "send", content: "archived" },
-      })
-      yield* emit(Catalog["outbox.acked"], { at: 520, data: { remote: PEER, ids: [ITEM] } })
+        { at: 500 },
+      )
+      yield* emit(
+        MachineEvent.OutboxQueued,
+        { id: ITEM, remoteId: PEER, session: REMOTE, content: "done" },
+        { at: 510 },
+      )
+      yield* emit(
+        MachineEvent.OutboxQueued,
+        { id: ITEM_2, remoteId: PEER, session: REMOTE, kind: "send", content: "archived" },
+        { at: 511 },
+      )
+      yield* emit(MachineEvent.OutboxAcked, { remoteId: PEER, ids: [ITEM] }, { at: 520 })
 
-      const notice = yield* emit(Catalog["inbox.enqueued"], {
-        sessionId: MAIN,
-        at: 530,
-        data: {
+      const notice = 2
+      yield* emit(
+        SessionEvent.InboxEnqueued,
+        {
+          sessionId: MAIN,
+          messageId: notice,
           sender: { type: "vibest" },
           content: "remote done",
           transferId: ITEM,
         },
-      })
+        { at: 530 },
+      )
 
-      const typed = mainProcess
-      yield* emit(Catalog["execution.allocated"], {
-        sessionId: MAIN,
-        at: 539,
-        data: { executionId: typed, processId: mainProcess, typed: "hello" },
-      })
-      yield* emit(Catalog["execution.started"], {
-        sessionId: MAIN,
-        at: 540,
-        data: { executionId: typed, processId: mainProcess },
-      })
-
-      yield* emit(Catalog["execution.failed"], {
-        sessionId: MAIN,
-        at: 541,
-        data: { executionId: typed, failure: { message: "model overloaded" } },
-      })
-      yield* emit(Catalog["machine.removed"], { at: 600, data: { name: "mb" } })
+      const typed = 1
+      yield* emit(
+        SessionEvent.ExecutionAllocated,
+        { sessionId: MAIN, executionId: typed, processId: mainProcess, typed: "hello" },
+        { at: 539 },
+      )
+      yield* emit(
+        SessionEvent.ExecutionStarted,
+        { sessionId: MAIN, executionId: typed, processId: mainProcess },
+        { at: 540 },
+      )
+      yield* emit(
+        SessionEvent.ExecutionFailed,
+        { sessionId: MAIN, executionId: typed, failure: { message: "model overloaded" } },
+        { at: 541 },
+      )
+      yield* emit(MachineEvent.Removed, { name: "mb" }, { at: 600 })
 
       return { mainProcess, task, subProcess, execution, result, placeholder, notice, typed }
     }),
@@ -237,7 +242,7 @@ const story = Effect.gen(function* () {
 const rowsOf = <A extends object>(sql: SqlClient.SqlClient, query: string) => sql.unsafe<A>(query)
 
 describe("projectors", () => {
-  it.effect("project facts: created, repositories, move", () =>
+  it.effect("project events: created, repositories, move", () =>
     Effect.gen(function* () {
       const { sql } = yield* story
 
@@ -261,18 +266,19 @@ describe("projectors", () => {
       const { bus, sql } = yield* ledger
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["project.created"], {
+          yield* bus.publish(ProjectEvent.Created, {
             projectId: P,
-            data: { directory: "/a", repositories: [{ path: "/a" }] },
+            directory: "/a",
+            repositories: [{ path: "/a" }],
           })
-          yield* bus.publish(Catalog["project.created"], { projectId: OTHER_PROJECT, data: { repositories: [] } })
-          yield* bus.publish(Catalog["project.repositories_changed"], {
+          yield* bus.publish(ProjectEvent.Created, { projectId: OTHER_PROJECT, repositories: [] })
+          yield* bus.publish(ProjectEvent.RepositoriesChanged, {
             projectId: OTHER_PROJECT,
-            data: { repositories: [{ path: "/a", remote: "r" }] },
+            repositories: [{ path: "/a", remote: "r" }],
           })
-          yield* bus.publish(Catalog["project.repositories_changed"], {
+          yield* bus.publish(ProjectEvent.RepositoriesChanged, {
             projectId: P,
-            data: { repositories: [{ path: "/a", remote: "mine" }] },
+            repositories: [{ path: "/a", remote: "mine" }],
           })
         }),
       )
@@ -282,7 +288,7 @@ describe("projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("session facts: created, renamed, origin, ended and current process", () =>
+  it.effect("session events: created, renamed, origin, ended and current process", () =>
     Effect.gen(function* () {
       const { sql, subProcess, mainProcess } = yield* story
 
@@ -337,13 +343,13 @@ describe("projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("session.ended keeps the first end time and stops offering the session's outbox", () =>
+  it.effect("session.archived keeps the first end time and stops offering the session's outbox", () =>
     Effect.gen(function* () {
       const { sql, bus } = yield* story
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["session.ended"], { sessionId: REMOTE, at: 700, data: { reason: "archived" } })
-          yield* bus.publish(Catalog["session.ended"], { sessionId: REMOTE, at: 800, data: { reason: "archived" } })
+          yield* bus.publish(SessionEvent.Archived, { sessionId: REMOTE }, { at: 700 })
+          yield* bus.publish(SessionEvent.Archived, { sessionId: REMOTE }, { at: 800 })
         }),
       )
       assert.deepStrictEqual(yield* rowsOf(sql, `SELECT ended_at FROM session WHERE id = '${REMOTE}'`), [
@@ -361,7 +367,7 @@ describe("projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("process facts: placed, ready, pid, conversation, ended", () =>
+  it.effect("process events: placed, ready, pid, conversation, ended", () =>
     Effect.gen(function* () {
       const { sql, mainProcess, subProcess } = yield* story
 
@@ -419,14 +425,18 @@ describe("projectors", () => {
 
       const placed = yield* bus.transaction(
         Effect.gen(function* () {
-          const id = yield* bus.publish(Catalog["process.started"], {
+          const id = 3
+          yield* bus.publish(ProcessEvent.Started, {
             sessionId: SUB,
-            data: { harness: "pi", runtime: "herdr", terminal: { id: "w1:p3" } },
+            processId: id,
+            harness: "pi",
+            runtime: "herdr",
+            terminal: { id: "w1:p3" },
           })
-
-          yield* bus.publish(Catalog["process.ended"], {
+          yield* bus.publish(ProcessEvent.Ended, {
             sessionId: SUB,
-            data: { process: id, reason: "launch_failed" },
+            processId: id,
+            reason: "launch_failed",
           })
 
           return id
@@ -445,20 +455,26 @@ describe("projectors", () => {
 
       const placeholder = yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
-          yield* bus.publish(Catalog["session.created"], {
+          yield* bus.publish(ProjectEvent.Created, { projectId: P, repositories: [] })
+          yield* bus.publish(SessionEvent.Created, {
             sessionId: SUB,
-            data: { project: P, agent: "subagent", name: "s", directory: "" },
+            project: P,
+            agent: "subagent",
+            name: "s",
+            directory: "",
           })
 
-          const id = yield* bus.publish(Catalog["process.started"], {
+          const id = 1
+          yield* bus.publish(ProcessEvent.Started, {
             sessionId: SUB,
-            data: { harness: "pi", runtime: "herdr" },
+            processId: id,
+            harness: "pi",
+            runtime: "herdr",
           })
-
-          yield* bus.publish(Catalog["process.ended"], {
+          yield* bus.publish(ProcessEvent.Ended, {
             sessionId: SUB,
-            data: { process: id, reason: "launch_failed" },
+            processId: id,
+            reason: "launch_failed",
           })
 
           return id
@@ -478,7 +494,7 @@ describe("projectors", () => {
 
       const exit = yield* bus
         .transaction(
-          bus.publish(Catalog["process.started"], { sessionId: MAIN, data: { harness: "pi", runtime: "herdr" } }),
+          bus.publish(ProcessEvent.Started, { sessionId: MAIN, processId: 2, harness: "pi", runtime: "herdr" }),
         )
         .pipe(Effect.exit)
 
@@ -487,15 +503,15 @@ describe("projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("execution facts: started, ended once with its reply", () =>
+  it.effect("execution events: started, ended once with its reply", () =>
     Effect.gen(function* () {
       const { sql, bus, execution, typed, subProcess, mainProcess } = yield* story
       yield* bus.transaction(
-        bus.publish(Catalog["execution.unresolved"], {
-          sessionId: SUB,
-          at: 999,
-          data: { executionId: execution, observation: "lost" },
-        }),
+        bus.publish(
+          SessionEvent.ExecutionUnresolved,
+          { sessionId: SUB, executionId: execution, observation: "lost" },
+          { at: 999 },
+        ),
       )
       assert.deepStrictEqual(
         yield* rowsOf(
@@ -530,7 +546,7 @@ describe("projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("inbox facts: queued and moved, with the execution that took a row", () =>
+  it.effect("inbox events: queued and moved, with the execution that took a row", () =>
     Effect.gen(function* () {
       const { sql, task, execution, result, notice } = yield* story
       assert.deepStrictEqual(
@@ -584,13 +600,12 @@ describe("projectors", () => {
 
       const exit = yield* bus
         .transaction(
-          bus.publish(Catalog["inbox.enqueued"], {
+          bus.publish(SessionEvent.InboxEnqueued, {
             sessionId: MAIN,
-            data: {
-              sender: { type: "vibest" },
-              content: "again",
-              transferId: ITEM,
-            },
+            messageId: 3,
+            sender: { type: "vibest" },
+            content: "again",
+            transferId: ITEM,
           }),
         )
         .pipe(Effect.exit)
@@ -599,12 +614,16 @@ describe("projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("machine, remote and outbox facts", () =>
+  it.effect("machine, remote and outbox events", () =>
     Effect.gen(function* () {
       const { sql, bus } = yield* story
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM machine"), [])
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM remote"), [{ id: PEER, name: "mac2", connectedAt: 170 }])
-      const [queued] = yield* sql<{ seq: number }>`SELECT seq FROM event WHERE type = 'outbox.queued' ORDER BY seq DESC`
+
+      const [queued] = yield* sql<{
+        seq: number
+      }>`SELECT seq FROM event WHERE type = 'remote.outbox.queued.1' ORDER BY seq DESC`
+
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM outbox WHERE acked_at IS NULL"), [
         {
           id: ITEM_2,
@@ -624,9 +643,9 @@ describe("projectors", () => {
         },
       ])
       yield* bus.transaction(
-        bus.publish(Catalog["machine.added"], { at: 900, data: { name: "mc", target: "mc", remote: MACHINE } }),
+        bus.publish(MachineEvent.Added, { name: "mc", target: "mc", remote: MACHINE }, { at: 900 }),
       )
-      yield* bus.transaction(bus.publish(Catalog["machine.connected"], { at: 950, data: { name: "mc" } }))
+      yield* bus.transaction(bus.publish(MachineEvent.Connected, { name: "mc" }, { at: 950 }))
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT * FROM machine"), [
         { name: "mc", target: "mc", remoteId: MACHINE, connectedAt: 950, createdAt: 900 },
       ])
@@ -655,7 +674,7 @@ describe("bus", () => {
   it.effect("publish outside a transaction commits and publishes it on its own", () =>
     Effect.gen(function* () {
       const { bus, published, sql } = yield* ledger
-      yield* bus.publish(Catalog["machine.connected"], { data: { name: "mb" } })
+      yield* bus.publish(MachineEvent.Connected, { name: "mb" })
       assert.strictEqual(yield* eventCount(sql), 1)
       assert.deepStrictEqual(
         (yield* published).map((event) => event.type),
@@ -670,9 +689,7 @@ describe("bus", () => {
 
       const exit = yield* bus
         .transaction(
-          Effect.forkChild(bus.publish(Catalog["machine.connected"], { data: { name: "mb" } })).pipe(
-            Effect.flatMap(Fiber.join),
-          ),
+          Effect.forkChild(bus.publish(MachineEvent.Connected, { name: "mb" })).pipe(Effect.flatMap(Fiber.join)),
         )
         .pipe(Effect.exit)
 
@@ -685,7 +702,7 @@ describe("bus", () => {
       const { bus, sql } = yield* ledger
 
       const exit = yield* bus
-        .transaction(bus.publish(Catalog["machine.connected"], { data: { name: "mb", extra: 1 } as never }))
+        .transaction(bus.publish(MachineEvent.Connected, { name: "mb", extra: 1 } as never))
         .pipe(Effect.exit)
 
       assert.isTrue(Exit.hasDies(exit))
@@ -699,7 +716,7 @@ describe("bus", () => {
 
       const failed = yield* bus
         .transaction(
-          Effect.andThen(bus.publish(Catalog["remote.seen"], { data: { id: PEER, name: "a" } }), Effect.fail("stop")),
+          Effect.andThen(bus.publish(MachineEvent.RemoteSeen, { remoteId: PEER, name: "a" }), Effect.fail("stop")),
         )
         .pipe(Effect.exit)
 
@@ -707,17 +724,17 @@ describe("bus", () => {
       assert.deepStrictEqual(yield* published, [])
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["machine.added"], { data: { name: "mb", target: "mb", remote: MACHINE } })
-          yield* bus.transaction(bus.publish(Catalog["machine.connected"], { data: { name: "mb" } }))
+          yield* bus.publish(MachineEvent.Added, { name: "mb", target: "mb", remote: MACHINE })
+          yield* bus.transaction(bus.publish(MachineEvent.Connected, { name: "mb" }))
           assert.deepStrictEqual(yield* published, [])
         }),
       )
-      const facts = (yield* published).filter((event): event is Fact => "seq" in event)
+      const events = (yield* published).filter((event): event is DurableEvent => "durable" in event)
       assert.deepStrictEqual(
-        facts.map((fact) => fact.type),
+        events.map((event) => event.type),
         ["machine.added", "machine.connected"],
       )
-      assert.isTrue(facts[0]!.seq < facts[1]!.seq)
+      assert.isTrue(events[0]!.durable.seq < events[1]!.durable.seq)
     }).pipe(Effect.provide(memory())),
   )
 
@@ -740,17 +757,20 @@ describe("bus", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("a commit publishes its facts and then one change signal per session and per project it touched", () =>
+  it.effect("a commit publishes its events and then one change signal per session and per project it touched", () =>
     Effect.gen(function* () {
       const { bus, published } = yield* ledger
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
-          yield* bus.publish(Catalog["session.created"], {
+          yield* bus.publish(ProjectEvent.Created, { projectId: P, repositories: [] })
+          yield* bus.publish(SessionEvent.Created, {
             sessionId: MAIN,
-            data: { project: P, agent: "main", name: "main", directory: "" },
+            project: P,
+            agent: "main",
+            name: "main",
+            directory: "",
           })
-          yield* bus.publish(Catalog["session.renamed"], { sessionId: MAIN, data: { name: "again" } })
+          yield* bus.publish(SessionEvent.Renamed, { sessionId: MAIN, name: "again" })
         }),
       )
       assert.deepStrictEqual(
@@ -760,35 +780,44 @@ describe("bus", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("each fact numbers on in its own aggregate: a session, a project, or the ledger", () =>
+  it.effect("each durable event numbers independently per aggregate_id and stores versioned type", () =>
     Effect.gen(function* () {
       const { bus, sql } = yield* ledger
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
-          yield* bus.publish(Catalog["session.created"], {
+          yield* bus.publish(ProjectEvent.Created, { projectId: P, repositories: [] })
+          yield* bus.publish(SessionEvent.Created, {
             sessionId: MAIN,
-            data: { project: P, agent: "main", name: "main", directory: "" },
+            project: P,
+            agent: "main",
+            name: "main",
+            directory: "",
           })
-          yield* bus.publish(Catalog["inbox.enqueued"], {
+          yield* bus.publish(SessionEvent.InboxEnqueued, {
             sessionId: MAIN,
-            data: { sender: { type: "agent", session: MAIN }, content: "hi" },
+            messageId: 1,
+            sender: { type: "agent", session: MAIN },
+            content: "hi",
           })
-          yield* bus.publish(Catalog["remote.seen"], { data: { id: PEER, name: "a" } })
-          yield* bus.publish(Catalog["project.moved"], {
+          yield* bus.publish(MachineEvent.RemoteSeen, { remoteId: PEER, name: "a" })
+          yield* bus.publish(ProjectEvent.Moved, {
             projectId: P,
-            data: { from: "/a", to: "/b", repositories: [] },
+            from: "/a",
+            to: "/b",
+            repositories: [],
           })
         }),
       )
-      const [ledgerId] = yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT position, aggregate, seq, type FROM event ORDER BY position"), [
-        { position: 1, aggregate: P, seq: 1, type: "project.created" },
-        { position: 2, aggregate: MAIN, seq: 1, type: "session.created" },
-        { position: 3, aggregate: MAIN, seq: 2, type: "inbox.enqueued" },
-        { position: 4, aggregate: ledgerId!.value, seq: 1, type: "remote.seen" },
-        { position: 5, aggregate: P, seq: 2, type: "project.moved" },
-      ])
+      assert.deepStrictEqual(
+        yield* rowsOf(sql, "SELECT position, aggregate_id, seq, type FROM event ORDER BY position"),
+        [
+          { position: 1, aggregateId: P, seq: 1, type: "project.created.1" },
+          { position: 2, aggregateId: MAIN, seq: 1, type: "session.created.1" },
+          { position: 3, aggregateId: MAIN, seq: 2, type: "session.inbox.enqueued.1" },
+          { position: 4, aggregateId: PEER, seq: 1, type: "remote.seen.1" },
+          { position: 5, aggregateId: P, seq: 2, type: "project.moved.1" },
+        ],
+      )
     }).pipe(Effect.provide(memory())),
   )
 
@@ -803,14 +832,20 @@ describe("bus", () => {
 
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
-          yield* bus.publish(Catalog["session.created"], {
+          yield* bus.publish(ProjectEvent.Created, { projectId: P, repositories: [] })
+          yield* bus.publish(SessionEvent.Created, {
             sessionId: MAIN,
-            data: { project: P, agent: "main", name: "main", directory: "" },
+            project: P,
+            agent: "main",
+            name: "main",
+            directory: "",
           })
-          yield* bus.publish(Catalog["process.started"], {
+          yield* bus.publish(ProcessEvent.Started, {
             sessionId: MAIN,
-            data: { harness: "pi", runtime: "herdr", routing: routing as never },
+            processId: 1,
+            harness: "pi",
+            runtime: "herdr",
+            routing: routing as never,
           })
         }),
       )
@@ -820,139 +855,83 @@ describe("bus", () => {
 
       assert.deepStrictEqual(yield* rowsOf(sql, "SELECT routing FROM process"), [{ routing: stored }])
       const started = (yield* published).find((event) => event.type === "process.started")!
-      assert.strictEqual(JSON.stringify((started as FactOf<"process.started">).data.routing), stored)
+      assert.strictEqual(JSON.stringify((started as DurableEventOf<"process.started">).data.routing), stored)
       assert.strictEqual(yield* replayDifference(sql), undefined)
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("a session fact given a project too dies and writes nothing", () =>
-    Effect.gen(function* () {
-      const { bus, sql } = yield* ledger
-
-      const exit = yield* bus
-        .transaction(
-          Effect.gen(function* () {
-            yield* bus.publish(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
-            yield* bus.publish(Catalog["session.created"], {
-              sessionId: MAIN,
-              data: { project: P, agent: "main", name: "main", directory: "" },
-            })
-            yield* bus.publish(Catalog["session.renamed"], {
-              projectId: OTHER_PROJECT,
-              sessionId: MAIN,
-              data: { name: "x" },
-            })
-          }),
-        )
-        .pipe(Effect.exit)
-
-      assert.isTrue(Exit.hasDies(exit))
-      assert.strictEqual(yield* eventCount(sql), 0)
-    }).pipe(Effect.provide(memory())),
-  )
-
-  it.effect("a fact may be earlier than the one before it", () =>
+  it.effect("an event may be earlier than the one before it", () =>
     Effect.gen(function* () {
       const { bus, sql } = yield* ledger
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["machine.added"], {
-            at: 500,
-            data: { name: "mb", target: "mb", remote: MACHINE },
-          })
-          yield* bus.publish(Catalog["machine.connected"], { at: 400, data: { name: "mb" } })
+          yield* bus.publish(MachineEvent.Added, { name: "mb", target: "mb", remote: MACHINE }, { at: 500 })
+          yield* bus.publish(MachineEvent.Connected, { name: "mb" }, { at: 400 })
         }),
       )
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT at FROM event ORDER BY seq"), [{ at: 500 }, { at: 400 }])
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT created FROM event ORDER BY seq"), [
+        { created: 500 },
+        { created: 400 },
+      ])
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("the log refuses updates and never reuses a position", () =>
+  it.effect("the log refuses updates and never reuses a position or sequence", () =>
     Effect.gen(function* () {
       const { bus, sql } = yield* ledger
-      const emitConnected = bus.transaction(bus.publish(Catalog["machine.connected"], { data: { name: "mb" } }))
+      const emitConnected = bus.transaction(bus.publish(MachineEvent.Connected, { name: "mb" }))
       const first = yield* emitConnected
       const second = yield* emitConnected
-      const update = yield* sql`UPDATE event SET at = 0 WHERE seq = ${first}`.pipe(Effect.exit)
+      const update = yield* sql`UPDATE event SET created = 0 WHERE seq = ${first.durable.seq}`.pipe(Effect.exit)
       assert.isTrue(Exit.isFailure(update))
-      yield* sql`DELETE FROM event WHERE seq = ${second}`
-      assert.strictEqual(yield* emitConnected, second)
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT position FROM event ORDER BY position"), [
-        { position: 1 },
-        { position: 3 },
+      yield* sql`DELETE FROM event WHERE seq = ${second.durable.seq}`
+      const third = yield* emitConnected
+      assert.strictEqual(third.durable.seq, 3)
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT position, seq FROM event ORDER BY position"), [
+        { position: 1, seq: 1 },
+        { position: 3, seq: 3 },
       ])
-    }).pipe(Effect.provide(memory())),
-  )
-})
-
-describe("rebuild", () => {
-  it.effect("a database whose read model is another version replays to the same state", () =>
-    Effect.gen(function* () {
-      const { sql } = yield* story
-      yield* sql`UPDATE meta SET value = '0' WHERE key = 'projection'`
-      yield* sql`CREATE TABLE answer (execution INTEGER PRIMARY KEY)`
-      yield* sql`DELETE FROM inbox`
-      yield* (yield* Bus.Service).rebuild
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT value FROM meta WHERE key = 'projection'"), [
-        { value: String(PROJECTION_VERSION) },
-      ])
-      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT name FROM sqlite_schema WHERE name = 'answer'"), [])
-      assert.strictEqual(yield* replayDifference(sql), undefined)
-      const [inbox] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM inbox`
-      assert.strictEqual(inbox!.n, 3)
-    }).pipe(Effect.provide(memory())),
-  )
-
-  it.effect("a log row of a type outside the catalog fails the rebuild, names it and changes nothing", () =>
-    Effect.gen(function* () {
-      const { sql } = yield* story
-      yield* sql`INSERT INTO event (aggregate, seq, at, type, data) VALUES (${SUB}, 99, 1, 'session.purged', '{}')`
-      const error = yield* (yield* Bus.Service).rebuild.pipe(Effect.flip)
-      assert.strictEqual(error._tag, "UnknownFact")
-      assert.include(error.message, `event ${SUB} 99`)
-      const [sessions] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM session`
-      assert.strictEqual(sessions!.n, 3)
     }).pipe(Effect.provide(memory())),
   )
 })
 
 describe("project", () => {
-  it.effect("a replay reaching a fact type no domain registered a projector for fails and names it", () =>
+  it.effect("a replay reaching an event type no domain registered a projector for fails and names it", () =>
     Effect.gen(function* () {
-      yield* installLedger
+      yield* installBaseline
       const sql = yield* SqlClient.SqlClient
-      yield* sql`INSERT INTO event (aggregate, seq, at, type, data)
-        VALUES (${PEER}, 1, 1, 'remote.seen', '{"id":"p","name":"a"}')`
+      yield* sql`INSERT INTO event (id, aggregate_id, seq, created, type, data)
+        VALUES ('evt_test_unprojected', ${PEER}, 1, 1, 'remote.seen.1', ${JSON.stringify({ remoteId: PEER, name: "a" })})`
       const error = yield* (yield* Bus.Service).rebuild.pipe(Effect.flip)
-      assert.strictEqual(error._tag, "UnknownFact")
-      assert.include(error.message, `event ${PEER} 1: remote.seen has no projector`)
+      assert.strictEqual(error._tag, "InvalidDurableEvent")
+      assert.include(error.message, `event ${PEER} 1: remote.seen.1 has no projector`)
     }).pipe(Effect.provide(Bus.layer.pipe(Layer.provideMerge(Layer.fresh(memorySqlite))))),
   )
 })
 
 describe("delivery order", () => {
-  it.effect("a subscriber publishing a follow-up fact does not overtake the rest of the batch", () =>
+  it.effect("a subscriber publishing a follow-up event does not overtake the rest of the batch", () =>
     Effect.gen(function* () {
-      yield* installLedger
+      yield* installBaseline
       const bus = yield* Bus.Service
-      const first = yield* bus.subscribe([Catalog["remote.seen"]])
-      const second = yield* bus.subscribe([Catalog["remote.seen"], Catalog["machine.connected"]])
+      const first = yield* bus.subscribe([MachineEvent.RemoteSeen])
+      const second = yield* bus.subscribe([MachineEvent.RemoteSeen, MachineEvent.Connected])
       yield* Stream.fromSubscription(first).pipe(
         Stream.take(1),
-        Stream.runForEach(() => bus.publish(Catalog["machine.connected"], { data: { name: "mb" } })),
+        Stream.runForEach(() => bus.publish(MachineEvent.Connected, { name: "mb" })),
         Effect.forkScoped,
       )
       yield* Effect.yieldNow
       yield* bus.transaction(
         Effect.gen(function* () {
-          yield* bus.publish(Catalog["remote.seen"], { data: { id: PEER, name: "a" } })
-          yield* bus.publish(Catalog["remote.seen"], { data: { id: PEER, name: "b" } })
+          yield* bus.publish(MachineEvent.RemoteSeen, { remoteId: PEER, name: "a" })
+          yield* bus.publish(MachineEvent.RemoteSeen, { remoteId: PEER, name: "b" })
         }),
       )
       const seen = yield* Effect.forEach([1, 2, 3], () => PubSub.take(second))
       assert.deepStrictEqual(
-        seen.map((event) => (event as Fact).seq),
-        [1, 2, 3],
+        seen.map((event) => event.type),
+        ["remote.seen", "remote.seen", "machine.connected"],
       )
     }).pipe(Effect.provide(memory()), Effect.scoped),
   )

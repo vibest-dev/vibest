@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { projectRemotes, rankedRemotes, RepositoryUrl, repositoryIdentity } from "@vibest/core/repository-url"
+import { projectRemotes, rankedRemotes, RepositoryUrl, repositoryIdentity } from "@vibest/core/project/repository-url"
 import { Effect } from "effect"
 
 const config = (lines: ReadonlyArray<string>) => lines.join("\n")

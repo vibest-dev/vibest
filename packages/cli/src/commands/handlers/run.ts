@@ -5,7 +5,6 @@ import { caller, callerEnvOf, json } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { EmptyInput, input, readAttachments } from "../../input.ts"
 import { requested } from "../../requested.ts"
-import { parseSessionRef } from "../../session-ref.ts"
 import { Commands } from "../commands.ts"
 
 export default Runtime.handler(Commands.commands.run, (o) =>
@@ -36,31 +35,33 @@ export default Runtime.handler(Commands.commands.run, (o) =>
         if (
           harness === undefined &&
           /^\S+$/.test(prompt) &&
-          (yield* client["Harnesses.List"]({})).some((choice) => choice.harness === prompt)
+          (yield* client["server.harness"]["harness.list"]({ query: {} })).some((choice) => choice.harness === prompt)
         )
           return yield* new EmptyInput({
             message: `the prompt is missing: ${prompt} is a harness; give the prompt after it`,
           })
 
-        return yield* client.Spawn({
-          ...(request !== undefined && { request }),
-          harness,
-          agent: o.agent,
-          prompt,
-          name: Option.getOrUndefined(o.title),
-          provider: Option.getOrUndefined(o.provider),
-          model: Option.getOrUndefined(o.model),
-          env: Option.getOrUndefined(o.env),
-          share: Option.getOrUndefined(o.share),
-          runtime: Option.getOrUndefined(o.runtime),
-          machine: Option.getOrUndefined(o.machine),
-          project: Option.getOrUndefined(o.project),
-          callerEnv: callerEnvOf(),
-          ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
-          ...(files.length !== 0 && { files }),
-          ...(o.from.length !== 0 && { from: o.from.map(parseSessionRef) }),
-          ...(o.to.length !== 0 && { to: o.to.map(parseSessionRef) }),
-          ...(o.with.length !== 0 && { with: o.with.map(parseSessionRef) }),
+        return yield* client["server.session"]["session.spawn"]({
+          payload: {
+            ...(request !== undefined && { request }),
+            harness,
+            agent: o.agent,
+            prompt,
+            name: Option.getOrUndefined(o.title),
+            provider: Option.getOrUndefined(o.provider),
+            model: Option.getOrUndefined(o.model),
+            env: Option.getOrUndefined(o.env),
+            share: Option.getOrUndefined(o.share),
+            runtime: Option.getOrUndefined(o.runtime),
+            machine: Option.getOrUndefined(o.machine),
+            project: Option.getOrUndefined(o.project),
+            callerEnv: callerEnvOf(),
+            ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
+            ...(files.length !== 0 && { files }),
+            ...(o.from.length !== 0 && { from: o.from.map((id) => ({ id })) }),
+            ...(o.to.length !== 0 && { to: o.to.map((id) => ({ id })) }),
+            ...(o.with.length !== 0 && { with: o.with.map((id) => ({ id })) }),
+          },
         })
       }),
     )

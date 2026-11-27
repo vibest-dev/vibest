@@ -8,7 +8,8 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast"
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p test/tsconfig.json",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/server"
   },
   "dependencies": {
     "@vibest/client": "workspace:*",
@@ -16,6 +17,12 @@
     "@vibest/plugin": "workspace:*",
     "@vibest/protocol": "workspace:*",
     "@vibest/schema": "workspace:*",
+    "@vibest/util": "workspace:*",
     "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@vibest/plugin-harnesses": "workspace:*",
+    "@vibest/runtime-herdr": "workspace:*"
   }
 }

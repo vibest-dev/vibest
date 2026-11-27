@@ -4,8 +4,12 @@ import os from "node:os"
 import path from "node:path"
 
 import { assert, it } from "@effect/vitest"
+import { runVibest } from "@vibest/testkit/fakes"
+import { Effect } from "effect"
 
-import { alive, note, reapEndedRuns } from "../../../tools/reap.ts"
+import * as Platform from "#platform"
+
+import { alive, endNoted, note, reapEndedRuns } from "../../../tools/reap.ts"
 
 const noteIn = (file: string, pid: number | undefined, marker: string) => {
   const saved = process.env.VIBEST_REAP_FILE
@@ -45,3 +49,60 @@ it("cleanup of an ended run stops only the processes it recorded: not a reused p
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+it("runVibest forwards VIBEST_REAP_FILE and BUN_OPTIONS so spawned children and detached daemons are noted and reaped", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-reap-forward-"))
+  const home = path.join(dir, "home")
+  const vibestHome = path.join(dir, "vibest")
+  const reapPath = path.join(dir, "reap-file")
+  fs.mkdirSync(home, { recursive: true })
+  const savedReap = process.env.VIBEST_REAP_FILE
+  const savedBunOptions = process.env.BUN_OPTIONS
+  const preload = `--preload=${path.resolve(import.meta.dirname, "../../../tools/reap-preload.ts")}`
+  let daemonPid: number | undefined
+
+  const killBestEffort = (pid: number) => {
+    try {
+      process.kill(pid, "SIGKILL")
+    } catch (e) {
+      if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+    }
+  }
+
+  try {
+    process.env.VIBEST_REAP_FILE = reapPath
+    process.env.BUN_OPTIONS = [savedBunOptions, preload].filter(Boolean).join(" ")
+
+    const versionResult = await Effect.runPromise(
+      runVibest(home, { HOME: home }, ["--version"]).pipe(Effect.provide(Platform.services)),
+    )
+
+    assert.strictEqual(versionResult.code, 0)
+    const afterVersion = fs.readFileSync(reapPath, "utf8")
+    assert.include(afterVersion, "--version")
+
+    const daemonResult = await Effect.runPromise(
+      runVibest(home, { HOME: home, VIBEST_HOME: vibestHome }, ["daemon"]).pipe(Effect.provide(Platform.services)),
+    )
+
+    assert.strictEqual(daemonResult.code, 0)
+    const info = JSON.parse(fs.readFileSync(path.join(vibestHome, "vibestd.pid"), "utf8")) as { pid?: number }
+    daemonPid = info.pid
+    assert.isNumber(daemonPid)
+    assert.isTrue(alive(daemonPid!))
+    assert.include(fs.readFileSync(reapPath, "utf8"), `${daemonPid}\t`)
+
+    await endNoted(reapPath)
+    assert.isFalse(alive(daemonPid!))
+  } finally {
+    if (savedReap === undefined) delete process.env.VIBEST_REAP_FILE
+    else process.env.VIBEST_REAP_FILE = savedReap
+
+    if (savedBunOptions === undefined) delete process.env.BUN_OPTIONS
+    else process.env.BUN_OPTIONS = savedBunOptions
+
+    if (daemonPid !== undefined && alive(daemonPid)) killBestEffort(daemonPid)
+
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+}, 30_000)

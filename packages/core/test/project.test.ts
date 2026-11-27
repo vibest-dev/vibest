@@ -1,12 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Project, type ProjectScope } from "@vibest/core/project"
-import { RepositoryUrl } from "@vibest/core/repository-url"
+import { RepositoryUrl } from "@vibest/core/project/repository-url"
 import { Layout } from "@vibest/schema/layout"
+import * as Platform from "@vibest/testkit/bun"
+import { tempDirectory } from "@vibest/testkit/directory"
+import { FakeGit } from "@vibest/testkit/fake-git"
 import { Effect, FileSystem, Layer, Path } from "effect"
-
-import { tempDirectory } from "./lib/directory.ts"
-import { FakeGit } from "./lib/fake-git.ts"
-import * as Platform from "./platform/bun.ts"
 
 const scope: ProjectScope = { id: "0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b" }
 

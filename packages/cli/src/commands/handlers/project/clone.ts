@@ -15,14 +15,22 @@ export default Runtime.handler(Commands.commands.project.commands.clone, (o) =>
     const added = yield* vibest((client, _agent, ping) =>
       ping.capabilities?.projectClone !== true
         ? Effect.fail(new ProjectCloneFailed({ message: "this vibestd does not clone projects; run vibest update" }))
-        : client["Project.Clone"]({
-            url: o.url,
-            ...(directory !== undefined && { directory }),
-            ...(machine !== undefined && { machine }),
-          }).pipe(
-            Stream.tap((step) => ("progress" in step ? Console.error(step.progress) : Effect.void)),
-            Stream.runLast,
-          ),
+        : client["server.project"]
+            ["project.clone"]({
+              payload: {
+                url: o.url,
+                ...(directory !== undefined && { directory }),
+                ...(machine !== undefined && { machine }),
+              },
+            })
+            .pipe(
+              Effect.flatMap((stream) =>
+                stream.pipe(
+                  Stream.tap((step) => ("progress" in step ? Console.error(step.progress) : Effect.void)),
+                  Stream.runLast,
+                ),
+              ),
+            ),
     )
 
     const last = Option.getOrUndefined(added)

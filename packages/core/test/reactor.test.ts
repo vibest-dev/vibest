@@ -1,9 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus, TerminalExited } from "@vibest/core/bus"
 import * as Reactor from "@vibest/core/reactor"
+import { memoryBus } from "@vibest/testkit/bun"
 import { Effect, Layer } from "effect"
-
-import { memoryBus } from "./platform/bun.ts"
 
 describe("Reactor", () => {
   it.live("a handler that throws while being built does not end the subscription", () =>
@@ -20,8 +19,8 @@ describe("Reactor", () => {
         return Effect.sync(() => void seen.push(calls))
       })
       yield* Effect.yieldNow
-      yield* bus.observe({ type: "terminal.exited", runtime: "r", terminal: "t" } as never)
-      yield* bus.observe({ type: "terminal.exited", runtime: "r", terminal: "t" } as never)
+      yield* bus.publish(TerminalExited, { runtime: "r", terminal: { id: "t" }, processes: [] })
+      yield* bus.publish(TerminalExited, { runtime: "r", terminal: { id: "t" }, processes: [] })
       yield* Effect.sleep("20 millis")
       assert.deepStrictEqual(seen, [2])
     }).pipe(Effect.provide(Layer.fresh(memoryBus)), Effect.scoped),

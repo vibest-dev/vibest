@@ -229,7 +229,8 @@ const statusCore = async (
       () => {
         const saved = row<{ terminal: string }>(
           w,
-          "SELECT terminal FROM process WHERE session_id = ? AND coalesce(terminal, '') != '' ORDER BY id DESC LIMIT 1",
+          `SELECT CASE WHEN json_valid(terminal) THEN coalesce(terminal ->> '$.id', terminal) ELSE terminal END AS terminal
+            FROM process WHERE session_id = ? AND coalesce(terminal, '') != '' ORDER BY id DESC LIMIT 1`,
           sessionId,
         )
 

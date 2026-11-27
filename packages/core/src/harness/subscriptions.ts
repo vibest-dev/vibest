@@ -1,0 +1,208 @@
+import type { SubscriptionReport } from "@vibest/plugin/effect"
+import { isLimited } from "@vibest/plugin/host"
+import type { HarnessId } from "@vibest/schema/session"
+import { type Subscription, type SubscriptionLimit } from "@vibest/schema/subscription"
+import { LayerNode } from "@vibest/util/layer-node"
+import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Predicate, Ref, Semaphore } from "effect"
+
+import { Harness } from "../harness.ts"
+import type { HarnessDefinition, SubscriptionsDomain } from "../plugin/domains.ts"
+import { logFailure } from "../reactor.ts"
+import { Harnesses } from "./registry.ts"
+
+export * as Subscriptions from "./subscriptions.ts"
+
+const MINUTE = "1 minute"
+const CLI_TIMEOUT = "10 seconds"
+const SUBSCRIPTION_TIMEOUT = "30 seconds"
+const MACHINE = "local" as const
+
+type Row = Subscription
+
+type Usage = { readonly limits: ReadonlyArray<SubscriptionLimit>; readonly error?: string } | { readonly error: string }
+
+const keyOf = (harness: string, provider: string) => `${harness}\0${provider}`
+
+const isLimit = (limit: SubscriptionLimit) =>
+  Predicate.isString(limit?.window) &&
+  limit.window !== "" &&
+  Predicate.isNumber(limit.percent) &&
+  Number.isFinite(limit.percent) &&
+  (limit.status === "available" || limit.status === "limited") &&
+  (limit.resetTime === null || (Predicate.isNumber(limit.resetTime) && Number.isFinite(limit.resetTime)))
+
+const homeDir = Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
+
+const keep = (prev: Row | undefined, now: number, error: string, harness: HarnessId, provider: string): Row =>
+  prev
+    ? { ...prev, error }
+    : { harness, provider, machine: MACHINE, account: { kind: "none" }, limits: [], updatedAt: now, error }
+
+const wrote = (
+  prev: Row | undefined,
+  now: number,
+  harness: HarnessId,
+  provider: string,
+  account: Subscription["account"],
+  usage?: Usage,
+): Row => {
+  const limits = usage && "limits" in usage ? usage.limits : (prev?.limits ?? [])
+  const error = usage && "error" in usage ? usage.error : undefined
+
+  return { harness, provider, machine: MACHINE, account, limits, updatedAt: now, ...(error && { error }) }
+}
+
+const representable = (time: number | null): time is number => time !== null && !Number.isNaN(new Date(time).getTime())
+
+export const limitSeen = (rows: ReadonlyArray<Row>, harness: string, provider: string, now: number) => {
+  const exhausted = (rows.find((row) => row.harness === harness && row.provider === provider)?.limits ?? []).filter(
+    (limit) => isLimited({ limits: [limit] }, now),
+  )
+
+  const resets = exhausted.map((limit) => limit.resetTime).filter(representable)
+
+  return {
+    windows: exhausted.map((limit) => limit.window),
+    ...(provider !== "" && { provider }),
+    ...(resets.length > 0 && { resetAt: Math.min(...resets) }),
+  }
+}
+
+export type Interface = SubscriptionsDomain
+
+export class Service extends Context.Service<Service, Interface>()("vibest/Subscriptions") {}
+
+export const make = Effect.gen(function* () {
+  const harnesses = yield* Harnesses.Service
+  const harness = yield* Harness.Service
+  const rows = yield* Ref.make(new Map<string, Row>())
+
+  const modify = (harness: HarnessId, provider: string, f: (prev: Row | undefined, now: number) => Row) =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis
+      yield* Ref.update(rows, (map) => {
+        const next = new Map(map)
+        next.set(keyOf(harness, provider), f(map.get(keyOf(harness, provider)), now))
+
+        return next
+      })
+    })
+
+  const list = Ref.get(rows).pipe(
+    Effect.map((map) =>
+      [...map.values()].sort((a, b) => a.harness.localeCompare(b.harness) || a.provider.localeCompare(b.provider)),
+    ),
+  )
+
+  const report = Effect.fn("Subscriptions.report")(function* (input: SubscriptionReport) {
+    const harness = input.harness
+
+    if (harnesses.find(harness) === undefined || !Array.isArray(input.limits) || !input.limits.every(isLimit)) {
+      yield* Effect.logWarning(`subscription report ignored for ${JSON.stringify(input.harness)}`)
+
+      return
+    }
+
+    const provider = input.provider ?? ""
+    yield* modify(harness, provider, (prev, now) => ({
+      harness,
+      provider,
+      machine: MACHINE,
+      account: prev?.account ?? { kind: "none" },
+      limits: input.limits,
+      updatedAt: now,
+    }))
+  })
+
+  const read = (definition: HarnessDefinition, home: string) =>
+    Effect.gen(function* () {
+      const id = definition.id
+
+      const read = yield* definition.subscription!(home, definition.binary).pipe(
+        Effect.timeoutOption(SUBSCRIPTION_TIMEOUT),
+      )
+
+      if (Option.isNone(read))
+        return yield* Effect.logWarning(`subscriptions: ${id} poll timed out after ${SUBSCRIPTION_TIMEOUT}`)
+
+      for (const row of read.value)
+        yield* modify(id, row.provider, (prev, now) =>
+          row.account === undefined
+            ? keep(prev, now, row.error ?? "subscription read failed", id, row.provider)
+            : wrote(
+                prev,
+                now,
+                id,
+                row.provider,
+                row.account,
+                row.limits !== undefined
+                  ? { limits: row.limits, ...(row.error && { error: row.error }) }
+                  : row.error
+                    ? { error: row.error }
+                    : undefined,
+              ),
+        )
+    }).pipe(logFailure(`subscriptions: ${definition.id} poll failed`))
+
+  const poll = Effect.gen(function* () {
+    const home = yield* homeDir
+
+    yield* Effect.forEach(
+      harnesses.all,
+      (definition) =>
+        definition.subscription
+          ? Effect.flatMap(harness.available(definition.id), (found) => (found ? read(definition, home) : Effect.void))
+          : Effect.void,
+      { concurrency: "unbounded", discard: true },
+    )
+  })
+
+  return Service.of({ list, read: list, report, poll })
+})
+
+export const testLayer = Layer.effect(Service, make)
+
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const service = yield* make
+    const harnesses = yield* Harnesses.Service
+    const scope = yield* Effect.scope
+    const lock = yield* Semaphore.make(1)
+    let polledAt = Number.NEGATIVE_INFINITY
+    let running: Fiber.Fiber<void> | undefined
+    let first: Fiber.Fiber<void> | undefined
+
+    const refresh = lock.withPermit(
+      Effect.gen(function* () {
+        if (running !== undefined && running.pollUnsafe() === undefined) return running
+        const now = yield* Clock.currentTimeMillis
+
+        if (now - polledAt < Duration.toMillis(MINUTE) || harnesses.all.length === 0) return undefined
+        polledAt = now
+        running = yield* Effect.forkIn(service.poll, scope)
+        first ??= running
+
+        return running
+      }),
+    )
+
+    yield* refresh
+
+    return Service.of({
+      ...service,
+      list: Effect.andThen(refresh, service.list),
+      read: refresh.pipe(
+        Effect.andThen(Effect.suspend(() => (first === undefined ? Effect.void : Fiber.await(first)))),
+        Effect.timeoutOption(CLI_TIMEOUT),
+        Effect.andThen(service.list),
+      ),
+    })
+  }),
+)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Harness.node, Harnesses.node],
+})

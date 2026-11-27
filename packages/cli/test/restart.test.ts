@@ -1,11 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
-import { executionStateOf, exitedAt, pidOf } from "@vibest/core/database/db-rows"
-import { detailOf } from "@vibest/core/replies"
-import { noticeEnvelope } from "@vibest/core/replies"
+import { executionStateOf, exitedAt, pidOf } from "@vibest/core/database/rows"
+import { InboxStore } from "@vibest/core/inbox/store"
 import { Session } from "@vibest/core/session"
 import { SessionLive, type Restarted } from "@vibest/core/session/live"
+import { detailOf } from "@vibest/core/session/replies"
+import { noticeEnvelope } from "@vibest/core/session/replies"
 import { CONTINUE, continueText } from "@vibest/core/session/restart"
+import { SessionStore } from "@vibest/core/session/store"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { VibestCommand } from "@vibest/schema/layout"
+import { PROTOCOL } from "@vibest/schema/version"
 import {
   CLAUDE,
   CURSOR,
@@ -22,10 +26,7 @@ import {
   untilVirtual,
   writeEnd,
   projectOf,
-} from "@vibest/platform-bun/test/lib/fakes"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { VibestCommand } from "@vibest/schema/layout"
-import { PROTOCOL } from "@vibest/schema/version"
+} from "@vibest/testkit/fakes"
 import { Clock, Effect, Fiber, Ref, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -53,11 +54,11 @@ describe("vibest update's plan for vibestd", () => {
 })
 
 const busyPiSubagent = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const sessions = yield* Session.Service
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
-  yield* db.session.startRoot(
+  yield* sessionStore.startRoot(
     key,
     "pi",
     false,
@@ -77,18 +78,18 @@ const busyPiSubagent = Effect.gen(function* () {
     harness: "pi",
   })
 
-  yield* until(db.session.getSession(id), (w) => !!w && (w.process?.placedAt ?? null) !== null)
+  yield* until(sessionStore.getSession(id), (w) => !!w && (w.process?.placedAt ?? null) !== null)
   yield* sessions.check(id)
-  const pid = (yield* db.session.getSession(id))!.process!.pid!
+  const pid = (yield* sessionStore.getSession(id))!.process!.pid!
 
-  return { db, sessions, id, pid }
+  return { sessionStore, inboxStore: yield* InboxStore.Service, sessions, id, pid }
 })
 
 describe("restart in place", () => {
   test(
     "a restart mid-execution: SIGTERM to the harness pid only, its exit and aborted execution end not recorded while it is down, the same terminal runs it again on the same conversation, then one continue and an execution end that sends nothing",
     Effect.gen(function* () {
-      const { db, sessions, id, pid } = yield* busyPiSubagent
+      const { sessionStore, inboxStore, sessions, id, pid } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
       const processes = yield* FakeProcesses
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
@@ -101,27 +102,27 @@ describe("restart in place", () => {
       yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
       yield* sessions.check(id)
       yield* sessions.send(id, "queued meanwhile")
-      const down = (yield* db.session.getSession(id))!
+      const down = (yield* sessionStore.getSession(id))!
       assert.isNull(exitedAt(down))
       assert.strictEqual(executionStateOf(down), "open")
-      assert.deepStrictEqual(yield* entryPending(db, down.projectId), [])
-      assert.isUndefined(yield* db.session.readyAt(id), "the old harness's ready report is gone")
+      assert.deepStrictEqual(yield* entryPending(sessionStore, inboxStore, down.projectId), [])
+      assert.isUndefined(yield* sessionStore.readyAt(id), "the old harness's ready report is gone")
       assert.isUndefined(pidOf(down), "so is its pid")
       const opened = (yield* herdr.callsTo("open")).length
-      yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* sessionStore.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* ran.release()
       const [run] = yield* herdr.callsTo("run")
       assert.deepStrictEqual([run!.argv[0], run!.argv[4]], ["sh", "pi"])
       assert.include(
         run!.env,
-        `VIBEST_PROCESS=${yield* db.session.currentProcessId(id)}`,
+        `VIBEST_PROCESS=${yield* sessionStore.currentProcessId(id)}`,
         "a subagent restarted in its pane names its new process",
       )
       assert.includeMembers([...run!.argv], ["--session-id", (down.process?.harnessSessionId ?? null)!])
       const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (o) => o !== undefined))!
       assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted execution continues` })
       assert.strictEqual((yield* herdr.callsTo("open")).length, opened, "no new terminal")
-      const row = (yield* db.session.getSession(id))!
+      const row = (yield* sessionStore.getSession(id))!
       assert.isFalse(yield* (yield* SessionLive.Service).restarting.has(id))
       assert.notStrictEqual(row.process?.pid, pid)
       assert.strictEqual(executionStateOf(row), "open")
@@ -130,15 +131,15 @@ describe("restart in place", () => {
       yield* writeEnd(id, "pi", { text: "done\nstatus: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.deepStrictEqual(yield* entryPending(db, row.projectId), [])
-      assert.include((yield* db.session.latestReply(id))!.text, "done")
+      assert.deepStrictEqual(yield* entryPending(sessionStore, inboxStore, row.projectId), [])
+      assert.include((yield* sessionStore.latestReply(id))!.text, "done")
     }),
   )
 
   test(
     "a restart after the old process went idle without its execution end: the new process, of which its runtime knows no state yet, keeps the execution it continues past the hook grace",
     Effect.gen(function* () {
-      const { db, sessions, id } = yield* busyPiSubagent
+      const { sessionStore, sessions, id } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
@@ -146,24 +147,24 @@ describe("restart in place", () => {
       const restarted = yield* Effect.forkChild(sessions.restart([id]))
       yield* ran.reached
       const looked = yield* herdr.hold("state")
-      yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* sessionStore.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* ran.release()
       const [outcome] = yield* Fiber.join(restarted)
       assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted execution continues` })
       yield* looked.reached
-      yield* (yield* FakeProcesses).set(pidOf((yield* db.session.getSession(id))!)!, "alive")
+      yield* (yield* FakeProcesses).set(pidOf((yield* sessionStore.getSession(id))!)!, "alive")
       yield* herdr.updateAgent(id, (a) => ({ ...a, status: "unknown" }))
       yield* looked.release()
       yield* TestClock.adjust("11 seconds")
       yield* sessions.check(id)
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "open")
+      assert.strictEqual(executionStateOf((yield* sessionStore.getSession(id))!), "open")
     }),
   )
 
   test(
     "a second restart of an agent already being restarted joins it: one signal, one run, one continue notice, both callers get the result",
     Effect.gen(function* () {
-      const { db, sessions, id, pid } = yield* busyPiSubagent
+      const { sessionStore, sessions, id, pid } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
       const processes = yield* FakeProcesses
       const ran = yield* herdr.hold("run")
@@ -172,7 +173,7 @@ describe("restart in place", () => {
       const second = yield* Effect.forkChild(sessions.restart([id, id]))
       yield* Effect.yieldNow
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false, status: "idle" }))
-      yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* sessionStore.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* ran.release()
       const outcomes = [yield* Fiber.join(first), yield* Fiber.join(second)]
       assert.deepStrictEqual(
@@ -198,10 +199,10 @@ describe("restart in place", () => {
 
   const workingEntry = (harness: "cursor" | "pi") =>
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const herdr = yield* FakeRuntime
       const projectId = yield* projectOf(yield* makeRepository)
-      yield* db.session.startRoot(
+      yield* sessionStore.startRoot(
         projectId,
         harness,
         false,
@@ -213,11 +214,11 @@ describe("restart in place", () => {
       )
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
-      const entry = (yield* db.session.latestRoot(projectId))!
-      yield* db.session.noteConversation(entry.id, "conversation-1")
-      yield* db.session.patchLive(entry.id, { pid: 100 })
+      const entry = (yield* sessionStore.latestRoot(projectId))!
+      yield* sessionStore.noteConversation(entry.id, "conversation-1")
+      yield* sessionStore.patchLive(entry.id, { pid: 100 })
 
-      return { db, herdr, id: entry.id, projectId }
+      return { sessionStore, inboxStore: yield* InboxStore.Service, herdr, id: entry.id, projectId }
     })
 
   test(
@@ -238,23 +239,23 @@ describe("restart in place", () => {
   test(
     "a Pi entry session (inbox subscribe) with an open execution, after its idle subagent: waits for its integration's ready report even when the runtime sees it idle, then the continue notice is in the launch argv of the process that continues the execution",
     Effect.gen(function* () {
-      const { db, sessions, id: sub, pid } = yield* busyPiSubagent
+      const { sessionStore, inboxStore, sessions, id: sub, pid } = yield* busyPiSubagent
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
-      const projectId = (yield* db.session.getSession(sub))!.projectId
-      const entryId = (yield* db.session.latestRoot(projectId))!.id
+      const projectId = (yield* sessionStore.getSession(sub))!.projectId
+      const entryId = (yield* sessionStore.latestRoot(projectId))!.id
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
-      yield* db.session.noteConversation(entryId, "conversation-1")
-      yield* db.session.patchLive(entryId, { pid: 400 })
-      yield* db.session.startObserved(entryId, "work in flight", 1)
-      const interrupted = yield* db.session.openExecution(entryId)
+      yield* sessionStore.noteConversation(entryId, "conversation-1")
+      yield* sessionStore.patchLive(entryId, { pid: 400 })
+      yield* sessionStore.startObserved(entryId, "work in flight", 1)
+      const interrupted = yield* sessionStore.openExecution(entryId)
       assert.isDefined(interrupted)
       yield* herdr.endExecution(sub)
       yield* Ref.set(herdr.onStarted, (session) =>
         Clock.currentTimeMillis.pipe(
           Effect.flatMap((at) =>
-            db.session.patchLive(session, {
+            sessionStore.patchLive(session, {
               ready: at,
               pid: 600,
               integration: { version: VERSION, protocol: PROTOCOL },
@@ -266,12 +267,12 @@ describe("restart in place", () => {
       yield* Effect.forkChild(sessions.restart([entryId, sub]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
       yield* until(herdr.callsTo("run"), (runs) => runs.some((r) => r.env.includes(`VIBEST_SESSION_ID=${entryId}`)))
       yield* until(processes.signaled, (signaled) => [pid, 400].every((p) => signaled.includes(p)))
-      yield* db.session.patchLive(entryId, { pid: 500, ready: null })
-      yield* db.session.noteIntegration(entryId, { version: VERSION, protocol: PROTOCOL })
+      yield* sessionStore.patchLive(entryId, { pid: 500, ready: null })
+      yield* sessionStore.noteIntegration(entryId, { version: VERSION, protocol: PROTOCOL })
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "idle" }))
       yield* TestClock.adjust("5 seconds")
       assert.isUndefined(yield* Ref.get(outcomes), "not done before the integration's ready report")
-      yield* db.session.patchLive(entryId, { ready: 2 })
+      yield* sessionStore.patchLive(entryId, { ready: 2 })
       const done = (yield* untilVirtual(Ref.get(outcomes), (o) => o !== undefined))!
       assert.sameDeepMembers(
         done.map((o) => [o.id, o.ok]),
@@ -280,8 +281,16 @@ describe("restart in place", () => {
           [entryId, true],
         ],
       )
-      assert.deepStrictEqual(yield* entryPending(db, projectId), [], "the continuation waits behind nothing")
-      assert.strictEqual(yield* db.session.openExecution(entryId), interrupted, "the interrupted execution stays open")
+      assert.deepStrictEqual(
+        yield* entryPending(sessionStore, inboxStore, projectId),
+        [],
+        "the continuation waits behind nothing",
+      )
+      assert.strictEqual(
+        yield* sessionStore.openExecution(entryId),
+        interrupted,
+        "the interrupted execution stays open",
+      )
       const entryRun = (yield* herdr.callsTo("run")).find((c) => c.env.includes(`VIBEST_SESSION_ID=${entryId}`))
       assert.ok(entryRun, "the entry session is restarted by typing env")
       assert.strictEqual(
@@ -289,7 +298,7 @@ describe("restart in place", () => {
         noticeEnvelope(continueText(VERSION)),
         "the continuation is in the argv of the process that continues the execution",
       )
-      assert.ok(entryRun.env.includes(`VIBEST_PROCESS=${yield* db.session.currentProcessId(entryId)}`))
+      assert.ok(entryRun.env.includes(`VIBEST_PROCESS=${yield* sessionStore.currentProcessId(entryId)}`))
       assert.deepStrictEqual([entryRun.argv[0], entryRun.argv[4]], ["sh", "pi"])
 
       const identity = new Set([
@@ -298,6 +307,7 @@ describe("restart in place", () => {
         "VIBEST_EXECUTION",
         "VIBEST_PROJECT_ID",
         "VIBEST_PROJECT_DIR",
+        "VIBEST_SCRATCHPAD_DIR",
         "VIBEST_AGENT",
         "VIBEST_HARNESS",
         "VIBEST_RUNTIME",
@@ -312,12 +322,12 @@ describe("restart in place", () => {
   test(
     "an entry session the runtime calls idle still continues when the update command is running in its process tree",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const sessions = yield* Session.Service
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
       const projectId = yield* projectOf(yield* makeRepository)
-      yield* db.session.startRoot(
+      yield* sessionStore.startRoot(
         projectId,
         "pi",
         false,
@@ -328,30 +338,30 @@ describe("restart in place", () => {
         { agent: "coordinator" },
       )
       yield* herdr.seedAgent("test/coord")
-      const id = (yield* db.session.latestRoot(projectId))!.id
-      yield* db.session.noteConversation(id, "conversation-1")
-      yield* db.session.patchLive(id, { pid: 400 })
-      yield* db.session.startObserved(id, "work in flight", 1)
+      const id = (yield* sessionStore.latestRoot(projectId))!.id
+      yield* sessionStore.noteConversation(id, "conversation-1")
+      yield* sessionStore.patchLive(id, { pid: 400 })
+      yield* sessionStore.startObserved(id, "work in flight", 1)
       yield* processes.setTree(400, [400, 900])
       const held = yield* herdr.hold("run")
       yield* Effect.forkChild(sessions.restartLater([id], 900))
       yield* held.reached
-      yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
-      yield* db.session.patchLive(id, { ready: 2, pid: 500 })
+      yield* sessionStore.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* sessionStore.patchLive(id, { ready: 2, pid: 500 })
       yield* held.release()
       yield* untilVirtual(herdr.callsTo("run").pipe(Effect.map((calls) => calls.map((c) => c.argv.at(-1)))), (last) =>
         last.includes(noticeEnvelope(continueText(VERSION))),
       )
-      assert.deepStrictEqual(yield* entryPending(db, projectId), [])
+      assert.deepStrictEqual(yield* entryPending(sessionStore, yield* InboxStore.Service, projectId), [])
     }).pipe(Effect.provideService(VibestCommand, ["/own/bin/vibest"])),
   )
 
   test(
     "a ready report records the integration it names, not whatever an older report left noted",
     Effect.gen(function* () {
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const projectId = yield* projectOf(yield* makeRepository)
-      yield* db.session.startRoot(
+      yield* sessionStore.startRoot(
         projectId,
         "pi",
         false,
@@ -361,10 +371,10 @@ describe("restart in place", () => {
         },
         { agent: "coordinator" },
       )
-      const id = (yield* db.session.latestRoot(projectId))!.id
-      yield* db.session.noteConversation(id, "conversation-1")
-      yield* db.session.noteIntegration(id, { version: "0.0.0-old", protocol: PROTOCOL })
-      yield* db.session.patchLive(id, { ready: 1, pid: 500, integration: { version: VERSION, protocol: PROTOCOL } })
+      const id = (yield* sessionStore.latestRoot(projectId))!.id
+      yield* sessionStore.noteConversation(id, "conversation-1")
+      yield* sessionStore.noteIntegration(id, { version: "0.0.0-old", protocol: PROTOCOL })
+      yield* sessionStore.patchLive(id, { ready: 1, pid: 500, integration: { version: VERSION, protocol: PROTOCOL } })
       const ready = (yield* eventsOf(id, "process.ready")).at(-1)
       assert.deepStrictEqual(ready?.data.integration, { version: VERSION, protocol: PROTOCOL })
       assert.strictEqual(ready?.data.pid, 500)
@@ -374,9 +384,9 @@ describe("restart in place", () => {
   test(
     "the old harness's report after the new process.start is not its answer, even for a fresh Session service",
     Effect.gen(function* () {
-      const { db, sessions, id, pid } = yield* busyPiSubagent
+      const { sessionStore, sessions, id, pid } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
-      yield* db.session.noteConversation(id, "conv-1")
+      yield* sessionStore.noteConversation(id, "conv-1")
       const held = yield* herdr.hold("run", id)
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
       yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((rows) => Ref.set(outcomes, rows))))
@@ -384,34 +394,34 @@ describe("restart in place", () => {
       const [restarted] = (yield* eventsOf(id, "process.started")).slice(-1)
       yield* writeEnd(id, "pi", { text: "status: completed\nsummary: old harness" })
       assert.isAbove(restarted!.id, 0)
-      assert.lengthOf(yield* eventsOf(id, "execution.succeeded"), 0)
-      yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      assert.lengthOf(yield* eventsOf(id, "session.execution.succeeded"), 0)
+      yield* sessionStore.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* held.release()
       const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (rows) => rows !== undefined))!
       assert.strictEqual(outcome?.ok, true, outcome?.message)
-      assert.notStrictEqual((yield* db.session.getSession(id))!.process?.pid, pid)
+      assert.notStrictEqual((yield* sessionStore.getSession(id))!.process?.pid, pid)
       yield* sessions.check(id)
       const freshSessions = yield* restartSessions
       yield* freshSessions.check(id)
-      assert.strictEqual((yield* eventsOf(id, "execution.succeeded")).length, 0)
-      assert.isUndefined(yield* db.session.latestReply(id))
+      assert.strictEqual((yield* eventsOf(id, "session.execution.succeeded")).length, 0)
+      assert.isUndefined(yield* sessionStore.latestReply(id))
     }),
   )
 
   test(
     "an idle in-place restart after Turn 1 omits VIBEST_EXECUTION from run env",
     Effect.gen(function* () {
-      const { db, sessions, id } = yield* busyPiSubagent
+      const { sessionStore, sessions, id } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
-      yield* db.session.noteConversation(id, "conv-idle-restart")
+      yield* sessionStore.noteConversation(id, "conv-idle-restart")
       yield* writeEnd(id, "pi", { text: "turn 1 done" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.isUndefined(yield* db.session.openExecution(id))
+      assert.isUndefined(yield* sessionStore.openExecution(id))
       const ran = yield* herdr.hold("run")
       const restarting = yield* Effect.forkChild(sessions.restart([id]))
       yield* ran.reached
-      yield* db.session.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* sessionStore.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* ran.release()
       const [outcome] = yield* Fiber.join(restarting)
       assert.deepInclude(outcome, { id, ok: true })

@@ -1,0 +1,24 @@
+{
+  "name": "@vibest/codemode",
+  "version": "0.0.2-dev",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p test/tsconfig.json",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/codemode"
+  },
+  "dependencies": {
+    "@vibest/schema": "workspace:*",
+    "@vibest/util": "workspace:*",
+    "effect": "catalog:",
+    "psychoscript": "0.3.0"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/vitest": "catalog:"
+  }
+}

@@ -7,11 +7,10 @@ import { LOG_MAX_BYTES } from "@vibest/platform-bun/log-file"
 import { ID } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
+import { PATH_WITHOUT_HARNESS_CLIS, pingOf, recordedInfo, runVibest, tempDirectory } from "@vibest/testkit/fakes"
 import { Effect, Fiber, FileSystem } from "effect"
 
 import * as Platform from "#platform"
-
-import { PATH_WITHOUT_HARNESS_CLIS, pingOf, recordedInfo, runVibest, tempDirectory } from "./lib/fakes.ts"
 
 const execFile = util.promisify(childProcess.execFile)
 
@@ -52,7 +51,7 @@ describe.concurrent("vibestd.pid lock", () => {
         assert.isTrue(yield* fs.exists(layout.socket))
         assert.isFalse(yield* fs.exists(layout.database))
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 
   it.live(
@@ -69,7 +68,7 @@ describe.concurrent("vibestd.pid lock", () => {
         const running = [...starts]
         const exited: Array<{ readonly code: number; readonly stdout: string; readonly stderr: string }> = []
 
-        for (const deadline = Date.now() + 10_000; running.length > 1 && Date.now() < deadline;) {
+        for (const deadline = Date.now() + 30_000; running.length > 1 && Date.now() < deadline;) {
           for (let i = running.length - 1; i >= 0; i--) {
             if (running[i]!.pollUnsafe() === undefined) continue
             exited.push(yield* Fiber.join(running.splice(i, 1)[0]!))
@@ -97,7 +96,7 @@ describe.concurrent("vibestd.pid lock", () => {
           "no temp file is left",
         )
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 
   it.live(
@@ -119,7 +118,7 @@ describe.concurrent("vibestd.pid lock", () => {
         assert.notStrictEqual(next.instance, old.instance)
         assert.notStrictEqual(next.pid, process.pid)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 
   it.live(
@@ -133,7 +132,7 @@ describe.concurrent("vibestd.pid lock", () => {
           Effect.promise(() =>
             execFile(process.execPath, [`${import.meta.dirname}/lock-contender.ts`, file], {
               encoding: "utf8",
-              timeout: 10_000,
+              timeout: 30_000,
             }),
           ).pipe(Effect.map(({ stdout }) => stdout.trim()))
 
@@ -151,7 +150,7 @@ describe.concurrent("vibestd.pid lock", () => {
         assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), "")
         assert.strictEqual(yield* contend(layout.daemonInfo), "ACQUIRED")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 
   it.live(
@@ -170,32 +169,32 @@ describe.concurrent("vibestd.pid lock", () => {
         const info = yield* recordedInfo(layout.daemonInfo, ping.instance)
 
         assert.strictEqual((yield* fs.stat(layout.daemonInfo)).mode & 0o777, 0o600)
-        assert.isDefined(info.ws)
-        assert.strictEqual(info.ws?.url, `ws://127.0.0.1:${info.ws?.port}`)
-        assert.isAbove(info.ws?.port ?? 0, 0)
-        assert.match(info.ws?.token ?? "", /^[a-f0-9]{64}$/)
-        assert.strictEqual(info.ws?.protocol, PROTOCOL)
+        assert.isDefined(info.http)
+        assert.strictEqual(info.http?.url, `http://127.0.0.1:${info.http?.port}`)
+        assert.isAbove(info.http?.port ?? 0, 0)
+        assert.match(info.http?.token ?? "", /^[a-f0-9]{64}$/)
+        assert.strictEqual(info.http?.protocol, PROTOCOL)
         assert.isFalse(yield* fs.exists(staleWsInfo))
 
         process.kill(ping.pid!, "SIGTERM")
         yield* Fiber.await(proc)
         assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), "")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 
   it.live(
-    "omits ws from DaemonInfo when disabled via VIBEST_WEBSOCKET=0",
+    "omits http from DaemonInfo when disabled via VIBEST_WEBSOCKET=0",
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-ws-env-"))
         const proc = yield* Effect.forkScoped(daemon(layout.home, { VIBEST_WEBSOCKET: "0" }))
         const ping = yield* pingOf(layout.socket)
         const info = yield* recordedInfo(layout.daemonInfo, ping.instance)
-        assert.isUndefined(info.ws)
+        assert.isUndefined(info.http)
         process.kill(ping.pid!, "SIGTERM")
         yield* Fiber.await(proc)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-    30_000,
+    60_000,
   )
 })

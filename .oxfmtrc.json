@@ -12,10 +12,11 @@
     "**/dist/**",
     "tools/oxlint/anti-slop/**",
     "**/node_modules/**",
-    "packages/effect-herdr-sdk/src/generated/**",
-    "packages/effect-herdr-sdk/schema/**",
-    "packages/effect-herdr-core-sdk/src/generated/**",
-    "packages/effect-herdr-core-sdk/schema/**",
-    "packages/protocol/contract/**"
+    "packages/herdr-sdk/src/generated/**",
+    "packages/herdr-sdk/schema/**",
+    "packages/herdr-core-sdk/src/generated/**",
+    "packages/herdr-core-sdk/schema/**",
+    "packages/protocol/openapi.json",
+    "packages/protocol/fixtures/**"
   ]
 }

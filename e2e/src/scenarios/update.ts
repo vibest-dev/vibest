@@ -80,8 +80,28 @@ const olderVersion = (bytes: Buffer, version: string) => {
 const olderVibest = async (w: World, share: string, version: string, protocol: number) => {
   const dir = path.join(share, "versions", version)
   const bin = path.join(dir, "bin", "vibest")
+  const olderHarnesses = path.join(dir, "harnesses")
   await fs.mkdir(path.dirname(bin), { recursive: true })
-  const bytes = Buffer.from(await fs.readFile(compiled))
+  await fs.cp(harnesses, olderHarnesses, { recursive: true })
+  const extension = path.join(olderHarnesses, "pi", "extension.mjs")
+  const source = Buffer.from(await fs.readFile(extension))
+  olderProtocol(source, protocol)
+  const older = source.toString().replace(/var VERSION = "[^"]+";/, `var VERSION = "${version}";`)
+  expect(older !== source.toString(), `${extension}: its version was not found`)
+  await fs.writeFile(extension, older)
+
+  const built = await w.run(path.join(checkout, "packages", "cli"), [
+    process.execPath,
+    "script/build.ts",
+    bin,
+    `bun-${process.platform}-${process.arch}`,
+    "--no-bytecode",
+    "--prebuilt-harnesses",
+    olderHarnesses,
+  ])
+
+  expect(built.code === 0, `olderVibest build exited ${built.code}: ${out(built)}`)
+  const bytes = Buffer.from(await fs.readFile(bin))
   olderProtocol(bytes, protocol)
   olderVersion(bytes, version)
   await fs.writeFile(bin, bytes, { mode: 0o755 })
@@ -90,14 +110,6 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
     const signed = await w.run(dir, ["codesign", "--force", "-s", "-", bin])
     expect(signed.code === 0, `codesign: ${out(signed)}`)
   }
-
-  await fs.cp(harnesses, path.join(dir, "harnesses"), { recursive: true })
-  const extension = path.join(dir, "harnesses", "pi", "extension.mjs")
-  const source = Buffer.from(await fs.readFile(extension))
-  olderProtocol(source, protocol)
-  const older = source.toString().replace(/var VERSION = "[^"]+";/, `var VERSION = "${version}";`)
-  expect(older !== source.toString(), `${extension}: its version was not found`)
-  await fs.writeFile(extension, older)
 
   return bin
 }

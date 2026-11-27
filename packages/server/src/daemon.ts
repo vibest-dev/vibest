@@ -1,21 +1,23 @@
-import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
+import { accepts, DAEMON_START_TIMEOUT, type HttpConnector, probe, stopByHand } from "@vibest/client/client"
 import type { SocketConnector } from "@vibest/client/socket-connector"
 import { App } from "@vibest/core/app"
 import type { ReplayDiffers } from "@vibest/core/bus"
-import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/db-schema"
-import { LayerNode } from "@vibest/core/effect/layer-node"
+import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/database/schema.sql"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Identity } from "@vibest/core/identity"
-import type { UnknownFact } from "@vibest/schema/event"
+import type { InvalidDurableEvent } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Option, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
 import { DaemonHandlers } from "./handlers/daemon.ts"
 import * as ShutdownDeadline from "./shutdown-deadline.ts"
 import type { ShutdownHost } from "./shutdown-deadline.ts"
-import * as Ws from "./ws.ts"
+import * as Ui from "./ui.ts"
+
+export * as Daemon from "./daemon.ts"
 
 export const DaemonInfo = Schema.Struct({
   pid: Schema.Number,
@@ -24,7 +26,7 @@ export const DaemonInfo = Schema.Struct({
   startedAt: Schema.Number,
   instance: Schema.optional(Schema.String),
   command: Schema.optional(Schema.Array(Schema.String)),
-  ws: Schema.optional(Ws.WsEndpoint),
+  http: Schema.optional(Ui.UiEndpoint),
 })
 
 export type DaemonInfo = typeof DaemonInfo.Type
@@ -48,7 +50,7 @@ export interface Host extends ShutdownHost {
   ) => Effect.Effect<((text: string) => Effect.Effect<void, LockFailed>) | undefined, LockFailed, Scope.Scope>
   readonly checkDatabase: (
     filename: string,
-  ) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch | UnknownFact | ReplayDiffers>
+  ) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch | InvalidDurableEvent | ReplayDiffers>
   readonly trimLog: (file: string) => Effect.Effect<void>
 }
 
@@ -93,13 +95,15 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
             message: `cannot take vibestd's start lock ${layout.daemonInfo}: ${e.message}. Nothing was changed; check that file.`,
           }),
       ),
-      Effect.flatMap((writer): Effect.Effect<LockWait | undefined, never, SocketConnector.Service> => {
-        if (writer) return Effect.succeed({ held: true, write: writer })
+      Effect.flatMap(
+        (writer): Effect.Effect<LockWait | undefined, never, SocketConnector.Service | HttpConnector.Service> => {
+          if (writer) return Effect.succeed({ held: true, write: writer })
 
-        if (options.handoff) return Effect.succeed(undefined)
+          if (options.handoff) return Effect.succeed(undefined)
 
-        return probe(layout.socket).pipe(Effect.map((up) => (up ? { held: false } : undefined)))
-      }),
+          return probe(layout.socket).pipe(Effect.map((up) => (up ? { held: false } : undefined)))
+        },
+      ),
       Effect.repeat({
         until: (done) => done !== undefined,
         schedule: Schedule.jittered(Schedule.spaced("100 millis")),
@@ -130,7 +134,7 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
       })
     yield* host.trimLog(layout.log)
     yield* fs.remove(layout.socket, { force: true })
-    yield* fs.remove(layout.httpSocket, { force: true })
+    yield* fs.remove(`${layout.home}/vibest-http.sock`, { force: true }).pipe(Effect.ignore)
     yield* fs.remove(`${layout.home}/vibest-ws.json`, { force: true }).pipe(Effect.ignore)
 
     const facts = yield* Identity.HostFacts.pipe(
@@ -162,15 +166,14 @@ export const run = (host: Host, replacements: Replacements, options: { readonly 
       }),
     )
 
-    const ws = yield* Effect.provide(Ws.Service, context)
+    const ui = yield* Effect.provide(Ui.Service, context)
     yield* fs.chmod(layout.socket, 0o600)
-    yield* fs.chmod(layout.httpSocket, 0o600)
 
     const info: DaemonInfo = {
       ...identity,
       version: app.version,
       socket: layout.socket,
-      ...(Option.isSome(ws) && { ws: ws.value }),
+      ...(Option.isSome(ui) && { http: ui.value }),
     }
 
     yield* acquired.write(Schema.encodeSync(DaemonInfoJson)(info)).pipe(Effect.orDie)

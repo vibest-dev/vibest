@@ -1,21 +1,22 @@
 import { assert } from "@effect/vitest"
-import { Concurrency } from "@vibest/core/concurrency"
-import { Db } from "@vibest/core/database/db"
-import { Drain } from "@vibest/core/drain"
+import { Integration } from "@vibest/core/harness/integration"
 import { Inbox } from "@vibest/core/inbox"
-import { Integration } from "@vibest/core/integration"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
+import { Drain } from "@vibest/core/runtime/drain"
 import { Session } from "@vibest/core/session"
 import { Starts } from "@vibest/core/session/starts"
+import { SessionStore } from "@vibest/core/session/store"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { until } from "@vibest/testkit/observe"
+import { makeRepository } from "@vibest/testkit/session"
+import { idleSession, spawnInput, test } from "@vibest/testkit/sessions-helpers"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { projectOf } from "./lib/directory.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until } from "./lib/observe.ts"
-import { makeRepository } from "./lib/session.ts"
-import { idleSession, spawnInput, test } from "./lib/sessions-helpers.ts"
 
 const here = { runtime: RUNTIME, target: { id: "test/coord" } }
 
@@ -57,12 +58,12 @@ test(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const runtime = yield* FakeRuntime
-    const { db, sessions, id } = yield* idleSession(yield* makeRepository)
+    const { sessionStore, sessions, id } = yield* idleSession(yield* makeRepository)
     const held = yield* runtime.hold("send", id)
     yield* sessions.send(id, "not handed")
     yield* held.reached
-    const execution = yield* db.session.openExecution(id)
-    yield* db.session.closeExecution(id, execution!, "interrupted")
+    const execution = yield* sessionStore.openExecution(id)
+    yield* sessionStore.closeExecution(id, execution!, "interrupted")
     yield* held.release("failed")
     yield* until(inboxStatus(id, "not handed"), (rows) => rows[0]?.status !== "delivering")
     assert.notStrictEqual((yield* inboxStatus(id, "not handed"))[0]?.status, "delivered")
@@ -98,11 +99,12 @@ test(
   "a refused message tells the session that sent it",
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
+    const inboxStore = yield* InboxStore.Service
     const inbox = yield* Inbox.Service
     const { id, entryId } = yield* idleSession(yield* makeRepository)
-    const item = yield* db.inbox.insertSend(entryId, "from child", { type: "agent", session: id })
-    yield* inbox.undelivered((yield* db.session.getSession(entryId))!, [item!], "definite refusal")
+    const item = yield* inboxStore.insertSend(entryId, "from child", { type: "agent", session: id })
+    yield* inbox.undelivered((yield* sessionStore.getSession(entryId))!, [item!], "definite refusal")
     assert.deepStrictEqual(
       yield* sql<{ sessionId: string }>`SELECT recipient_session_id AS sessionId FROM inbox
         WHERE sender_type = 'vibest' AND instr(content, 'definite refusal') > 0`,
@@ -149,11 +151,11 @@ test(
 test(
   "the integration reporting that this execution's input started is what delivers a taken batch",
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const inboxStore = yield* InboxStore.Service
     const inbox = yield* Inbox.Service
     const integration = yield* Integration.Service
     const { entryId } = yield* idleSession(yield* makeRepository)
-    yield* db.inbox.insertSend(entryId, "hello", { type: "user" })
+    yield* inboxStore.insertSend(entryId, "hello", { type: "user" })
     const taken = yield* inbox.take(entryId, undefined)
     assert.deepStrictEqual(yield* inboxStatus(entryId, "hello"), [{ status: "delivering" }])
     yield* integration.prompt(
@@ -168,13 +170,13 @@ test(
 test(
   "an unrelated prompt does not deliver a taken batch, and the batch report does",
   Effect.gen(function* () {
-    const db = yield* Db.Service
+    const inboxStore = yield* InboxStore.Service
     const inbox = yield* Inbox.Service
     const sessions = yield* Session.Service
     const integration = yield* Integration.Service
     const { entryId } = yield* idleSession(yield* makeRepository)
-    yield* db.inbox.insertSend(entryId, "one", { type: "user" })
-    yield* db.inbox.insertSend(entryId, "two", { type: "user" })
+    yield* inboxStore.insertSend(entryId, "one", { type: "user" })
+    yield* inboxStore.insertSend(entryId, "two", { type: "user" })
     const taken = yield* inbox.take(entryId, undefined)
     yield* sessions.userPrompt(entryId, "an unrelated typed question")
     assert.deepStrictEqual(yield* inboxStatus(entryId, "one"), [{ status: "delivering" }])
@@ -193,13 +195,13 @@ test(
   "a terminal that is already working is not given the launch input",
   Effect.gen(function* () {
     const runtime = yield* FakeRuntime
-    const db = yield* Db.Service
+    const sessionStore = yield* SessionStore.Service
     const sessions = yield* Session.Service
     const repo = yield* makeRepository
     yield* runtime.seedAgent("test/coord")
     yield* runtime.updateAgent("test/coord", (agent) => ({ ...agent, status: "working" }))
 
-    const started = yield* db.session.startRoot(yield* projectOf(repo), "pi", false, here, {
+    const started = yield* sessionStore.startRoot(yield* projectOf(repo), "pi", false, here, {
       agent: "general",
       firstInput: "bootstrap",
     })
@@ -252,13 +254,13 @@ test(
   "a successful write after the execution was interrupted is not a handoff",
   Effect.gen(function* () {
     const runtime = yield* FakeRuntime
-    const { db, id, sessions } = yield* idleSession(yield* makeRepository)
+    const { sessionStore, id, sessions } = yield* idleSession(yield* makeRepository)
     yield* runtime.updateAgent(id, (agent) => ({ ...agent, registerPrompt: false }))
     const held = yield* runtime.hold("send", id)
     yield* sessions.send(id, "bound batch")
     yield* held.reached
-    const execution = yield* db.session.openExecution(id)
-    yield* db.session.closeExecution(id, execution!, "interrupted")
+    const execution = yield* sessionStore.openExecution(id)
+    yield* sessionStore.closeExecution(id, execution!, "interrupted")
     yield* held.release()
 
     for (let i = 0; i < 2; i++) yield* TestClock.adjust("9 seconds")
@@ -276,7 +278,7 @@ test(
     yield* sessions.archive(id)
 
     const dropped = yield* sql<{ type: string }>`SELECT type FROM event
-      WHERE aggregate = ${id} AND type = 'inbox.dropped'`
+      WHERE aggregate_id = ${id} AND type = 'session.inbox.dropped.1'`
 
     assert.deepStrictEqual(dropped, [])
 

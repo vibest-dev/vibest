@@ -5,14 +5,14 @@ import { canonicalTarget } from "@vibest/schema/terminal"
 import { Clock, Duration, Effect, FileSystem, Option, Path } from "effect"
 
 import { awaitOn, Bus } from "../bus.ts"
-import { type SessionRow, runtimeOf, exitedAt } from "../database/db-rows.ts"
-import { Db } from "../database/db.ts"
-import { Git } from "../git.ts"
-import { Processes, validPid } from "../processes.ts"
+import { type SessionRow, runtimeOf, exitedAt } from "../database/rows.ts"
 import { listProjectRepositories, workspaceGit } from "../project/create.ts"
-import { agentState, formatTerminal, type Runtime, type Terminal } from "../runtimes.ts"
-import { removeSystemPrompt } from "../system-prompt.ts"
+import { Processes, validPid } from "../runtime/processes.ts"
+import { agentState, formatTerminal, type Runtime, type Terminal } from "../runtime/registry.ts"
 import { gitState, mainCheckout, removeWorktree } from "../worktree.ts"
+import { Git } from "../worktree/git.ts"
+import { SessionStore } from "./store.ts"
+import { removeSystemPrompt } from "./system-prompt.ts"
 
 type ProcessState = ArchiveOutcome["processes"]
 
@@ -67,7 +67,7 @@ export const stopAgent = (
               gone.pipe(Effect.map((yes) => (yes ? Option.some(true) : Option.none()))),
               (event) =>
                 Effect.succeed(
-                  event.type === "terminal.exited" && canonicalTarget(event.terminal) === canonicalTarget(terminal)
+                  event.type === "terminal.exited" && canonicalTarget(event.data.terminal) === canonicalTarget(terminal)
                     ? Option.some(true)
                     : Option.none(),
                 ),
@@ -93,7 +93,7 @@ export interface ReleaseInput {
 }
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const layout = yield* Layout
   const processes = yield* Processes.Service
   const fs = yield* FileSystem.FileSystem
@@ -105,7 +105,7 @@ export const make = Effect.gen(function* () {
       const { h, session } = input
       const id = session.id
       const reasons = [...input.reasons]
-      const directory = yield* db.session.sessionDirectory(id)
+      const directory = yield* sessionStore.sessionDirectory(id)
 
       if (!directory) {
         reasons.push(`${id} records no directory; nothing was deleted`)
@@ -215,7 +215,7 @@ export const make = Effect.gen(function* () {
         reasons.push(`process ${survivors.join(", ")} of ${id} still runs after its terminal closed`)
 
       if (pane !== "kept" && exitedAt(session) === null) {
-        yield* db.session.endProcess(id, "archived")
+        yield* sessionStore.endProcess(id, "archived")
       }
 
       let shared = false
@@ -242,7 +242,7 @@ export const make = Effect.gen(function* () {
         const sharing = (live: ReadonlyArray<string>) =>
           live.length > 0 ? `worktree kept: session ${live.join(", ")} still works in it` : undefined
 
-        const liveSharers = db.session.liveSharers(id)
+        const liveSharers = sessionStore.liveSharers(id)
         const early = sharing(yield* liveSharers)
 
         if (early) {

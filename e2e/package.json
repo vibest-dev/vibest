@@ -8,6 +8,7 @@
     "typecheck": "tsrs --noEmit --fast -p tsconfig.json"
   },
   "dependencies": {
+    "@vibest/cli": "workspace:*",
     "effect": "catalog:"
   }
 }
