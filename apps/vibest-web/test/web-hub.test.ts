@@ -370,6 +370,111 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
     expect(rawRes.status).toBe(404)
   })
 
+  it("B-SYM-1 regression: blocks in-project symlink escape from artifacts/ to sessions/", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-bsym1-"))
+    tempDirs.push(tmp)
+    const vibestHome = path.join(tmp, "vibest-home")
+    const projDir = path.join(vibestHome, "projects", "legit")
+    fs.mkdirSync(path.join(projDir, "artifacts"), { recursive: true })
+    fs.mkdirSync(path.join(projDir, "sessions"), { recursive: true })
+    fs.writeFileSync(path.join(projDir, "sessions", "raw.log"), "INTERNAL_SESSION_LOG", "utf8")
+    fs.symlinkSync(path.join("..", "sessions", "raw.log"), path.join(projDir, "artifacts", "leak.log"))
+
+    expect(resolveSafeProjectFilePath(vibestHome, "legit", "artifacts/leak.log")).toBeNull()
+    expect(readProjectTextFile(vibestHome, "legit", "artifacts/leak.log")).toBeNull()
+
+    const server = await createWebServer({ port: 0, vibestHome, demoMode: true, safeActions: true })
+    servers.push(server)
+
+    const getRes = await fetch(`${server.url}/api/projects/legit/file?path=artifacts/leak.log`)
+    expect(getRes.status).toBe(404)
+  })
+
+  it("B-LIVE-1 regression: retains user message in getTimeline after live sendToSession", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-blive1-"))
+    tempDirs.push(tmp)
+    const sockPath = path.join(tmp, "vibest.sock")
+
+    const mockDaemon = http.createServer((req, res) => {
+      const reqUrl = req.url ?? "/"
+
+      if (req.method === "GET" && reqUrl.startsWith("/api/daemon/ping")) {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ version: "0.0.2-dev", protocol: 1 }))
+
+        return
+      }
+
+      if (req.method === "GET" && reqUrl.startsWith("/api/machine/load")) {
+        res.writeHead(404, { "content-type": "application/json" })
+        res.end(JSON.stringify({ error: "unavailable" }))
+
+        return
+      }
+
+      if (req.method === "GET" && reqUrl.startsWith("/api/watch")) {
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" })
+        res.write('data: {"_tag":"Snapshot","projects":[],"sessions":[],"machines":[]}\n\n')
+
+        return
+      }
+
+      if (req.method === "POST" && reqUrl.startsWith("/api/session/s1/send")) {
+        req.resume()
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ id: "s1", name: "coordinator" }))
+
+        return
+      }
+
+      if (req.method === "GET" && reqUrl.startsWith("/api/session/s1")) {
+        res.writeHead(404, { "content-type": "application/json" })
+        res.end(JSON.stringify({ error: "not found" }))
+
+        return
+      }
+
+      res.writeHead(404)
+      res.end()
+    })
+
+    await new Promise<void>((resolve) => {
+      mockDaemon.listen(sockPath, resolve)
+    })
+
+    const bridge = createVibestBridge({ vibestHome: tmp, repositoryRoot: tmp, demoMode: false, safeActions: false })
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("timed out waiting for live daemon")), 3000)
+
+        const unsub = bridge.subscribe((ev) => {
+          if (ev.type === "daemon" && ev.data.connected) {
+            clearTimeout(timer)
+            unsub()
+            resolve()
+          }
+        })
+
+        if (bridge.snapshot().daemon.connected) {
+          clearTimeout(timer)
+          unsub()
+          resolve()
+        }
+      })
+
+      const sent = await bridge.sendToSession("s1", "hello live timeline", [])
+      expect(sent.ok).toBe(true)
+
+      const timeline = await bridge.getTimeline("p1", "s1")
+      expect(timeline.map((e) => e.content)).toContain("hello live timeline")
+    } finally {
+      bridge.stop()
+      mockDaemon.closeAllConnections()
+      mockDaemon.close()
+    }
+  })
+
   it("B2: rejects non-loopback Host, cross-origin Origin, and non-JSON Content-Type on mutations", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-b2-"))
     tempDirs.push(home)

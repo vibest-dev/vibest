@@ -490,11 +490,7 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
             attachments: [],
           })
         }
-      } catch {
-        return entries
-      }
-
-      return entries
+      } catch {}
     }
 
     for (const item of stored) {

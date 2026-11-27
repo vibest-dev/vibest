@@ -48,11 +48,7 @@ function realPathOrAncestor(targetPath: string): string | null {
   }
 }
 
-function verifyComponentChain(
-  realProjectDir: string,
-  segments: ReadonlyArray<string>,
-  allowSymlinks: boolean,
-): string | null {
+function verifyComponentChain(realProjectDir: string, segments: ReadonlyArray<string>): string | null {
   let current = realProjectDir
 
   for (const segment of segments) {
@@ -68,21 +64,7 @@ function verifyComponentChain(
 
     if (stat === null) continue
 
-    if (stat.isSymbolicLink()) {
-      if (!allowSymlinks) return null
-
-      try {
-        const resolved = fs.realpathSync(current)
-
-        if (resolved !== realProjectDir && !resolved.startsWith(`${realProjectDir}${path.sep}`)) {
-          return null
-        }
-
-        current = resolved
-      } catch {
-        return null
-      }
-    }
+    if (stat.isSymbolicLink()) return null
   }
 
   if (!current.startsWith(`${realProjectDir}${path.sep}`)) return null
@@ -240,12 +222,7 @@ export function scanProjectFiles(vibestHome: string, projectId: string): Readonl
   return results
 }
 
-function resolveContainedPath(
-  vibestHome: string,
-  projectId: string,
-  relativePath: string,
-  allowSymlinks: boolean,
-): string | null {
+export function resolveSafeProjectFilePath(vibestHome: string, projectId: string, relativePath: string): string | null {
   if (relativePath.length === 0 || relativePath.includes("\0")) return null
   const projectDir = resolveSafeProjectDir(vibestHome, projectId)
 
@@ -271,15 +248,11 @@ function resolveContainedPath(
 
   if (segments.length === 0) return null
 
-  return verifyComponentChain(realProjectDir, segments, allowSymlinks)
-}
-
-export function resolveSafeProjectFilePath(vibestHome: string, projectId: string, relativePath: string): string | null {
-  return resolveContainedPath(vibestHome, projectId, relativePath, false)
+  return verifyComponentChain(realProjectDir, segments)
 }
 
 export function readProjectTextFile(vibestHome: string, projectId: string, relativePath: string): string | null {
-  const target = resolveContainedPath(vibestHome, projectId, relativePath, true)
+  const target = resolveSafeProjectFilePath(vibestHome, projectId, relativePath)
 
   if (target === null) return null
 
@@ -300,14 +273,14 @@ export function writeProjectTextFile(
   relativePath: string,
   content: string,
 ): boolean {
-  const target = resolveContainedPath(vibestHome, projectId, relativePath, false)
+  const target = resolveSafeProjectFilePath(vibestHome, projectId, relativePath)
 
   if (target === null) return false
 
   try {
     const existing = lstatOrNull(target)
 
-    if (existing !== null && (existing.isSymbolicLink() || existing.isDirectory())) {
+    if (existing !== null && existing.isDirectory()) {
       return false
     }
 

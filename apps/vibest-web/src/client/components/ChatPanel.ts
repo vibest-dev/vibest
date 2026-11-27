@@ -325,7 +325,11 @@ export const ChatPanel = ChatPanelDef.make({
                                                   .children(repSession?.name ?? `agent-${block.agentId.slice(0, 8)}`),
                                                 h.span
                                                   .class("font-mono text-[10.5px] text-muted-foreground tabular-nums")
-                                                  .children(block.agentId.slice(0, 8)),
+                                                  .children(
+                                                    block.machine !== null
+                                                      ? `${block.agentId.slice(0, 8)} · ${block.machine}`
+                                                      : block.agentId.slice(0, 8),
+                                                  ),
                                                 repSession?.git?.branch
                                                   ? Badge(
                                                       h,

@@ -27,32 +27,6 @@ const ExcalidrawDocSchema = Schema.Struct({
 
 const decodeExcalidrawDoc = Schema.decodeUnknownOption(Schema.fromJsonString(ExcalidrawDocSchema))
 
-interface ExcalidrawSerializedBox {
-  readonly id: string
-  readonly type: BoardNode["kind"]
-  readonly x: number
-  readonly y: number
-  readonly width: number
-  readonly height: number
-  readonly backgroundColor: string
-  readonly strokeColor: string
-  readonly fillStyle: "solid"
-  readonly boundElements: ReadonlyArray<{ readonly id: string; readonly type: "text" }>
-}
-
-interface ExcalidrawSerializedText {
-  readonly id: string
-  readonly type: "text"
-  readonly containerId: string
-  readonly x: number
-  readonly y: number
-  readonly width: number
-  readonly height: number
-  readonly text: string
-  readonly fontSize: number
-  readonly strokeColor: string
-}
-
 export function parseExcalidrawNodes(raw: string): ReadonlyArray<BoardNode> {
   const decoded = decodeExcalidrawDoc(raw)
 
@@ -90,35 +64,36 @@ export function parseExcalidrawNodes(raw: string): ReadonlyArray<BoardNode> {
 }
 
 function serializeExcalidrawNodes(nodes: ReadonlyArray<BoardNode>, theme: "dark" | "light"): string {
-  const elements: Array<ExcalidrawSerializedBox | ExcalidrawSerializedText> = []
-
-  for (const node of nodes) {
+  const elements = nodes.flatMap((node) => {
     const textId = `${node.id}-label`
-    elements.push({
-      id: node.id,
-      type: node.kind,
-      x: node.x,
-      y: node.y,
-      width: node.width,
-      height: node.height,
-      backgroundColor: node.backgroundColor,
-      strokeColor: node.strokeColor,
-      fillStyle: "solid",
-      boundElements: [{ id: textId, type: "text" }],
-    })
-    elements.push({
-      id: textId,
-      type: "text",
-      containerId: node.id,
-      x: node.x + 12,
-      y: node.y + node.height / 2 - 8,
-      width: node.width - 24,
-      height: 20,
-      text: node.label,
-      fontSize: 15,
-      strokeColor: "#ffffff",
-    })
-  }
+
+    return [
+      {
+        id: node.id,
+        type: node.kind,
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        backgroundColor: node.backgroundColor,
+        strokeColor: node.strokeColor,
+        fillStyle: "solid",
+        boundElements: [{ id: textId, type: "text" }],
+      },
+      {
+        id: textId,
+        type: "text",
+        containerId: node.id,
+        x: node.x + 12,
+        y: node.y + node.height / 2 - 8,
+        width: node.width - 24,
+        height: 20,
+        text: node.label,
+        fontSize: 15,
+        strokeColor: "#ffffff",
+      },
+    ]
+  })
 
   return JSON.stringify(
     {
