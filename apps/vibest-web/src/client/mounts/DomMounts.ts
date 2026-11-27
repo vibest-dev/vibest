@@ -3,7 +3,7 @@ import { WTerm } from "@wterm/dom"
 import { Effect, Option, Queue, Schema, Stream } from "effect"
 import mermaid from "mermaid"
 
-import { HoverTargetSchema, ThemeModeSchema } from "../domain/WebHub.ts"
+import { HoverTargetSchema, ThemeModeSchema } from "../../domain/WebHub.ts"
 
 const BridgeMsgSchema = Schema.Union([
   Schema.Struct({ source: Schema.Literal("vibest-web-bridge"), type: Schema.Literal("bridge-ready") }),

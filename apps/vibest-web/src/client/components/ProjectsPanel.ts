@@ -8,7 +8,7 @@ import {
   ThemeModeSchema,
   type DaemonStatus,
   type ProjectSummary,
-} from "../domain/WebHub.ts"
+} from "../../domain/WebHub.ts"
 import { IconCpu, IconFolderGit, IconMoon, IconSearch, IconServer, IconSun } from "../ui/icons.ts"
 import { Badge, buttonClass, EmptyState, Frame, FrameHeader, FramePanel, FrameTitle } from "../ui/primitives.ts"
 
@@ -132,11 +132,6 @@ export const ProjectsPanel = ProjectsPanelDef.make({
                   )
                   .value(model.query)
                   .on("input", ({ value }) => ProjectsPanelMessage.UpdatedQuery({ query: value })),
-                h.kbd
-                  .class(
-                    "rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground",
-                  )
-                  .children("⌘K"),
               ),
             h.div
               .attrs({ "data-testid": "daemon-status-pill", title: daemon.socket })

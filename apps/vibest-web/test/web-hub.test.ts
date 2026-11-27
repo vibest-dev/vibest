@@ -16,7 +16,7 @@ import {
 } from "../src/project-files.ts"
 import { createWebServer, type RunningWebServer } from "../src/server.ts"
 import { createVibestBridge } from "../src/vibest-bridge.ts"
-import { hasStructuredVibestTags, parseVibestMessageBlocks } from "../src/xml-parser.ts"
+import { parseVibestMessageBlocks } from "../src/xml-parser.ts"
 
 describe("vibest-web xml-parser", () => {
   it("parses vibest-agent-message and vibest-message into structured blocks", () => {
@@ -29,7 +29,6 @@ describe("vibest-web xml-parser", () => {
       "<vibest-message>Session a1b2c3d4 pushed feat/panel-layout.</vibest-message>",
     ].join("\n")
 
-    expect(hasStructuredVibestTags(raw)).toBe(true)
     const blocks = parseVibestMessageBlocks(raw)
     expect(blocks.length).toBe(3)
     expect(blocks[0]?.kind).toBe("text")
@@ -48,6 +47,37 @@ describe("vibest-web xml-parser", () => {
 
     if (notice?.kind === "system-notice") {
       expect(notice.body).toContain("feat/panel-layout")
+    }
+  })
+  it("parses real Vibest <session-id>, optional <machine>, and <vibest-message><message> envelopes", () => {
+    const raw = [
+      "<vibest-agent-message>",
+      "<session-id>sess-9988</session-id>",
+      "<machine>racknerd</machine>",
+      "<message>Fixed dangling symlink escape.\n\nDetails:\n- Added lstat walk</message>",
+      "</vibest-agent-message>",
+      "<vibest-message>",
+      "<message>Session sess-9988 finished.</message>",
+      "</vibest-message>",
+    ].join("\n")
+
+    const blocks = parseVibestMessageBlocks(raw)
+    expect(blocks.length).toBe(2)
+
+    const report = blocks[0]
+    expect(report?.kind).toBe("agent-report")
+
+    if (report?.kind === "agent-report") {
+      expect(report.agentId).toBe("sess-9988")
+      expect(report.firstLine).toBe("Fixed dangling symlink escape.")
+      expect(report.details).toContain("Added lstat walk")
+    }
+
+    const notice = blocks[1]
+    expect(notice?.kind).toBe("system-notice")
+
+    if (notice?.kind === "system-notice") {
+      expect(notice.body).toBe("Session sess-9988 finished.")
     }
   })
 })
@@ -293,6 +323,51 @@ describe("vibest-web project-files and HTTP/SSE server", () => {
 
     expect(putRes.status).toBe(400)
     expect(fs.existsSync(path.join(outsideDir, "artifacts", "pwned.txt"))).toBe(false)
+  })
+
+  it("B1 regression: blocks dangling symlink write escape and symlinked file reads", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-b1-dangling-"))
+    tempDirs.push(tmp)
+    const vibestHome = path.join(tmp, "vibest-home")
+    const outsideDir = path.join(tmp, "outside-target")
+    fs.mkdirSync(path.join(vibestHome, "projects", "legit", "artifacts"), { recursive: true })
+    fs.mkdirSync(outsideDir, { recursive: true })
+    const pwnedPath = path.join(outsideDir, "pwned.txt")
+    fs.symlinkSync(pwnedPath, path.join(vibestHome, "projects", "legit", "artifacts", "dangling.txt"))
+
+    expect(resolveSafeProjectFilePath(vibestHome, "legit", "artifacts/dangling.txt")).toBeNull()
+    expect(writeProjectTextFile(vibestHome, "legit", "artifacts/dangling.txt", "ESCAPED")).toBe(false)
+    expect(fs.existsSync(pwnedPath)).toBe(false)
+
+    const server = await createWebServer({ port: 0, vibestHome, demoMode: true, safeActions: true })
+    servers.push(server)
+
+    const putRes = await fetch(`${server.url}/api/projects/legit/file`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: server.url },
+      body: JSON.stringify({ path: "artifacts/dangling.txt", content: "ESCAPED" }),
+    })
+
+    expect(putRes.status).toBe(400)
+    expect(fs.existsSync(pwnedPath)).toBe(false)
+
+    const getRes = await fetch(`${server.url}/api/projects/legit/file?path=artifacts/dangling.txt`)
+    expect(getRes.status).toBe(404)
+  })
+
+  it("returns 404 instead of 500 EISDIR when GET /api/projects/:id/file targets a directory", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vbweb-dir-"))
+    tempDirs.push(home)
+    fs.mkdirSync(path.join(home, "projects", "proj-dir", "artifacts", "nested"), { recursive: true })
+
+    const server = await createWebServer({ port: 0, vibestHome: home, demoMode: true, safeActions: true })
+    servers.push(server)
+
+    const textRes = await fetch(`${server.url}/api/projects/proj-dir/file?path=artifacts/nested`)
+    expect(textRes.status).toBe(404)
+
+    const rawRes = await fetch(`${server.url}/api/projects/proj-dir/file?path=artifacts/nested&raw=1`)
+    expect(rawRes.status).toBe(404)
   })
 
   it("B2: rejects non-loopback Host, cross-origin Origin, and non-JSON Content-Type on mutations", async () => {

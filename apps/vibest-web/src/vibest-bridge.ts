@@ -7,89 +7,18 @@ import { nodeUnixHttpClient } from "@vibest/client/unix-http.node"
 import type { ProjectRow, WatchEvent, WatchSession } from "@vibest/protocol/schemas"
 import { Effect, Layer, Match, Option, Schema, Stream } from "effect"
 
+import {
+  DemoStateSchema,
+  type DaemonStatus,
+  type PeekResult,
+  type ProjectFileEntry,
+  type ProjectSummary,
+  type SessionItem,
+  type StreamPayload,
+  type TimelineEntry,
+  type WorkspaceSnapshot,
+} from "./domain/WebHub.ts"
 import { scanProjectFiles, watchProjectDirectories } from "./project-files.ts"
-import type {
-  DaemonStatus,
-  PeekResult,
-  ProjectFileEntry,
-  ProjectSummary,
-  SessionItem,
-  StreamPayload,
-  TimelineEntry,
-  WorkspaceSnapshot,
-} from "./types.ts"
-
-const DemoGitSchema = Schema.Struct({
-  branch: Schema.String,
-  pushed: Schema.Boolean,
-  saved: Schema.Boolean,
-  why: Schema.String,
-})
-
-const DemoSessionSchema = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  agent: Schema.String,
-  harness: Schema.String,
-  provider: Schema.NullOr(Schema.String),
-  model: Schema.NullOr(Schema.String),
-  status: Schema.Literals(["idle", "working", "blocked", "done", "unknown"]),
-  executionState: Schema.Literals(["none", "open", "completed", "failed", "interrupted", "lost", "not_started"]),
-  projectId: Schema.String,
-  parentId: Schema.NullOr(Schema.String),
-  runtime: Schema.String,
-  machine: Schema.String,
-  worktree: Schema.String,
-  repositoryRoot: Schema.NullOr(Schema.String),
-  git: Schema.NullOr(DemoGitSchema),
-  createdAt: Schema.Number,
-  lastActive: Schema.Number,
-  startedAt: Schema.NullOr(Schema.Number),
-  exitedAt: Schema.NullOr(Schema.Number),
-  task: Schema.NullOr(Schema.String),
-  summary: Schema.String,
-  isEntry: Schema.Boolean,
-  needsYou: Schema.Boolean,
-})
-
-const DemoProjectSchema = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  directory: Schema.String,
-  entrySessionId: Schema.NullOr(Schema.String),
-  activity: Schema.Literals(["blocked", "done", "working", "idle"]),
-  machine: Schema.String,
-  branch: Schema.String,
-})
-
-const DemoTimelineSchema = Schema.Struct({
-  id: Schema.String,
-  sessionId: Schema.String,
-  projectId: Schema.String,
-  role: Schema.Literals(["user", "assistant", "agent", "system"]),
-  senderLabel: Schema.String,
-  senderSessionId: Schema.NullOr(Schema.String),
-  content: Schema.String,
-  createdAt: Schema.Number,
-  status: Schema.Literals(["completed", "working", "blocked", "failed", "queued"]),
-  attachments: Schema.Array(Schema.String),
-})
-
-const DemoStateSchema = Schema.Struct({
-  version: Schema.String,
-  load: Schema.Struct({
-    sampledAt: Schema.Number,
-    cpuCount: Schema.Number,
-    cpuUtilization: Schema.NullOr(Schema.Number),
-    memoryTotalBytes: Schema.Number,
-    memoryAvailableBytes: Schema.Number,
-    workingExecutions: Schema.Number,
-  }),
-  projects: Schema.Array(DemoProjectSchema),
-  sessions: Schema.Array(DemoSessionSchema),
-  timelines: Schema.Array(DemoTimelineSchema),
-  peeks: Schema.Record(Schema.String, Schema.String),
-})
 
 const decodeDemoState = Schema.decodeUnknownOption(DemoStateSchema)
 
@@ -177,7 +106,7 @@ interface RawProjectRecord {
 }
 
 function summarizeProject(row: RawProjectRecord, sessions: ReadonlyArray<SessionItem>): ProjectSummary {
-  const projectSessions = sessions.flatMap((s) => (s.projectId === row.id ? [s] : []))
+  const projectSessions = sessions.filter((s) => s.projectId === row.id)
   const entry = projectSessions.find((s) => s.id === row.entrySessionId || s.isEntry)
   let activeSubagents = 0
   let needsYouCount = 0
@@ -267,15 +196,7 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
     return list
   }
 
-  const computeFilesRecord = () => {
-    const out: Record<string, ReadonlyArray<ProjectFileEntry>> = {}
-
-    for (const [projectId, files] of filesByProject.entries()) {
-      out[projectId] = files
-    }
-
-    return out
-  }
+  const computeFilesRecord = () => Object.fromEntries(filesByProject)
 
   const refreshFiles = (projectId: string): ReadonlyArray<ProjectFileEntry> => {
     const scanned = scanProjectFiles(options.vibestHome, projectId)
@@ -657,8 +578,6 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
             payload: { message: formattedMessage },
           }),
         )
-
-        return { ok: true, entry: null }
       } catch (err) {
         return { ok: false, entry: null, error: err instanceof Error ? err.message : String(err) }
       }

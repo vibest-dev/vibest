@@ -14,7 +14,7 @@ import {
   type StreamPayload,
   type TimelineEntry,
   type WorkspaceSnapshot,
-} from "../domain/WebHub.ts"
+} from "../../domain/WebHub.ts"
 
 export interface VibestWebApiClient {
   readonly getState: () => Effect.Effect<WorkspaceSnapshot, WebApiError>

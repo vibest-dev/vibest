@@ -6,6 +6,7 @@ import url from "node:url"
 
 import { Option, Predicate, Schema } from "effect"
 
+import type { StreamPayload } from "./domain/WebHub.ts"
 import { injectHtmlPreviewBridge } from "./preview-bridge.ts"
 import {
   isValidProjectId,
@@ -13,7 +14,6 @@ import {
   resolveSafeProjectFilePath,
   writeProjectTextFile,
 } from "./project-files.ts"
-import type { StreamPayload } from "./types.ts"
 import { createVibestBridge } from "./vibest-bridge.ts"
 
 const MODULE_DIR = path.dirname(url.fileURLToPath(import.meta.url))
@@ -377,7 +377,7 @@ export async function createWebServer(options: WebServerOptions = {}): Promise<R
       if (rawMode) {
         const abs = resolveSafeProjectFilePath(vibestHome, projectId, relPath)
 
-        if (abs === null || !fs.existsSync(abs)) {
+        if (abs === null || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
           return jsonResponse({ error: "File not found" }, 404)
         }
 

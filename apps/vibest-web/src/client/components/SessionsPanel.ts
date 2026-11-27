@@ -9,7 +9,7 @@ import {
   ThemeModeSchema,
   type SessionFilter,
   type SessionItem,
-} from "../domain/WebHub.ts"
+} from "../../domain/WebHub.ts"
 import {
   IconArchive,
   IconChevronDown,
@@ -78,10 +78,10 @@ function statusLabel(session: SessionItem): string {
   return "Idle"
 }
 
-function toSessionFilter(value: string): SessionFilter {
-  if (value === "needs_you" || value === "working" || value === "done") return value
+const isSessionFilter = Schema.is(SessionFilterSchema)
 
-  return "all"
+function toSessionFilter(value: string): SessionFilter {
+  return isSessionFilter(value) ? value : "all"
 }
 
 export const SessionsPanelMessage = UiSchema.TaggedEnum({

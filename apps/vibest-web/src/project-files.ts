@@ -1,7 +1,9 @@
 import fs from "node:fs"
 import path from "node:path"
 
-import type { KnowledgeCategory, ProjectFileEntry } from "./types.ts"
+import { Predicate } from "effect"
+
+import type { KnowledgeCategory, ProjectFileEntry } from "./domain/WebHub.ts"
 
 const CATEGORIES: ReadonlyArray<Exclude<KnowledgeCategory, "preferences">> = ["artifacts", "docs", "memories"]
 const VALID_PROJECT_ID = /^[a-zA-Z0-9._-]+$/
@@ -12,19 +14,31 @@ export function isValidProjectId(projectId: string): boolean {
   return VALID_PROJECT_ID.test(projectId)
 }
 
+function lstatOrNull(targetPath: string): fs.Stats | null {
+  try {
+    return fs.lstatSync(targetPath)
+  } catch (err) {
+    if (Predicate.hasProperty(err, "code") && err.code === "ENOENT") return null
+
+    throw err
+  }
+}
+
 function realPathOrAncestor(targetPath: string): string | null {
   let current = targetPath
 
   while (true) {
-    if (fs.existsSync(current)) {
-      try {
+    try {
+      const stat = lstatOrNull(current)
+
+      if (stat !== null) {
         const realBase = fs.realpathSync(current)
         const suffix = path.relative(current, targetPath)
 
         return suffix.length === 0 ? realBase : path.join(realBase, suffix)
-      } catch {
-        return null
       }
+    } catch {
+      return null
     }
 
     const parent = path.dirname(current)
@@ -32,6 +46,48 @@ function realPathOrAncestor(targetPath: string): string | null {
     if (parent === current) return null
     current = parent
   }
+}
+
+function verifyComponentChain(
+  realProjectDir: string,
+  segments: ReadonlyArray<string>,
+  allowSymlinks: boolean,
+): string | null {
+  let current = realProjectDir
+
+  for (const segment of segments) {
+    current = path.join(current, segment)
+
+    let stat: fs.Stats | null
+
+    try {
+      stat = lstatOrNull(current)
+    } catch {
+      return null
+    }
+
+    if (stat === null) continue
+
+    if (stat.isSymbolicLink()) {
+      if (!allowSymlinks) return null
+
+      try {
+        const resolved = fs.realpathSync(current)
+
+        if (resolved !== realProjectDir && !resolved.startsWith(`${realProjectDir}${path.sep}`)) {
+          return null
+        }
+
+        current = resolved
+      } catch {
+        return null
+      }
+    }
+  }
+
+  if (!current.startsWith(`${realProjectDir}${path.sep}`)) return null
+
+  return current
 }
 
 export function resolveSafeProjectDir(vibestHome: string, projectId: string): string | null {
@@ -42,17 +98,19 @@ export function resolveSafeProjectDir(vibestHome: string, projectId: string): st
 
   if (!projectDir.startsWith(`${projectsRoot}${path.sep}`)) return null
 
-  if (fs.existsSync(projectsRoot) && fs.existsSync(projectDir)) {
-    try {
+  try {
+    const dirStat = lstatOrNull(projectDir)
+
+    if (dirStat !== null) {
       const realRoot = fs.realpathSync(projectsRoot)
       const realDir = fs.realpathSync(projectDir)
 
       if (!realDir.startsWith(`${realRoot}${path.sep}`)) return null
 
       return realDir
-    } catch {
-      return null
     }
+  } catch {
+    return null
   }
 
   return projectDir
@@ -182,7 +240,12 @@ export function scanProjectFiles(vibestHome: string, projectId: string): Readonl
   return results
 }
 
-export function resolveSafeProjectFilePath(vibestHome: string, projectId: string, relativePath: string): string | null {
+function resolveContainedPath(
+  vibestHome: string,
+  projectId: string,
+  relativePath: string,
+  allowSymlinks: boolean,
+): string | null {
   if (relativePath.length === 0 || relativePath.includes("\0")) return null
   const projectDir = resolveSafeProjectDir(vibestHome, projectId)
 
@@ -200,29 +263,35 @@ export function resolveSafeProjectFilePath(vibestHome: string, projectId: string
 
   if (!allowedRoot) return null
 
-  const resolved = path.resolve(projectDir, normalized)
-
-  if (!resolved.startsWith(`${projectDir}${path.sep}`)) return null
-
   const realProjectDir = realPathOrAncestor(projectDir)
 
   if (realProjectDir === null) return null
 
-  const realTarget = realPathOrAncestor(resolved)
+  const segments = normalized.split("/").filter((s) => s.length > 0 && s !== ".")
 
-  if (realTarget === null) return null
+  if (segments.length === 0) return null
 
-  if (!realTarget.startsWith(`${realProjectDir}${path.sep}`)) return null
+  return verifyComponentChain(realProjectDir, segments, allowSymlinks)
+}
 
-  return realTarget
+export function resolveSafeProjectFilePath(vibestHome: string, projectId: string, relativePath: string): string | null {
+  return resolveContainedPath(vibestHome, projectId, relativePath, false)
 }
 
 export function readProjectTextFile(vibestHome: string, projectId: string, relativePath: string): string | null {
-  const target = resolveSafeProjectFilePath(vibestHome, projectId, relativePath)
+  const target = resolveContainedPath(vibestHome, projectId, relativePath, true)
 
-  if (target === null || !fs.existsSync(target)) return null
+  if (target === null) return null
 
-  return fs.readFileSync(target, "utf8")
+  try {
+    const stat = fs.statSync(target)
+
+    if (!stat.isFile()) return null
+
+    return fs.readFileSync(target, "utf8")
+  } catch {
+    return null
+  }
 }
 
 export function writeProjectTextFile(
@@ -231,14 +300,24 @@ export function writeProjectTextFile(
   relativePath: string,
   content: string,
 ): boolean {
-  const target = resolveSafeProjectFilePath(vibestHome, projectId, relativePath)
+  const target = resolveContainedPath(vibestHome, projectId, relativePath, false)
 
   if (target === null) return false
 
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.writeFileSync(target, content, "utf8")
+  try {
+    const existing = lstatOrNull(target)
 
-  return true
+    if (existing !== null && (existing.isSymbolicLink() || existing.isDirectory())) {
+      return false
+    }
+
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, content, "utf8")
+
+    return true
+  } catch {
+    return false
+  }
 }
 
 export function watchProjectDirectories(

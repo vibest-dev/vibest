@@ -8,7 +8,7 @@ import {
   ProjectFileEntrySchema,
   type KnowledgeTab,
   type ProjectFileEntry,
-} from "../domain/WebHub.ts"
+} from "../../domain/WebHub.ts"
 import {
   IconAtSign,
   IconBookOpen,
@@ -81,10 +81,10 @@ const KnowledgePanelDef = Html.component({
   events: KnowledgePanelEvents,
 })
 
-function toKnowledgeTab(value: string): KnowledgeTab {
-  if (value === "docs" || value === "memories") return value
+const isKnowledgeTab = Schema.is(KnowledgeTabSchema)
 
-  return "artifacts"
+function toKnowledgeTab(value: string): KnowledgeTab {
+  return isKnowledgeTab(value) ? value : "artifacts"
 }
 
 export const KnowledgePanel = KnowledgePanelDef.make({

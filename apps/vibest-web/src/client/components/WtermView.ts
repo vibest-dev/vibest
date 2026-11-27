@@ -2,7 +2,7 @@ import { Mount, UiSchema } from "@effect/ui"
 import { Html } from "@effect/ui/html"
 import { Schema } from "effect"
 
-import { ThemeModeSchema } from "../domain/WebHub.ts"
+import { ThemeModeSchema } from "../../domain/WebHub.ts"
 import { AttachWterm } from "../mounts/DomMounts.ts"
 import { IconMaximize, IconRefresh, IconTerminal } from "../ui/icons.ts"
 import { buttonClass } from "../ui/primitives.ts"
@@ -32,7 +32,8 @@ export function stripAnsiEscapeCodes(input: string): string {
 }
 
 export const WtermViewMessage = UiSchema.TaggedEnum({
-  ChangedWtermStatus: { ready: Schema.Boolean },
+  InitializedWterm: {},
+  FailedWterm: {},
   ClickedRefresh: {},
   ClickedExpand: {},
 })
@@ -61,7 +62,8 @@ const WtermViewDef = Html.component({
 export const WtermView = WtermViewDef.make({
   init: () => ({ failed: false }),
   update: {
-    ChangedWtermStatus: ($, { ready }) => $.evolve({ failed: !ready }),
+    InitializedWterm: ($) => $.evolve({ failed: false }),
+    FailedWterm: ($) => $.evolve({ failed: true }),
     ClickedRefresh: ($) => $.emit(WtermViewEvents.RequestedRefresh()),
     ClickedExpand: ($) => $.emit(WtermViewEvents.RequestedExpand()),
   },
@@ -107,7 +109,7 @@ export const WtermView = WtermViewDef.make({
               .class("wterm-host w-full overflow-auto", compact ? "h-48" : "min-h-0 flex-1", themeClass)
               .onMount(
                 AttachWterm({ content, compact }).pipe(
-                  Mount.map((ready) => WtermViewMessage.ChangedWtermStatus({ ready })),
+                  Mount.map((ready) => (ready ? WtermViewMessage.InitializedWterm() : WtermViewMessage.FailedWterm())),
                 ),
               ),
       )

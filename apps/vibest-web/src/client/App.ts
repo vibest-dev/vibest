@@ -1,13 +1,7 @@
 import { Command, Component, Subscription, UiSchema } from "@effect/ui"
-import { TooltipProvider } from "@effect/ui-kit"
 import { Html } from "@effect/ui/html"
 import { Effect, Layer, Schema, Stream } from "effect"
 
-import { ChatPanel } from "./components/ChatPanel.ts"
-import { KnowledgePanel } from "./components/KnowledgePanel.ts"
-import { ProjectsPanel } from "./components/ProjectsPanel.ts"
-import { SessionsPanel } from "./components/SessionsPanel.ts"
-import { StagePanelNoDeps, LoadStageFile, SaveStageFile } from "./components/StagePanel.ts"
 import {
   DaemonStatusSchema,
   INITIAL_DAEMON,
@@ -23,7 +17,12 @@ import {
   type ProjectSummary,
   type SessionItem,
   type StageItem,
-} from "./domain/WebHub.ts"
+} from "../domain/WebHub.ts"
+import { ChatPanel } from "./components/ChatPanel.ts"
+import { KnowledgePanel } from "./components/KnowledgePanel.ts"
+import { ProjectsPanel } from "./components/ProjectsPanel.ts"
+import { SessionsPanel } from "./components/SessionsPanel.ts"
+import { StagePanel } from "./components/StagePanel.ts"
 import { SyncThemeClass } from "./mounts/DomMounts.ts"
 import { VibestWebApi, VibestWebApiBrowserLayer } from "./services/VibestWebApi.ts"
 
@@ -41,11 +40,11 @@ export const AppMessage = UiSchema.TaggedEnum({
   DismissedToast: { message: Schema.String },
   SelectedProject: { projectId: Schema.String },
   ToggledTheme: {},
-  ChangedStageMode: { mode: StageModeSchema },
-  ChangedTargetSession: { sessionId: Schema.String },
-  ChangedComposerText: { text: Schema.String },
-  AddedAttachment: { relativePath: Schema.String },
-  RemovedAttachment: { relativePath: Schema.String },
+  RequestedStageMode: { mode: StageModeSchema },
+  RequestedTargetSession: { sessionId: Schema.String },
+  RequestedComposerText: { text: Schema.String },
+  RequestedAddAttachment: { relativePath: Schema.String },
+  RequestedRemoveAttachment: { relativePath: Schema.String },
   RequestedSend: {},
   ToggledPeek: { sessionId: Schema.String },
   RequestedRefreshPeek: { sessionId: Schema.String },
@@ -209,9 +208,6 @@ const AppDef = Html.component({
     attachedPaths: Schema.Array(Schema.String),
     sending: Schema.Boolean,
     toast: Schema.NullOr(Schema.String),
-    leftWidth: Schema.Number,
-    rightWidth: Schema.Number,
-    rightSplitPercent: Schema.Number,
   }),
   message: AppMessage,
 })
@@ -245,7 +241,7 @@ function resolveProjectSessions(
 }
 
 function stageKeyFor(item: StageItem): string {
-  return item.kind === "file" ? `file:${item.file.id}` : `term:${item.sessionId}`
+  return item.kind === "file" ? `file:${item.file.id}:${item.file.updatedAt}` : `term:${item.sessionId}`
 }
 
 export const AppNoDeps = AppDef.make({
@@ -268,9 +264,6 @@ export const AppNoDeps = AppDef.make({
       attachedPaths: [],
       sending: false,
       toast: null,
-      leftWidth: 264,
-      rightWidth: 408,
-      rightSplitPercent: 52,
     }).run(LoadWorkspaceState.make()),
   update: {
     SucceededLoadState: ($, { snapshot }) => {
@@ -335,6 +328,7 @@ export const AppNoDeps = AppDef.make({
 
         case "daemon":
           return $.evolve({ daemon: payload.data })
+
         case "project": {
           const updated = payload.data
           const exists = $.model.projects.some((p) => p.id === updated.id)
@@ -366,10 +360,20 @@ export const AppNoDeps = AppDef.make({
           })
         }
 
-        case "files-changed":
+        case "files-changed": {
+          const currentStage = $.model.stageItem
+
+          const updatedFile =
+            currentStage?.kind === "file" && currentStage.file.projectId === payload.data.projectId
+              ? (payload.data.files.find((f) => f.id === currentStage.file.id) ?? null)
+              : null
+
           return $.evolve({
             filesByProject: (prev) => ({ ...prev, [payload.data.projectId]: payload.data.files }),
+            stageItem: updatedFile !== null ? { kind: "file", file: updatedFile } : $.model.stageItem,
           })
+        }
+
         case "timeline-entry": {
           const entry = payload.data
 
@@ -391,12 +395,18 @@ export const AppNoDeps = AppDef.make({
     SucceededSend: ($, { ok, error }) => {
       const msg = ok ? "Dispatched message via vibestd" : (error ?? "Failed to send")
 
-      return $.evolve({
+      const step = $.evolve({
         sending: false,
         composerText: ok ? "" : $.model.composerText,
         attachedPaths: ok ? [] : $.model.attachedPaths,
         toast: msg,
       }).run(WaitToastDismissal.make({ message: msg }))
+
+      if (ok && $.model.selectedProjectId !== null && $.model.activeSessionId !== null) {
+        return step.run(LoadTimeline.make({ projectId: $.model.selectedProjectId, sessionId: $.model.activeSessionId }))
+      }
+
+      return step
     },
     FailedSend: ($, { reason }) =>
       $.evolve({ sending: false, toast: reason }).run(WaitToastDismissal.make({ message: reason })),
@@ -422,14 +432,14 @@ export const AppNoDeps = AppDef.make({
       return step
     },
     ToggledTheme: ($) => $.evolve({ theme: (prev) => (prev === "dark" ? "light" : "dark") }),
-    ChangedStageMode: ($, { mode }) => $.evolve({ stageMode: mode }),
-    ChangedTargetSession: ($, { sessionId }) => $.evolve({ targetSessionId: sessionId }),
-    ChangedComposerText: ($, { text }) => $.evolve({ composerText: text }),
-    AddedAttachment: ($, { relativePath }) =>
+    RequestedStageMode: ($, { mode }) => $.evolve({ stageMode: mode }),
+    RequestedTargetSession: ($, { sessionId }) => $.evolve({ targetSessionId: sessionId }),
+    RequestedComposerText: ($, { text }) => $.evolve({ composerText: text }),
+    RequestedAddAttachment: ($, { relativePath }) =>
       $.evolve({
         attachedPaths: (prev) => (prev.includes(relativePath) ? prev : [...prev, relativePath]),
       }),
-    RemovedAttachment: ($, { relativePath }) =>
+    RequestedRemoveAttachment: ($, { relativePath }) =>
       $.evolve({ attachedPaths: (prev) => prev.filter((p) => p !== relativePath) }),
     RequestedSend: ($) => {
       if ($.model.targetSessionId === null || $.model.composerText.trim().length === 0 || $.model.sending) {
@@ -519,145 +529,114 @@ export const AppNoDeps = AppDef.make({
     const activeStagePeekText =
       model.stageItem?.kind === "terminal" ? (model.peekCache[model.stageItem.sessionId] ?? "Loading terminal...") : ""
 
-    return TooltipProvider(h, {
-      props: {},
-      view: () =>
-        h.div
-          .attr("data-testid", "workspace-canvas")
-          .class("flex h-dvh w-full overflow-hidden bg-sidebar p-2 text-foreground select-none")
-          .onMount(SyncThemeClass({ theme: model.theme }))
-          .children(
-            h.aside
-              .class("flex h-full shrink-0 flex-col")
-              .style({ width: `${model.leftWidth}px` })
-              .children(
-                ProjectsPanel(h, {
-                  props: {
-                    projects: model.projects,
-                    selectedProjectId: model.selectedProjectId,
-                    daemon: model.daemon,
-                    theme: model.theme,
-                  },
-                  onEmit: {
-                    SelectedProject: ({ projectId }) => AppMessage.SelectedProject({ projectId }),
-                    ToggledTheme: () => AppMessage.ToggledTheme(),
-                  },
-                }),
-              ),
-            h.div
-              .attrs({ role: "separator", "aria-orientation": "vertical" })
-              .class("group relative flex w-2 shrink-0 items-center justify-center")
-              .children(h.span.class("h-7 w-0.5 rounded-full bg-transparent transition-colors group-hover:bg-ring")),
-            h.main.class("flex h-full min-w-0 flex-1 gap-2 overflow-hidden select-text").children(
-              model.stageMode !== "stage" &&
-                h.div.class("flex min-w-0 flex-1 flex-col").children(
-                  ChatPanel(h, {
-                    props: {
-                      project: selectedProject,
-                      sessions: projectSessions,
-                      activeSessionId: model.activeSessionId,
-                      targetSessionId: model.targetSessionId,
-                      timeline: model.timeline,
-                      projectFiles,
-                      stageMode: model.stageMode,
-                      hasStageItem: model.stageItem !== null,
-                      composerText: model.composerText,
-                      attachedPaths: model.attachedPaths,
-                      sending: model.sending,
-                    },
-                    onEmit: {
-                      ChangedStageMode: ({ mode }) => AppMessage.ChangedStageMode({ mode }),
-                      ChangedTargetSession: ({ sessionId }) => AppMessage.ChangedTargetSession({ sessionId }),
-                      ChangedComposerText: ({ text }) => AppMessage.ChangedComposerText({ text }),
-                      AddedAttachment: ({ relativePath }) => AppMessage.AddedAttachment({ relativePath }),
-                      RemovedAttachment: ({ relativePath }) => AppMessage.RemovedAttachment({ relativePath }),
-                      RequestedSend: () => AppMessage.RequestedSend(),
-                      RequestedPeekSession: ({ sessionId }) => AppMessage.RequestedOpenTerminalStage({ sessionId }),
-                      RequestedFocusSession: ({ sessionId }) => AppMessage.RequestedFocusSession({ sessionId }),
-                    },
-                  }),
-                ),
-              model.stageItem !== null &&
-                model.stageMode !== "chat" &&
-                h.div.class("flex min-w-0 flex-[1.1] flex-col").children(
-                  StagePanelNoDeps(h, {
-                    key: stageKeyFor(model.stageItem),
-                    props: {
-                      item: model.stageItem,
-                      theme: model.theme,
-                      sessions: projectSessions,
-                      peekText: activeStagePeekText,
-                    },
-                    onEmit: {
-                      RequestedRefreshPeek: ({ sessionId }) => AppMessage.RequestedRefreshPeek({ sessionId }),
-                      AddedToComposer: ({ text, attachmentPath }) =>
-                        AppMessage.AddedToComposer({ text, attachmentPath }),
-                      RequestedClose: () => AppMessage.ClosedStage(),
-                    },
-                  }),
-                ),
+    return h.div
+      .attr("data-testid", "workspace-canvas")
+      .class("flex h-dvh w-full gap-2 overflow-hidden bg-sidebar p-2 text-foreground select-none")
+      .onMount(SyncThemeClass({ theme: model.theme }))
+      .children(
+        h.aside.class("flex h-full w-64 shrink-0 flex-col").children(
+          ProjectsPanel(h, {
+            props: {
+              projects: model.projects,
+              selectedProjectId: model.selectedProjectId,
+              daemon: model.daemon,
+              theme: model.theme,
+            },
+            onEmit: {
+              SelectedProject: ({ projectId }) => AppMessage.SelectedProject({ projectId }),
+              ToggledTheme: () => AppMessage.ToggledTheme(),
+            },
+          }),
+        ),
+        h.main.class("flex h-full min-w-0 flex-1 gap-2 overflow-hidden select-text").children(
+          model.stageMode !== "stage" &&
+            h.div.class("flex min-w-0 flex-1 flex-col").children(
+              ChatPanel(h, {
+                props: {
+                  project: selectedProject,
+                  sessions: projectSessions,
+                  activeSessionId: model.activeSessionId,
+                  targetSessionId: model.targetSessionId,
+                  timeline: model.timeline,
+                  projectFiles,
+                  stageMode: model.stageMode,
+                  hasStageItem: model.stageItem !== null,
+                  composerText: model.composerText,
+                  attachedPaths: model.attachedPaths,
+                  sending: model.sending,
+                },
+                onEmit: {
+                  RequestedStageMode: ({ mode }) => AppMessage.RequestedStageMode({ mode }),
+                  RequestedTargetSession: ({ sessionId }) => AppMessage.RequestedTargetSession({ sessionId }),
+                  RequestedComposerText: ({ text }) => AppMessage.RequestedComposerText({ text }),
+                  RequestedAddAttachment: ({ relativePath }) => AppMessage.RequestedAddAttachment({ relativePath }),
+                  RequestedRemoveAttachment: ({ relativePath }) =>
+                    AppMessage.RequestedRemoveAttachment({ relativePath }),
+                  RequestedSend: () => AppMessage.RequestedSend(),
+                  RequestedPeekSession: ({ sessionId }) => AppMessage.RequestedOpenTerminalStage({ sessionId }),
+                  RequestedFocusSession: ({ sessionId }) => AppMessage.RequestedFocusSession({ sessionId }),
+                },
+              }),
             ),
-            h.div
-              .attrs({ role: "separator", "aria-orientation": "vertical" })
-              .class("group relative flex w-2 shrink-0 items-center justify-center")
-              .children(h.span.class("h-7 w-0.5 rounded-full bg-transparent transition-colors group-hover:bg-ring")),
-            h.div
-              .class("flex h-full shrink-0 flex-col select-text")
-              .style({ width: `${model.rightWidth}px` })
-              .children(
-                h.div
-                  .class("flex min-h-36 flex-col overflow-hidden")
-                  .style({ height: `calc(${model.rightSplitPercent}% - 4px)` })
-                  .children(
-                    SessionsPanel(h, {
-                      props: {
-                        sessions: projectSessions,
-                        theme: model.theme,
-                        expandedPeekId: model.expandedPeekId,
-                        peekCache: model.peekCache,
-                      },
-                      onEmit: {
-                        ToggledPeek: ({ sessionId }) => AppMessage.ToggledPeek({ sessionId }),
-                        RequestedRefreshPeek: ({ sessionId }) => AppMessage.RequestedRefreshPeek({ sessionId }),
-                        RequestedOpenTerminalStage: ({ sessionId }) =>
-                          AppMessage.RequestedOpenTerminalStage({ sessionId }),
-                        SelectedForSend: ({ sessionId }) => AppMessage.SelectedForSend({ sessionId }),
-                        RequestedInterrupt: ({ sessionId }) => AppMessage.RequestedInterrupt({ sessionId }),
-                        RequestedArchive: ({ sessionId }) => AppMessage.RequestedArchive({ sessionId }),
-                      },
-                    }),
-                  ),
-                h.div
-                  .attrs({ role: "separator", "aria-orientation": "horizontal" })
-                  .class("group relative flex h-2 shrink-0 items-center justify-center")
-                  .children(
-                    h.span.class("h-0.5 w-8 rounded-full bg-transparent transition-colors group-hover:bg-ring"),
-                  ),
-                h.div
-                  .class("flex min-h-36 flex-col overflow-hidden")
-                  .style({ height: `calc(${100 - model.rightSplitPercent}% - 4px)` })
-                  .children(
-                    KnowledgePanel(h, {
-                      props: {
-                        files: projectFiles,
-                        activeFileId: activeStageFileId,
-                      },
-                      onEmit: {
-                        OpenedFile: ({ file }) => AppMessage.OpenedFile({ file }),
-                        AttachedFile: ({ relativePath }) => AppMessage.AttachedFile({ relativePath }),
-                      },
-                    }),
-                  ),
-              ),
-            model.toast !== null &&
-              h.div
-                .attrs({ role: "status", "data-testid": "toast-pill" })
-                .class(
-                  "fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-border bg-popover px-3.5 py-1.5 text-xs font-medium text-popover-foreground shadow-lg",
-                )
-                .children(model.toast),
+          model.stageItem !== null &&
+            model.stageMode !== "chat" &&
+            h.div.class("flex min-w-0 flex-[1.1] flex-col").children(
+              StagePanel(h, {
+                key: stageKeyFor(model.stageItem),
+                props: {
+                  item: model.stageItem,
+                  theme: model.theme,
+                  sessions: projectSessions,
+                  peekText: activeStagePeekText,
+                },
+                onEmit: {
+                  RequestedRefreshPeek: ({ sessionId }) => AppMessage.RequestedRefreshPeek({ sessionId }),
+                  AddedToComposer: ({ text, attachmentPath }) => AppMessage.AddedToComposer({ text, attachmentPath }),
+                  RequestedClose: () => AppMessage.ClosedStage(),
+                },
+              }),
+            ),
+        ),
+        h.div.class("flex h-full w-[408px] shrink-0 flex-col gap-2 select-text").children(
+          h.div.class("flex min-h-36 flex-[1.08] flex-col overflow-hidden").children(
+            SessionsPanel(h, {
+              props: {
+                sessions: projectSessions,
+                theme: model.theme,
+                expandedPeekId: model.expandedPeekId,
+                peekCache: model.peekCache,
+              },
+              onEmit: {
+                ToggledPeek: ({ sessionId }) => AppMessage.ToggledPeek({ sessionId }),
+                RequestedRefreshPeek: ({ sessionId }) => AppMessage.RequestedRefreshPeek({ sessionId }),
+                RequestedOpenTerminalStage: ({ sessionId }) => AppMessage.RequestedOpenTerminalStage({ sessionId }),
+                SelectedForSend: ({ sessionId }) => AppMessage.SelectedForSend({ sessionId }),
+                RequestedInterrupt: ({ sessionId }) => AppMessage.RequestedInterrupt({ sessionId }),
+                RequestedArchive: ({ sessionId }) => AppMessage.RequestedArchive({ sessionId }),
+              },
+            }),
           ),
-    })
+          h.div.class("flex min-h-36 flex-1 flex-col overflow-hidden").children(
+            KnowledgePanel(h, {
+              props: {
+                files: projectFiles,
+                activeFileId: activeStageFileId,
+              },
+              onEmit: {
+                OpenedFile: ({ file }) => AppMessage.OpenedFile({ file }),
+                AttachedFile: ({ relativePath }) => AppMessage.AttachedFile({ relativePath }),
+              },
+            }),
+          ),
+        ),
+        model.toast !== null &&
+          h.div
+            .attrs({ role: "status", "data-testid": "toast-pill" })
+            .class(
+              "fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-border bg-popover px-3.5 py-1.5 text-xs font-medium text-popover-foreground shadow-lg",
+            )
+            .children(model.toast),
+      )
   },
 })
 
@@ -668,8 +647,6 @@ export const AppCommandLayers = Layer.mergeAll(
   SendSessionMessage.layer,
   InterruptSession.layer,
   ArchiveSession.layer,
-  LoadStageFile.layer,
-  SaveStageFile.layer,
 )
 
 export const App = AppNoDeps.pipe(

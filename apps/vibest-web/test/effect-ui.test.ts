@@ -10,12 +10,17 @@ import { KnowledgePanel, KnowledgePanelEvents, KnowledgePanelMessage } from "../
 import { ProjectsPanel, ProjectsPanelEvents } from "../src/client/components/ProjectsPanel.ts"
 import { SessionsPanel, SessionsPanelEvents, SessionsPanelMessage } from "../src/client/components/SessionsPanel.ts"
 import {
-  LoadStageFile,
-  SaveStageFile,
-  StagePanelEvents,
-  StagePanelMessage,
-  StagePanelNoDeps,
-} from "../src/client/components/StagePanel.ts"
+  ExcalidrawStageMessage,
+  ExcalidrawStageNoDeps,
+  SaveBoardFile,
+} from "../src/client/components/stage/ExcalidrawStage.ts"
+import {
+  MarkdownStage,
+  MarkdownStageEvents,
+  MarkdownStageMessage,
+} from "../src/client/components/stage/MarkdownStage.ts"
+import { LoadStageFile, StagePanelMessage, StagePanelNoDeps } from "../src/client/components/StagePanel.ts"
+import { makeVibestWebApiMemoryLayer } from "../src/client/services/VibestWebApi.ts"
 import type {
   DaemonStatus,
   ProjectFileEntry,
@@ -23,8 +28,7 @@ import type {
   SessionItem,
   TimelineEntry,
   WorkspaceSnapshot,
-} from "../src/client/domain/WebHub.ts"
-import { makeVibestWebApiMemoryLayer } from "../src/client/services/VibestWebApi.ts"
+} from "../src/domain/WebHub.ts"
 
 const sampleDaemon: DaemonStatus = {
   connected: true,
@@ -295,61 +299,59 @@ describe("Effect UI components (Story & HtmlScene)", () => {
     }),
   )
 
-  it.effect("StagePanel loads markdown, creates structured feedback, and saves Excalidraw boards", () =>
+  it.effect("StagePanel loads file content, MarkdownStage emits feedback, and ExcalidrawStage saves boards", () =>
     Effect.gen(function* () {
-      const mdStory = yield* Story.make(StagePanelNoDeps, {
+      const stageStory = yield* Story.make(StagePanelNoDeps, {
         item: { kind: "file", file: sampleFiles[0]! },
         theme: "dark",
         sessions: sampleSessions,
         peekText: "",
       })
 
-      mdStory.expectExact(LoadStageFile).resolve(
+      stageStory.expectExact(LoadStageFile).resolve(
         LoadStageFile,
         StagePanelMessage.SucceededLoadFile({
           fileId: "f-spec",
           content: "# Effect UI Spec\n\nClean Elm architecture.",
-          nodes: [],
         }),
       )
 
-      mdStory.send(StagePanelMessage.ClickedMarkdownComment())
+      assert.strictEqual(stageStory.model.loading, false)
+      assert.strictEqual(stageStory.model.content, "# Effect UI Spec\n\nClean Elm architecture.")
+
+      const mdStory = yield* Story.make(MarkdownStage, {
+        file: sampleFiles[0]!,
+        content: "# Effect UI Spec\n\nClean Elm architecture.",
+        theme: "dark",
+      })
+
+      mdStory.send(MarkdownStageMessage.ClickedComment())
       assert.strictEqual(mdStory.model.selectedQuote, "Effect UI Spec")
 
-      mdStory.send(StagePanelMessage.UpdatedMarkdownNote({ note: "Looks solid" }))
-      mdStory.send(StagePanelMessage.ClickedAddMarkdownFeedback()).emitted(
-        StagePanelEvents.AddedToComposer({
+      mdStory.send(MarkdownStageMessage.UpdatedNote({ note: "Looks solid" }))
+      mdStory.send(MarkdownStageMessage.ClickedAddToComposer()).emitted(
+        MarkdownStageEvents.AddedToComposer({
           text: '[Feedback on @artifacts/spec.md]\n> "Effect UI Spec"\nLooks solid',
           attachmentPath: "artifacts/spec.md",
         }),
       )
 
-      const boardStory = yield* Story.make(StagePanelNoDeps, {
-        item: { kind: "file", file: sampleFiles[1]! },
+      const boardStory = yield* Story.make(ExcalidrawStageNoDeps, {
+        file: sampleFiles[1]!,
+        initialContent: '{"type":"excalidraw","version":2,"elements":[]}',
         theme: "dark",
-        sessions: sampleSessions,
-        peekText: "",
       })
 
-      boardStory.expectExact(LoadStageFile).resolve(
-        LoadStageFile,
-        StagePanelMessage.SucceededLoadFile({
-          fileId: "f-board",
-          content: '{"type":"excalidraw","version":2,"elements":[]}',
-          nodes: [],
-        }),
-      )
-
-      boardStory.send(StagePanelMessage.ClickedBoardAddNode())
-      assert.strictEqual(boardStory.model.boardNodes.length, 1)
-      assert.strictEqual(boardStory.model.boardSaveLabel, "Unsaved")
+      boardStory.send(ExcalidrawStageMessage.ClickedAddNode())
+      assert.strictEqual(boardStory.model.nodes.length, 1)
+      assert.strictEqual(boardStory.model.saveLabel, "Unsaved")
 
       boardStory
-        .send(StagePanelMessage.ClickedBoardSave())
-        .expectExact(SaveStageFile)
-        .resolve(SaveStageFile, StagePanelMessage.SucceededBoardSave())
+        .send(ExcalidrawStageMessage.ClickedSave())
+        .expectExact(SaveBoardFile)
+        .resolve(SaveBoardFile, ExcalidrawStageMessage.SucceededSave())
 
-      assert.strictEqual(boardStory.model.boardSaveLabel, "Saved")
+      assert.strictEqual(boardStory.model.saveLabel, "Saved")
     }),
   )
 })

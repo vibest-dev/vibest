@@ -31,6 +31,8 @@ export const GitBranchStateSchema = Schema.Struct({
   why: Schema.String,
 })
 
+export type GitBranchState = typeof GitBranchStateSchema.Type
+
 export const SessionItemSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -82,6 +84,8 @@ export const MachineLoadSnapshotSchema = Schema.Struct({
   memoryAvailableBytes: Schema.Number,
   workingExecutions: Schema.Number,
 })
+
+export type MachineLoadSnapshot = typeof MachineLoadSnapshotSchema.Type
 
 export const DaemonStatusSchema = Schema.Struct({
   connected: Schema.Boolean,
@@ -212,6 +216,47 @@ export const BoardNodeSchema = Schema.Struct({
 })
 
 export type BoardNode = typeof BoardNodeSchema.Type
+
+export const DemoProjectSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  directory: Schema.String,
+  entrySessionId: Schema.NullOr(Schema.String),
+  activity: Schema.Literals(["blocked", "done", "working", "idle"]),
+  machine: Schema.String,
+  branch: Schema.String,
+})
+
+export const DemoStateSchema = Schema.Struct({
+  version: Schema.String,
+  load: MachineLoadSnapshotSchema,
+  projects: Schema.Array(DemoProjectSchema),
+  sessions: Schema.Array(SessionItemSchema),
+  timelines: Schema.Array(TimelineEntrySchema),
+  peeks: Schema.Record(Schema.String, Schema.String),
+})
+
+export interface ParsedAgentReport {
+  readonly kind: "agent-report"
+  readonly agentId: string
+  readonly machine: string | null
+  readonly firstLine: string
+  readonly details: string
+  readonly rawBody: string
+}
+
+export interface ParsedSystemNotice {
+  readonly kind: "system-notice"
+  readonly firstLine: string
+  readonly body: string
+}
+
+export interface ParsedTextBlock {
+  readonly kind: "text"
+  readonly text: string
+}
+
+export type MessageBlock = ParsedTextBlock | ParsedAgentReport | ParsedSystemNotice
 
 export const INITIAL_DAEMON: DaemonStatus = {
   connected: false,

@@ -1,7 +1,4 @@
-import type { MessageBlock } from "./types.ts"
-
-const AGENT_MESSAGE_PATTERN = /<vibest-agent-message>([\s\S]*?)<\/vibest-agent-message>/g
-const VIBEST_MESSAGE_PATTERN = /<vibest-message>([\s\S]*?)<\/vibest-message>/g
+import type { MessageBlock } from "./domain/WebHub.ts"
 
 const COMBINED_TAG_PATTERN =
   /<vibest-agent-message>([\s\S]*?)<\/vibest-agent-message>|<vibest-message>([\s\S]*?)<\/vibest-message>/g
@@ -13,6 +10,7 @@ interface SummarySplit {
 
 interface ParsedInnerAgent {
   readonly agentId: string
+  readonly machine: string | null
   readonly body: string
 }
 
@@ -36,19 +34,28 @@ function splitSummaryAndDetails(body: string): SummarySplit {
 }
 
 function parseAgentInner(inner: string): ParsedInnerAgent {
-  const idMatch = /<agent-id>([\s\S]*?)<\/agent-id>/.exec(inner)
+  const sessionIdMatch = /<session-id>([\s\S]*?)<\/session-id>/.exec(inner)
+  const legacyIdMatch = /<agent-id>([\s\S]*?)<\/agent-id>/.exec(inner)
+  const machineMatch = /<machine>([\s\S]*?)<\/machine>/.exec(inner)
   const msgMatch = /<message>([\s\S]*?)<\/message>/.exec(inner)
-  const agentId = (idMatch?.[1] ?? "unknown").trim()
-  const body = (msgMatch?.[1] ?? inner.replace(/<agent-id>[\s\S]*?<\/agent-id>/g, "")).trim()
+  const agentId = (sessionIdMatch?.[1] ?? legacyIdMatch?.[1] ?? "unknown").trim()
+  const machineRaw = machineMatch?.[1]?.trim() ?? ""
+  const machine = machineRaw.length > 0 ? machineRaw : null
 
-  return { agentId, body }
+  const fallbackBody = inner
+    .replace(/<session-id>[\s\S]*?<\/session-id>/g, "")
+    .replace(/<agent-id>[\s\S]*?<\/agent-id>/g, "")
+    .replace(/<machine>[\s\S]*?<\/machine>/g, "")
+
+  const body = (msgMatch?.[1] ?? fallbackBody).trim()
+
+  return { agentId, machine, body }
 }
 
-export function hasStructuredVibestTags(raw: string): boolean {
-  AGENT_MESSAGE_PATTERN.lastIndex = 0
-  VIBEST_MESSAGE_PATTERN.lastIndex = 0
+function unwrapSystemNotice(inner: string): string {
+  const msgMatch = /<message>([\s\S]*?)<\/message>/.exec(inner)
 
-  return AGENT_MESSAGE_PATTERN.test(raw) || VIBEST_MESSAGE_PATTERN.test(raw)
+  return (msgMatch?.[1] ?? inner).trim()
 }
 
 export function parseVibestMessageBlocks(raw: string): ReadonlyArray<MessageBlock> {
@@ -75,16 +82,18 @@ export function parseVibestMessageBlocks(raw: string): ReadonlyArray<MessageBloc
       blocks.push({
         kind: "agent-report",
         agentId: parsed.agentId,
+        machine: parsed.machine,
         firstLine: split.firstLine,
         details: split.details,
         rawBody: parsed.body,
       })
     } else if (systemInner !== undefined) {
-      const split = splitSummaryAndDetails(systemInner)
+      const body = unwrapSystemNotice(systemInner)
+      const split = splitSummaryAndDetails(body)
       blocks.push({
         kind: "system-notice",
         firstLine: split.firstLine,
-        body: systemInner.trim(),
+        body,
       })
     }
 

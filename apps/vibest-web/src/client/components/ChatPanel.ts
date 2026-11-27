@@ -3,17 +3,16 @@ import { Collapsible, Popover, Select, Tabs } from "@effect/ui-kit"
 import { Html } from "@effect/ui/html"
 import { Predicate, Schema } from "effect"
 
-import { renderSafeMarkdownHtml } from "../../markdown-safe.ts"
-import { parseVibestMessageBlocks } from "../../xml-parser.ts"
 import {
   ProjectFileEntrySchema,
   ProjectSummarySchema,
   SessionItemSchema,
   StageModeSchema,
   TimelineEntrySchema,
-  type SessionItem,
   type StageMode,
-} from "../domain/WebHub.ts"
+} from "../../domain/WebHub.ts"
+import { renderSafeMarkdownHtml } from "../../markdown-safe.ts"
+import { parseVibestMessageBlocks } from "../../xml-parser.ts"
 import { RenderSafeHtml, SyncTextareaHeight } from "../mounts/DomMounts.ts"
 import {
   IconAtSign,
@@ -56,10 +55,10 @@ function initialsOf(label: string): string {
   return clean.slice(0, 2).toUpperCase()
 }
 
-function toStageMode(value: string): StageMode {
-  if (value === "split" || value === "stage") return value
+const isStageMode = Schema.is(StageModeSchema)
 
-  return "chat"
+function toStageMode(value: string): StageMode {
+  return isStageMode(value) ? value : "chat"
 }
 
 export const ChatPanelMessage = UiSchema.TaggedEnum({
@@ -80,11 +79,11 @@ export const ChatPanelMessage = UiSchema.TaggedEnum({
 })
 
 export const ChatPanelEvents = UiSchema.TaggedEnum({
-  ChangedStageMode: { mode: StageModeSchema },
-  ChangedTargetSession: { sessionId: Schema.String },
-  ChangedComposerText: { text: Schema.String },
-  AddedAttachment: { relativePath: Schema.String },
-  RemovedAttachment: { relativePath: Schema.String },
+  RequestedStageMode: { mode: StageModeSchema },
+  RequestedTargetSession: { sessionId: Schema.String },
+  RequestedComposerText: { text: Schema.String },
+  RequestedAddAttachment: { relativePath: Schema.String },
+  RequestedRemoveAttachment: { relativePath: Schema.String },
   RequestedSend: {},
   RequestedPeekSession: { sessionId: Schema.String },
   RequestedFocusSession: { sessionId: Schema.String },
@@ -123,22 +122,23 @@ export const ChatPanel = ChatPanelDef.make({
     expandedReports: {},
   }),
   update: {
-    SelectedStageMode: ($, { mode }) => $.emit(ChatPanelEvents.ChangedStageMode({ mode })),
+    SelectedStageMode: ($, { mode }) => $.emit(ChatPanelEvents.RequestedStageMode({ mode })),
     UpdatedComposerText: ($, { text }) =>
       $.evolve({ atOpen: (open) => (text.endsWith("@") ? true : open) }).emit(
-        ChatPanelEvents.ChangedComposerText({ text }),
+        ChatPanelEvents.RequestedComposerText({ text }),
       ),
     SubmittedComposer: ($) => $.emit(ChatPanelEvents.RequestedSend()),
     RequestedOpenAtPopover: ($) => $.evolve({ atOpen: true }),
     RequestedCloseAtPopover: ($) => $.evolve({ atOpen: false }),
     UpdatedAtFilter: ($, { filter }) => $.evolve({ atFilter: filter }),
     PickedAttachment: ($, { relativePath }) =>
-      $.evolve({ atOpen: false, atFilter: "" }).emit(ChatPanelEvents.AddedAttachment({ relativePath })),
-    ClickedRemoveAttachment: ($, { relativePath }) => $.emit(ChatPanelEvents.RemovedAttachment({ relativePath })),
+      $.evolve({ atOpen: false, atFilter: "" }).emit(ChatPanelEvents.RequestedAddAttachment({ relativePath })),
+    ClickedRemoveAttachment: ($, { relativePath }) =>
+      $.emit(ChatPanelEvents.RequestedRemoveAttachment({ relativePath })),
     RequestedOpenTargetSelect: ($) => $.evolve({ targetSelectOpen: true }),
     RequestedCloseTargetSelect: ($) => $.evolve({ targetSelectOpen: false }),
     PickedTargetSession: ($, { sessionId }) =>
-      $.evolve({ targetSelectOpen: false }).emit(ChatPanelEvents.ChangedTargetSession({ sessionId })),
+      $.evolve({ targetSelectOpen: false }).emit(ChatPanelEvents.RequestedTargetSession({ sessionId })),
     ToggledAgentReport: ($, { reportKey }) =>
       $.evolve({
         expandedReports: (prev) => ({ ...prev, [reportKey]: !prev[reportKey] }),
@@ -161,11 +161,7 @@ export const ChatPanel = ChatPanelDef.make({
       sending,
     } = h.props
 
-    const sessionById = new Map<string, SessionItem>()
-
-    for (const s of sessions) {
-      sessionById.set(s.id, s)
-    }
+    const sessionById = new Map(sessions.map((s) => [s.id, s]))
 
     const activeSession = activeSessionId !== null ? sessionById.get(activeSessionId) : undefined
     const targetSession = targetSessionId !== null ? sessionById.get(targetSessionId) : undefined
