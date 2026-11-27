@@ -1,4 +1,5 @@
-import fs from "node:fs/promises"
+import fs from "node:fs"
+import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -67,7 +68,7 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
   try {
     for (const deadline = Date.now() + 30_000; !(await rpc(probe(socket))); await Bun.sleep(100)) {
       if (daemon.exitCode !== null || Date.now() > deadline)
-        assert.fail(`vibestd did not come up:\n${await fs.readFile(log, "utf8").catch(() => "")}`)
+        assert.fail(`vibestd did not come up:\n${await fsPromises.readFile(log, "utf8").catch(() => "")}`)
     }
 
     await f(() =>
@@ -90,7 +91,7 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
 }
 
 beforeAll(() => {
-  if (process.env.TURBO_HASH !== undefined) return
+  if (process.env.TURBO_HASH !== undefined && fs.existsSync(binary)) return
   const out = Bun.spawnSync(["bun", "run", "build"], { cwd: pkg, stdout: "pipe", stderr: "pipe" })
   assert.strictEqual(out.exitCode, 0, out.stderr.toString())
 }, 120_000)
@@ -99,11 +100,11 @@ it(
   "P11: the compiled binary maps effect, effect/* and @vibest/plugin to its own instances, even for a plugin with its own copy of effect",
   { timeout: 60_000 },
   async () => {
-    const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-p11-"))
+    const home = await fsPromises.mkdtemp(path.join(os.tmpdir(), "vibest-p11-"))
 
     for (const [file, content] of Object.entries(plugins)) {
-      await fs.mkdir(path.dirname(path.join(home, "plugins", file)), { recursive: true })
-      await fs.writeFile(path.join(home, "plugins", file), content)
+      await fsPromises.mkdir(path.dirname(path.join(home, "plugins", file)), { recursive: true })
+      await fsPromises.writeFile(path.join(home, "plugins", file), content)
     }
 
     try {
@@ -120,7 +121,7 @@ it(
         assert.strictEqual(status["broken.ts"]?.[0], "failed")
       })
     } finally {
-      await fs.rm(home, { recursive: true, force: true })
+      await fsPromises.rm(home, { recursive: true, force: true })
     }
   },
 )
@@ -146,14 +147,14 @@ it(
   "a plugin's lazy import, imported again once another plugin loads, is the same module evaluated once",
   { timeout: 180_000 },
   async () => {
-    const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-lazy-"))
+    const home = await fsPromises.mkdtemp(path.join(os.tmpdir(), "vibest-lazy-"))
     const log = path.join(home, "lazy.log")
-    await fs.mkdir(path.join(home, "plugins", "lazy"), { recursive: true })
-    await fs.writeFile(
+    await fsPromises.mkdir(path.join(home, "plugins", "lazy"), { recursive: true })
+    await fsPromises.writeFile(
       path.join(home, "plugins", "lazy", "lazy.ts"),
       `import fs from "node:fs"\nfs.appendFileSync(process.env.VIBEST_HOME + "/lazy.log", "evaluated\\n")\n`,
     )
-    await fs.writeFile(
+    await fsPromises.writeFile(
       path.join(home, "plugins", "lazy", "index.ts"),
       `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
@@ -179,20 +180,20 @@ export default Plugin.define({
     try {
       await withVibestd(home, async (list) => {
         await listUntil(list, (l) => l[0]?.status === "active")
-        await fs.writeFile(
+        await fsPromises.writeFile(
           path.join(home, "plugins", "zz-other.ts"),
           `import { Plugin } from "@vibest/plugin/effect"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "other", effect: () => Effect.void })\n`,
         )
         await listUntil(list, (l) => l[1]?.status === "active")
-        await fs.writeFile(path.join(home, "trigger"), "")
-        const lines = async () => (await fs.readFile(log, "utf8")).trim().split("\n")
+        await fsPromises.writeFile(path.join(home, "trigger"), "")
+        const lines = async () => (await fsPromises.readFile(log, "utf8")).trim().split("\n")
 
         for (const deadline = Date.now() + 15_000; (await lines()).length < 2 && Date.now() < deadline;)
           await Bun.sleep(100)
         assert.deepStrictEqual(await lines(), ["evaluated", "same"])
       })
     } finally {
-      await fs.rm(home, { recursive: true, force: true })
+      await fsPromises.rm(home, { recursive: true, force: true })
     }
   },
 )

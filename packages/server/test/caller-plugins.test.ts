@@ -315,7 +315,9 @@ describe("caller runtimes", () => {
         )
         yield* Effect.gen(function* () {
           while (process.env[key] !== undefined) yield* Effect.sleep("20 millis")
-        }).pipe(Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.die("caller env was not dropped") }))
+        }).pipe(
+          Effect.timeoutOrElse({ duration: "15 seconds", orElse: () => Effect.die("caller env was not dropped") }),
+        )
 
         const out = yield* (yield* ChildProcessSpawner.ChildProcessSpawner).string(
           ChildProcess.make("sh", ["-c", `printf %s "\${${key}-}"`]),

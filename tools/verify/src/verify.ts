@@ -86,9 +86,14 @@ const run = (title: string, argv: ReadonlyArray<string>, options: Options = {}) 
     child.stdout.on("data", (b: Buffer) => out.push(b))
     child.stderr.on("data", (b: Buffer) => out.push(b))
 
+    let settled = false
+
     const done = async (ok: boolean, why: string) => {
-      await writeAll(process.stdout, `\n== verify: ${title} (${((Date.now() - started) / 1000).toFixed(1)} s)\n`)
-      await writeAll(process.stdout, Buffer.concat(out))
+      if (settled) return
+      settled = true
+
+      const header = Buffer.from(`\n== verify: ${title} (${((Date.now() - started) / 1000).toFixed(1)} s)\n`)
+      await writeAll(process.stdout, Buffer.concat([header, ...out]))
 
       if (!ok) await writeAll(process.stderr, `\nverify: ${title} failed (${why})\n`)
       resolve(ok)

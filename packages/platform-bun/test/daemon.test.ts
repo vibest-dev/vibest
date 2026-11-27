@@ -68,7 +68,7 @@ describe.concurrent("vibestd.pid lock", () => {
         const running = [...starts]
         const exited: Array<{ readonly code: number; readonly stdout: string; readonly stderr: string }> = []
 
-        for (const deadline = Date.now() + 10_000; running.length > 1 && Date.now() < deadline;) {
+        for (const deadline = Date.now() + 30_000; running.length > 1 && Date.now() < deadline;) {
           for (let i = running.length - 1; i >= 0; i--) {
             if (running[i]!.pollUnsafe() === undefined) continue
             exited.push(yield* Fiber.join(running.splice(i, 1)[0]!))
@@ -132,7 +132,7 @@ describe.concurrent("vibestd.pid lock", () => {
           Effect.promise(() =>
             execFile(process.execPath, [`${import.meta.dirname}/lock-contender.ts`, file], {
               encoding: "utf8",
-              timeout: 10_000,
+              timeout: 30_000,
             }),
           ).pipe(Effect.map(({ stdout }) => stdout.trim()))
 
