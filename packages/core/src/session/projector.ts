@@ -1,37 +1,11 @@
-import {
-  ExecutionAccepted,
-  ExecutionAllocated,
-  ExecutionFailed,
-  ExecutionInput,
-  ExecutionInterrupted,
-  ExecutionStarted,
-  ExecutionSucceeded,
-  ExecutionUnresolved,
-  type Fact,
-  InboxDelivered,
-  InboxDeliveryFailed,
-  InboxDeliveryStarted,
-  InboxDropped,
-  InboxEnqueued,
-  InboxUnresolved,
-  ProcessConversation,
-  ProcessEnded,
-  ProcessPid,
-  ProcessPlaced,
-  ProcessReady,
-  ProcessStarted,
-  SessionCreated,
-  SessionDirectoryChanged,
-  SessionEnded,
-  SessionRenamed,
-} from "@vibest/schema/event"
+import { ProcessEvent } from "@vibest/schema/process-event"
+import { SessionEvent } from "@vibest/schema/session-event"
+import { canonicalTarget } from "@vibest/schema/terminal"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus, type Definition, type Projector } from "../bus.ts"
-import { senderColumns, senderKey } from "../database/db-rows.ts"
-
-const sessionIdOf = (fact: Fact) => fact.sessionId!
+import { senderColumns, senderKey } from "../database/rows.ts"
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -40,101 +14,101 @@ export const layer = Layer.effectDiscard(
 
     const active =
       <D extends Definition>(projector: Projector<D>): Projector<D> =>
-      (fact) =>
+      (event) =>
         Effect.andThen(
-          projector(fact),
-          sql`UPDATE session SET active_at = max(coalesce(active_at, 0), ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
+          projector(event),
+          sql`UPDATE session SET active_at = max(coalesce(active_at, 0), ${event.created})
+            WHERE id = ${event.durable.aggregateId}`,
         )
 
-    yield* bus.project(SessionCreated, (fact) => {
-      const { data } = fact
+    yield* bus.project(SessionEvent.Created, (event) => {
+      const { data } = event
       const origin = data.origin
 
-      return sql`INSERT INTO session (id, project_id, parent_session_id, agent, name, directory, origin_peer,
-          origin_project, origin_session, team, created_at, active_at, message_id)
-        VALUES (${sessionIdOf(fact)}, ${data.project}, ${data.parent ?? null}, ${data.agent}, ${data.name},
-          ${data.directory}, ${origin?.peer ?? null}, ${origin?.project ?? null}, ${origin?.session ?? null},
-          ${data.team ?? null}, ${fact.at}, ${origin === undefined ? null : fact.at}, ${data.message ?? null})`
+      return sql`INSERT INTO session (id, project_id, parent_session_id, agent, name, directory, origin_remote,
+          origin_project, origin_session, created_at, active_at, message_id)
+        VALUES (${data.sessionId}, ${data.project}, ${data.parent ?? null}, ${data.agent}, ${data.name},
+          ${data.directory}, ${origin?.remote ?? null}, ${origin?.project ?? null}, ${origin?.session ?? null},
+          ${event.created}, ${origin === undefined ? null : event.created}, ${data.messageId ?? null})`
     })
     yield* bus.project(
-      SessionRenamed,
-      (fact) => sql`UPDATE session SET name = ${fact.data.name} WHERE id = ${sessionIdOf(fact)}`,
+      SessionEvent.Renamed,
+      (event) => sql`UPDATE session SET name = ${event.data.name} WHERE id = ${event.data.sessionId}`,
     )
     yield* bus.project(
-      SessionDirectoryChanged,
-      (fact) => sql`UPDATE session SET directory = ${fact.data.directory} WHERE id = ${sessionIdOf(fact)}`,
+      SessionEvent.DirectoryChanged,
+      (event) => sql`UPDATE session SET directory = ${event.data.directory} WHERE id = ${event.data.sessionId}`,
     )
-    yield* bus.project(SessionEnded, (fact) =>
+    yield* bus.project(SessionEvent.Archived, (event) =>
       Effect.andThen(
-        sql`UPDATE session SET ended_at = coalesce(ended_at, ${fact.at}) WHERE id = ${sessionIdOf(fact)}`,
-        sql`UPDATE outbox SET peer_id = '' WHERE session_id = ${sessionIdOf(fact)} AND acked_at IS NULL`,
+        sql`UPDATE session SET ended_at = coalesce(ended_at, ${event.created}) WHERE id = ${event.data.sessionId}`,
+        sql`UPDATE outbox SET remote_id = '' WHERE session_id = ${event.data.sessionId} AND acked_at IS NULL`,
       ),
+    )
+    yield* bus.project(
+      SessionEvent.Linked,
+      (event) =>
+        sql`INSERT OR IGNORE INTO session_edge (from_session_id, to_remote_id, to_session_id)
+          VALUES (${event.data.sessionId}, ${event.data.remote ?? ""}, ${event.data.to})`,
+    )
+    yield* bus.project(
+      SessionEvent.Unlinked,
+      (event) =>
+        sql`DELETE FROM session_edge WHERE from_session_id = ${event.data.sessionId}
+          AND to_remote_id = ${event.data.remote ?? ""} AND to_session_id = ${event.data.to}`,
     )
 
     yield* bus.project(
-      ProcessStarted,
-      active((fact) => {
-        const { data } = fact
+      ProcessEvent.Started,
+      active((event) => {
+        const { data } = event
 
         return Effect.andThen(
           sql`INSERT INTO process (id, session_id, harness, provider, model, routing, harness_session_id, runtime, terminal,
               pid, started_at, placed_at)
-            VALUES (${fact.seq}, ${sessionIdOf(fact)}, ${data.harness}, ${data.provider ?? null}, ${data.model ?? null},
+            VALUES (${data.processId}, ${data.sessionId}, ${data.harness}, ${data.provider ?? null}, ${data.model ?? null},
               ${data.routing === undefined ? null : JSON.stringify(data.routing)}, ${data.resume ?? null}, ${data.runtime},
-              ${data.terminal ?? null}, ${data.pid ?? null}, ${fact.at}, ${data.terminal === undefined ? null : fact.at})`,
-          sql`UPDATE session SET process_id = ${fact.seq} WHERE id = ${sessionIdOf(fact)}`,
+              ${data.terminal === undefined ? null : canonicalTarget(data.terminal)}, ${data.pid ?? null}, ${event.created}, ${data.terminal === undefined ? null : event.created})`,
+          sql`UPDATE session SET process_id = ${data.processId} WHERE id = ${data.sessionId}`,
         )
       }),
     )
     yield* bus.project(
-      ProcessPlaced,
-      active(
-        (fact) =>
-          sql`UPDATE process SET terminal = ${fact.data.terminal}, placed_at = ${fact.at},
-              pid = coalesce(${fact.data.pid ?? null}, pid)
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
-      ),
-    )
-    yield* bus.project(
-      ProcessReady,
-      active((fact) => {
-        const { integration } = fact.data
+      ProcessEvent.Updated,
+      active((event) => {
+        const { data } = event
 
-        return sql`UPDATE process SET ready_at = ${fact.at}, pid = coalesce(${fact.data.pid ?? null}, pid),
-            integration_version = ${integration === undefined ? sql`integration_version` : integration.version},
-            integration_protocol = ${integration === undefined ? sql`integration_protocol` : integration.protocol}
-          WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`
+        return sql`UPDATE process SET terminal = ${data.terminal === undefined ? sql`terminal` : canonicalTarget(data.terminal)},
+            placed_at = ${data.terminal === undefined ? sql`placed_at` : sql`coalesce(placed_at, ${event.created})`},
+            pid = coalesce(${data.pid ?? null}, pid),
+            harness_session_id = coalesce(${data.conversation ?? null}, harness_session_id)
+          WHERE session_id = ${data.sessionId} AND id = ${data.processId}`
       }),
     )
     yield* bus.project(
-      ProcessPid,
-      active(
-        (fact) =>
-          sql`UPDATE process SET pid = ${fact.data.pid} WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
-      ),
+      ProcessEvent.Ready,
+      active((event) => {
+        const { integration } = event.data
+
+        return sql`UPDATE process SET ready_at = ${event.created}, pid = coalesce(${event.data.pid ?? null}, pid),
+            integration_version = ${integration === undefined ? sql`integration_version` : integration.version},
+            integration_protocol = ${integration === undefined ? sql`integration_protocol` : integration.protocol}
+          WHERE session_id = ${event.data.sessionId} AND id = ${event.data.processId}`
+      }),
     )
     yield* bus.project(
-      ProcessConversation,
-      active(
-        (fact) =>
-          sql`UPDATE process SET harness_session_id = ${fact.data.conversation}
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.process}`,
-      ),
-    )
-    yield* bus.project(
-      ProcessEnded,
-      active((fact) =>
+      ProcessEvent.Ended,
+      active((event) =>
         Effect.gen(function* () {
-          const { process, reason } = fact.data
-          const session = sessionIdOf(fact)
-          yield* sql`UPDATE process SET ended_at = ${fact.at}, end_reason = ${reason}
-            WHERE session_id = ${session} AND id = ${process} AND ended_at IS NULL`
+          const { processId, reason, sessionId } = event.data
+          yield* sql`UPDATE process SET ended_at = ${event.created}, end_reason = ${reason}
+            WHERE session_id = ${sessionId} AND id = ${processId} AND ended_at IS NULL`
 
           if (reason !== "launch_failed") return
-          yield* sql`UPDATE session SET process_id = coalesce((SELECT max(id) FROM process WHERE session_id = ${session}
+          yield* sql`UPDATE session SET process_id = coalesce((SELECT max(id) FROM process WHERE session_id = ${sessionId}
               AND NOT (terminal IS NULL AND end_reason = 'launch_failed')), process_id)
-            WHERE id = ${session}
-              AND EXISTS (SELECT 1 FROM process WHERE session_id = ${session} AND id = ${process} AND terminal IS NULL)`
+            WHERE id = ${sessionId}
+              AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND id = ${processId} AND terminal IS NULL)`
         }),
       ),
     )
@@ -143,69 +117,68 @@ export const layer = Layer.effectDiscard(
       sql`session_id = ${session} AND id = ${execution} AND (outcome IS NULL OR outcome IN ('lost', 'not_started'))`
 
     yield* bus.project(
-      ExecutionAllocated,
-      active((fact) =>
+      SessionEvent.ExecutionAllocated,
+      active((event) =>
         Effect.gen(function* () {
-          const session = sessionIdOf(fact)
+          const session = event.data.sessionId
           yield* sql`INSERT INTO execution (session_id, id, process_id, typed, booked_at, owner)
-              VALUES (${session}, ${fact.data.executionId}, ${fact.data.processId ?? null},
-                ${fact.data.typed ?? null}, ${fact.at}, 0)`
-          yield* sql`UPDATE execution SET owner = 1 WHERE session_id = ${session} AND id = ${fact.data.executionId}
+              VALUES (${session}, ${event.data.executionId}, ${event.data.processId ?? null},
+                ${event.data.typed ?? null}, ${event.created}, 0)`
+          yield* sql`UPDATE execution SET owner = 1 WHERE session_id = ${session} AND id = ${event.data.executionId}
               AND NOT EXISTS (SELECT 1 FROM execution WHERE session_id = ${session} AND owner = 1)`
         }),
       ),
     )
-    yield* bus.project(ExecutionAccepted, () => Effect.void)
     yield* bus.project(
-      ExecutionStarted,
-      active((fact) =>
+      SessionEvent.ExecutionStarted,
+      active((event) =>
         Effect.gen(function* () {
-          const session = sessionIdOf(fact)
-          const id = fact.data.executionId
+          const session = event.data.sessionId
+          const id = event.data.executionId
           yield* sql`UPDATE execution SET owner = 0 WHERE session_id = ${session} AND id != ${id}
               AND EXISTS (SELECT 1 FROM execution WHERE session_id = ${session} AND id = ${id} AND started_at IS NULL)`
-          yield* sql`UPDATE execution SET started_at = coalesce(started_at, ${fact.at}), owner = 1,
-                process_id = coalesce(${fact.data.processId ?? null}, process_id)
+          yield* sql`UPDATE execution SET started_at = coalesce(started_at, ${event.created}), owner = 1,
+                process_id = coalesce(${event.data.processId ?? null}, process_id)
               WHERE session_id = ${session} AND id = ${id} AND started_at IS NULL`
         }),
       ),
     )
     yield* bus.project(
-      ExecutionSucceeded,
+      SessionEvent.ExecutionSucceeded,
       active(
-        (fact) =>
-          sql`UPDATE execution SET outcome = 'completed', reply = ${fact.data.reply ?? null}, ended_at = ${fact.at}, owner = 0,
+        (event) =>
+          sql`UPDATE execution SET outcome = 'completed', reply = ${event.data.reply ?? null}, ended_at = ${event.created}, owner = 0,
               failure = null, failure_kind = null
-            WHERE ${openEnded(sessionIdOf(fact), fact.data.executionId)}`,
+            WHERE ${openEnded(event.data.sessionId, event.data.executionId)}`,
       ),
     )
     yield* bus.project(
-      ExecutionFailed,
+      SessionEvent.ExecutionFailed,
       active(
-        (fact) =>
-          sql`UPDATE execution SET outcome = 'failed', reply = ${fact.data.reply ?? null},
-              failure = ${fact.data.failure.message}, failure_kind = ${fact.data.failure.kind ?? null},
-              ended_at = ${fact.at}, owner = 0
-            WHERE ${openEnded(sessionIdOf(fact), fact.data.executionId)}`,
+        (event) =>
+          sql`UPDATE execution SET outcome = 'failed', reply = ${event.data.reply ?? null},
+              failure = ${event.data.failure.message}, failure_kind = ${event.data.failure.kind ?? null},
+              ended_at = ${event.created}, owner = 0
+            WHERE ${openEnded(event.data.sessionId, event.data.executionId)}`,
       ),
     )
     yield* bus.project(
-      ExecutionInterrupted,
+      SessionEvent.ExecutionInterrupted,
       active(
-        (fact) =>
-          sql`UPDATE execution SET outcome = 'interrupted', reply = ${fact.data.reply ?? null}, ended_at = ${fact.at},
+        (event) =>
+          sql`UPDATE execution SET outcome = 'interrupted', reply = ${event.data.reply ?? null}, ended_at = ${event.created},
               owner = 0, failure = null, failure_kind = null
-            WHERE ${openEnded(sessionIdOf(fact), fact.data.executionId)}`,
+            WHERE ${openEnded(event.data.sessionId, event.data.executionId)}`,
       ),
     )
     yield* bus.project(
-      ExecutionUnresolved,
+      SessionEvent.ExecutionUnresolved,
       active(
-        (fact) =>
-          sql`UPDATE execution SET outcome = ${fact.data.observation}, owner = 0,
-              reply = ${fact.data.reply ?? null},
-              failure = ${fact.data.failure?.message ?? null}, failure_kind = ${fact.data.failure?.kind ?? null}
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.executionId} AND outcome IS NULL`,
+        (event) =>
+          sql`UPDATE execution SET outcome = ${event.data.observation}, owner = 0,
+              reply = ${event.data.reply ?? null},
+              failure = ${event.data.failure?.message ?? null}, failure_kind = ${event.data.failure?.kind ?? null}
+            WHERE session_id = ${event.data.sessionId} AND id = ${event.data.executionId} AND outcome IS NULL`,
       ),
     )
 
@@ -233,76 +206,50 @@ export const layer = Layer.effectDiscard(
     }
 
     yield* bus.project(
-      ExecutionInput,
+      SessionEvent.ExecutionInput,
       active(
-        (fact) =>
-          sql`UPDATE execution SET typed = CASE WHEN typed IS NULL THEN ${fact.data.typed}
-              ELSE typed || char(10) || ${fact.data.typed} END
-            WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.executionId}`,
+        (event) =>
+          sql`UPDATE execution SET typed = CASE WHEN typed IS NULL THEN ${event.data.typed}
+              ELSE typed || char(10) || ${event.data.typed} END
+            WHERE session_id = ${event.data.sessionId} AND id = ${event.data.executionId}`,
       ),
     )
     yield* bus.project(
-      InboxEnqueued,
-      active((fact) => inboxRow(sessionIdOf(fact), fact.seq, { ...fact.data, status: "pending" })),
+      SessionEvent.InboxEnqueued,
+      active((event) => inboxRow(event.data.sessionId, event.data.messageId, { ...event.data, status: "pending" })),
     )
     yield* bus.project(
-      InboxDeliveryStarted,
+      SessionEvent.InboxDelivering,
       active(
-        (fact) =>
+        (event) =>
           sql`UPDATE inbox SET status = 'delivering',
-              recipient_execution_id = coalesce(${fact.data.execution ?? null}, recipient_execution_id)
-            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+              recipient_execution_id = coalesce(${event.data.execution ?? null}, recipient_execution_id)
+            WHERE recipient_session_id = ${event.data.sessionId} AND id = ${event.data.messageId}`,
       ),
     )
     yield* bus.project(
-      InboxDelivered,
+      SessionEvent.InboxDelivered,
       active(
-        (fact) =>
-          sql`UPDATE inbox SET status = 'delivered', recipient_execution_id = ${fact.data.recipientExecutionId}
-            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+        (event) =>
+          sql`UPDATE inbox SET status = 'delivered', recipient_execution_id = ${event.data.recipientExecutionId}
+            WHERE recipient_session_id = ${event.data.sessionId} AND id = ${event.data.messageId}`,
       ),
     )
     yield* bus.project(
-      InboxDeliveryFailed,
+      SessionEvent.InboxFailed,
       active(
-        (fact) =>
+        (event) =>
           sql`UPDATE inbox SET status = 'failed'
-            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+            WHERE recipient_session_id = ${event.data.sessionId} AND id = ${event.data.messageId}`,
       ),
     )
     yield* bus.project(
-      InboxDropped,
+      SessionEvent.InboxDropped,
       active(
-        (fact) =>
+        (event) =>
           sql`UPDATE inbox SET status = 'dropped'
-            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${fact.data.messageId}`,
+            WHERE recipient_session_id = ${event.data.sessionId} AND id = ${event.data.messageId}`,
       ),
-    )
-    yield* bus.project(
-      InboxUnresolved,
-      active((fact) => {
-        const { data } = fact
-        const sender = data.sender
-        const content = data.content
-
-        if (data.history === "released" && data.messageId !== undefined)
-          return sql`UPDATE inbox SET status = 'pending', recipient_execution_id = NULL
-            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${data.messageId}`
-
-        if (data.messageId !== undefined || sender === undefined || content === undefined)
-          return sql`UPDATE inbox SET status = 'unresolved'
-            WHERE recipient_session_id = ${sessionIdOf(fact)} AND id = ${data.messageId ?? fact.seq}`
-
-        return inboxRow(sessionIdOf(fact), fact.seq, {
-          sender,
-          content,
-          status: "unresolved",
-          ...(data.senderExecutionId !== undefined && { senderExecutionId: data.senderExecutionId }),
-          ...(data.requestId !== undefined && { requestId: data.requestId }),
-          ...(data.transferId !== undefined && { transferId: data.transferId }),
-          ...(data.aboutSessionId !== undefined && { aboutSessionId: data.aboutSessionId }),
-        })
-      }),
     )
   }),
 )

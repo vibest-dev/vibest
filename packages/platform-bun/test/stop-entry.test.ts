@@ -1,82 +1,72 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/database/db"
-import { encodeAddress, harnessIdOf, placedTerminal, runtimeOf, terminalOf } from "@vibest/core/database/db-rows"
-import { Processes } from "@vibest/core/processes"
+import { Bus, TerminalExited } from "@vibest/core/bus"
+import { harnessIdOf, placedTerminal, runtimeOf, terminalOf } from "@vibest/core/database/rows"
+import { InboxStore } from "@vibest/core/inbox/store"
 import { Project } from "@vibest/core/project"
-import { HARNESS_EXIT_WAIT } from "@vibest/core/remove"
-import { unwrapped } from "@vibest/core/replies"
+import { Processes } from "@vibest/core/runtime/processes"
 import { SessionLive } from "@vibest/core/session/live"
+import { HARNESS_EXIT_WAIT } from "@vibest/core/session/release"
+import { unwrapped } from "@vibest/core/session/replies"
+import { SessionStore } from "@vibest/core/session/store"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
-import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
-import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
-
 import {
   authed,
   entryPending,
   FakeProcesses,
   FakeRuntime,
   makeRepository,
+  processesOn,
+  projectOf,
   TEST_HERDR,
   testLayer,
   type TestOptions,
   type TestServices,
   until,
   untilVirtual,
-  projectOf,
-  processesOn,
-} from "./lib/fakes.ts"
+} from "@vibest/testkit/fakes"
+import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
+import { TestClock } from "effect/testing"
 
-const served = (options: TestOptions) =>
+import * as Platform from "#platform"
+
+const refuseRealKills = Effect.gen(function* () {
+  const real = process.kill.bind(process)
+  yield* Effect.acquireRelease(
+    Effect.sync(() => {
+      process.kill = ((pid: number, signal?: string | number) => {
+        throw new Error(`test called real process.kill(${pid}, ${String(signal)})`)
+      }) as typeof process.kill
+    }),
+    () =>
+      Effect.sync(() => {
+        process.kill = real
+      }),
+  )
+})
+
+const served = (options?: TestOptions) =>
   Server.layer.pipe(
-    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(testLayer(options)),
   )
 
 const test = <E>(
   name: string,
-  program: Effect.Effect<void, E, TestServices | FakeProcesses | Project.Service | Scope.Scope>,
-  options: TestOptions = {},
-) => it.effect(name, () => program.pipe(Effect.provide(served(options))), 20_000)
+  program: Effect.Effect<void, E, TestServices | Project.Service | Scope.Scope>,
+  options?: TestOptions,
+) => it.effect(name, () => program.pipe(Effect.provide(served(options))))
 
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 
-const refuseRealKills = Effect.acquireRelease(
-  Effect.sync(() => {
-    const real = process.kill
-    process.kill = ((pid: number, signal?: string | number) => {
-      const terminal =
-        signal === undefined ||
-        signal === "SIGTERM" ||
-        signal === "SIGKILL" ||
-        signal === "SIGHUP" ||
-        signal === 15 ||
-        signal === 9 ||
-        signal === 1
-
-      if (pid <= 0 || terminal) throw new Error(`refused to signal ${pid} with ${String(signal)}`)
-
-      return real(pid, signal)
-    }) as typeof process.kill
-
-    return real
-  }),
-  (real) =>
-    Effect.sync(() => {
-      process.kill = real
-    }),
-)
-
 const HARNESS = 4242
 
-const workingPiEntry = Effect.gen(function* () {
+const workingPiRoot = Effect.gen(function* () {
   yield* refuseRealKills
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
+  const inboxStore = yield* InboxStore.Service
   const herdr = yield* FakeRuntime
   const processes = yield* FakeProcesses
   const repo = yield* makeRepository
@@ -86,21 +76,22 @@ const workingPiEntry = Effect.gen(function* () {
   yield* herdr.updateAgent(paneId, (a) => ({ ...a, status: "working" }))
   yield* processes.set(HARNESS, "alive")
 
-  const started = yield* c["Project.EntrySession"]({
-    agent: "coordinator",
-    harness: "pi",
-    fresh: false,
-    terminal: paneId,
-    runtime: TEST_HERDR,
-    pid: HARNESS,
+  const started = yield* c["server.session"]["session.claim"]({
+    payload: {
+      agent: "coordinator",
+      harness: "pi",
+      fresh: false,
+      terminal: { id: paneId },
+      runtime: TEST_HERDR,
+      pid: HARNESS,
+    },
   })
 
-  yield* db.session.noteConversation(started.sessionId, "conversation-1")
+  yield* sessionStore.noteConversation(started.sessionId, "conversation-1")
   const projectId = yield* projectOf(repo)
-  const entry = (yield* db.session.entryOf(projectId))!
-  const origin = { runtime: runtimeOf(entry), address: terminalOf(entry) }
-  const address = encodeAddress(origin.address)
-  yield* db.session.insertSession(
+  const root = (yield* sessionStore.latestRoot(projectId))!
+  const origin = { runtime: runtimeOf(root), target: terminalOf(root)!.target }
+  yield* sessionStore.insertSession(
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       agent: "general",
@@ -110,7 +101,7 @@ const workingPiEntry = Effect.gen(function* () {
       model: null,
       harnessSessionId: null,
       runtime: TEST_HERDR,
-      address: { machine: "local", id: "test/p0" },
+      terminal: { id: "test/p0" },
       status: "idle",
       startedAt: 1,
       exitedAt: null,
@@ -120,23 +111,47 @@ const workingPiEntry = Effect.gen(function* () {
       lastActive: 1,
     },
     projectId,
-    { parentSessionId: entry.id },
+    { parentSessionId: root.id },
   )
-  yield* db.inbox.insertInbox({
+  yield* inboxStore.insertInbox({
     sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-    message: "waiting for the entry session",
+    message: "waiting for the root session",
   })
-  const stop = c["Project.StopEntry"]({ runtime: origin.runtime, address })
+
+  const moveTo = (terminal: string, harness: "pi" | "claude" = "pi") =>
+    c["server.session"]["session.claim"]({
+      payload: {
+        sessionId: started.sessionId,
+        agent: "coordinator",
+        harness,
+        fresh: false,
+        move: true,
+        terminal: { id: terminal },
+        runtime: TEST_HERDR,
+        pid: 5151,
+      },
+    })
 
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
-    c["Project.EntrySession"]({ agent: "coordinator", harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })
+    c["server.session"]["session.claim"]({
+      payload: {
+        agent: "coordinator",
+        harness,
+        fresh: false,
+        terminal: { id: terminal },
+        runtime: TEST_HERDR,
+        pid: 5151,
+      },
+    })
 
-  const pending = Effect.map(entryPending(db, projectId), (rows) => rows.map((r) => unwrapped(r.message)))
+  const pending = Effect.map(entryPending(sessionStore, inboxStore, projectId), (rows) =>
+    rows.map((r) => unwrapped(r.message)),
+  )
 
-  return { db, herdr, processes, c, paneId, origin, projectId, started, stop, startAt, pending }
+  return { sessionStore, inboxStore, herdr, processes, c, paneId, origin, projectId, started, moveTo, startAt, pending }
 })
 
-describe("Project.StopEntry moves the entry session: SIGTERM to the recorded harness PID only, never a group or the terminal; what waits is kept for the next launch", () => {
+describe("Session.Claim move: SIGTERM to the recorded harness PID only, never a group or the terminal; what waits is kept for the next launch", () => {
   it.effect(
     "terminate signals one valid PID: ESRCH is sent; EPERM or anything else, or an invalid PID, is denied",
     () =>
@@ -176,177 +191,127 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   )
 
   test(
-    "y: SIGTERM to the harness PID only (after a restart in place, the pid it reported ready with), its terminal kept; its exit and a delivery before the launch drop nothing; the start in another terminal resumes the same conversation and gets what waited",
+    "move: SIGTERM to the harness PID only, its terminal kept, resumes the same conversation and keeps pending messages",
     Effect.gen(function* () {
-      const s = yield* workingPiEntry
+      const s = yield* workingPiRoot
       yield* s.processes.set(7777, "alive")
-      yield* s.db.session.patchLive(s.started.sessionId, { pid: 7777 })
-      assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
+      yield* s.sessionStore.patchLive(s.started.sessionId, { pid: 7777 })
+      const moved = yield* s.moveTo("test/p2")
       assert.deepStrictEqual(yield* s.processes.signaled, [7777])
       assert.deepStrictEqual(yield* s.herdr.callsTo("close"), [])
       assert.deepStrictEqual(yield* s.herdr.callsTo("send"), [])
       assert.isTrue(HashMap.has(yield* s.herdr.panes, s.paneId))
-      yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
-      yield* untilVirtual(s.pending, (rows) => rows.length === 1)
-      assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
-      const moved = yield* s.startAt("test/p2")
       assert.deepInclude(moved, { sessionId: s.started.sessionId, harnessSessionId: "conversation-1" })
-      const row = (yield* s.db.session.entryOf(s.projectId))!
-      assert.strictEqual(terminalOf(row)?.id, "test/p2")
+      const row = (yield* s.sessionStore.latestRoot(s.projectId))!
+      assert.strictEqual(terminalOf(row)?.target["id"], "test/p2")
       assert.strictEqual(row.process?.pid, 5151)
-      assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
+      assert.deepStrictEqual(yield* s.pending, ["waiting for the root session"])
     }),
     { statusEvents: true },
   )
 
   test(
-    "y with another harness: the same entry session, a new conversation for that harness",
+    "move with another harness: the same root session, a new conversation for that harness",
     Effect.gen(function* () {
-      const s = yield* workingPiEntry
-      assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
-      assert.deepInclude(yield* s.startAt("test/p2", "claude"), {
+      const s = yield* workingPiRoot
+      assert.deepInclude(yield* s.moveTo("test/p2", "claude"), {
         sessionId: s.started.sessionId,
         harnessSessionId: null,
       })
-      assert.strictEqual(harnessIdOf((yield* s.db.session.entryOf(s.projectId))!), "claude")
+      assert.strictEqual(harnessIdOf((yield* s.sessionStore.latestRoot(s.projectId))!), "claude")
     }),
   )
 
   test(
     "while a restart is between its harnesses: a start elsewhere is refused even with no agent seen, and the move is unsupported",
     Effect.gen(function* () {
-      const s = yield* workingPiEntry
+      const s = yield* workingPiRoot
       yield* (yield* SessionLive.Service).restarting.mark(s.started.sessionId)
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
       const refused = yield* Effect.exit(s.startAt("test/p2"))
       assert.isTrue(Exit.isFailure(refused))
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
-      assert.deepInclude(yield* s.stop, { result: "unsupported" })
+      const moved = yield* Effect.exit(s.moveTo("test/p2"))
+      assert.isTrue(Exit.isFailure(moved))
+      assert.include(String(Cause.squash((moved as Exit.Failure<unknown, unknown>).cause)), "cannot be moved")
       assert.deepStrictEqual(yield* s.processes.signaled, [])
-      assert.strictEqual(terminalOf((yield* s.db.session.entryOf(s.projectId))!)?.id, s.paneId)
+      assert.strictEqual(terminalOf((yield* s.sessionStore.latestRoot(s.projectId))!)?.target["id"], s.paneId)
     }),
   )
 
   test(
-    "a harness that ignores SIGTERM: running after about 10 s, the row back at its terminal, nothing dropped, and the start elsewhere still refused",
+    "a harness that ignores SIGTERM: move fails after wait, the row stays at its terminal, nothing dropped",
     Effect.gen(function* () {
-      const s = yield* workingPiEntry
+      const s = yield* workingPiRoot
       yield* s.processes.setSignalIgnored(true)
-      const stopping = yield* Effect.forkChild(s.stop)
+      const moving = yield* Effect.forkChild(Effect.exit(s.moveTo("test/p2")))
       yield* untilVirtual(
-        Effect.sync(() => stopping.pollUnsafe()),
+        Effect.sync(() => moving.pollUnsafe()),
         (exit) => exit !== undefined,
       )
-      assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "running" })
+      const result = yield* Fiber.join(moving)
+      assert.isTrue(Exit.isFailure(result))
+      assert.include(String(Cause.squash((result as Exit.Failure<unknown, unknown>).cause)), "did not exit")
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
-      const row = (yield* s.db.session.entryOf(s.projectId))!
-      assert.strictEqual(terminalOf(row)?.id, s.paneId)
+      const row = (yield* s.sessionStore.latestRoot(s.projectId))!
+      assert.strictEqual(terminalOf(row)?.target["id"], s.paneId)
       assert.strictEqual(row.process?.harnessSessionId ?? null, "conversation-1")
-      assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
-      const refused = yield* Effect.exit(s.startAt("test/p2"))
-      assert.isTrue(Exit.isFailure(refused))
-      assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
+      assert.deepStrictEqual(yield* s.pending, ["waiting for the root session"])
     }),
   )
 
   test(
-    "stopped as soon as the runtime reports the harness's exit, with no clock advance, while its PID still reads alive",
+    "move completes as soon as the runtime reports the harness exit, with no clock advance, while its PID still reads alive",
     Effect.gen(function* () {
-      const s = yield* workingPiEntry
+      const s = yield* workingPiRoot
       yield* s.processes.setSignalIgnored(true)
-      const stopping = yield* Effect.forkChild(s.stop)
+      const moving = yield* Effect.forkChild(s.moveTo("test/p2"))
       yield* until(s.processes.signaled, (pids) => pids.length === 1)
-      const terminal = { machine: "local", id: s.paneId }
-      yield* (yield* Bus.Service).observe({
-        type: "terminal.exited",
+      const terminal = { id: s.paneId }
+      yield* (yield* Bus.Service).publish(TerminalExited, {
         runtime: s.origin.runtime,
         terminal,
-        processes: yield* (yield* Db.Service).session.processesAt(s.origin.runtime, terminal),
+        processes: yield* (yield* SessionStore.Service).processesAt(s.origin.runtime, terminal),
       })
-      assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "stopped" })
+      const moved = yield* Fiber.join(moving)
+      assert.strictEqual(moved.sessionId, s.started.sessionId)
     }),
   )
 
   test(
-    "a harness that exits without an event is stopped at the deadline's last look",
+    "a harness that exits without an event is moved at the deadline last look",
     Effect.gen(function* () {
-      const s = yield* workingPiEntry
+      const s = yield* workingPiRoot
       yield* s.processes.setSignalIgnored(true)
-      const stopping = yield* Effect.forkChild(s.stop)
+      const moving = yield* Effect.forkChild(s.moveTo("test/p2"))
       yield* until(s.processes.signaled, (pids) => pids.length === 1)
       yield* s.processes.set(HARNESS, "exited")
       yield* TestClock.adjust(HARNESS_EXIT_WAIT)
-      assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "stopped" })
+      const moved = yield* Fiber.join(moving)
+      assert.strictEqual(moved.sessionId, s.started.sessionId)
     }),
   )
 
   test(
-    "the CLI interrupted (Ctrl-C) after the detach: the stop still finishes, the row is back at its terminal, and a start elsewhere is still refused",
+    "the CLI interrupted after detach: the row is back at its terminal, and a start elsewhere is still refused",
     Effect.gen(function* () {
-      const s = yield* workingPiEntry
+      const s = yield* workingPiRoot
       yield* s.processes.setSignalIgnored(true)
-      const stopping = yield* Effect.forkChild(s.stop)
+      const moving = yield* Effect.forkChild(s.moveTo("test/p2"))
       yield* untilVirtual(
-        s.db.session.entryOf(s.projectId),
+        s.sessionStore.latestRoot(s.projectId),
         (row) => row !== undefined && placedTerminal(row) === undefined,
       )
-      yield* Fiber.interrupt(stopping)
+      yield* Fiber.interrupt(moving)
       yield* untilVirtual(
-        s.db.session.entryOf(s.projectId),
-        (row) => row !== undefined && placedTerminal(row)?.address.id === s.paneId,
+        s.sessionStore.latestRoot(s.projectId),
+        (row) => row !== undefined && placedTerminal(row)?.target["id"] === s.paneId,
       )
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
-      assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
+      assert.deepStrictEqual(yield* s.pending, ["waiting for the root session"])
       const refused = yield* Effect.exit(s.startAt("test/p2"))
       assert.isTrue(Exit.isFailure(refused))
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
-    }),
-  )
-
-  test(
-    "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded (an older vibest), or no agent seen and a PID of unknown liveness; no agent seen but a live PID still stops it; an exited PID moves without a signal",
-    Effect.gen(function* () {
-      const s = yield* workingPiEntry
-
-      const restore = s.db.session.startEntry(s.projectId, "pi", false, s.origin, {
-        agent: "coordinator",
-        pid: HARNESS,
-      })
-
-      yield* s.db.session.startEntry(
-        s.projectId,
-        "pi",
-        false,
-        {
-          ...s.origin,
-          address: { machine: "local", id: "test/p9" },
-        },
-        { agent: "coordinator" },
-      )
-      assert.deepStrictEqual(yield* s.stop, { result: "moved" })
-      yield* s.db.session.startEntry(s.projectId, "pi", false, s.origin, { agent: "coordinator" })
-      const old = yield* s.stop
-      assert.strictEqual(old.result, "unsupported")
-      assert.include(old.reason, "started by an older vibest")
-      yield* restore
-      yield* s.processes.setSignalDenied(true)
-      assert.deepStrictEqual(yield* s.stop, { result: "running" })
-      yield* s.processes.setSignalDenied(false)
-      yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
-      yield* s.herdr.addPane(s.paneId, "test", "/")
-      yield* s.processes.set(HARNESS, "unknown")
-      const unseen = yield* s.stop
-      assert.strictEqual(unseen.result, "unsupported")
-      assert.include(unseen.reason, "cannot tell whether its harness still runs")
-      assert.deepStrictEqual(yield* s.processes.signaled, [])
-      assert.strictEqual(terminalOf((yield* s.db.session.entryOf(s.projectId))!)?.id, s.paneId)
-      yield* s.processes.set(HARNESS, "exited")
-      assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
-      assert.deepStrictEqual(yield* s.processes.signaled, [])
-      yield* restore
-      yield* s.processes.set(HARNESS, "alive")
-      assert.strictEqual((yield* s.stop).result, "stopped")
-      assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
     }),
   )
 
@@ -362,12 +327,14 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       const exits = yield* Effect.all(
         ["test/p1", "test/p2"].map((terminal) =>
           Effect.exit(
-            c["Project.EntrySession"]({
-              agent: "coordinator",
-              harness: "pi",
-              fresh: false,
-              terminal,
-              runtime: TEST_HERDR,
+            c["server.session"]["session.claim"]({
+              payload: {
+                agent: "coordinator",
+                harness: "pi",
+                fresh: false,
+                terminal: { id: terminal },
+                runtime: TEST_HERDR,
+              },
             }),
           ),
         ),

@@ -111,7 +111,7 @@ export const cursorWorld = async (w: World, runtime: Runtime, name: string, entr
   const terminalOf = (id: string) => {
     const at = runtimeOf(id)
 
-    return core ? at.slice(0, at.indexOf("@")) : (at.split("/")[1] ?? "")
+    return core ? (at.split("@")[0] ?? "") : (at.split("/")[1] ?? "")
   }
 
   const screen = async (id: string) => {
@@ -330,10 +330,7 @@ const reports = (runtime: Runtime): Check => ({
       keep("after the message that followed the early interrupt", await c.screen(id))
       const log = await c.log()
       expect(!log.includes("did not reach vibestd"), "a report did not reach vibestd")
-      expect(
-        !screens.some((s) => /vibest integration|did not reach vibestd/.test(s)),
-        "the plugin wrote to the terminal",
-      )
+      expect(!screens.some((s) => /vibest guard|did not reach vibestd/.test(s)), "the plugin wrote to the terminal")
       keep("fresh, before any input", await c.freshScreen())
 
       const timing = row<{ placed: number | null; started: number }>(
@@ -355,14 +352,14 @@ const reports = (runtime: Runtime): Check => ({
   },
 })
 
-const SEND_THEN_HERDR =
-  "Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: herdr pane list > herdr-ran.txt. Then reply with exactly: pong"
+const SEND_THEN_GUARD =
+  'Use vibest send to send the message i12-hello to the session that started you. Then run this shell command exactly: curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready > guard-ran.txt. Then reply with exactly: pong'
 
 const noApprovalDialog: Check = {
   id: "I12",
   tier: "agent",
   title:
-    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to run herdr, herdr does not run",
+    "Cursor (real model) on its default allowlist approval mode with no allow rule: a vibest session runs vibest send to the session that started it and the message arrives, the session is never blocked on Cursor's approval dialog, and asked to curl vibest.sock, it does not run",
   run: async (w) => {
     const c = await cursorWorld(w, "herdr", "i12")
     await fs.writeFile(
@@ -372,7 +369,7 @@ const noApprovalDialog: Check = {
     const ids: Array<string> = []
 
     try {
-      const id = await c.start(SEND_THEN_HERDR)
+      const id = await c.start(SEND_THEN_GUARD)
       ids.push(id)
       const seen = new Set<string>()
       await until(
@@ -407,7 +404,7 @@ const noApprovalDialog: Check = {
         row<{ d: string }>(w, `SELECT directory AS d FROM ${SESSIONS} s WHERE id = ?`, id)?.d ?? "",
       )
 
-      expect(!(await Bun.file(path.join(worktree, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
+      expect(!(await Bun.file(path.join(worktree, "guard-ran.txt")).exists()), "guard-ran.txt exists")
     } finally {
       await c.close(ids)
     }
@@ -426,9 +423,9 @@ const conversationAtStart: Check = {
     const fact = (id: string, type: string) =>
       rows<{ at: number; data: string }>(
         w,
-        "SELECT at, data FROM event WHERE aggregate = ? AND type = ? ORDER BY seq",
+        "SELECT created AS at, data FROM event WHERE aggregate_id = ? AND type = ? ORDER BY seq",
         id,
-        type,
+        `${type}.1`,
       )
 
     const closePane = async (id: string) => {
@@ -451,14 +448,20 @@ const conversationAtStart: Check = {
       ids.push(id)
       await until("the session start reported", () => fact(id, "process.ready").length > 0, 120_000)
       const ready = fact(id, "process.ready")[0]!
-      await until("the conversation", () => fact(id, "process.conversation").length > 0, 2_000).catch(() => undefined)
-      const noted = fact(id, "process.conversation")
+
+      const conversations = () =>
+        fact(id, "process.updated").filter(
+          (f) => (JSON.parse(f.data) as { conversation?: string }).conversation !== undefined,
+        )
+
+      await until("the conversation", () => conversations().length > 0, 2_000).catch(() => undefined)
+      const noted = conversations()
       expect(
         noted.length > 0 && Math.abs(noted[0]!.at - ready.at) <= 1_000,
         `the conversation was not recorded at the session start: ready ${JSON.stringify(ready)}, conversation ${JSON.stringify(noted)}`,
       )
       const conversation = (JSON.parse(noted[0]!.data) as { conversation: string }).conversation
-      await until("the first task taken", () => fact(id, "execution.input").length > 0, 60_000)
+      await until("the first task taken", () => fact(id, "session.execution.input").length > 0, 60_000)
       await closePane(id)
       expect(
         !c.executions(id).some((x) => x.outcome === "completed"),
@@ -467,9 +470,7 @@ const conversationAtStart: Check = {
       await w.ok(["send", id, "--", "Reply with exactly: i13-second"], { cwd: c.repo })
       await replied(id, "i13-second")
 
-      const resumed = fact(id, "process.conversation").map(
-        (f) => (JSON.parse(f.data) as { conversation: string }).conversation,
-      )
+      const resumed = conversations().map((f) => (JSON.parse(f.data) as { conversation: string }).conversation)
 
       expect(
         resumed.every((r) => r === conversation),
@@ -479,9 +480,7 @@ const conversationAtStart: Check = {
       await w.ok(["send", id, "--", "Reply with exactly: i13-third"], { cwd: c.repo })
       await replied(id, "i13-third")
 
-      const third = fact(id, "process.conversation").map(
-        (f) => (JSON.parse(f.data) as { conversation: string }).conversation,
-      )
+      const third = conversations().map((f) => (JSON.parse(f.data) as { conversation: string }).conversation)
 
       expect(
         third.every((r) => r === conversation),

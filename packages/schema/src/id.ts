@@ -4,10 +4,31 @@ export const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a
 
 export const RequestId = Schema.String.check(Schema.isUUID(4))
 
+export const ProjectId = Schema.String.check(Schema.isUUID(4))
+
+export type ProjectId = typeof ProjectId.Type
+
+export const SessionId = Schema.String.check(Schema.isUUID(4))
+
+export type SessionId = typeof SessionId.Type
+
+export const MachineName = Schema.NonEmptyString
+
+export type MachineName = typeof MachineName.Type
+
 export const shortId = (id: string) => id.slice(0, 8)
 
 export const sessionLabel = (session: { readonly id: string; readonly name: string }) =>
   session.name === "" ? shortId(session.id) : `${shortId(session.id)} (${session.name})`
+
+export const entryLabel = (directory: string) => {
+  const name = directory
+    .replace(/[\\/]+$/, "")
+    .split(/[\\/]/)
+    .at(-1)
+
+  return name ? `Vibest/${name}` : "Vibest"
+}
 
 declare const crypto: { readonly randomUUID: () => string }
 

@@ -1,14 +1,16 @@
+import { canonicalTarget, type TerminalTarget } from "@vibest/schema/terminal"
+import { KeyedMutex } from "@vibest/util/keyed-mutex"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
 
-import { Drain } from "../drain.ts"
-import { KeyedMutex } from "../effect/keyed-mutex.ts"
-import { LayerNode } from "../effect/layer-node.ts"
+import { Drain } from "../runtime/drain.ts"
 
 export * as SessionLocks from "./locks.ts"
 
 export const directoryLock = (directory: string) => `directory:${directory}`
 
-export const terminalLock = (runtime: string, terminal: { readonly id: string }) => `terminal:${runtime}:${terminal.id}`
+export const terminalLock = (runtime: string, terminal: TerminalTarget) =>
+  `terminal:${runtime}:${canonicalTarget(terminal)}`
 
 export const make = Effect.gen(function* () {
   const drain = yield* Drain.Service

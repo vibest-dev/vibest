@@ -235,7 +235,7 @@ fragile.
 - **Agent names.** A vibest session's agent is `s-` and the first 30 hex digits of its id (herdr allows
   `[a-z][a-z0-9_-]{0,31}`), so `herdr agent list` shows which session runs where; any other agent `open` starts is
   `vbt-` and random hex. Never the pane id: it is reused and carries uppercase (`w1:pC`). herdr's `done` is `idle`.
-- **open.** An agent another machine started (`remote`, from `Peer.Spawn`) opens in herdr's default session `default`
+- **open.** An agent another machine started (`remote`, from `Remote.Spawn`) opens in herdr's default session `default`
   (`DEFAULT_SESSION_NAME`, also what `herdr machine add` uses without `--remote-session`), never beside a pane, so the
   machine that started it can save that session as a herdr machine. Otherwise the session is `near`'s, else the
   caller's location, else `HERDR_SOCKET_PATH`, else `vibest`. A missing session is started with `herdr server
@@ -291,7 +291,7 @@ fragile.
   loads in any host that runs the plugin API; its pool lives in the plugin's scope and closes with it. `doctor`
   asserts the type of the spawner's output, since `spawner` is typed by its tag.
 
-## 7. effect-herdr-sdk
+## 7. @vibest/herdr-sdk
 
 - **Wire** (protocol 22): newline-delimited JSON, `{id, method, params}` → `{id, result}` or `{id, error}`; the
   server closes after one response, so every call is its own connection. A response with `id: ""` means the server
@@ -313,5 +313,5 @@ fragile.
   `--check` fails when it differs. Each schema namespace is its own module: several type names (`PaneInfo`,
   `TabInfo`, `WorkspaceInfo`, …) differ between the event and response namespaces. `AgentStatus` and `PaneScrollInfo`
   are defined identically in the session and subscription event namespaces, so the events module emits them once. The schema has no method →
-  result map (`ResponseResult` is one flat union), so `scripts/gen/method-result-map.ts` was found empirically
+  result map (`ResponseResult` is one flat union), so `script/gen/method-result-map.ts` was found empirically
   against herdr 0.8.2; a method missing there is typed as the loose union, a typing gap and never a runtime bug.

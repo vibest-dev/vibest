@@ -1,5 +1,7 @@
 import { BunServices, BunSocketServer } from "@effect/platform-bun"
 import { assert, describe, it } from "@effect/vitest"
+import { Hc, SocketConnector } from "@vibest/herdr-core-sdk"
+import * as HcBun from "@vibest/herdr-core-sdk/bun"
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import {
   Cause,
@@ -16,11 +18,9 @@ import {
   type Scope,
   Stream,
 } from "effect"
-import { Hc, SocketConnector } from "effect-herdr-core-sdk"
-import * as HcBun from "effect-herdr-core-sdk/bun"
 import * as Socket from "effect/socket/Socket"
 
-import { LABEL, TYPED_LAUNCH_MS, make, terminalId } from "../src/terminal-runtime.ts"
+import { hcTerminal, LABEL, TYPED_LAUNCH_MS, make } from "../src/terminal-runtime.ts"
 
 const shell = { argv: ["/bin/zsh"], cwd: "/tmp", name: "zsh", pid: 100 }
 const sleeping = { argv: ["sleep", "5"], cwd: "/tmp", name: "sleep", pid: 101 }
@@ -127,7 +127,7 @@ const fakeCore = Effect.gen(function* () {
   const connector = yield* SocketConnector
   const connect = (at: string) => Hc.make(at).pipe(Effect.provideService(SocketConnector, connector))
   const runtime = yield* make({ connect, socket: socketPath, scope: yield* Effect.scope })
-  const terminal = { id: terminalId(socketPath, "t1") }
+  const terminal = hcTerminal(socketPath, "t1", socketPath)
   const seen = yield* Queue.unbounded<VibestPlugin.Runtime.RuntimeEvent>()
   yield* runtime.events.pipe(
     Stream.runForEach((e) => Queue.offer(seen, e)),

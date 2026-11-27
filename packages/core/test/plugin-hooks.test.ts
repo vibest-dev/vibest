@@ -1,13 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Agents } from "@vibest/core/agents"
+import { Agents } from "@vibest/core/agent/registry"
 import { type Candidate, makeHost } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
-import { type AgentStartBefore, Plugin } from "@vibest/plugin/effect"
+import { type SessionStartBefore, Plugin } from "@vibest/plugin/effect"
+import { memoryPluginHost } from "@vibest/testkit/bun"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "@vibest/testkit/harnesses"
 import { Duration, Deferred, Effect, Fiber, type Schema } from "effect"
 import { TestClock } from "effect/testing"
-
-import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { memoryPluginHost } from "./platform/bun.ts"
 
 const candidate = (
   source: string,
@@ -51,8 +50,8 @@ const host = <A, E>(
   )
 
 describe("plugins: hook events are detached copies", () => {
-  const hooked = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void>) =>
-    candidate(id, "1", Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) }))
+  const hooked = (id: string, callback: (e: SessionStartBefore) => Effect.Effect<void>) =>
+    candidate(id, "1", Plugin.define({ id, effect: (ctx) => ctx.session.hook("start.before", callback) }))
 
   it.effect("a reference a plugin keeps cannot change the result or the trace after its callback succeeded", () =>
     host((h) =>
@@ -89,7 +88,7 @@ describe("plugins: hook events are detached copies", () => {
               ),
             ),
           ])
-          assert.strictEqual((yield* h.service.start(input).pipe(Effect.flip))._tag, "AgentRefused")
+          assert.strictEqual((yield* h.service.start(input).pipe(Effect.flip))._tag, "SessionRefused")
           assert.deepStrictEqual(input, event)
           yield* h.activate([
             hooked("timeout", (e) =>
@@ -101,7 +100,7 @@ describe("plugins: hook events are detached copies", () => {
           ])
           const starting = yield* Effect.forkChild(h.service.start(input).pipe(Effect.flip))
           yield* TestClock.adjust("20 millis")
-          assert.strictEqual((yield* Fiber.join(starting))._tag, "AgentRefused")
+          assert.strictEqual((yield* Fiber.join(starting))._tag, "SessionRefused")
           late.at(-1)!()
           assert.deepStrictEqual(input, event)
         }),
@@ -115,7 +114,7 @@ describe("plugins: one registry across activations", () => {
     Plugin.define({
       id,
       effect: (ctx) =>
-        setup.pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => void (e.model = model))))),
+        setup.pipe(Effect.andThen(ctx.session.hook("start.before", (e) => Effect.sync(() => void (e.model = model))))),
     })
 
   it.effect("a retired revision whose teardown overran its deadline leaves no hook beside its replacement", () =>
@@ -126,7 +125,7 @@ describe("plugins: one registry across activations", () => {
         const stuck = Plugin.define({
           id: "g",
           effect: (ctx) =>
-            ctx.agent
+            ctx.session
               .hook("start.before", (e) => Effect.sync(() => void (e.model = "retired")))
               .pipe(Effect.andThen(Effect.addFinalizer(() => Deferred.await(gate)))),
         })
@@ -155,7 +154,7 @@ describe("plugins: one registry across activations", () => {
           id: "a",
           effect: (ctx) =>
             Deferred.await(gate).pipe(
-              Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => void (e.model = "a")))),
+              Effect.andThen(ctx.session.hook("start.before", (e) => Effect.sync(() => void (e.model = "a")))),
               Effect.forkScoped,
               Effect.asVoid,
             ),

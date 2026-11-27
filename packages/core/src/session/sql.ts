@@ -1,0 +1,900 @@
+import {
+  type ExecutionFailure,
+  type ExecutionObservation,
+  type ExecutionOutcome,
+  type ProcessEndReason,
+  type Sender,
+} from "@vibest/schema/event"
+import { newId, sessionLabel } from "@vibest/schema/id"
+import { Routing } from "@vibest/schema/plugin"
+import { ProcessEvent } from "@vibest/schema/process-event"
+import { type AgentStatus } from "@vibest/schema/session"
+import { SessionEvent } from "@vibest/schema/session-event"
+import { canonicalTarget, TerminalTarget } from "@vibest/schema/terminal"
+import { Effect, Schema } from "effect"
+import type { SqlClient, Statement } from "effect/sql"
+
+import { type Bus, SessionChanged } from "../bus.ts"
+import {
+  archived,
+  decodeRoutingJson,
+  isMessageStatus,
+  SessionRow,
+  type ExecutionEnd,
+  type Integration,
+  type ProcessStart,
+  type SessionBrief,
+  type SpawnedBefore,
+} from "../database/rows.ts"
+import { SessionLive } from "./live.ts"
+import { unwrapped } from "./replies.ts"
+
+export type Current = {
+  readonly id: number
+  readonly start: ProcessStart
+  readonly ended: number | null
+  readonly terminal: TerminalTarget | null
+  readonly harnessSessionId: string | null
+  readonly integration: Integration | undefined
+  readonly readyAt: number | null
+}
+
+export type Creator = { readonly local: string } | { readonly remote: string; readonly session: string } | undefined
+
+type ProcessColumns = {
+  readonly id: number
+  readonly harness: string
+  readonly provider: string | null
+  readonly model: string | null
+  readonly routing: string | null
+  readonly runtime: string
+  readonly terminal: string | null
+  readonly pid: number | null
+  readonly harnessSessionId: string | null
+  readonly integrationVersion: string | null
+  readonly integrationProtocol: number | null
+  readonly readyAt: number | null
+  readonly endedAt: number | null
+}
+
+export type SessionColumns = {
+  readonly id: string
+  readonly project: string
+  readonly agent: string
+  readonly name: string
+  readonly createdAt: number
+  readonly endedAt: number | null
+  readonly activeAt: number | null
+  readonly pId: number | null
+  readonly harness: string | null
+  readonly provider: string | null
+  readonly model: string | null
+  readonly routing: string | null
+  readonly runtime: string | null
+  readonly terminal: string | null
+  readonly pid: number | null
+  readonly integrationVersion: string | null
+  readonly integrationProtocol: number | null
+  readonly harnessSessionId: string | null
+  readonly placedAt: number | null
+  readonly readyAt: number | null
+  readonly pEnded: number | null
+  readonly parent: string | null
+  readonly pEndReason: string | null
+  readonly oId: number | null
+  readonly oProcess: number | null
+  readonly oBooked: number | null
+  readonly oAt: number | null
+  readonly lId: number | null
+  readonly lProcess: number | null
+  readonly lOutcome: string | null
+  readonly lAt: number | null
+  readonly lEnded: number | null
+  readonly lReply: string | null
+  readonly lFailure: string | null
+  readonly lFailureKind: string | null
+}
+
+export type Live = {
+  readonly status: AgentStatus
+  readonly integration: Integration | undefined
+}
+
+const NOT_LIVE: Live = { status: "unknown", integration: undefined }
+
+const encodeRouting = Schema.encodeSync(Routing)
+
+const decodeTerminalJson = Schema.decodeSync(Schema.fromJsonString(TerminalTarget))
+
+const decodeUnknownJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))
+
+export const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
+
+const routingJson = (routing: Routing | undefined) =>
+  routing === undefined ? null : JSON.stringify(encodeRouting(routing))
+
+const integrationOf = (row: Pick<SessionColumns, "integrationVersion" | "integrationProtocol">) =>
+  row.integrationVersion === null || row.integrationProtocol === null
+    ? undefined
+    : { version: row.integrationVersion, protocol: row.integrationProtocol }
+
+const processOf = (row: SessionColumns, integration: Integration | undefined) =>
+  row.pId === null
+    ? null
+    : {
+        id: row.pId,
+        harness: row.harness ?? "",
+        provider: row.provider,
+        model: row.model,
+        routing: row.routing === null ? null : decodeUnknownJson(row.routing),
+        runtime: row.runtime ?? "",
+        terminal: row.terminal === null ? null : decodeUnknownJson(row.terminal),
+        pid: row.pid,
+        harnessSessionId: row.harnessSessionId,
+        placedAt: row.placedAt,
+        readyAt: row.readyAt,
+        endedAt: row.pEnded,
+        endReason: row.pEndReason,
+        integration: integration ?? null,
+      }
+
+const openExecutionOf = (row: SessionColumns) =>
+  row.oId === null ? null : { id: row.oId, process: row.oProcess, bookedAt: row.oBooked ?? 0, startedAt: row.oAt }
+
+const lastExecutionOf = (row: SessionColumns) =>
+  row.lId === null
+    ? null
+    : {
+        id: row.lId,
+        process: row.lProcess,
+        outcome: row.lOutcome ?? "",
+        startedAt: row.lAt,
+        endedAt: row.lEnded,
+        reply: row.lReply,
+        failure:
+          row.lFailure === null
+            ? null
+            : { message: row.lFailure, ...(row.lFailureKind !== null && { kind: row.lFailureKind }) },
+      }
+
+export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => ({
+  id: row.id,
+  projectId: row.project,
+  agent: row.agent,
+  name: row.name,
+  status: live.status,
+  createdAt: row.createdAt,
+  lastActive: row.activeAt ?? row.createdAt,
+  endedAt: row.endedAt,
+  parentId: row.parent,
+  process: processOf(row, live.integration ?? integrationOf(row)),
+  openExecution: openExecutionOf(row),
+  lastExecution: lastExecutionOf(row),
+})
+
+const currentOf = (row: ProcessColumns): Current => {
+  const terminal = row.terminal === null ? null : decodeTerminalJson(row.terminal)
+
+  return {
+    id: row.id,
+    start: {
+      harness: row.harness,
+      ...(row.provider !== null && { provider: row.provider }),
+      ...(row.model !== null && { model: row.model }),
+      ...(row.routing !== null && { routing: decodeRoutingJson(row.routing) }),
+      runtime: row.runtime,
+      ...(terminal !== null && { terminal }),
+      ...(row.pid !== null && { pid: row.pid }),
+    },
+    ended: row.endedAt,
+    terminal,
+    harnessSessionId: row.harnessSessionId,
+    integration:
+      row.integrationVersion === null || row.integrationProtocol === null
+        ? undefined
+        : { version: row.integrationVersion, protocol: row.integrationProtocol },
+    readyAt: row.readyAt,
+  }
+}
+
+const PROCESS_COLUMNS = `id, harness, provider, model, routing, runtime, terminal, pid, harness_session_id,
+  integration_version, integration_protocol, ready_at, ended_at`
+
+export const openExecution = (sql: SqlClient.SqlClient, sessionId: string) =>
+  sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${sessionId} AND owner = 1`.pipe(
+    Effect.map((rows) => rows[0]?.id),
+  )
+
+export const startedAt = (sql: SqlClient.SqlClient, id: string, execution: number) =>
+  sql<{ at: number | null }>`SELECT started_at AS at FROM execution
+    WHERE session_id = ${id} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]?.at ?? null))
+
+export const currentProcessId = (sql: SqlClient.SqlClient, sessionId: string) =>
+  sql<{ id: number | null }>`SELECT process_id AS id FROM session WHERE id = ${sessionId}`.pipe(
+    Effect.map((rows) => rows[0]?.id ?? undefined),
+  )
+
+export const nextExecutionId = (sql: SqlClient.SqlClient, sessionId: string) =>
+  sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM execution WHERE session_id = ${sessionId}`.pipe(
+    Effect.map((rows) => rows[0]?.id ?? 1),
+  )
+
+export const allocateExecution = (
+  sql: SqlClient.SqlClient,
+  publish: Bus.Interface["publish"],
+  sessionId: string,
+  at: number,
+  typed?: string,
+) =>
+  Effect.gen(function* () {
+    const executionId = yield* nextExecutionId(sql, sessionId)
+    const process = yield* currentProcessId(sql, sessionId)
+    yield* publish(
+      SessionEvent.ExecutionAllocated,
+      {
+        sessionId,
+        executionId,
+        ...(process !== undefined && { processId: process }),
+        ...(typed !== undefined && typed !== "" && { typed }),
+      },
+      { at },
+    )
+
+    return executionId
+  })
+
+export const observable = (sql: SqlClient.SqlClient, id: string) =>
+  sql<{ ok: number }>`SELECT 1 AS ok FROM session s WHERE s.id = ${id} AND s.ended_at IS NULL`.pipe(
+    Effect.map((rows) => rows.length > 0),
+  )
+
+export const isLiveSession = (sql: SqlClient.SqlClient, id: string) =>
+  sql`SELECT 1 FROM session WHERE id = ${id} AND ended_at IS NULL`.pipe(Effect.map((rows) => rows.length > 0))
+
+export const fromOldProcess = (sql: SqlClient.SqlClient, id: string, process: number | undefined) =>
+  Effect.map(currentProcessId(sql, id), (current) => process !== undefined && process !== current)
+
+export const creatorOf = (sql: SqlClient.SqlClient, id: string): Effect.Effect<Creator> =>
+  sql<{ parent: string | null; remote: string | null; session: string | null }>`SELECT
+      parent_session_id AS parent, origin_remote AS remote, origin_session AS session
+    FROM session WHERE id = ${id}`.pipe(
+    Effect.map(([row]): Creator => {
+      if (row === undefined) return undefined
+
+      if (row.remote !== null && row.session !== null) return { remote: row.remote, session: row.session }
+
+      if (row.parent !== null) return { local: row.parent }
+
+      return undefined
+    }),
+    Effect.orDie,
+  )
+
+export const nearestAlive = (sql: SqlClient.SqlClient, id: string): Effect.Effect<Creator> =>
+  Effect.gen(function* () {
+    let current = id
+
+    for (;;) {
+      const creator = yield* creatorOf(sql, current)
+
+      if (creator === undefined || "remote" in creator) return creator
+
+      if ((yield* sql`SELECT 1 FROM session WHERE id = ${creator.local} AND ended_at IS NULL`).length > 0)
+        return creator
+      current = creator.local
+    }
+  }).pipe(Effect.orDie)
+
+export const sessionSql = (
+  sql: SqlClient.SqlClient,
+  bus: Bus.Interface,
+  sessionLive: SessionLive.Interface,
+  moving: ReadonlySet<string>,
+) => {
+  const { publish } = bus
+  const afterCommitLive = (effect: Effect.Effect<void>) => bus.afterCommit(() => Effect.runSync(effect))
+
+  const remember = (row: Pick<SessionRow, "id" | "status" | "endedAt">) =>
+    archived(row) ? sessionLive.ended(row.id) : sessionLive.setStatus(row.id, row.status)
+
+  const running = sql`p_ended IS NULL`
+
+  const selectRaw = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
+    sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.agent, s.name,
+        s.created_at, s.ended_at, s.active_at, s.parent_session_id AS parent,
+        p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
+        p.integration_version, p.integration_protocol, p.harness_session_id, p.placed_at, p.ready_at,
+        p.ended_at AS p_ended, p.end_reason AS p_end_reason,
+        o.id AS o_id, o.process_id AS o_process, o.booked_at AS o_booked, o.started_at AS o_at,
+        l.id AS l_id, l.process_id AS l_process, l.outcome AS l_outcome, l.started_at AS l_at,
+        l.ended_at AS l_ended, l.reply AS l_reply, l.failure AS l_failure, l.failure_kind AS l_failure_kind
+      FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id
+        LEFT JOIN execution o ON o.session_id = s.id AND o.owner = 1
+        LEFT JOIN execution l ON l.session_id = s.id AND l.id = (SELECT id FROM execution
+          WHERE session_id = s.id AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1)
+      ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
+    ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
+
+  const briefs = (ids: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      if (ids.length === 0) return new Map<string, SessionBrief>()
+
+      const rows = yield* sql<{
+        id: string
+        task: string | null
+        executionId: number | null
+        outcome: string | null
+        endedAt: number | null
+        reply: string | null
+        owner: number | null
+      }>`SELECT s.id,
+          (SELECT i.content FROM inbox i WHERE i.recipient_session_id = s.id AND i.id = s.message_id) AS task,
+          t.id AS execution_id, t.outcome, t.ended_at, t.reply, t.owner AS owner
+        FROM session s LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
+        WHERE ${sql.in("s.id", ids)}`
+
+      const found = new Map<string, SessionBrief>()
+
+      for (const row of rows) {
+        const raw =
+          row.executionId === null
+            ? undefined
+            : row.owner === 1 && row.outcome === null
+              ? "working"
+              : (row.outcome ?? undefined)
+
+        const status = raw !== undefined && isMessageStatus(raw) ? raw : undefined
+        found.set(row.id, {
+          task: row.task === null ? null : unwrapped(row.task),
+          latest:
+            status === undefined
+              ? null
+              : { status, summary: row.reply?.trim().split("\n")[0] ?? "", endedAt: row.endedAt ?? null },
+        })
+      }
+
+      return found
+    })
+
+  const hadTerminal = (id: string) =>
+    sql`SELECT 1 FROM process WHERE session_id = ${id} AND placed_at IS NOT NULL LIMIT 1`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
+
+  const spawnedBy = (project: string, request: string) =>
+    sql<{
+      id: string
+      harness: string | null
+      provider: string | null
+      model: string | null
+      runtime: string | null
+      routing: string | null
+    }>`SELECT s.id, p.harness, p.provider, p.model, p.runtime, p.routing FROM session s
+        JOIN inbox i ON i.recipient_session_id = s.id AND i.id = s.message_id
+        LEFT JOIN process p ON p.session_id = s.id AND p.id = (SELECT min(id) FROM process WHERE session_id = s.id)
+      WHERE i.request_id = ${request} AND s.project_id = ${project}
+      ORDER BY s.created_at, s.id LIMIT 1`.pipe(
+      Effect.map((rows): SpawnedBefore | undefined => {
+        const found = rows[0]
+
+        if (found === undefined) return undefined
+
+        return {
+          id: found.id,
+          harness: found.harness ?? "",
+          provider: found.provider ?? undefined,
+          model: found.model ?? undefined,
+          runtime: found.runtime ?? "",
+          routing: found.routing === null ? undefined : decodeRoutingJson(found.routing),
+        }
+      }),
+    )
+
+  const selectSessions = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
+    selectRaw(where, filter).pipe(
+      Effect.flatMap((rows) =>
+        Effect.forEach(rows, (row) =>
+          Effect.gen(function* () {
+            return sessionOf(row, {
+              status: yield* sessionLive.status(row.id),
+              integration: yield* sessionLive.integration(row.id),
+            })
+          }),
+        ),
+      ),
+      Effect.flatMap(decodeSessions),
+    )
+
+  const findSession = (id: string) => selectSessions([sql`s.id = ${id}`]).pipe(Effect.map((rows) => rows[0]))
+
+  const currentProcess = (id: string) =>
+    sql<ProcessColumns>`SELECT ${sql.literal(PROCESS_COLUMNS)} FROM process
+      WHERE session_id = ${id} AND id = (SELECT process_id FROM session WHERE id = ${id})`.pipe(
+      Effect.map((rows) => (rows[0] === undefined ? undefined : currentOf(rows[0]))),
+    )
+
+  const liveProcess = (id: string) =>
+    sql<ProcessColumns>`SELECT ${sql.literal(PROCESS_COLUMNS)} FROM process
+      WHERE session_id = ${id} AND ended_at IS NULL`.pipe(
+      Effect.map((rows) => (rows[0] === undefined ? undefined : currentOf(rows[0]))),
+    )
+
+  const latestRoot = (project: string) =>
+    sql<{ id: string }>`SELECT id FROM session
+      WHERE project_id = ${project} AND parent_session_id IS NULL AND origin_remote IS NULL AND ended_at IS NULL
+      ORDER BY coalesce(active_at, created_at) DESC, rowid DESC LIMIT 1`.pipe(
+      Effect.flatMap((rows) => (rows[0] === undefined ? Effect.succeed(undefined) : findSession(rows[0].id))),
+    )
+
+  const workingExecutions = sql<{
+    n: number
+  }>`SELECT count(*) AS n FROM execution e JOIN session s ON s.id = e.session_id
+      WHERE e.owner = 1 AND s.ended_at IS NULL`.pipe(Effect.map((rows) => rows[0]?.n ?? 0))
+
+  const nextProcessId = (sessionId: string) =>
+    sql<{ id: number }>`SELECT coalesce(max(id), 0) + 1 AS id FROM process WHERE session_id = ${sessionId}`.pipe(
+      Effect.map((rows) => rows[0]?.id ?? 1),
+    )
+
+  const executionOutcome = (sessionId: string, execution: number) =>
+    sql<{ outcome: string | null; started: number | null; booked: number; process: number | null }>`SELECT
+        outcome, started_at AS started, booked_at AS booked, process_id AS process FROM execution
+      WHERE session_id = ${sessionId} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]))
+
+  const accept = (id: string, execution: number) =>
+    Effect.gen(function* () {
+      if ((yield* openExecution(sql, id)) !== execution) return false
+
+      if ((yield* startedAt(sql, id, execution)) !== null) return true
+      const process = yield* currentProcessId(sql, id)
+      yield* publish(SessionEvent.ExecutionStarted, {
+        sessionId: id,
+        executionId: execution,
+        ...(process !== undefined && { processId: process }),
+      })
+
+      return true
+    })
+
+  const finishable = (outcome: string | null | undefined) =>
+    outcome === undefined || outcome === null || outcome === "lost" || outcome === "not_started"
+
+  const releaseExecution = (sessionId: string, execution: number, observation: ExecutionObservation, at?: number) =>
+    Effect.gen(function* () {
+      const row = yield* executionOutcome(sessionId, execution)
+
+      if (row === undefined || row.outcome !== null) return false
+      yield* publish(
+        SessionEvent.ExecutionUnresolved,
+        { sessionId, executionId: execution, observation },
+        at === undefined ? undefined : { at },
+      )
+
+      return true
+    })
+
+  const isRoot = (id: string) =>
+    sql`SELECT 1 FROM session WHERE id = ${id} AND parent_session_id IS NULL AND origin_remote IS NULL`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
+
+  const endProcess = (id: string, reason: ProcessEndReason, at?: number, process?: number, by?: Sender) =>
+    Effect.gen(function* () {
+      const current = yield* currentProcess(id)
+
+      if (current === undefined || current.ended !== null || (process !== undefined && process !== current.id))
+        return false
+
+      if (reason === "launch_failed") {
+        const execution = yield* openExecution(sql, id)
+        const open = execution === undefined ? undefined : yield* executionOutcome(id, execution)
+
+        if (execution !== undefined && open?.process === current.id && open.started === null)
+          yield* releaseExecution(id, execution, "not_started", at)
+      }
+
+      yield* publish(
+        ProcessEvent.Ended,
+        { sessionId: id, processId: current.id, reason, ...(by !== undefined && { by }) },
+        at === undefined ? undefined : { at },
+      )
+      yield* afterCommitLive(sessionLive.forgetProcess(id))
+
+      return true
+    })
+
+  const sameChoice = (live: Current, start: ProcessStart) =>
+    live.start.harness === start.harness &&
+    live.start.provider === start.provider &&
+    live.start.model === start.model &&
+    live.start.runtime === start.runtime &&
+    routingJson(live.start.routing) === routingJson(start.routing)
+
+  const placeProcess = (id: string, terminal: TerminalTarget, pid?: number, at?: number) =>
+    Effect.gen(function* () {
+      const live = yield* liveProcess(id)
+
+      if (live === undefined || live.terminal !== null) return undefined
+      yield* publish(
+        ProcessEvent.Updated,
+        { sessionId: id, processId: live.id, terminal, ...(pid !== undefined && { pid }) },
+        at === undefined ? undefined : { at },
+      )
+
+      return live.id
+    })
+
+  const startProcess = (id: string, start: ProcessStart, at?: number) =>
+    Effect.gen(function* () {
+      const live = yield* liveProcess(id)
+      const options = at === undefined ? undefined : { at }
+
+      if (live !== undefined && live.terminal === null && start.terminal !== undefined && sameChoice(live, start)) {
+        yield* placeProcess(id, start.terminal, start.pid, at)
+
+        if (start.resume && start.resume !== live.harnessSessionId)
+          yield* publish(
+            ProcessEvent.Updated,
+            { sessionId: id, processId: live.id, conversation: start.resume },
+            options,
+          )
+
+        return live.id
+      }
+
+      if (live !== undefined)
+        yield* publish(ProcessEvent.Ended, { sessionId: id, processId: live.id, reason: "superseded" }, options)
+
+      const processId = yield* nextProcessId(id)
+
+      yield* publish(
+        ProcessEvent.Started,
+        {
+          sessionId: id,
+          processId,
+          harness: start.harness,
+          ...(start.provider && { provider: start.provider }),
+          ...(start.model && { model: start.model }),
+          ...(start.routing !== undefined && { routing: start.routing }),
+          ...(start.resume && { resume: start.resume }),
+          runtime: start.runtime,
+          ...(start.terminal !== undefined && { terminal: start.terminal }),
+          ...(start.pid !== undefined && { pid: start.pid }),
+        },
+        options,
+      )
+
+      yield* afterCommitLive(sessionLive.forgetProcess(id))
+
+      return processId
+    })
+
+  const ensureProcess = (id: string, start: ProcessStart) =>
+    Effect.gen(function* () {
+      const live = yield* liveProcess(id)
+
+      if (live !== undefined && live.terminal === null && sameChoice(live, start)) {
+        if (start.resume && start.resume !== live.harnessSessionId)
+          yield* publish(ProcessEvent.Updated, { sessionId: id, processId: live.id, conversation: start.resume })
+
+        return live.id
+      }
+
+      return yield* startProcess(id, start)
+    })
+
+  const rename = (id: string, name: string) =>
+    Effect.gen(function* () {
+      const [row] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${id}`
+
+      if (row === undefined || row.name === name) return false
+      yield* publish(SessionEvent.Renamed, { sessionId: id, name })
+
+      return true
+    })
+
+  const labelOf = (id: string) =>
+    sql<{ name: string }>`SELECT name FROM session WHERE id = ${id}`.pipe(
+      Effect.map(([row]) => sessionLabel({ id, name: row?.name ?? "" })),
+    )
+
+  const archive = (id: string) =>
+    Effect.gen(function* () {
+      const [row] = yield* sql<{ endedAt: number | null }>`SELECT ended_at FROM session WHERE id = ${id}`
+
+      if (row === undefined || row.endedAt !== null) return false
+      yield* publish(SessionEvent.Archived, { sessionId: id })
+      yield* afterCommitLive(sessionLive.ended(id))
+
+      return true
+    })
+
+  const noteConversation = (id: string, conversation: string, process?: number) =>
+    Effect.gen(function* () {
+      const current = yield* currentProcess(id)
+
+      if (current === undefined || current.harnessSessionId === conversation) return false
+
+      if (process !== undefined && process !== current.id) return false
+      yield* publish(ProcessEvent.Updated, { sessionId: id, processId: current.id, conversation })
+
+      return true
+    })
+
+  const finishExecution = (id: string, execution: number, end: ExecutionEnd, at?: number) =>
+    Effect.gen(function* () {
+      const row = yield* executionOutcome(id, execution)
+
+      if (row === undefined || !finishable(row.outcome)) return false
+      const options = at === undefined ? undefined : { at }
+      const reply = end.reply
+
+      if (end.outcome === "completed")
+        yield* publish(
+          SessionEvent.ExecutionSucceeded,
+          { sessionId: id, executionId: execution, ...(reply !== undefined && { reply }) },
+          options,
+        )
+      else if (end.outcome === "failed") {
+        const failure: ExecutionFailure = end.failure ?? { message: "failed" }
+        yield* publish(
+          SessionEvent.ExecutionFailed,
+          { sessionId: id, executionId: execution, failure, ...(reply !== undefined && { reply }) },
+          options,
+        )
+      } else if (end.outcome === "interrupted")
+        yield* publish(
+          SessionEvent.ExecutionInterrupted,
+          {
+            sessionId: id,
+            executionId: execution,
+            ...(end.failure !== undefined && { reason: end.failure.message }),
+            ...(reply !== undefined && { reply }),
+          },
+          options,
+        )
+      else {
+        const observation: ExecutionObservation = end.outcome === "not_started" ? "not_started" : "lost"
+        yield* publish(
+          SessionEvent.ExecutionUnresolved,
+          {
+            sessionId: id,
+            executionId: execution,
+            observation,
+            ...(end.failure !== undefined && { failure: end.failure }),
+            ...(reply !== undefined && { reply }),
+          },
+          options,
+        )
+      }
+
+      return true
+    })
+
+  const noteInput = (sessionId: string, execution: number, typed: string) =>
+    publish(SessionEvent.ExecutionInput, { sessionId, executionId: execution, typed })
+
+  const confirmedOutcome = (outcome: string | null) =>
+    outcome === "completed" || outcome === "failed" || outcome === "interrupted"
+
+  const recordObservedEnd = (
+    id: string,
+    end: ExecutionEnd,
+    at: number | undefined,
+    currentProcess: number,
+    executionId?: number,
+    needsReady = false,
+    pulls = false,
+  ) =>
+    Effect.gen(function* () {
+      if (executionId !== undefined) {
+        const rows = yield* sql<{
+          id: number
+          outcome: string | null
+          owner: number
+        }>`SELECT id, outcome, owner FROM execution WHERE session_id = ${id}`
+
+        const named = rows.find((row) => row.id === executionId)
+
+        if (named === undefined) return undefined
+
+        if (confirmedOutcome(named.outcome))
+          return { kind: "duplicate" as const, id: named.id, active: rows.some((row) => row.owner === 1) }
+        const wrote = yield* finishExecution(id, named.id, end, at)
+
+        return {
+          kind: "settled" as const,
+          id: named.id,
+          current: rows.some((row) => row.owner === 1 && row.id === named.id),
+          wrote,
+        }
+      }
+
+      const rows = yield* sql<{
+        id: number
+        outcome: string | null
+        owner: number
+        reply: string | null
+        started: number | null
+        typed: string | null
+      }>`SELECT id, outcome, owner, reply, started_at AS started, typed FROM execution
+        WHERE session_id = ${id} AND process_id = ${currentProcess} ORDER BY id`
+
+      const active = rows.find((row) => row.owner === 1)
+      const reply = end.reply ?? null
+
+      if (active === undefined) {
+        const last = rows.at(-1)
+
+        if (
+          last !== undefined &&
+          confirmedOutcome(last.outcome) &&
+          last.outcome === end.outcome &&
+          reply !== null &&
+          reply !== "" &&
+          last.reply === reply
+        )
+          return { kind: "duplicate" as const, id: last.id, active: false }
+
+        return { kind: "unmatched" as const }
+      }
+
+      const unresolvedEarlier = rows.some((row) => row.id !== active.id && !confirmedOutcome(row.outcome))
+
+      if (unresolvedEarlier) return { kind: "unmatched" as const }
+
+      if (active.started === null && active.typed === null) {
+        if (needsReady) return { kind: "unaccepted" as const }
+
+        if (pulls) {
+          const unacceptedPulled =
+            (yield* sql<{ ok: number }>`SELECT 1 AS ok FROM inbox m
+              WHERE m.recipient_session_id = ${id} AND m.status = 'delivering'
+                AND m.recipient_execution_id = ${active.id}
+                AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = m.recipient_session_id AND s.message_id = m.id)
+              LIMIT 1`).length > 0
+
+          if (unacceptedPulled) return { kind: "unaccepted" as const }
+        }
+      }
+
+      const wrote = yield* finishExecution(id, active.id, end, at)
+
+      return { kind: "settled" as const, id: active.id, current: true, wrote }
+    })
+
+  const setStatus = (id: string, status: AgentStatus) =>
+    Effect.gen(function* () {
+      const current = yield* findSession(id)
+
+      if (current === undefined) return
+      yield* afterCommitLive(remember({ ...current, status }))
+      yield* publish(SessionChanged, { sessionId: id })
+    })
+
+  const processesAt = (runtime: string, target: TerminalTarget) =>
+    sql<{ sessionId: string; process: number }>`SELECT s.id AS session_id, p.id AS process FROM session s
+      JOIN process p ON p.session_id = s.id AND p.id = s.process_id
+      WHERE p.runtime = ${runtime} AND p.terminal = ${canonicalTarget(target)} AND p.ended_at IS NULL`
+
+  const lastSessionAt = (runtime: string, target: TerminalTarget) =>
+    sql<{
+      sessionId: string
+    }>`SELECT session_id FROM process WHERE runtime = ${runtime} AND terminal = ${canonicalTarget(target)}
+      ORDER BY started_at DESC, rowid DESC LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.sessionId))
+
+  const lastProjectTerminal = (projectId: string, runtime: string) =>
+    sql<{ terminal: string }>`SELECT p.terminal FROM process p
+      JOIN session s ON s.id = p.session_id
+      WHERE s.project_id = ${projectId}
+        AND s.origin_remote IS NULL
+        AND p.runtime = ${runtime}
+        AND p.terminal IS NOT NULL
+      ORDER BY p.ended_at IS NOT NULL, p.started_at DESC, p.rowid DESC
+      LIMIT 1`.pipe(
+      Effect.map((rows): TerminalTarget | undefined =>
+        rows[0] === undefined ? undefined : decodeTerminalJson(rows[0].terminal),
+      ),
+    )
+
+  const liveSessionsAt = (runtime: string, target: TerminalTarget, except?: string) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<{ id: string }>`SELECT s.id FROM session s
+        JOIN process p ON p.session_id = s.id AND p.id = s.process_id
+        WHERE p.runtime = ${runtime} AND p.terminal = ${canonicalTarget(target)} AND p.ended_at IS NULL
+          ${except === undefined ? sql`` : sql`AND s.id != ${except}`}`
+
+      return rows.filter((r) => !moving.has(r.id))
+    })
+
+  const sessionPrefixTaken = (short: string) =>
+    sql`SELECT 1 FROM session WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
+      Effect.map((rows) => rows.length > 0),
+    )
+
+  const unusedId = newId(sessionPrefixTaken)
+
+  const fromCurrentHarness = (sessionId: string, current: number, reporter?: number, pid?: number) =>
+    Effect.gen(function* () {
+      const processes = yield* sql<{
+        id: number
+        pid: number | null
+        terminal: string | null
+      }>`SELECT id, pid, terminal FROM process WHERE session_id = ${sessionId}`
+
+      if (pid !== undefined && processes.some((p) => p.id !== current && p.pid === pid)) return false
+
+      if (reporter === undefined || reporter === current) return true
+      const terminalOf = (id: number) => processes.find((p) => p.id === id)?.terminal ?? null
+
+      return pid !== undefined && terminalOf(reporter) !== null && terminalOf(reporter) === terminalOf(current)
+    })
+
+  const canResumeConversation = (sessionId: string, harnessSessionId: string) =>
+    sql<{ ok: number }>`SELECT (
+      EXISTS (
+        SELECT 1 FROM execution t JOIN process p ON p.session_id = t.session_id AND p.id = t.process_id
+        WHERE t.session_id = ${sessionId} AND (t.started_at IS NOT NULL OR t.outcome IS NOT NULL)
+          AND p.harness_session_id = ${harnessSessionId}
+      )
+      OR (
+        EXISTS (SELECT 1 FROM session WHERE id = ${sessionId} AND parent_session_id IS NULL AND origin_remote IS NULL)
+        AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND harness_session_id = ${harnessSessionId})
+      )
+    ) AS ok`.pipe(
+      Effect.map((rows) => rows[0]?.ok === 1),
+      Effect.orDie,
+    )
+
+  const latestReply = (sessionId: string) =>
+    sql<{
+      execution: number
+      status: typeof ExecutionOutcome.Type
+      text: string | null
+      failure: string | null
+      endedAt: number | null
+    }>`SELECT id AS execution, outcome AS status, reply AS text, failure, ended_at FROM execution
+      WHERE session_id = ${sessionId} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(
+      Effect.map((rows) => rows[0]),
+      Effect.orDie,
+    )
+
+  return {
+    briefs,
+    hadTerminal,
+    spawnedBy,
+    afterCommitLive,
+    running,
+    selectRaw,
+    selectSessions,
+    findSession,
+    currentProcess,
+    latestRoot,
+    workingExecutions,
+    noteInput,
+    releaseExecution,
+    finishExecution,
+    recordObservedEnd,
+    accept,
+    isRoot,
+    endProcess,
+    placeProcess,
+    startProcess,
+    ensureProcess,
+    rename,
+    labelOf,
+    archive,
+    noteConversation,
+    setStatus,
+    liveSessionsAt,
+    processesAt,
+    lastSessionAt,
+    lastProjectTerminal,
+    unusedId,
+    fromCurrentHarness,
+    canResumeConversation,
+    latestReply,
+  }
+}
+
+export type SessionSql = ReturnType<typeof sessionSql>

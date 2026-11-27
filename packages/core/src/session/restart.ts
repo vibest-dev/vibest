@@ -1,37 +1,41 @@
-import { Layout, VibestCommand } from "@vibest/schema/layout"
 import type { HarnessId } from "@vibest/schema/session"
 import { PROTOCOL } from "@vibest/schema/version"
-import { Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Predicate, Schedule } from "effect"
+import { LayerNode } from "@vibest/util/layer-node"
+import { Context, Duration, Effect, Exit, Layer, Option, Predicate, Schedule } from "effect"
 
-import { Agents } from "../agents.ts"
+import { withExecution, type Launch } from "../agent/launch.ts"
 import { App } from "../app.ts"
 import { awaitEvent, Bus, type BusEvent } from "../bus.ts"
 import {
   archived,
   executionStateOf,
   harnessIdOf,
+  isRoot,
   pidOf,
-  placedTerminal,
   reportedOf,
   runtimeOf,
   type SessionRow,
   terminalOf,
-} from "../database/db-rows.ts"
-import { Db } from "../database/db.ts"
-import { LayerNode } from "../effect/layer-node.ts"
-import { PlatformNode } from "../effect/platform.ts"
-import { Harness } from "../harness.ts"
-import { Harnesses } from "../harnesses.ts"
-import { entryCommand, withExecution, withProcess, type Launch } from "../launch.ts"
+} from "../database/rows.ts"
+import { Harnesses } from "../harness/registry.ts"
 import { errorMessage } from "../plugin.ts"
 import type { HarnessDefinition } from "../plugin/domains.ts"
-import { Processes } from "../processes.ts"
-import { noticeEnvelope } from "../replies.ts"
-import { agentState, type AgentSeen, peekHint, type Runtime, Runtimes, stateOf, type Terminal } from "../runtimes.ts"
+import { Processes } from "../runtime/processes.ts"
+import {
+  agentState,
+  type AgentSeen,
+  peekHint,
+  type Runtime,
+  Runtimes,
+  stateOf,
+  type Terminal,
+} from "../runtime/registry.ts"
 import { SessionLive, type Restarted } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
-import { Placement, runtimeEnv } from "./placement.ts"
+import { Placement } from "./placement.ts"
 import { Reconcile } from "./reconcile.ts"
+import { noticeEnvelope } from "./replies.ts"
+import { SessionStore } from "./store.ts"
 
 export * as Restart from "./restart.ts"
 
@@ -85,14 +89,9 @@ type LiveNow = Effect.Effect<
 >
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const runtimes = yield* Runtimes.Service
-  const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service
-  const agents = yield* Agents.Service
-  const layout = yield* Layout
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
   const processes = yield* Processes.Service
   const { restarting } = yield* SessionLive.Service
   const bus = yield* Bus.Service
@@ -102,48 +101,8 @@ export const make = Effect.gen(function* () {
   const checkLater = (id: string) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid)
   const { launching } = yield* Placement.Service
   const reconcile = yield* Reconcile.Service
-  const vibestCommand = yield* VibestCommand
 
   const continuing = (interrupted: boolean) => (interrupted ? noticeEnvelope(continueText(version)) : undefined)
-
-  const entryArgv = (entry: SessionRow, interrupted: boolean) =>
-    Effect.gen(function* () {
-      yield* db.session.patchLive(entry.id, { ready: null })
-
-      const root =
-        (yield* db.project.projectDirectory(entry.projectId)) || (yield* db.session.sessionDirectory(entry.id)) || ""
-
-      const savedId = entry.process?.harnessSessionId ?? null
-      const place = placedTerminal(entry)
-
-      const command = yield* entryCommand({
-        harness: harnessIdOf(entry),
-        agent: entry.agent,
-        root,
-        provider: entry.process?.provider ?? null,
-        model: entry.process?.model ?? null,
-        session: Effect.succeed({
-          sessionId: entry.id,
-          harnessSessionId:
-            savedId !== null && (yield* db.session.canResumeConversation(entry.id, savedId)) ? savedId : null,
-          projectId: entry.projectId,
-          ...(place !== undefined && { runtime: runtimeEnv(place.runtime, place.address) }),
-        }),
-        message: continuing(interrupted),
-      })
-
-      const execution = interrupted ? yield* db.session.openExecution(entry.id) : undefined
-
-      return (process: number | undefined) => withExecution(withProcess(command, process), execution)
-    }).pipe(
-      Effect.provideService(Agents.Service, agents),
-      Effect.provideService(Harness.Service, harness),
-      Effect.provideService(Harnesses.Service, harnesses),
-      Effect.provideService(Layout, layout),
-      Effect.provideService(VibestCommand, vibestCommand),
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-    )
 
   interface Target {
     readonly id: string
@@ -154,10 +113,7 @@ export const make = Effect.gen(function* () {
     readonly terminal: Terminal
     readonly pid: number | undefined
     readonly harnessSessionId: string | null
-    readonly argv: Effect.Effect<
-      (process: number | undefined) => Launch,
-      Effect.Error<ReturnType<typeof entryArgv>> | Effect.Error<ReturnType<typeof launching>>
-    >
+    readonly argv: Effect.Effect<(process: number | undefined) => Launch, Effect.Error<ReturnType<typeof launching>>>
     readonly liveNow: LiveNow
     readonly hint: string
     readonly interrupted: boolean
@@ -177,7 +133,7 @@ export const make = Effect.gen(function* () {
     const look = Effect.map(again, (yes) => (yes ? Option.some(true) : Option.none()))
 
     const reported = (event: BusEvent) => {
-      if (event.type !== "process.ready" || event.sessionId !== id) return false
+      if (event.type !== "process.ready" || event.data.sessionId !== id) return false
       const { pid, integration } = event.data
 
       if (!Predicate.isNumber(pid) || !Predicate.isObjectOrArray(integration)) return false
@@ -192,7 +148,7 @@ export const make = Effect.gen(function* () {
       (event) =>
         reported(event)
           ? Effect.succeed(Option.some(true))
-          : event.type === "process.ready" && event.sessionId === id
+          : event.type === "process.ready" && event.data.sessionId === id
             ? look
             : Effect.succeed(Option.none()),
       RESTART_TIMEOUT,
@@ -223,7 +179,7 @@ export const make = Effect.gen(function* () {
             return { sent, process: undefined }
           }
 
-          return { sent, process: yield* db.session.restartProcess(id) }
+          return { sent, process: yield* sessionStore.restartProcess(id) }
         }),
       )
 
@@ -254,7 +210,7 @@ export const make = Effect.gen(function* () {
   const againArgv = (session: SessionRow, interrupted: boolean) =>
     Effect.gen(function* () {
       const message = continuing(interrupted)
-      const execution = interrupted ? yield* db.session.openExecution(session.id) : undefined
+      const execution = interrupted ? yield* sessionStore.openExecution(session.id) : undefined
 
       const plan = yield* launching(
         session,
@@ -265,137 +221,92 @@ export const make = Effect.gen(function* () {
       return (process: number | undefined) => withExecution(plan.launch(process), execution)
     })
 
-  const restartAgent = (id: string): Effect.Effect<Restarted> =>
+  const sessionRunning = (session: SessionRow) =>
     Effect.gen(function* () {
-      const session = yield* db.session.getSession(id)
+      const terminal = terminalOf(session)?.target
+
+      if (terminal === undefined) return undefined
+      const h = yield* routed(runtimeOf(session))
+
+      if (h === undefined) return undefined
+      const seen = yield* agentState(h, terminal).pipe(Effect.option)
+
+      return Option.isNone(seen) || seen.value === "absent" ? undefined : seen.value
+    })
+
+  const restartSession = (id: string, wasWorking: boolean): Effect.Effect<Restarted> =>
+    Effect.gen(function* () {
+      const session = yield* sessionStore.getSession(id)
 
       if (session === undefined)
         return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
-      const interrupted = executionStateOf(session) === "open"
+      const terminal = terminalOf(session)?.target
+
+      if (terminal === undefined)
+        return { id, projectId: session.projectId, ok: false, message: `${id} not restarted: it has no terminal` }
+      const h = yield* routed(runtimeOf(session))
+
+      const seen =
+        h === undefined
+          ? "unknown"
+          : yield* agentState(h, terminal).pipe(Effect.orElseSucceed((): AgentSeen => "unknown"))
+
+      const interrupted = wasWorking || executionStateOf(session) === "open" || stateOf(seen) === "working"
 
       return yield* inPlace({
         id,
         projectId: session.projectId,
         label: id,
         adapter: harnesses.find(harnessIdOf(session)),
-        h: yield* routed(runtimeOf(session)),
-        terminal: terminalOf(session),
+        h,
+        terminal,
         pid: pidOf(session),
         harnessSessionId: session.process?.harnessSessionId ?? null,
         argv: againArgv(session, interrupted),
-        liveNow: db.session.getSession(id).pipe(Effect.map(reportedOf)),
+        liveNow: sessionStore.getSession(id).pipe(Effect.map(reportedOf)),
         hint: `; ${peekHint(id)}`,
         interrupted,
       })
     })
 
-  const restartEntry = (entry: SessionRow, wasWorking: boolean) =>
-    Effect.gen(function* () {
-      const { id, projectId } = entry
-      const label = `${id} (entry session)`
-      const place = placedTerminal(entry)
-
-      if (place === undefined)
-        return { id, projectId, ok: false, message: `${label} not restarted: it has no terminal` } satisfies Restarted
-      const h = yield* routed(place.runtime)
-
-      const seen =
-        h === undefined
-          ? "unknown"
-          : yield* agentState(h, place.address).pipe(Effect.orElseSucceed((): AgentSeen => "unknown"))
-
-      const interrupted = wasWorking || stateOf(seen) === "working"
-
-      return yield* inPlace({
-        id,
-        projectId,
-        label,
-        adapter: harnesses.find(harnessIdOf(entry)),
-        h,
-        terminal: place.address,
-        pid: pidOf(entry),
-        harnessSessionId: entry.process?.harnessSessionId ?? null,
-        argv: entryArgv(entry, interrupted),
-        liveNow: Effect.gen(function* () {
-          const row = yield* db.session.entryOf(projectId)
-
-          return row?.id === id ? reportedOf(row) : undefined
-        }),
-        hint: "",
-        interrupted,
-      })
-    })
-
-  const entryRunning = (entry: SessionRow) =>
-    Effect.gen(function* () {
-      const place = placedTerminal(entry)
-
-      if (place === undefined) return undefined
-      const h = yield* routed(place.runtime)
-
-      if (h === undefined) return undefined
-      const seen = yield* agentState(h, place.address).pipe(Effect.option)
-
-      return Option.isNone(seen) || seen.value === "absent" ? undefined : seen.value
-    })
-
   const reports = (harness: HarnessId) => harnesses.find(harness)?.ready === "integration"
 
   const outdated = Effect.gen(function* () {
-    const sessions = (yield* db.session.listSessions())
-      .filter(
-        (row) =>
-          !row.entry &&
-          reports(harnessIdOf(row)) &&
-          !current(row.process?.integration ?? undefined) &&
-          !archived(row) &&
-          (row.process?.placedAt ?? null) !== null &&
-          terminalOf(row).id !== "",
-      )
-      .map((row) => ({
-        id: row.id,
-        agent: row.agent,
-        harnessId: harnessIdOf(row),
-        integration: row.process?.integration ?? undefined,
-        runtime: runtimeOf(row),
-        pid: pidOf(row),
-        harnessSessionId: row.process?.harnessSessionId ?? null,
-        working: Effect.succeed<boolean | undefined>(executionStateOf(row) === "open"),
-      }))
-
-    const entries = (yield* db.session.entrySessions)
-      .filter((entry) => reports(harnessIdOf(entry)) && !current(entry.process?.integration ?? undefined))
-      .map((entry) => ({
-        id: entry.id,
-        agent: entry.agent,
-        harnessId: harnessIdOf(entry),
-        integration: entry.process?.integration ?? undefined,
-        runtime: placedTerminal(entry)?.runtime,
-        pid: pidOf(entry),
-        harnessSessionId: entry.process?.harnessSessionId ?? null,
-        working: entryRunning(entry).pipe(
-          Effect.map((seen) => (seen === undefined ? undefined : stateOf(seen) === "working")),
-        ),
-      }))
+    const candidates = (yield* sessionStore.listSessions()).filter(
+      (row) =>
+        reports(harnessIdOf(row)) &&
+        !current(row.process?.integration ?? undefined) &&
+        !archived(row) &&
+        (row.process?.placedAt ?? null) !== null &&
+        terminalOf(row) !== null,
+    )
 
     const listed: Array<Outdated> = []
 
-    for (const candidate of [...sessions, ...entries]) {
-      const working = yield* candidate.working
+    for (const row of candidates) {
+      let working: boolean | undefined
+
+      if (isRoot(row)) {
+        const seen = yield* sessionRunning(row)
+        working = seen === undefined ? undefined : stateOf(seen) === "working"
+      } else {
+        working = executionStateOf(row) === "open"
+      }
 
       if (working === undefined) continue
+      const harnessId = harnessIdOf(row)
       listed.push({
-        id: candidate.id,
-        agent: candidate.agent,
-        harness: candidate.harnessId,
-        integration: candidate.integration?.version ?? null,
+        id: row.id,
+        agent: row.agent,
+        harness: harnessId,
+        integration: row.process?.integration?.version ?? null,
         working,
         blocked:
           blockedOf(
-            harnesses.find(candidate.harnessId),
-            yield* routed(candidate.runtime),
-            candidate.pid,
-            candidate.harnessSessionId,
+            harnesses.find(harnessId),
+            yield* routed(runtimeOf(row)),
+            pidOf(row),
+            row.process?.harnessSessionId ?? null,
           ) ?? null,
       })
     }
@@ -403,15 +314,7 @@ export const make = Effect.gen(function* () {
     return listed
   })
 
-  const restartOwned = (id: string, working: boolean) =>
-    restarting.own(
-      id,
-      Effect.gen(function* () {
-        const entry = (yield* db.session.entrySessions).find((candidate) => candidate.id === id)
-
-        return yield* entry === undefined ? restartAgent(id) : restartEntry(entry, working)
-      }),
-    )
+  const restartOwned = (id: string, working: boolean) => restarting.own(id, restartSession(id, working))
 
   const restart = Effect.fn("Restart.restart")((ids: ReadonlyArray<string>, working: ReadonlyArray<string> = []) =>
     Effect.gen(function* () {
@@ -425,8 +328,8 @@ export const make = Effect.gen(function* () {
     }),
   )
 
-  const runningTheCommand = (entry: SessionRow, command: number) => {
-    const pid = pidOf(entry)
+  const runningTheCommand = (session: SessionRow, command: number) => {
+    const pid = pidOf(session)
 
     return pid === undefined
       ? Effect.succeed(false)
@@ -437,14 +340,16 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const working: Array<string> = []
 
-      for (const entry of yield* db.session.entrySessions) {
-        if (!ids.includes(entry.id)) continue
+      for (const id of ids) {
+        const session = yield* sessionStore.getSession(id)
+
+        if (session === undefined) continue
 
         if (
-          stateOf((yield* entryRunning(entry)) ?? "unknown") === "working" ||
-          (after !== undefined && (yield* runningTheCommand(entry, after)))
+          stateOf((yield* sessionRunning(session)) ?? "unknown") === "working" ||
+          (after !== undefined && (yield* runningTheCommand(session, after)))
         )
-          working.push(entry.id)
+          working.push(session.id)
       }
 
       const waited =
@@ -475,10 +380,8 @@ export const node = LayerNode.make({
   layer,
   deps: [
     App.node,
-    Agents.node,
     Bus.node,
-    Db.node,
-    Harness.node,
+    SessionStore.node,
     Harnesses.node,
     Placement.node,
     Processes.node,
@@ -486,8 +389,5 @@ export const node = LayerNode.make({
     Runtimes.node,
     SessionLive.node,
     SessionLocks.node,
-    PlatformNode.fileSystem,
-    PlatformNode.layout,
-    PlatformNode.path,
   ],
 })

@@ -1,5 +1,5 @@
 import type * as Daemon from "@vibest/server/daemon"
-import { Context } from "effect"
+import { Context, type Schema } from "effect"
 
 export type Exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => void
 
@@ -9,5 +9,6 @@ export class Host extends Context.Service<
     readonly daemon: Daemon.Host
     readonly replacements: Daemon.Replacements
     readonly exec: Exec
+    readonly parseJsonc: (text: string) => Schema.Json
   }
 >()("@vibest/cli/Host") {}

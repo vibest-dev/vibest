@@ -1,10 +1,17 @@
 import type { Harness } from "@vibest/plugin/effect"
-import { Effect, FileSystem, Path, Predicate } from "effect"
+import { Effect, FileSystem, Option, Path, Predicate, Schema } from "effect"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 import { noProvider, opt } from "./models.ts"
-import { nodePlatform } from "./node-platform.ts"
+import { nodePlatform } from "./platform.node.ts"
 import { cursorSubscription } from "./subscriptions/cursor.ts"
+
+const hostPlatform = Schema.decodeUnknownOption(Schema.Struct({ process: Schema.Struct({ platform: Schema.String }) }))(
+  globalThis,
+).pipe(
+  Option.map((host) => host.process.platform),
+  Option.getOrUndefined,
+)
 
 export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
   if (!lines.some((l) => l.startsWith("Available models"))) return undefined
@@ -18,7 +25,7 @@ export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harnes
 
 export const keychainProblem = (home: string) =>
   Effect.gen(function* () {
-    if (process.platform !== "darwin") return undefined
+    if (hostPlatform !== "darwin") return undefined
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const keychain = path.join(home, "Library", "Keychains", "login.keychain-db")
@@ -53,6 +60,7 @@ export const cursor: Harness.HarnessDefinition = {
     ...(i.resume && i.sessionId ? [`--resume=${i.sessionId}`] : []),
     "--add-dir",
     i.projectDir,
+    ...(i.scratchpadDir ? ["--add-dir", i.scratchpadDir] : []),
     "--trust",
     "--force",
     "--plugin-dir",

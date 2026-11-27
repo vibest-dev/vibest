@@ -1,23 +1,21 @@
 # Integrations and the guard
 
 vibest's plugin for each harness ships with vibest and is loaded into every session vibest starts; nothing is
-installed into the harness's own configuration. Its pre-tool guard keeps an agent to its role. Each capability below
+installed into the harness's own configuration. Its pre-tool guard runs `session.tool.execute.before` plugin hooks, with
+`vibest.guard` enforcing minimal protocol invariants. Each capability below
 says what it is and when it counts as working.
 
 ## I1. The plugins ship with vibest
 
-Each harness's plugin is part of the vibest install, and `vibest integration` offers only the hooks the plugins call
-(guard, prompt, stop, ready, start); there is nothing to install.
+Each harness's plugin is part of the vibest install, and there is nothing to install; hooks talk directly to vibestd over its Unix sockets.
 
-## I2. The binary finds its plugins
+## I2. The binary finds its embedded plugins
 
-The vibest binary finds the plugins installed beside it. A vibest with no plugins beside it cannot run a harness, and
-`vibest doctor` names the missing plugin directory for each harness.
+The compiled vibest binary embeds all harness plugins and `herdr-plugin/` inside itself and materializes them to `<VIBEST_HOME>/cache/assets/<version>-<hash>/` on daemon startup, so a standalone copied binary runs `vibest doctor` cleanly without `VIBEST_HARNESSES` or a sibling `harnesses/` folder. When `VIBEST_HARNESSES` is explicitly pointed at a missing directory, `vibest doctor` refuses each harness and names the missing plugin directory.
 
 ## I3. Pi runs vibest's extension
 
-A real Pi session started by vibest runs vibest's extension (reporting, guard and inbox; the TUI presentation is a separate extension loaded beside it): a herdr command the agent tries is refused with the
-guard's reason and does not run, and the agent's reply is the execution's reply.
+A real Pi session started by vibest runs vibest's extension (reporting, guard and inbox; the TUI presentation is a separate extension loaded beside it): a command refused by `vibest.guard` (such as `curl --unix-socket "$VIBEST_HOME/vibest.sock" ...`) does not run and returns the guard's reason, and the agent's reply is the execution's reply.
 
 ## I4. Claude runs vibest's plugin beside the user's plugins
 
@@ -26,8 +24,8 @@ installed plugin's session-start hook runs too, and the reply is the execution's
 
 ## I5. Cursor runs vibest's plugin beside the project's hooks
 
-A real cursor-agent session on the user's own login runs vibest's plugin beside the project's own hooks. Asked to run a
-herdr command, herdr does not run (the model either tries and the guard refuses it, or keeps to its rules); the execution
+A real cursor-agent session on the user's own login runs vibest's plugin beside the project's own hooks. Asked to run
+a direct `curl --unix-socket` request to `vibest.sock`, it does not run (the model either tries and `vibest.guard` refuses it, or keeps to its rules); the execution
 completes with the reply, and the project's own hook ran.
 
 ## I6. The user's harness configuration is untouched
@@ -43,9 +41,7 @@ vibest too, also while a background shell keeps the terminal busy.
 
 ## I9. Claude's guard without settings
 
-Claude starts without a settings file; vibest's plugin guards each tool call instead. A herdr command, and reading,
-finding or searching in another Project's folder, are each refused with the guard's reason, no refused file's text
-reaches the model, and reading in its own Project folder is allowed.
+Claude starts without a settings file; vibest's plugin guards each tool call instead. Commands refused by `vibest.guard` (`VIBEST_SESSION_ID=other vibest ls`, `curl --unix-socket "$VIBEST_HOME/vibest.sock" ...`) are refused with the guard's reason and do not run, while ordinary commands (`hc --version`) and reading in its own Project folder are allowed.
 
 ## I10. Cursor reports to vibestd
 
@@ -73,7 +69,7 @@ same vibest: every session starts with `VIBEST_CLI` set to it and its directory 
 
 A Cursor session vibest started runs shell commands without Cursor asking "Run this command?", even on Cursor's default
 `allowlist` approval mode with no allow rule: its `vibest send` to the session that started it arrives, and the session
-is never blocked. vibest's guard still refuses what vibest forbids: asked to run herdr, herdr does not run.
+is never blocked. vibest's guard still refuses what `vibest.guard` forbids: asked to run a direct `curl --unix-socket` request to `vibest.sock`, it does not run.
 
 ## I13. A Cursor session resumes from its start
 

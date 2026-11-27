@@ -1,9 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
-import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
+import { privateTmp, UserPlatform } from "@vibest/core/session/system-prompt"
+import * as Platform from "@vibest/testkit/bun"
+import { tempDirectory } from "@vibest/testkit/directory"
 import { Cause, Effect, Exit, FileSystem } from "effect"
-
-import { tempDirectory } from "./lib/directory.ts"
-import * as Platform from "./platform/bun.ts"
 
 describe("System prompt directory", () => {
   const refused = <A, E, R>(e: Effect.Effect<A, E, R>) =>

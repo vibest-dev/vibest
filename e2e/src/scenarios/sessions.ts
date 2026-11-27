@@ -37,7 +37,7 @@ type Listed = {
   model: string | null
   status: string
   exitedAt: number | null
-  address: { id: string }
+  terminal: { runtime: string; target: { session?: string; pane?: string } } | null
   worktree: string
   git: ListedGit | null
   latest: { status: string; summary: string } | null
@@ -48,7 +48,7 @@ type Removed = {
   pane: string
   worktree: string
   path: string
-  branch: string | null
+  branches: Array<{ repository: string; branch: string }>
   reasons: Array<string>
 }
 
@@ -97,7 +97,7 @@ const spawningModel = (child: string, flags: string) => {
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
       const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
-      const vibest = /run `([^`]+) send [0-9a-f-]{36} -- '<message>'`/.exec(system)?.[1]
+      const vibest = /run `([^`]+) send [0-9a-f-]{8,36} -- '<message>'`/.exec(system)?.[1]
       const last = messages.at(-1)
 
       const answer =
@@ -143,7 +143,7 @@ import { Effect } from "effect"
 export default Plugin.define({
   id: "see-files",
   effect: (ctx) =>
-    ctx.agent.hook("start.before", (event) =>
+    ctx.session.hook("start.before", (event) =>
       Effect.sync(() => fs.appendFileSync(${JSON.stringify(out)}, JSON.stringify({ prompt: event.prompt, files: event.files, contents: event.files.map((file) => fs.readFileSync(file, "utf8")) }) + "\\n")),
     ),
 })
@@ -191,7 +191,7 @@ const checks: ReadonlyArray<Check> = [
             entry.harness === "pi" &&
             entry.provider === "second" &&
             entry.model === "m2" &&
-            entry.address.id.split("/")[0] === session,
+            entry.terminal?.target.session === session,
           `ls: ${JSON.stringify(entry)}`,
         )
         const worktree = await fs.realpath(entry!.worktree)
@@ -218,7 +218,7 @@ const checks: ReadonlyArray<Check> = [
         expect(
           sharer !== undefined &&
             (await fs.realpath(sharer.worktree)) === worktree &&
-            sharer.address.id !== entry!.address.id,
+            sharer.terminal?.target.pane !== entry!.terminal?.target.pane,
           `sharer: ${JSON.stringify(sharer)}, first: ${JSON.stringify(entry)}`,
         )
       } finally {
@@ -246,7 +246,7 @@ const checks: ReadonlyArray<Check> = [
         const projected = row<{ reply: string | null; reported: string | null }>(
           w,
           `SELECT t.reply, e.data ->> '$.reply' AS reported FROM execution t
-            JOIN event e ON e.aggregate = t.session_id AND e.type = 'execution.succeeded' AND e.data ->> '$.executionId' = t.id
+            JOIN event e ON e.aggregate_id = t.session_id AND e.type = 'session.execution.succeeded.1' AND e.data ->> '$.executionId' = t.id
             WHERE t.session_id = ? AND t.outcome = 'completed'`,
           a,
         )
@@ -361,7 +361,7 @@ const checks: ReadonlyArray<Check> = [
         const commit = await git(w, branched.worktree, "rev-parse", "HEAD")
         const branchedOut = await archive(w, p, branched.id)
         expect(
-          branchedOut.worktree === "removed" && branchedOut.branch === "s6/branched",
+          branchedOut.worktree === "removed" && branchedOut.branches.some((b) => b.branch === "s6/branched"),
           `a branch: ${JSON.stringify(branchedOut)}`,
         )
         expect((await git(w, p.repo, "rev-parse", "s6/branched")) === commit, "the branch lost its commit")
@@ -467,7 +467,7 @@ const checks: ReadonlyArray<Check> = [
           30_000,
         )
         const waiting = (await rowOf(two!))!
-        expect(waiting.address.id === "", `the waiting subagent already has a terminal: ${JSON.stringify(waiting)}`)
+        expect(waiting.terminal === null, `the waiting subagent already has a terminal: ${JSON.stringify(waiting)}`)
         expect(
           waiting.harness === "pi" && waiting.runtime !== "",
           `the waiting subagent does not show its launch choice: ${JSON.stringify(waiting)}`,
@@ -553,7 +553,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S57",
     title:
-      "vibest run --file copies the file into the session's files folder in the project folder and ends the task with a line naming the copy; a plugin sees that path in agent.start.before files and reads the copy during the hook; the Pi subagent reads the copy and answers with a word from it; archive removes the session's folder",
+      "vibest run --file copies the file into the session's files folder in the project folder and ends the task with a line naming the copy; a plugin sees that path in session.start.before files and reads the copy during the hook; the Pi subagent reads the copy and answers with a word from it; archive removes the session's folder",
     run: async (w) => {
       const p = await piProject(w, "s57")
       const model = fileReadingModel()
@@ -610,7 +610,7 @@ const checks: ReadonlyArray<Check> = [
             path.dirname(path.dirname(path.dirname(folder))).endsWith("/projects") &&
             seen.prompt === `Read the attached file and answer with its word.\n\nAttached files: ${copy}` &&
             !seen.prompt.includes("s57-word-hazel"),
-          `agent.start.before saw ${JSON.stringify(seen)} for ${id}`,
+          `session.start.before saw ${JSON.stringify(seen)} for ${id}`,
         )
         expect((await fs.readFile(copy, "utf8")) === "the answer is s57-word-hazel\n", `${copy} is not the copy`)
         await until(

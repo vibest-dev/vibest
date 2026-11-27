@@ -4,54 +4,97 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
+import { BunHttpServer, BunRuntime, BunServices, BunSocket } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { pre } from "@vibest/builtins"
+import { HttpConnector } from "@vibest/client/client"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
+import { nodeUnixHttpClient } from "@vibest/client/unix-http.node"
+import { CodeModeRuntime } from "@vibest/codemode/service"
 import { App } from "@vibest/core/app"
-import { SQL_NAMES } from "@vibest/core/database/db"
-import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/db-schema"
-import { checkLedger } from "@vibest/core/database/migration"
-import * as Projectors from "@vibest/core/database/projectors"
-import { LayerNode } from "@vibest/core/effect/layer-node"
+import { CodeMode } from "@vibest/core/codemode"
+import { PRIVATE_FILE, SQL_NAMES } from "@vibest/core/database/database"
+import { checkLedger, migrations } from "@vibest/core/database/migration"
+import { DatabaseOpenFailed, inspectSchema, SchemaMismatch } from "@vibest/core/database/schema.sql"
 import { PlatformNode } from "@vibest/core/effect/platform"
 import { Identity, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
+import { Mcp as CoreMcp } from "@vibest/core/mcp"
 import { Builtins, builtinsNode, PluginLoader, pluginLoaderNode } from "@vibest/core/plugin"
-import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/processes"
-import { Runtimes } from "@vibest/core/runtimes"
-import { UserPlatform } from "@vibest/core/system-prompt"
+import { Projectors } from "@vibest/core/reactor"
+import { type Liveness, livenessOf, Processes, validPid } from "@vibest/core/runtime/processes"
+import { Runtimes } from "@vibest/core/runtime/registry"
+import { UserPlatform } from "@vibest/core/session/system-prompt"
+import * as HerdrBun from "@vibest/herdr-sdk/bun"
+import { Mcp } from "@vibest/mcp/index"
 import * as VibestPlugin from "@vibest/plugin"
+import { pre } from "@vibest/plugin-builtins"
 import * as VibestPluginEffect from "@vibest/plugin/effect"
 import * as VibestPluginHost from "@vibest/plugin/host"
 import { messageOf } from "@vibest/schema/error"
-import { Layout } from "@vibest/schema/layout"
+import { Layout, UserUid } from "@vibest/schema/layout"
+import { VibestApiTools } from "@vibest/server/codemode/vibest-api-tools"
 import { type Host, LockFailed } from "@vibest/server/daemon"
-import * as Http from "@vibest/server/http"
 import { Load } from "@vibest/server/machine/load"
 import { Machines } from "@vibest/server/machine/machines"
 import * as Server from "@vibest/server/server"
+import * as Ui from "@vibest/server/ui"
 import { UpdateCheck } from "@vibest/server/update-check"
+import { LayerNode } from "@vibest/util/layer-node"
 import * as effect from "effect"
-import { Effect, Layer, Predicate, Schema, type Scope, Stdio, Stream } from "effect"
-import * as HerdrBun from "effect-herdr-sdk/bun"
+import {
+  Cause,
+  Duration,
+  Effect,
+  type FileSystem,
+  Layer,
+  Predicate,
+  Schedule,
+  Schema,
+  type Scope,
+  Stdio,
+  Stream,
+} from "effect"
+import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, type HttpClient } from "effect/http"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
-import { SqlClient } from "effect/sql"
+import { SqlClient, SqlError } from "effect/sql"
 
 import { layer as hostSample } from "./host-sample.ts"
 import { trimLog } from "./log-file.ts"
 import { graph, pluginLoads, packageName, watch } from "./plugin-source.ts"
+
+const readOnDemand = (handle: fsPromises.FileHandle) =>
+  Effect.flatMap(
+    Effect.promise(() => handle.read(Buffer.alloc(4096)).catch(() => ({ bytesRead: 0, buffer: Buffer.alloc(0) }))),
+    ({ bytesRead, buffer }) =>
+      bytesRead === 0 ? Cause.done() : Effect.succeed([buffer.subarray(0, bytesRead)] as const),
+  )
+
+const terminalUntilGone = Stream.scoped(
+  Stream.fromPull(
+    Effect.map(
+      Effect.acquireRelease(
+        Effect.promise(() => fsPromises.open("/dev/stdin")),
+        (handle) => Effect.promise(() => handle.close()),
+      ),
+      readOnDemand,
+    ),
+  ),
+)
 
 const unrefStdio = Layer.effect(
   Stdio.Stdio,
   Effect.map(Stdio.Stdio, (bun) =>
     Stdio.make({
       ...bun,
-      stdin: Stream.ensuring(
-        bun.stdin,
-        Effect.sync(() => process.stdin.unref?.()),
+      stdin: Stream.suspend(() =>
+        process.stdin.isTTY
+          ? terminalUntilGone
+          : Stream.ensuring(
+              bun.stdin,
+              Effect.sync(() => process.stdin.unref?.()),
+            ),
       ),
     }),
   ),
@@ -68,22 +111,27 @@ const user = Layer.succeed(UserPlatform, {
 
 const platform = Layer.mergeAll(
   BunServices.layer,
+  Digest.layerWebCrypto,
+  SecureRandom.layerWebCrypto,
   FetchHttpClient.layer,
+  Layer.succeed(FetchHttpClient.Fetch, globalThis.fetch),
   unrefStdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector.Service, (endpoint) => BunSocket.makeNet({ path: endpoint })),
+  Layer.succeed(UserUid, process.getuid?.()),
+  Layer.succeed(HttpConnector.Service, nodeUnixHttpClient),
   user,
 )
 
 const sqliteLayer = (filename: string, readonly: boolean) =>
   SqliteClient.layer({ filename, readonly, disableWAL: true, ...SQL_NAMES })
 
-const PRIVATE_FILE = 0o600
-
 const privateDatabase = (filename: string) =>
   Effect.tryPromise({
     try: async () => {
-      await (await fsPromises.open(filename, "a", PRIVATE_FILE)).close()
+      if (process.platform === "win32") return
+
+      if (!fs.existsSync(filename)) fs.closeSync(fs.openSync(filename, "a", PRIVATE_FILE))
       await fsPromises.chmod(filename, PRIVATE_FILE)
 
       for (const suffix of ["-wal", "-shm"]) {
@@ -97,10 +145,18 @@ const privateDatabase = (filename: string) =>
     catch: (e) => new DatabaseOpenFailed({ file: filename, message: messageOf(e) }),
   })
 
-const inspectFile = (filename: string) =>
-  inspectSchema.pipe(
+const INSPECT_RETRY = Schedule.spaced("10 millis").pipe(Schedule.upTo({ duration: "5 seconds" }))
+
+const inspectFile = (filename: string, known: ReadonlySet<string> = new Set(migrations.map((m) => m.id))) =>
+  inspectSchema(known).pipe(
     Effect.provide(sqliteLayer(filename, true)),
     Effect.scoped,
+    Effect.retry({
+      while: (error) =>
+        SqlError.isSqlError(error) &&
+        (Predicate.isTagged(error.reason, "LockTimeoutError") || Predicate.isTagged(error.reason, "ConnectionError")),
+      schedule: INSPECT_RETRY,
+    }),
     Effect.mapError((e) =>
       e instanceof SchemaMismatch
         ? new SchemaMismatch({
@@ -108,22 +164,21 @@ const inspectFile = (filename: string) =>
             applicationId: e.applicationId,
             ...(e.detail !== undefined && { detail: e.detail }),
             ...(e.older !== undefined && { older: e.older }),
-            ...(e.catalog !== undefined && { catalog: e.catalog }),
-            ...(e.oldEvents !== undefined && { oldEvents: e.oldEvents }),
+            ...(e.unknownMigration !== undefined && { unknownMigration: e.unknownMigration }),
             file: filename,
           })
         : new DatabaseOpenFailed({ file: filename, message: e.message }),
     ),
   )
 
-export const sqlite = (filename: string) =>
+export const sqlite = (filename: string, known?: ReadonlySet<string>) =>
   Layer.unwrap(
     Effect.gen(function* () {
       if (filename !== ":memory:") {
         const existed = yield* Effect.promise(() => Bun.file(filename).exists())
-        yield* privateDatabase(filename)
 
-        if (existed) yield* inspectFile(filename)
+        if (existed) yield* inspectFile(filename, known)
+        yield* privateDatabase(filename)
       }
 
       return sqliteLayer(filename, false)
@@ -165,6 +220,8 @@ const provided = new Map<string, ModuleExports>([
 
 const providedPackages: ReadonlySet<string> = new Set(provided.keys().map(packageName))
 
+export const parseJsonc = (text: string) => Schema.decodeUnknownSync(Schema.Json)(Bun.JSONC.parse(text))
+
 export const makePluginLoader = (): PluginLoader["Service"] => {
   const { keyLocalImports, load } = pluginLoads()
   let mapped = false
@@ -183,7 +240,7 @@ export const makePluginLoader = (): PluginLoader["Service"] => {
         },
       })
     }),
-    parseJsonc: (text) => Schema.decodeUnknownSync(Schema.Json)(Bun.JSONC.parse(text)),
+    parseJsonc,
     graph: (entry) => graph(entry, providedPackages),
     load,
     watch,
@@ -249,10 +306,25 @@ const processes: Processes.ProcessPlatform["Service"] = {
   uid: process.getuid?.(),
 }
 
-const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
+const LIBC_SPEC = {
   dup2: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-})
+} as const
+
+const LIBC_CANDIDATES =
+  process.platform === "darwin"
+    ? ["libc.dylib"]
+    : ["libc.so.6", "libc.musl-x86_64.so.1", "libc.musl-aarch64.so.1", "libc.so"]
+
+const openLibc = () => {
+  for (const name of LIBC_CANDIDATES) {
+    try {
+      return dlopen(name, LIBC_SPEC).symbols
+    } catch {}
+  }
+
+  throw new Error(`could not open libc (tried ${LIBC_CANDIDATES.join(", ")})`)
+}
 
 const LOCK_EX_NB = 2 | 4
 
@@ -262,11 +334,19 @@ export const captureDaemonLog = (file: string) =>
     const fd = fs.openSync(file, "a")
 
     try {
-      if (libc.symbols.dup2(fd, 1) === -1 || libc.symbols.dup2(fd, 2) === -1) throw new Error(`dup2 ${file} failed`)
+      const libc = openLibc()
+
+      if (libc.dup2(fd, 1) === -1 || libc.dup2(fd, 2) === -1) throw new Error(`dup2 ${file} failed`)
     } finally {
       fs.closeSync(fd)
     }
   })
+
+export const restoreNormalJitPolicy = Effect.sync(() => {
+  const unsafe = Bun.unsafe
+
+  if (Predicate.hasProperty(unsafe, "setJITPolicy") && Predicate.isFunction(unsafe.setJITPolicy)) unsafe.setJITPolicy(1)
+})
 
 export const trimDaemonLog: Host["trimLog"] = (file) =>
   Effect.sync(() => {
@@ -286,7 +366,17 @@ export const lock: Host["lock"] = (file) =>
       try: () => {
         const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT, 0o600)
 
-        if (libc.symbols.flock(fd, LOCK_EX_NB) === 0) return fd
+        try {
+          if (openLibc().flock(fd, LOCK_EX_NB) === 0) {
+            fs.fchmodSync(fd, 0o600)
+
+            return fd
+          }
+        } catch (cause) {
+          fs.closeSync(fd)
+          throw cause
+        }
+
         fs.closeSync(fd)
 
         return undefined
@@ -372,15 +462,18 @@ const dropEnv = (names: ReadonlyArray<string>) => {
 
 export const services = platform
 
-export const socketServer = (path: string) => BunSocketServer.layer({ path })
+export const httpServer = (path: string) =>
+  BunHttpServer.layerServer({ unix: path, idleTimeout: 0, gracefulShutdownTimeout: Duration.zero })
 
 const platformNode = LayerNode.make({ name: "vibest/Platform", layer: platform, deps: [] })
 
 export const replacements: LayerNode.Replacements = [
   PlatformNode.fileSystem.replace(platformNode),
   PlatformNode.path.replace(platformNode),
-  PlatformNode.crypto.replace(platformNode),
+  PlatformNode.digest.replace(platformNode),
+  PlatformNode.secureRandom.replace(platformNode),
   PlatformNode.childProcessSpawner.replace(platformNode),
+  PlatformNode.fetch.replace(platformNode),
   PlatformNode.sqlClientLayer.replace(
     LayerNode.make({
       name: "vibest/Sqlite",
@@ -397,12 +490,12 @@ export const replacements: LayerNode.Replacements = [
       name: "vibest/Builtins",
       layer: Layer.effect(
         Builtins,
-        Effect.flatMap(Layout, (layout) => pre(layout.home)),
+        Effect.flatMap(Layout, (layout) => pre(layout.home, parseJsonc)),
       ),
       deps: [
         PlatformNode.fileSystem,
         PlatformNode.path,
-        PlatformNode.crypto,
+        PlatformNode.digest,
         PlatformNode.layout,
         PlatformNode.childProcessSpawner,
       ],
@@ -410,25 +503,25 @@ export const replacements: LayerNode.Replacements = [
   ),
   Runtimes.hostEnvNode.replace(Layer.succeed(Runtimes.HostEnv, { drop: dropEnv })),
   Processes.processPlatformNode.replace(Layer.succeed(Processes.ProcessPlatform, processes)),
-  Server.socketServerLayer.replace(
+  Server.httpServerLayer.replace(
     LayerNode.make({
-      name: "vibest/SocketServer",
+      name: "vibest/HttpServer/unix",
       layer: Layer.unwrap(
-        Effect.map(Layout, (layout) => Layer.succeed(Server.SocketServerLayer, socketServer(layout.socket))),
+        Effect.map(Layout, (layout) => Layer.succeed(Server.HttpServerLayer, httpServer(layout.socket))),
       ),
       deps: [PlatformNode.layout],
     }),
   ),
-  Http.httpServerLayer.replace(
-    LayerNode.make({
-      name: "vibest/HttpServer/unix",
-      layer: Layer.unwrap(
-        Effect.map(Layout, (layout) =>
-          Layer.succeed(Http.HttpServerLayer, BunHttpServer.layerServer({ unix: layout.httpSocket })),
-        ),
-      ),
-      deps: [PlatformNode.layout],
-    }),
+  Ui.uiServerLayer.replace(
+    Layer.succeed(
+      Ui.UiServerLayer,
+      BunHttpServer.layerServer({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        gracefulShutdownTimeout: Duration.zero,
+      }),
+    ),
   ),
   Identity.hostFactsNode.replace(
     Layer.succeed(Identity.HostFacts, { name: os.hostname(), id: hostId, pid: process.pid }),
@@ -440,18 +533,22 @@ export const replacements: LayerNode.Replacements = [
       deps: [PlatformNode.fileSystem, PlatformNode.childProcessSpawner],
     }),
   ),
+  CoreMcp.node.replace(Mcp.node),
+  CodeMode.hostNode.replace(Layer.succeed(CodeMode.Host, () => CodeModeRuntime.make())),
+  VibestApiTools.httpConnectorNode.replace(platformNode),
+  CodeMode.builtinToolsNode.replace(VibestApiTools.node),
 ]
 
 export const app = (info: App.Interface) => App.node.replace(Layer.succeed(App.Service, info))
 
 export const updateCheck = (
-  construct: Effect.Effect<UpdateCheck.Interface, never, Scope.Scope | HttpClient.HttpClient>,
+  construct: Effect.Effect<UpdateCheck.Interface, never, Scope.Scope | HttpClient.HttpClient | FileSystem.FileSystem>,
 ) =>
   UpdateCheck.node.replace(
     LayerNode.make({
       service: UpdateCheck.Service,
       layer: Layer.effect(UpdateCheck.Service, construct),
-      deps: [PlatformNode.httpClient],
+      deps: [PlatformNode.httpClient, PlatformNode.fileSystem],
     }),
   )
 
@@ -486,6 +583,8 @@ export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")
     ? [process.execPath]
     : [process.execPath, process.argv[1]]
+
+export { ConnectFailed, servePipe, type PipeStdio } from "./pipe-server.ts"
 
 export const exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => {
   const { VIBEST_EXECUTION: _, ...inherited } = process.env

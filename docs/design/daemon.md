@@ -93,7 +93,7 @@ Changes are counted at the RPC and HTTP entry until they end, failed or interrup
 hook's execution start (`Prompt`) or execution end (`ExecutionEnd`) and an inbox ack. While it drains these are still admitted;
 after the Stop is accepted they are refused too. Refused while draining, a spawn's first execution would never show its
 pickup proof (its launch then holds the drain open) and an execution end would lose its result. An execution end is one
-transaction that writes the execution's `execution.succeeded` with its reply, without the session lock; a write that fails fails the request, so the caller sees a
+transaction that writes the execution's `session.execution.succeeded` with its reply, without the session lock; a write that fails fails the request, so the caller sees a
 failure, not a silent retry. An execution start is written once, when the hook arrives, without the session's lock (held through a send's whole
 confirm): `userPrompt` accepts the open execution, so the pending send sees its pickup proof while it still waits.
 
@@ -110,8 +110,8 @@ session id (an old entry session after a switch) changes nothing. ACCESS roles: 
 session with an inbox), `agent` (a session or the command line), `owner` (the session that started the target, or the command
 line; a forwarded call from another machine passes the same rule for the session that made it) and `self` (a session's
 own terminal for its own id, or the command line at the Project root for its entry session, its start after a restart).
-A session sends only to the session that started it, to sessions it started and to the unfinished members of its team
-(never to itself); when the creator it names has ended,
+A session sends only to sessions it has a directed link to (`session_edge`, initialized bidirectionally with its creator
+and extended with `vibest run --from/--to/--with` or `vibest session link`, never to itself); when the creator it names has ended,
 vibestd hands the message to the nearest session above it that is still running, on this machine or another, and when none
 is left the send is refused (the user reads the last reply). It manages (interrupts, removes) the sessions whose nearest
 living creator it is. One entry session per Project: every start passes one check that holds the

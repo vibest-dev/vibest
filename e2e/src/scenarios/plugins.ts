@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import url from "node:url"
 
+import { PROTOCOL } from "../../../packages/schema/src/version.ts"
 import type { Check } from "../check.ts"
 import { expect, until, type World } from "../world.ts"
 import pluginSessions from "./plugin-sessions.ts"
@@ -18,9 +19,12 @@ type Info = {
 
 const list = (w: World) => w.json<Array<Info>>(["plugins"])
 
-const plugin = (id: string, hook = "() => Effect.void") => `import { AgentRefused, Plugin } from "@vibest/plugin/effect"
+const plugin = (
+  id: string,
+  hook = "() => Effect.void",
+) => `import { SessionRefused, Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
-export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", ${hook}) })
+export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.session.hook("start.before", ${hook}) })
 `
 
 const transformThrows = (id: string, counter: string) => `import { Plugin } from "@vibest/plugin/effect"
@@ -183,14 +187,14 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
   },
   {
     id: "G4",
-    title: "a refusing agent.start.before blocks run with its reason, before any worktree",
+    title: "a refusing session.start.before blocks run with its reason, before any worktree",
     entry: true,
     run: async (w) => {
       const sessions = () => w.json<{ sessions: Array<unknown> }>(["ls", "--all"]).then((l) => l.sessions.length)
       const sessionsBefore = await sessions()
       await write(
         path.join(w.vibestHome, "plugins", "refuse.ts"),
-        plugin("refuse", `() => Effect.fail(new AgentRefused({ reason: "e2e says no" }))`),
+        plugin("refuse", `() => Effect.fail(new SessionRefused({ reason: "e2e says no" }))`),
       )
       await until("the refusing plugin active", async () =>
         (await list(w)).some((p) => p.id === "refuse" && p.status === "active"),
@@ -379,6 +383,167 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       )
       await fs.rm(dotted, { recursive: true })
       await fs.rm(escaping, { recursive: true })
+    },
+  },
+  {
+    id: "G21",
+    title:
+      "Effect and Promise tool.execute.before plugins receive session/tool/input/cwd, refuse tool calls with ToolRefused, count calls and refusals, and vibest.guard blocks only protocol invariants while allowing hc and ~/.vibest paths",
+    entry: true,
+    run: async (w) => {
+      const seenLog = path.join(w.root, "tool-before-seen.jsonl")
+      const effectFile = path.join(w.vibestHome, "plugins", "tool-effect.ts")
+      const promiseFile = path.join(w.vibestHome, "plugins", "tool-promise.ts")
+
+      await write(
+        effectFile,
+        `import fs from "node:fs"
+import { Plugin, ToolRefused } from "@vibest/plugin/effect"
+import { Effect } from "effect"
+
+export default Plugin.define({
+  id: "tool-effect",
+  effect: (ctx) =>
+    ctx.session.hook("tool.execute.before", (event) =>
+      Effect.gen(function* () {
+        fs.appendFileSync(${JSON.stringify(seenLog)}, JSON.stringify({ by: "effect", ...event }) + "\\n")
+        if (event.tool === "Write" && event.input.file_path === "/forbidden-by-effect")
+          return yield* new ToolRefused({ reason: "e2e effect refused write" })
+      }),
+    ),
+})
+`,
+      )
+
+      await write(
+        promiseFile,
+        `import fs from "node:fs"
+import { Plugin, ToolRefused } from "@vibest/plugin"
+
+export default Plugin.define({
+  id: "tool-promise",
+  setup: async (ctx) => {
+    await ctx.session.hook("tool.execute.before", async (event) => {
+      fs.appendFileSync(${JSON.stringify(seenLog)}, JSON.stringify({ by: "promise", ...event }) + "\\n")
+      if (event.tool === "Shell" && event.input.command === "blocked-by-promise")
+        throw new ToolRefused({ reason: "e2e promise refused shell" })
+    })
+  },
+})
+`,
+      )
+
+      await until("both tool.execute.before plugins active", async () => {
+        const all = await list(w)
+
+        return ["vibest.guard", "tool-effect", "tool-promise"].every((id) =>
+          all.some((p) => p.id === id && p.status === "active"),
+        )
+      })
+
+      const entry = (
+        await w
+          .json<{ sessions: Array<{ id: string; projectId: string; harness: string }> }>(["ls"])
+          .then((l) => l.sessions)
+      )[0]!
+
+      const guard = async (tool: string, input: Record<string, string>) => {
+        const r = await w.run(w.repository, [
+          "curl",
+          "-sS",
+          "-w",
+          "\n%{http_code}",
+          "--unix-socket",
+          path.join(w.vibestHome, "vibest.sock"),
+          "-X",
+          "POST",
+          "-H",
+          `vibest-protocol: ${PROTOCOL}`,
+          "-H",
+          "vibest-caller: session",
+          "-H",
+          `vibest-session-id: ${entry.id}`,
+          "-H",
+          `vibest-project-id: ${entry.projectId}`,
+          "-H",
+          `vibest-harness: ${entry.harness}`,
+          "-H",
+          "content-type: text/plain",
+          "--data-binary",
+          JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository }),
+          `http://vibest/api/hook/${entry.harness}/guard`,
+        ])
+
+        expect(r.code === 0, `guard curl exited ${r.code}: ${r.stderr}`)
+        const at = r.stdout.lastIndexOf("\n")
+        const status = Number(r.stdout.slice(at + 1))
+        expect(status === 200, `guard HTTP ${status}: ${r.stdout}`)
+
+        const body = JSON.parse(r.stdout.slice(0, at)) as {
+          deny?: string
+          agent_message?: string
+          reason?: string
+        }
+
+        return body.deny ?? body.agent_message ?? body.reason
+      }
+
+      const builtinIdentity = await guard("Shell", { command: "VIBEST_SESSION_ID=other vibest ls" })
+      expect(
+        builtinIdentity ===
+          "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused.",
+        `identity refusal: ${JSON.stringify(builtinIdentity)}`,
+      )
+
+      const builtinHook = await guard("Shell", {
+        command: 'curl --unix-socket "$VIBEST_HOME/vibest.sock" http://vibest/api/hook/ready',
+      })
+
+      expect(
+        builtinHook === "vibest.sock is the vibestd daemon socket, not for agent commands.",
+        `hook refusal: ${JSON.stringify(builtinHook)}`,
+      )
+
+      const relaxedHc = await guard("Shell", { command: "hc --version" })
+      expect(relaxedHc === undefined, `hc --version refused: ${JSON.stringify(relaxedHc)}`)
+
+      const relaxedWorktree = await guard("Shell", { command: "ls ~/.vibest/worktrees/vibest/1234/src/*.ts" })
+      expect(relaxedWorktree === undefined, `worktree path refused: ${JSON.stringify(relaxedWorktree)}`)
+
+      const effectDenied = await guard("Write", { file_path: "/forbidden-by-effect" })
+      expect(effectDenied === "e2e effect refused write", `effect refusal: ${JSON.stringify(effectDenied)}`)
+
+      const promiseDenied = await guard("Shell", { command: "blocked-by-promise" })
+      expect(promiseDenied === "e2e promise refused shell", `promise refusal: ${JSON.stringify(promiseDenied)}`)
+
+      const seen = (await fs.readFile(seenLog, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { by: string; session: { id: string; project: string }; cwd: string })
+
+      expect(
+        seen.some((e) => e.by === "effect" && e.session.id === entry.id && e.session.project === entry.projectId),
+        `effect plugin did not receive session context: ${JSON.stringify(seen)}`,
+      )
+      expect(
+        seen.some((e) => e.by === "promise" && e.session.id === entry.id && e.session.project === entry.projectId),
+        `promise plugin did not receive session context: ${JSON.stringify(seen)}`,
+      )
+
+      const all = await list(w)
+      const effectStats = all.find((p) => p.id === "tool-effect")
+      const promiseStats = all.find((p) => p.id === "tool-promise")
+      expect(
+        effectStats !== undefined && effectStats.calls === 4 && effectStats.refused === 1,
+        `effect stats: ${JSON.stringify(effectStats)}`,
+      )
+      expect(
+        promiseStats !== undefined && promiseStats.calls === 3 && promiseStats.refused === 1,
+        `promise stats: ${JSON.stringify(promiseStats)}`,
+      )
+
+      await fs.rm(effectFile)
+      await fs.rm(promiseFile)
     },
   },
 ]

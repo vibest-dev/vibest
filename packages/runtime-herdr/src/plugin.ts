@@ -2,16 +2,16 @@ import * as NodeChildProcessSpawner from "@effect/platform-node-shared/NodeChild
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
+import { SocketConnector } from "@vibest/herdr-sdk"
 import * as VibestPlugin from "@vibest/plugin/effect"
 import { Context, Effect, FileSystem, Layer } from "effect"
-import { SocketConnector } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 
 import { CALLER_ENV, readyFrom, targetFrom, terminalFrom } from "./caller.ts"
 import * as Machines from "./machines.ts"
 import * as Mirror from "./mirror.ts"
 import { HerdrPool } from "./pool.ts"
-import { KIND, fromPool } from "./terminal-runtime.ts"
+import { fromPool, type HerdrTerminal } from "./terminal-runtime.ts"
 
 const platform = Layer.mergeAll(
   Layer.succeed(SocketConnector, (endpoint: string) => NodeSocket.makeNet({ path: endpoint })),
@@ -23,7 +23,7 @@ const callerServices = Layer.provideMerge(NodeChildProcessSpawner.layer, platfor
 
 export const layer = HerdrPool.layer.pipe(Layer.provideMerge(callerServices))
 
-const caller: VibestPlugin.Runtime.RuntimeCaller = {
+const caller: VibestPlugin.Runtime.RuntimeCaller<HerdrTerminal> = {
   env: CALLER_ENV,
   terminal: (env) => terminalFrom(env).pipe(Effect.provide(callerServices)),
   ready: (env) => readyFrom(env).pipe(Effect.provide(platform)),
@@ -41,22 +41,17 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
       const cli = Machines.cliOf(spawner)
       const pool = Context.get(built, HerdrPool)
 
-      const runtime = yield* fromPool({
+      const definition = yield* fromPool({
         pool,
         spawner,
         fs: Context.get(built, FileSystem.FileSystem),
         scope,
+        caller,
+        link: () => Machines.link(pool),
+        locate: (remote, sessions) => Machines.locate(cli, remote, sessions),
       })
 
-      yield* context.runtime.transform((editor) =>
-        editor.add({
-          ...runtime,
-          id: KIND,
-          caller,
-          link: () => Machines.link(pool),
-          locate: (peer, sessions) => Machines.locate(cli, peer, sessions),
-        }),
-      )
+      yield* context.runtime.transform((editor) => editor.add(definition))
       yield* Mirror.mirror(context.machine, cli)
     }),
 })

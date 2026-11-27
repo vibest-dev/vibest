@@ -11,7 +11,7 @@ import { Effect, Ref, Stream } from "effect"
 
 import { alive, commandOf, note } from "../../../tools/reap.ts"
 import { connect } from "../src/client.ts"
-import { make, MIN_API_REVISION, parseTerminalId } from "../src/terminal-runtime.ts"
+import { make, MIN_API_REVISION } from "../src/terminal-runtime.ts"
 
 const REX_CANDIDATES = [
   process.env.REX_BIN,
@@ -40,7 +40,7 @@ const serverEnv = () => {
   for (const [key, value] of Object.entries(process.env))
     if (value !== undefined && !key.startsWith("REX_") && !key.startsWith("VIBEST_")) env[key] = value
 
-  return { ...env, ZDOTDIR: zdotdir }
+  return { ...env, ZDOTDIR: zdotdir, REX_RUNTIME_DIR: path.join(root, "run") }
 }
 
 const rexCli = (...args: Array<string>) =>
@@ -109,6 +109,7 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
   beforeAll(async () => {
     fs.mkdirSync(path.join(root, "state"), { recursive: true })
     fs.mkdirSync(zdotdir, { recursive: true })
+    fs.mkdirSync(path.join(root, "run"), { recursive: true })
     fs.writeFileSync(path.join(root, "init.lua"), "")
 
     const server = childProcess.spawn(
@@ -157,7 +158,7 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
     "passes the shared runtime contract",
     () =>
       withRuntime((runtime) =>
-        runtimeContract(runtime, { cwd: fs.realpathSync(root), timeout: "30 seconds" }).pipe(
+        runtimeContract(runtime, { cwd: fs.realpathSync(root), timeout: "30 seconds", reportsProgramExit: false }).pipe(
           Effect.provide(NodeFileSystem.layer),
           Effect.provide(NodePath.layer),
           Effect.scoped,
@@ -220,7 +221,13 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
           yield* until(
             Ref.get(seen),
             (events) =>
-              events.some((e) => e.type === "state" && e.terminal.id === terminal.id && e.state === "blocked"),
+              events.some(
+                (e) =>
+                  e.type === "state" &&
+                  e.terminal["session"] === terminal["session"] &&
+                  e.terminal["block"] === terminal["block"] &&
+                  e.state === "blocked",
+              ),
             "no blocked state event",
           )
           yield* runtime.send(terminal, { text: "printf '\\033]7501;state=done\\007'" })
@@ -248,10 +255,8 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
             split: true,
           })
 
-          const a = parseTerminalId(near.id)
-          const b = parseTerminalId(beside.id)
-          assert.strictEqual(b?.sessionId, a?.sessionId)
-          const view = rexCli("api", "call", "session.view", JSON.stringify({ session_id: a?.sessionId }))
+          assert.strictEqual(beside["session"], near["session"])
+          const view = rexCli("api", "call", "session.view", JSON.stringify({ session_id: near["session"] }))
           assert.strictEqual(view.status, 0, view.stderr)
 
           const windows = (
@@ -259,11 +264,11 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
           ).windows
 
           const holding = windows.filter((w) =>
-            w.layers.some((l) => l.blocks.some((block) => block.block_id === b?.blockId)),
+            w.layers.some((l) => l.blocks.some((block) => block.block_id === beside["block"])),
           )
 
           assert.strictEqual(holding.length, 1)
-          assert.isTrue(holding[0]?.layers.some((l) => l.blocks.some((block) => block.block_id === a?.blockId)))
+          assert.isTrue(holding[0]?.layers.some((l) => l.blocks.some((block) => block.block_id === near["block"])))
           yield* runtime.close(beside)
           yield* runtime.close(near)
         }),
@@ -316,6 +321,97 @@ describe.skipIf(rexBin === undefined)("runtime-rex against an isolated Rex serve
           yield* runtime.send(terminal, { text: "echo vbt-both-$((6*7))", keys: ["esc"] })
           yield* until(runtime.read(terminal, 20), (text) => text.includes("vbt-both-42"), "the text was not submitted")
           yield* runtime.close(terminal)
+        }),
+      ),
+    60_000,
+  )
+
+  it.live(
+    "near opens a new window in the same renamed Rex session even after the anchor block closes",
+    () =>
+      withRuntime((runtime) =>
+        Effect.gen(function* () {
+          const cwd = fs.realpathSync(root)
+
+          const created = rexCli(
+            "api",
+            "call",
+            "session.create",
+            JSON.stringify({
+              label: "renamed-by-user",
+              initial_windows: [
+                {
+                  window_label: "anchor",
+                  layout: {
+                    block: {
+                      flavor: "com.superlogical.terminal.shell",
+                      label: "anchor",
+                      options: { shell: "none", command: ["/bin/sh"], cwd, close_on_exit: false },
+                    },
+                  },
+                },
+              ],
+            }),
+          )
+
+          assert.strictEqual(created.status, 0, created.stderr)
+
+          const parsed = JSON.parse(created.stdout) as {
+            session_id: string
+            initial_windows: Array<{ block_ids: Array<string> }>
+          }
+
+          const sessionId = parsed.session_id
+          const anchor = { session: sessionId, block: parsed.initial_windows[0]!.block_ids[0]! }
+
+          const keeper = yield* runtime.open({
+            project: cwd,
+            cwd,
+            launch: { argv: [], env: {} },
+            label: "keeper",
+            near: anchor,
+          })
+
+          assert.strictEqual(keeper["session"], sessionId)
+
+          yield* runtime.close(anchor)
+
+          const afterClose = yield* runtime.open({
+            project: cwd,
+            cwd,
+            launch: { argv: [], env: {} },
+            label: "after-close",
+            near: anchor,
+          })
+
+          assert.strictEqual(afterClose["session"], sessionId)
+
+          yield* runtime.close(afterClose)
+          yield* runtime.close(keeper)
+        }),
+      ),
+    60_000,
+  )
+
+  it.live(
+    "open with a dead near session falls back cleanly to creating a new session",
+    () =>
+      withRuntime((runtime) =>
+        Effect.gen(function* () {
+          const cwd = fs.realpathSync(root)
+          const deadSession = "session:11111111-1111-4111-8111-111111111111"
+
+          const opened = yield* runtime.open({
+            project: cwd,
+            cwd,
+            launch: { argv: [], env: {} },
+            label: "fallback",
+            near: { session: deadSession, block: "block:22222222-2222-4222-8222-222222222222" },
+          })
+
+          assert.isDefined(opened["session"])
+          assert.notStrictEqual(opened["session"], deadSession)
+          yield* runtime.close(opened)
         }),
       ),
     60_000,

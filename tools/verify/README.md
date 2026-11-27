@@ -25,7 +25,7 @@ run fails at the end naming each failed leg:
 
 1. `pnpm run build` (Turborepo, cached), then at the same time: `pnpm run typecheck` and `pnpm run test` (skipped when
    areas or ids are given), and each way a user installs vibest, into a temp directory, with nothing from this checkout:
-   - **curl**: this platform's release archive (`scripts/build-archive.ts`), installed by `install.sh` run as
+   - **curl**: this platform's release archive (`script/build-archive.ts`), installed by `install.sh` run as
      `curl … | sh`, from `file://` (`VIBEST_DOWNLOAD_URL`, `VIBEST_INSTALL`, `VIBEST_BIN`).
    - **npm**: `pnpm pack` of `@vibest/cli` and this platform's binary package, then `npm install` of both tarballs.
 2. Both installs at the same time, `e2e --strict` with `VIBEST_E2E_METHOD` (`curl` or `npm`) and

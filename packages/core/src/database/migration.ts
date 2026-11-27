@@ -1,34 +1,25 @@
-import { CATALOG_VERSION } from "@vibest/schema/event"
 import { randomId } from "@vibest/schema/id"
-import { Clock, Effect } from "effect"
+import { Clock, Effect, String as Str } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import { Bus, checkReplay, copyWholeLog } from "../bus.ts"
+import { Bus, checkReplay } from "../bus.ts"
+import { automationMigration } from "./migration/20261125000000-automation.ts"
 import {
   APPEND_ONLY_TRIGGER,
+  AUTOMATION_SCHEMA,
   inspectSchema,
+  KNOWN_MIGRATIONS,
   LOG_SCHEMA,
-  MIGRATION_TABLE,
   objectCount,
   PROJECTION_SCHEMA,
-  PROJECTION_VERSION,
-  setMeta,
-} from "./db-schema.ts"
-import { migration as oneSender } from "./migration/20261119000000_one_sender.ts"
-import { migration as limitedEndIsExited } from "./migration/20261120000000_limited_end_is_exited.ts"
-import { migration as inboxV1 } from "./migration/20261121000000_inbox_v1.ts"
-import { migration as executionLifecycle } from "./migration/20261122000000_execution_lifecycle.ts"
+} from "./schema.sql.ts"
 
 export type Migration = {
   readonly id: string
   readonly up: (tx: SqlClient.SqlClient) => Effect.Effect<void, SqlError.SqlError>
 }
 
-export const migrations: ReadonlyArray<Migration> = [oneSender, limitedEndIsExited, inboxV1, executionLifecycle]
-
-const createTable = (sql: SqlClient.SqlClient) =>
-  sql.unsafe(`CREATE TABLE IF NOT EXISTS ${MIGRATION_TABLE} (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL)
-    STRICT`)
+export const migrations: ReadonlyArray<Migration> = [automationMigration]
 
 const appliedIds = (sql: SqlClient.SqlClient) =>
   sql<{ id: string }>`SELECT id FROM migration`.pipe(Effect.map((rows) => new Set(rows.map((row) => row.id))))
@@ -38,34 +29,21 @@ const markApplied = (sql: SqlClient.SqlClient, id: string) =>
     yield* sql`INSERT INTO migration (id, time_completed) VALUES (${id}, ${yield* Clock.currentTimeMillis})`
   })
 
-export const installLedger = Effect.gen(function* () {
+export const installBaseline = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
 
-  for (const statement of [...LOG_SCHEMA, ...PROJECTION_SCHEMA]) yield* sql.unsafe(statement)
-  yield* setMeta(sql, "catalog", CATALOG_VERSION)
-  yield* setMeta(sql, "projection", PROJECTION_VERSION)
-  yield* sql`INSERT INTO meta (key, value) VALUES ('ledger', ${randomId()})`
+  for (const statement of [...LOG_SCHEMA, ...PROJECTION_SCHEMA, ...AUTOMATION_SCHEMA]) yield* sql.unsafe(statement)
+  yield* sql`INSERT INTO kv (key, value) VALUES ('ledger', ${randomId()})`
 })
 
 const bootstrap = (sql: SqlClient.SqlClient, input: ReadonlyArray<Migration>) =>
   sql.withTransaction(
     Effect.gen(function* () {
       if ((yield* objectCount) > 0) return
-      yield* installLedger
-      yield* createTable(sql)
+      yield* installBaseline
 
       for (const migration of input) yield* markApplied(sql, migration.id)
     }),
-  )
-
-const projectionVersion = (sql: SqlClient.SqlClient) =>
-  sql<{ value: string }>`SELECT value FROM meta WHERE key = 'projection'`.pipe(
-    Effect.map((rows) => Number(rows[0]?.value)),
-  )
-
-const catalogVersion = (sql: SqlClient.SqlClient) =>
-  sql<{ value: string }>`SELECT value FROM meta WHERE key = 'catalog'`.pipe(
-    Effect.map((rows) => Number(rows[0]?.value)),
   )
 
 const pendingIn = (sql: SqlClient.SqlClient, input: ReadonlyArray<Migration>) =>
@@ -89,51 +67,84 @@ export const runMigrations = (
         yield* sql.unsafe(APPEND_ONLY_TRIGGER)
       })
 
-const openLedger = (sql: SqlClient.SqlClient, input: ReadonlyArray<Migration>) =>
+export const open = (input: ReadonlyArray<Migration> = migrations) =>
   Effect.gen(function* () {
-    const bus = yield* Bus.Service
+    const sql = yield* SqlClient.SqlClient
+    const known = new Set([...KNOWN_MIGRATIONS, ...input.map((m) => m.id)])
+
+    if ((yield* inspectSchema(known)) === "empty") {
+      yield* bootstrap(sql, input)
+
+      return
+    }
+
     yield* sql.withTransaction(
       Effect.gen(function* () {
         const pending = yield* pendingIn(sql, input)
 
-        const stale =
-          pending.length > 0 ||
-          (yield* catalogVersion(sql)) !== CATALOG_VERSION ||
-          (yield* projectionVersion(sql)) !== PROJECTION_VERSION
-
-        yield* runMigrations(sql, pending, (id) => markApplied(sql, id))
-
-        if (stale) yield* bus.rebuild
-        yield* setMeta(sql, "catalog", CATALOG_VERSION)
+        if (pending.length > 0) yield* runMigrations(sql, pending, (id) => markApplied(sql, id))
       }),
     )
   })
 
-export const open = (input: ReadonlyArray<Migration> = migrations) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
+type CopyRow = Readonly<Record<string, string | number | null>>
 
-    if ((yield* inspectSchema) === "empty") yield* bootstrap(sql, input)
-    yield* openLedger(sql, input)
-  })
-
-const copyMeta = (stored: SqlClient.SqlClient, scratch: SqlClient.SqlClient) =>
+const copyDatabase = (from: SqlClient.SqlClient, to: SqlClient.SqlClient) =>
   Effect.gen(function* () {
-    for (const row of yield* stored<{ key: string; value: string }>`SELECT key, value FROM meta`)
-      yield* scratch`INSERT INTO meta (key, value) VALUES (${row.key}, ${row.value})`
+    yield* to.unsafe("PRAGMA foreign_keys = OFF")
+    yield* to.withTransaction(
+      Effect.gen(function* () {
+        const objects = yield* from<{ type: string; name: string; sql: string | null }>`SELECT type, name, sql
+          FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
+          ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'trigger' THEN 2 ELSE 3 END`
+
+        for (const object of objects) {
+          if (object.type === "table") yield* to.unsafe(object.sql!)
+        }
+
+        for (const object of objects) {
+          if (object.type !== "table") continue
+
+          const columns = (yield* from<{
+            name: string
+          }>`SELECT name FROM pragma_table_info(${object.name}) ORDER BY cid`).map((col) => col.name)
+
+          const rows = yield* from.unsafe<CopyRow>(`SELECT * FROM "${object.name}"`)
+
+          if (rows.length === 0) continue
+          const cols = columns.map((c) => `"${c}"`).join(", ")
+          const placeholders = columns.map(() => "?").join(", ")
+          const insert = `INSERT INTO "${object.name}" (${cols}) VALUES (${placeholders})`
+
+          for (const row of rows)
+            yield* to.unsafe(
+              insert,
+              columns.map((c) => (c in row ? row[c] : row[Str.snakeToCamel(c)]) ?? null),
+            )
+        }
+
+        for (const object of objects) {
+          if (object.type !== "table") yield* to.unsafe(object.sql!)
+        }
+      }),
+    )
+    yield* to.unsafe("PRAGMA foreign_keys = ON")
   })
 
 export const checkLedger = (stored: SqlClient.SqlClient, input: ReadonlyArray<Migration> = migrations) =>
   Effect.gen(function* () {
+    const known = new Set([...KNOWN_MIGRATIONS, ...input.map((m) => m.id)])
+    const state = yield* inspectSchema(known).pipe(Effect.provideService(SqlClient.SqlClient, stored))
+
+    if (state === "empty") return
     const pending = yield* pendingIn(stored, input)
 
-    if (pending.length === 0 && (yield* catalogVersion(stored)) === CATALOG_VERSION) return yield* checkReplay(stored)
+    if (pending.length === 0) return yield* checkReplay(stored)
     const scratch = yield* SqlClient.SqlClient
+    yield* copyDatabase(stored, scratch)
     yield* scratch.withTransaction(
       Effect.gen(function* () {
-        yield* copyWholeLog(stored, scratch)
-        yield* copyMeta(stored, scratch)
-        yield* runMigrations(scratch, pending, () => Effect.void)
+        yield* runMigrations(scratch, pending, (id) => markApplied(scratch, id))
         yield* (yield* Bus.Service).rebuild
       }),
     )

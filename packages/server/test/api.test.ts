@@ -1,0 +1,725 @@
+import { assert, describe, it } from "@effect/vitest"
+import { cliHeaders, protocolHeaders } from "@vibest/client/client"
+import { withHeaders } from "@vibest/client/unix-http"
+import { executionStateOf } from "@vibest/core/database/rows"
+import { InboxStore } from "@vibest/core/inbox/store"
+import { Session } from "@vibest/core/session"
+import { PRESENT_TIMEOUT } from "@vibest/core/session/entry"
+import { unwrapped } from "@vibest/core/session/replies"
+import { SessionStore } from "@vibest/core/session/store"
+import { MISMATCH_ACTION, sessionHeaders } from "@vibest/protocol/protocol"
+import { PROTOCOL } from "@vibest/schema/version"
+import { authed, FakeRuntime, makeRepository, until, VERSION, writeEnd } from "@vibest/testkit/fakes"
+import { served, test, client, asCli, asEntry, asSession, failureTag } from "@vibest/testkit/rpc-helpers"
+import { session as draftSession } from "@vibest/testkit/unit-helpers"
+import { Cause, Effect, Exit, Fiber, FileSystem, Path } from "effect"
+import { SqlClient } from "effect/sql"
+import { TestClock } from "effect/testing"
+
+describe("vibest.sock", () => {
+  test(
+    "a direct request succeeds without Hello; missing or bad caller is refused and does not become cli",
+    Effect.gen(function* () {
+      const raw = yield* client
+      const repo = yield* makeRepository
+      assert.strictEqual((yield* raw["server.daemon"]["daemon.ping"]({})).protocol, PROTOCOL)
+
+      const newer = yield* Effect.exit(
+        withHeaders(raw["server.session"]["session.list"]({ query: {} }), { "vibest-protocol": String(PROTOCOL + 1) }),
+      )
+
+      assert.include(
+        String(Exit.isFailure(newer) && Cause.pretty(newer.cause)),
+        `vibestd is older (${VERSION}); run ${MISMATCH_ACTION}`,
+      )
+      assert.strictEqual(
+        failureTag(
+          yield* Effect.exit(withHeaders(raw["server.session"]["session.list"]({ query: {} }), protocolHeaders())),
+        ),
+        "InvalidCaller",
+      )
+      assert.strictEqual(
+        failureTag(
+          yield* Effect.exit(
+            withHeaders(raw["server.session"]["session.list"]({ query: {} }), {
+              ...protocolHeaders(),
+              "vibest-caller": "cli",
+            }),
+          ),
+        ),
+        "InvalidCaller",
+      )
+      assert.strictEqual(
+        failureTag(
+          yield* Effect.exit(
+            withHeaders(raw["server.session"]["session.list"]({ query: {} }), {
+              ...cliHeaders(repo),
+              "vibest-session-id": "abc",
+            }),
+          ),
+        ),
+        "InvalidCaller",
+      )
+      assert.strictEqual(
+        failureTag(
+          yield* Effect.exit(
+            withHeaders(raw["server.session"]["session.list"]({ query: {} }), {
+              ...protocolHeaders(),
+              "vibest-caller": "session",
+            }),
+          ),
+        ),
+        "InvalidCaller",
+      )
+      assert.deepStrictEqual(
+        yield* withHeaders(raw["server.session"]["session.list"]({ query: {} }), cliHeaders(repo)),
+        { sessions: [], machines: [] },
+      )
+      assert.deepStrictEqual(yield* asCli(raw, repo)["server.session"]["session.list"]({ query: {} }), {
+        sessions: [],
+        machines: [],
+      })
+    }),
+  )
+
+  it.effect(
+    "Daemon.Handoff to a vibest whose import check fails (a database it cannot open) refuses before the takeover, and this vibestd keeps serving",
+    () =>
+      Effect.gen(function* () {
+        const raw = yield* client
+        const c = asCli(raw, yield* makeRepository)
+        const instance = (yield* raw["server.daemon"]["daemon.ping"]({})).instance!
+        const cannotOpen = 'echo "vibest.db is not this vibest\'s schema" >&2; exit 1'
+
+        const refused = yield* Effect.flip(
+          c["server.daemon"]["daemon.handoff"]({
+            payload: { instance, command: ["sh", "-c", cannotOpen, "newer-vibest"] },
+          }),
+        )
+
+        assert.strictEqual(refused._tag, "LaunchFailed")
+        assert.include(refused.message, "cannot take over this vibestd (vibest.db is not this vibest's schema)")
+        assert.include(refused.message, "it keeps running")
+        assert.strictEqual((yield* raw["server.daemon"]["daemon.ping"]({})).instance, instance)
+        assert.deepStrictEqual(yield* c["server.session"]["session.list"]({ query: {} }), {
+          sessions: [],
+          machines: [],
+        })
+      }).pipe(Effect.provide(served({ identity: { instance: "vibestd-before" } }))),
+  )
+
+  test(
+    "a session is named by its full id or a unique prefix of 8 or more characters; the answers name the full id",
+    Effect.gen(function* () {
+      const sessionStore = yield* SessionStore.Service
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const spawner = yield* asEntry(yield* client, repo)
+
+      const { id } = yield* spawner["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
+
+      yield* until(
+        sessionStore.getSession(id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+      assert.strictEqual(
+        (yield* Effect.flip(c["server.session"]["session.get"]({ params: { id: "nothing!" }, query: {} })))._tag,
+        "NoSuchSession",
+      )
+      assert.deepStrictEqual(
+        yield* c["server.session"]["session.send"]({ params: { id: id.slice(0, 12) }, payload: { message: "more" } }),
+        { id },
+      )
+
+      const sharer = yield* spawner["server.session"]["session.spawn"]({
+        payload: {
+          agent: "general",
+          callerEnv: {},
+          harness: "pi",
+          prompt: "beside it",
+          share: id.slice(0, 10),
+        },
+      })
+
+      assert.strictEqual(
+        yield* sessionStore.sessionDirectory(sharer.id),
+        yield* sessionStore.sessionDirectory(id),
+        "--share takes a prefix",
+      )
+      const twinWithSameFirst8 = `${id.slice(0, 8)}-0000-4000-8000-000000000000`
+      const row = (yield* sessionStore.getSession(id))!
+      yield* sessionStore.insertSession(draftSession(twinWithSameFirst8), row.projectId)
+
+      const ambiguous = yield* Effect.flip(
+        c["server.session"]["session.get"]({ params: { id: id.slice(0, 8) }, query: {} }),
+      )
+
+      assert.strictEqual(ambiguous._tag, "AmbiguousSession")
+      assert.include(ambiguous.message, id)
+      assert.include(ambiguous.message, twinWithSameFirst8)
+      assert.include(ambiguous.message, "retry with more characters of the session id")
+      assert.strictEqual(
+        (yield* c["server.session"]["session.get"]({ params: { id: id.slice(0, 13) }, query: {} })).id,
+        id,
+      )
+
+      const slashRef = yield* Effect.flip(
+        c["server.session"]["session.get"]({ params: { id: `mb/${id.slice(0, 8)}` }, query: {} }),
+      )
+
+      assert.strictEqual(slashRef._tag, "NoSuchSession")
+    }),
+  )
+
+  test(
+    "a Send or Spawn repeated with its request id queues nothing more and answers as the first; a Send repeat still answers once archived",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const sql = yield* SqlClient.SqlClient
+      const sessionStore = yield* SessionStore.Service
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const spawner = yield* asEntry(yield* client, repo)
+
+      const first = yield* spawner["server.session"]["session.spawn"]({
+        payload: {
+          agent: "general",
+          callerEnv: {},
+          harness: "pi",
+          prompt: "do it",
+          request: "spawn-1",
+        },
+      })
+
+      assert.deepStrictEqual(
+        yield* spawner["server.session"]["session.spawn"]({
+          payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it", request: "spawn-1" },
+        }),
+        first,
+      )
+      assert.deepStrictEqual(
+        (yield* sessionStore.listSessions()).filter((w) => w.parentId !== null).map((w) => w.id),
+        [first.id],
+      )
+      const worktree = (yield* sessionStore.sessionDirectory(first.id))!
+      assert.deepStrictEqual(
+        yield* fs.readDirectory(path.dirname(worktree)),
+        [path.basename(worktree)],
+        "the repeat's reserved worktree directory went again",
+      )
+      yield* until(
+        sessionStore.getSession(first.id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+
+      const queued = (request: string) =>
+        sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'session.inbox.enqueued.1'
+          AND json_extract(data, '$.requestId') = ${request}`.pipe(Effect.map((rows) => rows[0]!.n))
+
+      const sends = sql<{ n: number }>`SELECT count(*) AS n FROM inbox i WHERE i.sender_type != 'vibest'
+          AND NOT EXISTS (SELECT 1 FROM session s WHERE s.id = i.recipient_session_id AND s.message_id = i.id)`.pipe(
+        Effect.map((rows) => rows[0]!.n),
+      )
+
+      assert.strictEqual(yield* queued("spawn-1"), 1)
+
+      const sent = yield* c["server.session"]["session.send"]({
+        params: { id: first.id },
+        payload: { message: "more", request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" },
+      })
+
+      yield* c["server.session"]["session.archive"]({ params: { id: first.id }, payload: {} })
+      assert.deepStrictEqual(
+        yield* c["server.session"]["session.send"]({
+          params: { id: first.id },
+          payload: { message: "more", request: "6f1c2a3e-8b7d-4c5a-9e10-2d3f4a5b6c7d" },
+        }),
+        sent,
+      )
+      assert.strictEqual(yield* sends, 1)
+      assert.strictEqual(
+        (yield* Effect.flip(
+          c["server.session"]["session.send"]({
+            params: { id: first.id },
+            payload: { message: "more", request: "7a2d3b4f-9c8e-4d6b-8f21-3e4a5b6c7d8e" },
+          }),
+        ))._tag,
+        "NoSuchSession",
+      )
+    }),
+  )
+
+  test(
+    "a Cursor afterAgentResponse stop ends the execution with its text as execution.reply and as Get's reply",
+    Effect.gen(function* () {
+      const raw = yield* client
+      const sessionStore = yield* SessionStore.Service
+      const sql = yield* SqlClient.SqlClient
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const c = asCli(raw, yield* makeRepository)
+      const spawner = yield* asEntry(raw, yield* makeRepository)
+
+      const { id } = yield* spawner["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "cursor", prompt: "work" },
+      })
+
+      yield* until(
+        sessionStore.getSession(id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+      yield* TestClock.adjust("2 seconds")
+      yield* withHeaders(
+        raw["server.hook"]["hook.executionEnd"]({
+          params: { harness: "cursor" },
+          payload: JSON.stringify({ hook_event_name: "afterAgentResponse", text: "cursor said this" }),
+        }),
+        { ...protocolHeaders(), "vibest-session-id": id },
+      )
+      yield* herdr.endExecution(id)
+      yield* until(
+        sessions.check(id).pipe(Effect.andThen(sessionStore.getSession(id))),
+        (w) => (w ? executionStateOf(w) : undefined) === "completed",
+      )
+
+      const [execution] = yield* sql<{
+        reply: string | null
+      }>`SELECT reply FROM execution WHERE session_id = ${id}`
+
+      assert.strictEqual(execution?.reply, "cursor said this")
+      const reply = (yield* c["server.session"]["session.get"]({ params: { id }, query: {} })).reply
+      assert.deepInclude(reply, { status: "completed", text: "cursor said this", failure: null })
+    }),
+  )
+
+  test(
+    "List cuts a task past 500 characters; Get keeps it, and latest is the newest message",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Session.Service
+      const sessionStore = yield* SessionStore.Service
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const spawner = yield* asEntry(yield* client, repo)
+      const exact = "e".repeat(500)
+      const prompt = "p".repeat(501)
+
+      const fit = yield* spawner["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: exact },
+      })
+
+      const { id } = yield* spawner["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt },
+      })
+
+      yield* until(
+        sessionStore.getSession(id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+      yield* until(
+        sessionStore.getSession(fit.id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+      const listed = new Map((yield* c["server.session"]["session.list"]({ query: {} })).sessions.map((w) => [w.id, w]))
+      const cut = `${"p".repeat(499)}…`
+      const open = { status: "working", summary: "", endedAt: null } as const
+      assert.strictEqual(listed.get(fit.id)!.task, exact)
+      assert.deepStrictEqual(listed.get(fit.id)!.latest, open)
+      assert.strictEqual(listed.get(id)!.task, cut)
+      assert.deepStrictEqual(listed.get(id)!.latest, open)
+      assert.strictEqual((yield* c["server.session"]["session.get"]({ params: { id }, query: {} })).task, prompt)
+      yield* writeEnd(id, "pi", { text: "\nfixed it\nand more" })
+      yield* herdr.endExecution(id)
+      yield* sessions.check(id)
+
+      const after = (yield* c["server.session"]["session.list"]({ query: {} })).sessions.find(
+        (w) => w.id === id,
+      )!.latest
+
+      assert.strictEqual(after?.status, "completed")
+      assert.strictEqual(after?.summary, "fixed it")
+      assert.isNumber(after?.endedAt)
+      yield* c["server.session"]["session.send"]({ params: { id }, payload: { message: "follow up" } })
+      assert.strictEqual(
+        (yield* c["server.session"]["session.list"]({ query: {} })).sessions.find((w) => w.id === id)!.task,
+        cut,
+        "a follow-up is not the task",
+      )
+      assert.strictEqual((yield* c["server.session"]["session.get"]({ params: { id }, query: {} })).task, prompt)
+    }),
+  )
+
+  test(
+    "Peek returns the runtime's terminal text and asks for at most 500 lines; an exited session has no terminal to read",
+    Effect.gen(function* () {
+      const sessionStore = yield* SessionStore.Service
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const raw = yield* client
+      const c = asCli(raw, repo)
+      const spawner = yield* asEntry(raw, repo)
+
+      const { id } = yield* spawner["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
+
+      yield* until(
+        sessionStore.getSession(id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+      assert.deepStrictEqual(yield* c["server.session"]["session.peek"]({ params: { id }, query: {} }), {
+        text: "pane tail",
+      })
+      yield* c["server.session"]["session.peek"]({ params: { id }, query: { lines: 100_000 } })
+      assert.deepInclude((yield* herdr.callsTo("read")).at(-1), { lines: 500 })
+      yield* sessionStore.endProcess(id, "exited")
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(c["server.session"]["session.peek"]({ params: { id }, query: {} }))),
+        "NoSuchSession",
+      )
+    }),
+  )
+
+  test(
+    "Project.EntrySession answers and frees the project when the runtime's present never returns",
+    Effect.gen(function* () {
+      const runtime = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const held = yield* runtime.hold("present")
+
+      const launch = yield* c["server.session"]
+        ["session.claim"]({
+          payload: {
+            agent: "coordinator",
+            harness: "claude",
+            fresh: false,
+            terminal: { id: "test/p1" },
+          },
+        })
+        .pipe(Effect.forkChild)
+
+      yield* held.reached
+      yield* TestClock.adjust(PRESENT_TIMEOUT)
+      const saved = yield* Fiber.join(launch)
+      assert.isString(saved.sessionId)
+
+      const again = yield* c["server.session"]
+        ["session.claim"]({
+          payload: {
+            agent: "coordinator",
+            harness: "claude",
+            fresh: false,
+            terminal: { id: "test/p1" },
+          },
+        })
+        .pipe(Effect.forkChild)
+
+      yield* TestClock.adjust(PRESENT_TIMEOUT)
+      assert.strictEqual((yield* Fiber.join(again)).sessionId, saved.sessionId)
+    }),
+  )
+
+  test(
+    "every entry session launch names its own process, so a new conversation in the same entry session is told apart",
+    Effect.gen(function* () {
+      const sessionStore = yield* SessionStore.Service
+      const c = asCli(yield* client, yield* makeRepository)
+
+      const enter = (harness: "pi" | "claude") =>
+        c["server.session"]["session.claim"]({
+          payload: { agent: "coordinator", harness, fresh: false, terminal: { id: "test/p1" } },
+        })
+
+      const first = yield* enter("pi")
+      assert.strictEqual(
+        first.command.env.VIBEST_PROCESS,
+        String(yield* sessionStore.currentProcessId(first.sessionId)),
+      )
+      const second = yield* enter("claude")
+      assert.strictEqual(second.sessionId, first.sessionId)
+      assert.strictEqual(
+        second.command.env.VIBEST_PROCESS,
+        String(yield* sessionStore.currentProcessId(first.sessionId)),
+      )
+      assert.notStrictEqual(second.command.env.VIBEST_PROCESS, first.command.env.VIBEST_PROCESS)
+    }),
+  )
+
+  test(
+    "a session sends only as itself; an unknown session is refused",
+    Effect.gen(function* () {
+      const sessionStore = yield* SessionStore.Service
+      const inboxStore = yield* InboxStore.Service
+      const repo = yield* makeRepository
+      const raw = yield* client
+      const c = asCli(raw, repo)
+      const spawner = yield* asEntry(raw, repo)
+
+      const { id } = yield* spawner["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
+
+      yield* until(
+        sessionStore.getSession(id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+      yield* (yield* FakeRuntime).seedAgent("test/p1")
+
+      const launch = yield* c["server.session"]["session.claim"]({
+        payload: {
+          agent: "coordinator",
+          harness: "claude",
+          fresh: false,
+          terminal: { id: "test/p1" },
+        },
+      })
+
+      yield* withHeaders(
+        raw["server.hook"]["hook.ready"]({
+          payload: { conversation: { harness: "claude", id: "s1" } },
+        }),
+        sessionHeaders({
+          sessionId: launch.sessionId,
+          projectId: launch.projectId,
+          pluginVersion: "1.2.3",
+        }),
+      )
+
+      const bare = yield* client
+      yield* withHeaders(
+        bare["server.hook"]["hook.executionEnd"]({ params: { harness: "pi" }, payload: "{}" }),
+        sessionHeaders({ sessionId: id, pluginVersion: "1.2.3" }),
+      )
+      assert.deepStrictEqual(
+        (yield* sessionStore.getSession(id))?.process?.integration,
+        { version: "1.2.3", protocol: PROTOCOL },
+        "an integration's version is recorded even when its protocol is refused",
+      )
+      const old = { ...sessionHeaders({ sessionId: id, pluginVersion: "1.0.0" }), "vibest-protocol": "1" }
+      assert.strictEqual(
+        failureTag(
+          yield* Effect.exit(
+            withHeaders(bare["server.hook"]["hook.executionEnd"]({ params: { harness: "pi" }, payload: "{}" }), old),
+          ),
+        ),
+        "ProtocolRejected",
+      )
+      assert.deepStrictEqual((yield* sessionStore.getSession(id))?.process?.integration, {
+        version: "1.0.0",
+        protocol: 1,
+      })
+
+      assert.strictEqual(
+        failureTag(
+          yield* Effect.exit(
+            withHeaders(
+              bare["server.session"]["session.send"]({ params: { id: launch.sessionId }, payload: { message: "x" } }),
+              sessionHeaders({ sessionId: "nope" }),
+            ),
+          ),
+        ),
+        "NoSuchSession",
+      )
+      assert.strictEqual(
+        failureTag(
+          yield* Effect.exit(
+            withHeaders(
+              bare["server.session"]["session.send"]({ params: { id: launch.sessionId }, payload: { message: "x" } }),
+              sessionHeaders({ sessionId: id }),
+            ),
+          ),
+        ),
+        "InvalidCaller",
+        "a known session without its project id is refused, as over HTTP",
+      )
+
+      const projectId = String((yield* sessionStore.sessionIdentity(id))!.projectId)
+
+      const as = (harness: string, harnessSessionId: string) =>
+        authed(raw, sessionHeaders({ sessionId: id, projectId, harness, harnessSessionId }))
+
+      yield* as("pi", "pi-1")["server.session"]["session.send"]({
+        params: { id: launch.sessionId },
+        payload: { message: "one" },
+      })
+      assert.strictEqual((yield* sessionStore.getSession(id))!.process?.harnessSessionId ?? null, "pi-1")
+      yield* as("claude", "other")["server.session"]["session.send"]({
+        params: { id: launch.sessionId },
+        payload: { message: "two" },
+      })
+      assert.strictEqual((yield* sessionStore.getSession(id))!.process?.harnessSessionId ?? null, "pi-1")
+      yield* withHeaders(
+        raw["server.hook"]["hook.executionEnd"]({ params: { harness: "pi" }, payload: "{}" }),
+        sessionHeaders({ sessionId: id, projectId, harness: "pi", harnessSessionId: "pi-2" }),
+      )
+      assert.strictEqual((yield* sessionStore.getSession(id))!.process?.harnessSessionId ?? null, "pi-2")
+      const w = yield* asSession(yield* client, id)
+      yield* w["server.session"]["session.send"]({ params: { id: launch.sessionId }, payload: { message: "half way" } })
+      const sent = yield* inboxStore.latestInbox(launch.sessionId, "send")
+      assert.match(
+        sent!.message,
+        /^<vibest-agent-message>\n<session-id>[a-f0-9]{8}<\/session-id>\n<message>\nhalf way\n<\/message>\n<\/vibest-agent-message>$/,
+      )
+      assert.strictEqual(executionStateOf((yield* sessionStore.getSession(id))!), "open")
+      assert.deepStrictEqual(
+        yield* c["server.session"]["session.send"]({
+          params: { id: launch.sessionId },
+          payload: { message: "from the user" },
+        }),
+        { id: launch.sessionId },
+      )
+      const fromUser = yield* inboxStore.latestInbox(launch.sessionId, "send")
+      assert.deepInclude(fromUser, { message: "from the user", sender: { type: "user" } })
+      yield* withHeaders(
+        raw["server.hook"]["hook.ready"]({
+          payload: { conversation: { harness: "claude", id: "stale" } },
+        }),
+        sessionHeaders({
+          sessionId: launch.sessionId,
+          projectId: launch.projectId,
+          pluginVersion: "1.2.3",
+        }),
+      )
+      yield* withHeaders(
+        raw["server.hook"]["hook.ready"]({
+          payload: { conversation: { harness: "claude", id: "s2" } },
+        }),
+        sessionHeaders({
+          sessionId: launch.sessionId,
+          projectId: launch.projectId,
+          pluginVersion: "1.2.3",
+        }),
+      )
+      yield* withHeaders(
+        raw["server.hook"]["hook.ready"]({
+          payload: { conversation: { harness: "pi", id: "late-pi-report" } },
+        }),
+        sessionHeaders({
+          sessionId: launch.sessionId,
+          projectId: launch.projectId,
+          pluginVersion: "1.2.3",
+        }),
+      )
+      assert.strictEqual(
+        (yield* c["server.session"]["session.claim"]({
+          payload: {
+            agent: "coordinator",
+            harness: "claude",
+            fresh: false,
+            terminal: { id: "test/p1" },
+          },
+        })).harnessSessionId,
+        "s2",
+        "a conversation reported by another harness than the session's is ignored",
+      )
+      const worker = (yield* sessionStore.getSession(id))!
+      yield* withHeaders(
+        raw["server.hook"]["hook.ready"]({ payload: { conversation: { harness: "pi", id: "worker-report" } } }),
+        sessionHeaders({ sessionId: id, projectId: worker.projectId, pluginVersion: "1.2.3" }),
+      )
+      assert.notStrictEqual(
+        (yield* sessionStore.getSession(id))!.process?.harnessSessionId ?? null,
+        "worker-report",
+        "a conversation reported by a session that is not its project's entry is ignored",
+      )
+    }),
+  )
+
+  test(
+    "an entry session manages only the sessions it spawned, and another project's reads them but does not list them; the command line (the user) manages any",
+    Effect.gen(function* () {
+      const sessionStore = yield* SessionStore.Service
+      const inboxStore = yield* InboxStore.Service
+      const repo = yield* makeRepository
+
+      const asEntry = (root: string, paneId: string) =>
+        Effect.gen(function* () {
+          const raw = yield* client
+
+          const launched = yield* asCli(raw, root)["server.session"]["session.claim"]({
+            payload: {
+              agent: "coordinator",
+              harness: "pi",
+              fresh: false,
+              terminal: { id: `test/${paneId}` },
+            },
+          })
+
+          return yield* asSession(raw, launched.sessionId, root)
+        })
+
+      const a = yield* asEntry(repo, "p1")
+      const b = yield* asEntry(yield* makeRepository, "p2")
+
+      const { id } = yield* a["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
+
+      yield* until(
+        sessionStore.getSession(id),
+        (row) => (row?.process?.placedAt ?? null) !== null && row?.status === "working",
+      )
+
+      const others: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
+        b["server.session"]["session.send"]({ params: { id }, payload: { message: "x" } }),
+        b["server.session"]["session.interrupt"]({ params: { id }, query: {} }),
+        b["server.session"]["session.peek"]({ params: { id }, query: {} }),
+        b["server.session"]["session.archive"]({ params: { id }, payload: {} }),
+      ]
+
+      for (const call of others) {
+        const exit = yield* Effect.exit(call)
+        assert.strictEqual(failureTag(exit), "Forbidden")
+        assert.match(
+          String(Exit.isFailure(exit) && Cause.pretty(exit.cause)),
+          /belongs to another project|was not started by this session/,
+        )
+      }
+
+      assert.deepInclude(yield* b["server.session"]["session.get"]({ params: { id }, query: {} }), {
+        id,
+        agent: "general",
+      })
+      assert.strictEqual((yield* b["server.session"]["session.list"]({ query: {} })).sessions[0]?.agent, "coordinator")
+      assert.deepStrictEqual(
+        (yield* b["server.session"]["session.list"]({ query: { stopped: true } })).sessions.filter(
+          (s) => s.agent !== "coordinator",
+        ),
+        [],
+      )
+      assert.deepStrictEqual(
+        (yield* b["server.session"]["session.list"]({ query: {} })).sessions.filter((s) => s.agent !== "coordinator"),
+        [],
+      )
+      assert.strictEqual(
+        failureTag(
+          yield* Effect.exit(
+            b["server.session"]["session.send"]({
+              params: { id: "0e0e0000-0e0e-40e0-80e0-0e0e00000e0e" },
+              payload: { message: "x" },
+            }),
+          ),
+        ),
+        "NoSuchSession",
+      )
+      assert.deepStrictEqual(yield* inboxStore.pendingInbox(id), [])
+      assert.strictEqual(executionStateOf((yield* sessionStore.getSession(id))!), "open")
+      yield* a["server.session"]["session.send"]({ params: { id }, payload: { message: "from its own entry session" } })
+      const user = asCli(yield* client, repo)
+      yield* user["server.session"]["session.send"]({ params: { id }, payload: { message: "from the user" } })
+      assert.deepStrictEqual(
+        (yield* inboxStore.pendingInbox(id)).map((r) => unwrapped(r.message)),
+        ["from its own entry session", "from the user"],
+      )
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(user["server.session"]["session.archive"]({ params: { id }, payload: {} }))),
+        "success",
+        "the user's command line archives it even while it works",
+      )
+    }),
+  )
+})

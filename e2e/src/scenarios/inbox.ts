@@ -264,7 +264,7 @@ export const curl = async (
     "-w",
     "\n%{http_code}",
     "--unix-socket",
-    path.join(w.vibestHome, "vibest-http.sock"),
+    path.join(w.vibestHome, "vibest.sock"),
     "-X",
     "POST",
     ...Object.entries(headers).flatMap(([k, v]) => ["-H", `${k}: ${v}`]),
@@ -485,7 +485,7 @@ const checks: ReadonlyArray<Check> = [
         await until(
           "a curl take hands the result out",
           async () => {
-            const r = await curl(w, "/inbox/take", who)
+            const r = await curl(w, "/api/inbox/take", who)
             expect(r.status === 200 || r.status === 204, `take answered ${r.status}: ${JSON.stringify(r.body)}`)
 
             if (r.status === 200) taken = r.body as typeof taken
@@ -497,11 +497,11 @@ const checks: ReadonlyArray<Check> = [
         expect(taken.content.includes("done-cmcurl"), `the taken text: ${taken.content}`)
         const id = taken.ids[0]!
         expect(status(id) === "delivering", `after the take the row is ${status(id)}`)
-        const again = await curl(w, "/inbox/take", who)
+        const again = await curl(w, "/api/inbox/take", who)
         expect(again.status === 204, `a second take answered ${again.status}: ${JSON.stringify(again.body)}`)
-        const other = await curl(w, "/inbox/take", { ...who, projectId: "00000000-0000-4000-8000-000000000000" })
+        const other = await curl(w, "/api/inbox/take", { ...who, projectId: "00000000-0000-4000-8000-000000000000" })
         expect(other.status === 403, `another project's take answered ${other.status}`)
-        const old = await curl(w, "/inbox/take", { ...who, protocol: "3" })
+        const old = await curl(w, "/api/inbox/take", { ...who, protocol: "3" })
         expect(
           old.status === 409 && (old.body as { action?: string }).action === "vibest update",
           `an older protocol's take answered ${old.status}: ${JSON.stringify(old.body)}`,
@@ -601,7 +601,7 @@ const checks: ReadonlyArray<Check> = [
     id: "S49",
     covers: ["S45"],
     title:
-      "a Pi subagent's vibest send to a Claude entry session (which polls) is one send row from the subagent to the entry session, delivered, with one inbox.queued and one inbox.moved to delivered; the entry session's conversation holds a line naming the subagent and an <vibest-agent-message> with its id and text",
+      "a Pi subagent's vibest send to a Claude entry session (which polls) is one send row from the subagent to the entry session, delivered, with one session.inbox.enqueued and one session.inbox.delivered; the entry session's conversation holds a line naming the subagent and an <vibest-agent-message> with its id and text",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -654,15 +654,15 @@ const checks: ReadonlyArray<Check> = [
         const fact = (sql: string) =>
           row<{ n: number }>(
             w,
-            `SELECT count(*) AS n FROM event WHERE aggregate = ? AND ${sql}`,
+            `SELECT count(*) AS n FROM event WHERE aggregate_id = ? AND ${sql}`,
             entryId,
             sent()[0]!.id,
           )?.n
 
         expect(
-          fact("type = 'inbox.enqueued' AND seq = ?") === 1 &&
-            fact("type = 'inbox.delivered' AND json_extract(data, '$.messageId') = ?") === 1,
-          `the send ${sent()[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
+          fact("type = 'session.inbox.enqueued.1' AND json_extract(data, '$.messageId') = ?") === 1 &&
+            fact("type = 'session.inbox.delivered.1' AND json_extract(data, '$.messageId') = ?") === 1,
+          `the send ${sent()[0]!.id} has not exactly one session.inbox.enqueued and one session.inbox.delivered`,
         )
         const line = `Message from @General · Send probe (${sub.slice(0, 8)})\nhello-claude`
         await until(
@@ -677,7 +677,7 @@ const checks: ReadonlyArray<Check> = [
                   e.type === "attachment" &&
                   e.raw.includes("hook_additional_context") &&
                   e.raw.includes("<vibest-agent-message>") &&
-                  e.raw.includes(sub) &&
+                  e.raw.includes(`<session-id>${sub.slice(0, 8)}</session-id>`) &&
                   e.raw.includes("hello-claude"),
               )
             )

@@ -15,7 +15,7 @@ type Entry = {
   provider: string | null
   model: string | null
   projectId: string
-  address: { id: string }
+  terminal: { runtime: string; target: { pane?: string } } | null
   routing?: { decidedBy: Record<string, string> }
 }
 
@@ -123,7 +123,7 @@ export default Plugin.define({
   id: "observer",
   effect: (ctx) =>
     ctx.event.subscribe(${types}).pipe(
-      Stream.runForEach((fact) => Effect.sync(() => fs.appendFileSync(${JSON.stringify(file)}, \`\${fact.type} \${fact.sessionId ?? "-"}\\n\`))),
+      Stream.runForEach((fact) => Effect.sync(() => fs.appendFileSync(${JSON.stringify(file)}, \`\${fact.type} \${"sessionId" in fact.data ? fact.data.sessionId : "-"}\\n\`))),
       Effect.forkScoped,
       Effect.asVoid,
     ),
@@ -135,12 +135,12 @@ import { Plugin } from "@vibest/plugin"
 export default Plugin.define({
   id: "promised",
   setup: async (ctx) => {
-    await ctx.agent.hook("start.before", async (e) => {
+    await ctx.session.hook("start.before", async (e) => {
       if (e.prompt.includes("done-promised")) e.provider = "second"
     })
     void (async () => {
-      for await (const fact of ctx.event.subscribe({ types: ["execution.succeeded"] }))
-        fs.appendFileSync(${JSON.stringify(facts)}, \`\${fact.type} \${fact.sessionId}\\n\`)
+      for await (const fact of ctx.event.subscribe({ types: ["session.execution.succeeded"] }))
+        fs.appendFileSync(${JSON.stringify(facts)}, \`\${fact.type} \${fact.data.sessionId}\\n\`)
     })()
     return () => fs.appendFileSync(${JSON.stringify(cleanup)}, "cleanup\\n")
   },
@@ -151,7 +151,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G5",
     title:
-      "a routing plugin's agent.start.before changes the start: the run starts Pi, ls names the plugin as the decider of the field it changed, and its answer arrives",
+      "a routing plugin's session.start.before changes the start: the run starts Pi, ls names the plugin as the decider of the field it changed, and its answer arrives",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "route")
@@ -162,7 +162,7 @@ const checks: ReadonlyArray<Check> = [
         await writePlugin(
           w,
           "router",
-          `ctx.agent.hook("start.before", (e) => Effect.sync(() => { if (e.prompt.includes("done-routed")) e.provider = "second" }))`,
+          `ctx.session.hook("start.before", (e) => Effect.sync(() => { if (e.prompt.includes("done-routed")) e.provider = "second" }))`,
         )
         const id = await runId(w, ["--", ask("routed")])
         const e = await entry(w, id)
@@ -288,7 +288,7 @@ const checks: ReadonlyArray<Check> = [
 
         await until("the entry session ready", () => processes().some((p) => p.readyAt !== null), 60_000)
         const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
-        await herdr(socket, "pane.close", { pane_id: entryRow.address.id.split("/").pop()! })
+        await herdr(socket, "pane.close", { pane_id: entryRow.terminal!.target.pane! })
         await until("the entry session's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
         const again = await w.vibest(["--headless"], { env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 60_000 })
         expect(again.code === 0, `restart without --harness: ${again.code} ${again.stderr}${again.stdout}`)
@@ -332,7 +332,7 @@ const checks: ReadonlyArray<Check> = [
         const router = await writePlugin(
           w,
           "router",
-          `ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.harness = "pi" }))`,
+          `ctx.session.hook("start.before", (e) => Effect.sync(() => { e.harness = "pi" }))`,
         )
 
         const pi = await startedIn("dflt-pi", { PI_CODING_AGENT_DIR: dir })
@@ -419,7 +419,7 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
     id: "G12",
     covers: ["G2"],
     title:
-      "a plugin's ctx.event.subscribe sees the ledger facts of a real Pi subagent in order (session.created, process.started, execution.started, execution.succeeded) and no live events; a new revision of the plugin gets the next agent's facts and the old one stops",
+      "a plugin's ctx.event.subscribe sees the public ledger facts of a real Pi subagent in order (session.inbox.enqueued, session.created, session.execution.started, session.execution.succeeded) and no process.* or live events; a new revision of the plugin gets the next agent's facts and the old one stops",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "observe")
@@ -433,7 +433,12 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
         await fs.rename(`${file}.tmp`, file)
       }
 
-      const ordered = ["session.created", "process.started", "execution.started", "execution.succeeded"]
+      const ordered = [
+        "session.inbox.enqueued",
+        "session.created",
+        "session.execution.started",
+        "session.execution.succeeded",
+      ]
 
       const of = (lines: ReadonlyArray<string>, id: string) =>
         lines.flatMap((line) => (line.endsWith(` ${id}`) ? [line.split(" ")[0]!] : []))
@@ -480,8 +485,12 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
         await until("the second agent's facts in order", async () => inOrder(of(await factLines(second), two)), 60_000)
         const all = await factLines(second)
         expect(
-          !all.some((line) => /^(terminal\.|runtime\.reset|session\.changed|project\.changed|drain\.)/.test(line)),
-          `signals reached the plugin: ${JSON.stringify(all)}`,
+          !all.some((line) =>
+            /^(process\.|session\.inbox\.delivering|machine\.connected|remote\.|terminal\.|runtime\.reset|session\.changed|project\.changed|drain\.)/.test(
+              line,
+            ),
+          ),
+          `internal process facts or signals reached the plugin: ${JSON.stringify(all)}`,
         )
         expect(
           (await factLines(first)).length === before,
@@ -495,7 +504,7 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
   {
     id: "G13",
     title:
-      "a plugin written as { id, setup } with Promises routes `vibest run -- <task>` to a real Pi, ls names it as the decider, its event.subscribe iterator gets the agent's execution.succeeded, and deleting the file runs its cleanup",
+      "a plugin written as { id, setup } with Promises routes `vibest run -- <task>` to a real Pi, ls names it as the decider, its event.subscribe iterator gets the agent's session.execution.succeeded, and deleting the file runs its cleanup",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "promised")
@@ -522,8 +531,8 @@ export default Plugin.define({ id: "user-${n + 1}", effect: () => Effect.void })
         )
         await resultOf(w, id, "promised")
         await until(
-          "the agent's execution.succeeded",
-          async () => (await factLines(facts)).includes(`execution.succeeded ${id}`),
+          "the agent's session.execution.succeeded",
+          async () => (await factLines(facts)).includes(`session.execution.succeeded ${id}`),
           60_000,
         )
         expect((await factLines(cleanup)).length === 0, "cleanup ran while the plugin was loaded")

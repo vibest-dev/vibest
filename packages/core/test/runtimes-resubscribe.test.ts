@@ -1,13 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus, type BusEvent } from "@vibest/core/bus"
-import { Runtimes } from "@vibest/core/runtimes"
+import { Runtimes } from "@vibest/core/runtime/registry"
 import { Runtime as RuntimeApi } from "@vibest/plugin/effect"
+import { memoryBus } from "@vibest/testkit/bun"
+import { noHostEnv, noTerminalProcesses } from "@vibest/testkit/harnesses"
+import { unusedRuntime } from "@vibest/testkit/session"
 import { Effect, Layer, PubSub, Queue, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
-
-import { noHostEnv, noTerminalProcesses } from "./lib/harnesses.ts"
-import { unusedRuntime } from "./lib/session.ts"
-import { memoryBus } from "./platform/bun.ts"
 
 const layer = Runtimes.layer.pipe(
   Layer.provideMerge(memoryBus),

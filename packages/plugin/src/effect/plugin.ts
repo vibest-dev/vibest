@@ -2,13 +2,13 @@ import type { Effect, Scope } from "effect"
 
 import type {
   AgentEditor,
-  AgentFailures,
-  AgentHooks,
   MachineHookOptions,
   MachineHooks,
   MachineNote,
   PluginOptions,
   PluginSession,
+  SessionFailures,
+  SessionHooks,
   SessionSend,
   SessionSendFailed,
   SessionStop,
@@ -21,7 +21,6 @@ import type { Hooks, Registration, Transform } from "./registration.ts"
 import type { RuntimeDomain } from "./runtime.ts"
 
 export interface AgentDomain {
-  readonly hook: Hooks<AgentHooks, AgentFailures>
   readonly transform: Transform<AgentEditor>
 }
 
@@ -34,6 +33,7 @@ export interface MachineDomain {
 }
 
 export interface SessionDomain {
+  readonly hook: Hooks<SessionHooks, SessionFailures>
   readonly list: () => Effect.Effect<ReadonlyArray<PluginSession>>
   readonly get: (id: string) => Effect.Effect<PluginSession | undefined>
   readonly sentIn: (id: string, execution: number) => Effect.Effect<number>

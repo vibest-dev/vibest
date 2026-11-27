@@ -1,79 +1,211 @@
-import { Effect, Schema } from "effect"
+import { Schema } from "effect"
 
-import { factOf } from "./event-fact.ts"
-import { Routing } from "./plugin.ts"
+import { randomId } from "./id.ts"
 
-export type Aggregate = "project" | "session" | "ledger"
+export * as Event from "./event.ts"
 
-export interface Definition<T extends string = string, S extends Schema.Top = Schema.Top> {
-  readonly type: T
+export const ID = Schema.String.check(Schema.isStartingWith("evt_"))
+
+export type ID = typeof ID.Type
+
+export const createId = (at = Date.now()): ID =>
+  `evt_${Math.max(0, Math.trunc(at)).toString(16).padStart(12, "0")}${randomId().replace(/-/g, "").slice(0, 16)}`
+
+export const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+
+export type Seq = typeof Seq.Type
+
+export const Version = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+
+export type Version = typeof Version.Type
+
+export const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
+
+export const DurableEnvelope = Schema.Struct({
+  aggregateId: Schema.NonEmptyString,
+  seq: Seq,
+  version: Version,
+})
+
+export type DurableEnvelope = typeof DurableEnvelope.Type
+
+export interface DurableMeta<Aggregate extends string = string, V extends number = number> {
   readonly aggregate: Aggregate
-  readonly data: S
+  readonly version: V
 }
 
-export const fact = <const T extends string, const F extends Schema.Struct.Fields>(
-  type: T,
-  aggregate: Aggregate,
-  fields: F,
-): Definition<T, Schema.Struct<F>> => ({ type, aggregate, data: Schema.Struct(fields) })
+export type DurableDefinition<
+  Type extends string = string,
+  DataSchema extends Schema.Codec<unknown, unknown> = Schema.Codec<unknown, unknown>,
+  Aggregate extends string = string,
+  V extends number = number,
+> = Schema.Top & {
+  readonly type: Type
+  readonly durability: "durable"
+  readonly durable: DurableMeta<Aggregate, V>
+  readonly data: DataSchema
+}
+
+export type EphemeralDefinition<
+  Type extends string = string,
+  DataSchema extends Schema.Codec<unknown, unknown> = Schema.Codec<unknown, unknown>,
+> = Schema.Top & {
+  readonly type: Type
+  readonly durability: "ephemeral"
+  readonly durable: undefined
+  readonly data: DataSchema
+}
+
+export type Definition<
+  Type extends string = string,
+  DataSchema extends Schema.Codec<unknown, unknown> = Schema.Codec<unknown, unknown>,
+> = DurableDefinition<Type, DataSchema> | EphemeralDefinition<Type, DataSchema>
+
+export type Data<D extends Definition> = D["data"]["Type"]
+
+export type Payload<D extends Definition = Definition> = D extends DurableDefinition
+  ? {
+      readonly id: ID
+      readonly type: D["type"]
+      readonly created: number
+      readonly durable: DurableEnvelope
+      readonly data: Data<D>
+    }
+  : {
+      readonly id: ID
+      readonly type: D["type"]
+      readonly created: number
+      readonly data: Data<D>
+    }
+
+export class InvalidDurableEvent extends Schema.TaggedError<InvalidDurableEvent>()("InvalidDurableEvent", {
+  aggregateId: Schema.optional(Schema.String),
+  seq: Schema.optional(Schema.Number),
+  type: Schema.String,
+  message: Schema.String,
+}) {}
+
+export const durable = <
+  const Type extends string,
+  const Fields extends Schema.Struct.Fields,
+  const Aggregate extends keyof Fields & string,
+  const V extends number,
+>(input: {
+  readonly type: Type
+  readonly durable: DurableMeta<Aggregate, V>
+  readonly schema: Fields
+}) => {
+  const data = Schema.Struct(input.schema)
+
+  const envelope = Schema.Struct({
+    aggregateId: Schema.NonEmptyString,
+    seq: Seq,
+    version: Schema.Literal(input.durable.version),
+  })
+
+  const schema = Schema.Struct({
+    id: ID,
+    type: Schema.Literal(input.type),
+    created: Schema.Int,
+    durable: envelope,
+    data,
+  })
+
+  return Object.assign(schema, {
+    type: input.type,
+    durability: "durable" as const,
+    durable: input.durable,
+    data,
+  })
+}
+
+export const ephemeral = <const Type extends string, const Fields extends Schema.Struct.Fields>(input: {
+  readonly type: Type
+  readonly schema: Fields
+}) => {
+  const data = Schema.Struct(input.schema)
+
+  const schema = Schema.Struct({
+    id: ID,
+    type: Schema.Literal(input.type),
+    created: Schema.Int,
+    data,
+  })
+
+  return Object.assign(schema, {
+    type: input.type,
+    durability: "ephemeral" as const,
+    durable: undefined,
+    data,
+  })
+}
+
+export const inventory = <const Definitions extends ReadonlyArray<Definition>>(...definitions: Definitions) =>
+  Object.freeze(definitions)
+
+export const versionedType = (type: string, version: number) => `${type}.${version}`
+
+const readonlyMap = <Key, Value>(map: Map<Key, Value>): ReadonlyMap<Key, Value> => {
+  const result: ReadonlyMap<Key, Value> = Object.freeze({
+    get size() {
+      return map.size
+    },
+    entries: () => map.entries(),
+    forEach: (callback: (value: Value, key: Key, map: ReadonlyMap<Key, Value>) => void) =>
+      map.forEach((value, key) => callback(value, key, result)),
+    get: (key: Key) => map.get(key),
+    has: (key: Key) => map.has(key),
+    keys: () => map.keys(),
+    values: () => map.values(),
+    [Symbol.iterator]: () => map[Symbol.iterator](),
+  })
+
+  return result
+}
+
+export const latest = (definitions: ReadonlyArray<Definition>): ReadonlyMap<string, Definition> => {
+  const map = new Map<string, Definition>()
+
+  for (const definition of definitions) {
+    const existing = map.get(definition.type)
+
+    if (existing === undefined) {
+      map.set(definition.type, definition)
+      continue
+    }
+
+    if (definition.durable && existing.durable && definition.durable.version !== existing.durable.version) {
+      if (definition.durable.version > existing.durable.version) map.set(definition.type, definition)
+      continue
+    }
+
+    if (definition !== existing) throw new Error(`Duplicate latest event definition for ${definition.type}`)
+  }
+
+  return readonlyMap(map)
+}
+
+const isDurable = <D extends Definition>(definition: D): definition is Extract<D, DurableDefinition> =>
+  definition.durability === "durable"
+
+export const durableMap = <const D extends Definition>(
+  definitions: ReadonlyArray<D>,
+): ReadonlyMap<string, Extract<D, DurableDefinition>> => {
+  const map = new Map<string, Extract<D, DurableDefinition>>()
+
+  for (const definition of definitions) {
+    if (!isDurable(definition)) continue
+    const key = versionedType(definition.type, definition.durable.version)
+
+    if (map.has(key)) throw new Error(`Duplicate durable event definition for ${key}`)
+    map.set(key, definition)
+  }
+
+  return readonlyMap(map)
+}
 
 const Text = Schema.NonEmptyString
 const optional = <S extends Schema.Top>(schema: S) => Schema.optionalKey(schema)
-const Seq = Schema.Int.check(Schema.isGreaterThan(0))
-const Pid = Schema.Int.check(Schema.isGreaterThan(0))
-
-const Repository = Schema.Struct({ path: Text, remote: optional(Text) })
-const Repositories = Schema.Array(Repository)
-
-export const ProjectCreated = fact("project.created", "project", {
-  directory: optional(Text),
-  repositories: Repositories,
-})
-
-export const ProjectMoved = fact("project.moved", "project", { from: Text, to: Text, repositories: Repositories })
-
-export const ProjectRepositoriesChanged = fact("project.repositories_changed", "project", {
-  repositories: Repositories,
-})
-
-export const ProjectEntryChanged = fact("project.entry_changed", "project", { session: optional(Text) })
-
-export const SessionCreated = fact("session.created", "session", {
-  project: Text,
-  agent: Text,
-  name: Text,
-  directory: Schema.String,
-  parent: optional(Text),
-  origin: optional(Schema.Struct({ peer: Text, project: Text, session: optional(Text) })),
-  message: optional(Seq),
-  team: optional(Text),
-})
-
-export const SessionRenamed = fact("session.renamed", "session", { name: Text })
-export const SessionDirectoryChanged = fact("session.directory_changed", "session", { directory: Text })
-export const SessionEnded = fact("session.ended", "session", { reason: Schema.Literals(["archived", "replaced"]) })
-
-export const ProcessStarted = fact("process.started", "session", {
-  harness: Text,
-  provider: optional(Text),
-  model: optional(Text),
-  routing: optional(Routing),
-  resume: optional(Text),
-  runtime: Text,
-  terminal: optional(Text),
-  pid: optional(Pid),
-})
-
-export const ProcessPlaced = fact("process.placed", "session", { process: Seq, terminal: Text, pid: optional(Pid) })
-
-export const ProcessReady = fact("process.ready", "session", {
-  process: Seq,
-  pid: optional(Pid),
-  integration: optional(Schema.Struct({ version: Text, protocol: Schema.Int })),
-})
-
-export const ProcessPid = fact("process.pid", "session", { process: Seq, pid: Pid })
-export const ProcessConversation = fact("process.conversation", "session", { process: Seq, conversation: Text })
 
 export const AgentFrom = Schema.Struct({
   session: Schema.String,
@@ -111,12 +243,6 @@ export const ProcessEndReason = Schema.Literals([
 
 export type ProcessEndReason = typeof ProcessEndReason.Type
 
-export const ProcessEnded = fact("process.ended", "session", {
-  process: Seq,
-  reason: ProcessEndReason,
-  by: optional(Sender),
-})
-
 export const ExecutionOutcome = Schema.Literals(["completed", "failed", "interrupted", "lost", "not_started"])
 
 export type ExecutionOutcome = typeof ExecutionOutcome.Type
@@ -132,227 +258,3 @@ export const ExecutionFailure = Schema.Struct({
 })
 
 export type ExecutionFailure = typeof ExecutionFailure.Type
-
-export const ExecutionAllocated = fact("execution.allocated", "session", {
-  executionId: Seq,
-  processId: optional(Seq),
-  typed: optional(Text),
-})
-
-export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
-
-export const ExecutionStarted = fact("execution.started", "session", {
-  executionId: Seq,
-  processId: optional(Seq),
-})
-
-export const ExecutionSucceeded = fact("execution.succeeded", "session", {
-  executionId: Seq,
-  reply: optional(Schema.String),
-})
-
-export const ExecutionFailed = fact("execution.failed", "session", {
-  executionId: Seq,
-  failure: ExecutionFailure,
-  reply: optional(Schema.String),
-})
-
-export const ExecutionInterrupted = fact("execution.interrupted", "session", {
-  executionId: Seq,
-  reason: optional(Text),
-  reply: optional(Schema.String),
-})
-
-export const ExecutionUnresolved = fact("execution.unresolved", "session", {
-  executionId: Seq,
-  observation: ExecutionObservation,
-  failure: optional(ExecutionFailure),
-  reply: optional(Schema.String),
-})
-
-export const ExecutionInput = fact("execution.input", "session", {
-  executionId: Seq,
-  typed: Text,
-})
-
-export const InboxHistory = Schema.Literals([
-  "route",
-  "delivered_without_execution",
-  "failed_unspecified",
-  "unconfirmed",
-  "released",
-])
-
-export type InboxHistory = typeof InboxHistory.Type
-
-export const UnrecordedDrop = "unrecorded"
-
-export const InboxEnqueued = fact("inbox.enqueued", "session", {
-  sender: Sender,
-  content: Schema.String,
-  senderExecutionId: optional(Seq),
-  requestId: optional(Text),
-  transferId: optional(Text),
-  aboutSessionId: optional(Text),
-})
-
-export const InboxDeliveryStarted = fact("inbox.delivery_started", "session", {
-  messageId: Seq,
-  execution: optional(Seq),
-})
-
-export const InboxDelivered = fact("inbox.delivered", "session", {
-  messageId: Seq,
-  recipientExecutionId: Seq,
-})
-
-export const InboxDeliveryFailed = fact("inbox.delivery_failed", "session", {
-  messageId: Seq,
-  reason: Text,
-})
-
-export const InboxDropped = fact("inbox.dropped", "session", {
-  messageId: Seq,
-  reason: Text,
-})
-
-export const InboxUnresolved = fact("inbox.unresolved", "session", {
-  history: InboxHistory,
-  messageId: optional(Seq),
-  execution: optional(Seq),
-  sender: optional(Sender),
-  content: optional(Schema.String),
-  senderExecutionId: optional(Seq),
-  requestId: optional(Text),
-  transferId: optional(Text),
-  aboutSessionId: optional(Text),
-})
-
-export const MachineAdded = fact("machine.added", "ledger", { name: Text, target: Text, vibestd: Text })
-export const MachineConnected = fact("machine.connected", "ledger", { name: Text })
-export const MachineRemoved = fact("machine.removed", "ledger", { name: Text })
-
-export const PeerSeen = fact("peer.seen", "ledger", { id: Text, name: Text })
-
-export const OutboxQueued = fact("outbox.queued", "ledger", {
-  id: Text,
-  peer: Text,
-  session: Text,
-  recipient: optional(Text),
-  kind: optional(Schema.Literals(["send", "notice"])),
-  content: Schema.String,
-  from: optional(AgentFrom),
-  execution: optional(Seq),
-})
-
-export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })
-
-export const Catalog = {
-  [ProjectCreated.type]: ProjectCreated,
-  [ProjectMoved.type]: ProjectMoved,
-  [ProjectRepositoriesChanged.type]: ProjectRepositoriesChanged,
-  [ProjectEntryChanged.type]: ProjectEntryChanged,
-  [SessionCreated.type]: SessionCreated,
-  [SessionRenamed.type]: SessionRenamed,
-  [SessionDirectoryChanged.type]: SessionDirectoryChanged,
-  [SessionEnded.type]: SessionEnded,
-  [ProcessStarted.type]: ProcessStarted,
-  [ProcessPlaced.type]: ProcessPlaced,
-  [ProcessReady.type]: ProcessReady,
-  [ProcessPid.type]: ProcessPid,
-  [ProcessConversation.type]: ProcessConversation,
-  [ProcessEnded.type]: ProcessEnded,
-  [ExecutionAllocated.type]: ExecutionAllocated,
-  [ExecutionAccepted.type]: ExecutionAccepted,
-  [ExecutionStarted.type]: ExecutionStarted,
-  [ExecutionSucceeded.type]: ExecutionSucceeded,
-  [ExecutionFailed.type]: ExecutionFailed,
-  [ExecutionInterrupted.type]: ExecutionInterrupted,
-  [ExecutionUnresolved.type]: ExecutionUnresolved,
-  [ExecutionInput.type]: ExecutionInput,
-  [InboxEnqueued.type]: InboxEnqueued,
-  [InboxDeliveryStarted.type]: InboxDeliveryStarted,
-  [InboxDelivered.type]: InboxDelivered,
-  [InboxDeliveryFailed.type]: InboxDeliveryFailed,
-  [InboxDropped.type]: InboxDropped,
-  [InboxUnresolved.type]: InboxUnresolved,
-  [MachineAdded.type]: MachineAdded,
-  [MachineConnected.type]: MachineConnected,
-  [MachineRemoved.type]: MachineRemoved,
-  [PeerSeen.type]: PeerSeen,
-  [OutboxQueued.type]: OutboxQueued,
-  [OutboxAcked.type]: OutboxAcked,
-} as const
-
-const byType: ReadonlyMap<string, Defined> = new Map(Object.values(Catalog).map((d) => [d.type, d]))
-
-type Defined = (typeof Catalog)[keyof typeof Catalog]
-
-export type FactType = Defined["type"]
-
-export const CATALOG_VERSION = 11
-
-export type Fact = {
-  readonly [D in Defined as D["type"]]: {
-    readonly aggregate: string
-    readonly seq: number
-    readonly at: number
-    readonly type: D["type"]
-    readonly projectId?: string
-    readonly sessionId?: string
-    readonly data: D["data"]["Type"]
-  }
-}[FactType]
-
-export type FactOf<T extends FactType> = Extract<Fact, { readonly type: T }>
-
-export interface Row {
-  readonly aggregate: string
-  readonly seq: number
-  readonly at: number
-  readonly type: string
-  readonly data: string
-}
-
-export class UnknownFact extends Schema.TaggedError<UnknownFact>()("UnknownFact", {
-  aggregate: Schema.String,
-  seq: Schema.Number,
-  type: Schema.String,
-  message: Schema.String,
-}) {}
-
-const strict = { onExcessProperty: "error" } as const
-
-export const encodeData = <D extends Defined>(
-  definition: D,
-  data: D["data"]["Type"],
-): Effect.Effect<string, Schema.SchemaError> =>
-  Schema.encodeUnknownEffect(definition.data)(data, strict).pipe(
-    Effect.map((encoded) => JSON.stringify(encoded)),
-    Effect.tap((json) => Schema.decodeUnknownEffect(definition.data)(JSON.parse(json), strict)),
-  )
-
-export const isFactOf = <T extends FactType>(type: T, fact: Fact): fact is FactOf<T> => fact.type === type
-
-export const decodeRow = (row: Row): Effect.Effect<Fact, UnknownFact> => {
-  const where = `event ${row.aggregate} ${row.seq}`
-
-  const refuse = (message: string) =>
-    new UnknownFact({ aggregate: row.aggregate, seq: row.seq, type: row.type, message: `${where}: ${message}` })
-
-  const definition = byType.get(row.type)
-
-  if (definition === undefined) return Effect.fail(refuse(`${row.type} is not in the event catalog`))
-
-  return Effect.try({
-    try: () => JSON.parse(row.data),
-    catch: (cause) => refuse(`${row.type} data is not JSON: ${String(cause)}`),
-  }).pipe(
-    Effect.flatMap((json) =>
-      Schema.decodeUnknownEffect(definition.data)(json, strict).pipe(
-        Effect.mapError((cause) => refuse(`${row.type} does not decode: ${cause.message}`)),
-      ),
-    ),
-    Effect.map((data) => factOf(row, definition, data)),
-  )
-}

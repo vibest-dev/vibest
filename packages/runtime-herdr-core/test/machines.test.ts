@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
+import { type api, HcError, type HcClient, HcTransportError } from "@vibest/herdr-core-sdk"
 import { type MachineEvent, type MachineNote, Plugin } from "@vibest/plugin/effect"
 import { machineHooks } from "@vibest/plugin/testing"
 import { Effect, Queue, Stream } from "effect"
-import { type api, HcError, type HcClient, HcTransportError } from "effect-herdr-core-sdk"
 
 import * as Mirror from "../src/machines.ts"
 import { locate, mirror } from "../src/machines.ts"
@@ -183,35 +183,34 @@ describe("hc mirrors vibest's machines", () => {
     }),
   )
 
-  const asked = (ids: ReadonlyArray<string>) => new Map(ids.map((id) => [id, `b/${id}`]))
+  const asked = (ids: ReadonlyArray<string>) => new Map(ids.map((id) => [id, { address: `b/${id}` }]))
 
   it.effect("locate: missing, found by core id under a renamed name, and unreachable with its why", () =>
     Effect.gen(function* () {
       const peer = { id: "mb", target: "b-host", link: linked }
-      const none = yield* locate(fake([]).hc, "/a.sock", peer, asked(["s1"]))
+      const none = yield* locate(fake([]).hc, peer, asked(["s1"]))
       assert.isTrue(none.missing)
-      const found = yield* locate(fake([row("mb", "core-new")]).hc, "/a.sock", peer, asked(["s1", "s2", "s9"]))
+      const found = yield* locate(fake([row("mb", "core-new")]).hc, peer, asked(["s1", "s2", "s9"]))
       assert.isFalse(found.missing)
       assert.include(found.note ?? "", "no terminal of that session under mb/")
       assert.strictEqual(found.as, "mb")
       assert.deepStrictEqual(
         [...found.terminals.entries()],
         [
-          ["s1", { id: "mb/t7@/a.sock" }],
-          ["s2", { id: "mb/t8@/a.sock" }],
+          ["s1", { address: "mb/t7" }],
+          ["s2", { address: "mb/t8" }],
         ],
       )
 
       const down = yield* locate(
         fake([row("mb", "core-new", { state: "unreachable", why: "ssh refused" })]).hc,
-        "/a.sock",
         peer,
         asked(["s1"]),
       )
 
       assert.isFalse(down.missing)
       assert.strictEqual(down.note, "hc here reaches mb as mb: unreachable (ssh refused)")
-      const offline = yield* locate(fake([], { offline: true }).hc, "/a.sock", peer, asked(["s1"]))
+      const offline = yield* locate(fake([], { offline: true }).hc, peer, asked(["s1"]))
       assert.isFalse(offline.missing)
       assert.include(offline.note ?? "", "fix: hc server start")
     }),

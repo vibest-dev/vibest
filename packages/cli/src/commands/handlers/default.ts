@@ -1,50 +1,47 @@
-import { type VibestClient } from "@vibest/client/client"
-import { VibestCommand } from "@vibest/schema/layout"
-import { describeSpawn, LaunchFailed } from "@vibest/schema/session"
-import { Console, Effect, FileSystem, Option, Path } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import type { AttachSuccess } from "@vibest/protocol/payloads"
+import { LaunchFailed, NO_RUNTIME_DETECTED } from "@vibest/schema/session"
+import { Console, Data, Effect, FileSystem, Option, Path } from "effect"
 
-import { askYesNo, interactive } from "../../ask.ts"
+import { askChoice, interactive } from "../../ask.ts"
 import { callerEnvOf, caller, userOnly } from "../../caller.ts"
 import { withVibest } from "../../client.ts"
 import { Runtime } from "../../framework/runtime.ts"
 import { Host } from "../../host.ts"
+import { attachCommand, chooseHarness, chooseRuntime, savedSetting } from "../../onboard.ts"
 import { noticeFrom } from "../../update.ts"
 import { Commands } from "../commands.ts"
 
-const ENTRY_AGENT = "coordinator"
+const DEFAULT_AGENT = "coordinator"
 
-export const soleEntry = <A, E, R>(
-  client: Pick<VibestClient, "Project.StopEntry">,
-  running: Effect.Success<ReturnType<VibestClient["Project.RunningEntry"]>>,
-  start: Effect.Effect<A, E, R>,
-) =>
+export type RunningRoot = (typeof AttachSuccess.Type)["running"]
+
+export type RunningAction = { readonly _tag: "Move"; readonly sessionId: string } | { readonly _tag: "New" }
+
+export const RunningActions = Data.taggedEnum<RunningAction>()
+
+export const resolveRunning = (running: RunningRoot) =>
   Effect.gen(function* () {
-    if (running) {
-      const where = `the entry session (${running.harness}) runs in ${running.place}`
-      const question = `The entry session (${running.harness}) runs in ${running.place}. Move it here and continue? [y/N]: `
+    if (running === null) return undefined
 
-      if (!((yield* interactive) && (yield* askYesNo(question))))
-        return yield* new LaunchFailed({
-          message: `not starting: ${where}, and a project has one entry session. Exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
-        })
-      const stopped = yield* client["Project.StopEntry"]({ runtime: running.runtime, address: running.address })
+    const where = `session ${running.sessionId} (${running.harness}) runs in ${running.place}`
 
-      if (stopped.result === "moved")
-        return yield* new LaunchFailed({ message: "not starting: the entry session moved meanwhile; run vibest again" })
+    if (!(yield* interactive))
+      return yield* new LaunchFailed({
+        message: `not starting: ${where}. Exit it there first, pass --new to start a parallel conversation, or run vibest on an interactive terminal to move it here`,
+      })
 
-      if (stopped.result === "unsupported")
-        return yield* new LaunchFailed({
-          message: `not starting: ${where} and cannot be moved from here: ${stopped.reason}. Exit it there first`,
-        })
+    const choice = yield* askChoice(`Session ${running.sessionId} (${running.harness}) runs in ${running.place}.`, [
+      "Move it to this terminal",
+      "Start a new parallel conversation",
+      "Cancel",
+    ])
 
-      if (stopped.result === "running")
-        return yield* new LaunchFailed({
-          message: `not starting: ${where} and did not exit; nothing changed. Exit it there first`,
-        })
-    }
+    if (Option.isNone(choice) || choice.value === 2)
+      return yield* new LaunchFailed({ message: `not starting: ${where}` })
 
-    return yield* start
+    if (choice.value === 0) return RunningActions.Move({ sessionId: running.sessionId })
+
+    return RunningActions.New()
   })
 
 export default Runtime.handler(Commands, (o) =>
@@ -55,18 +52,8 @@ export default Runtime.handler(Commands, (o) =>
     const provider = Option.getOrUndefined(o.provider)
     const model = Option.getOrUndefined(o.model)
     const runtimeKind = Option.getOrUndefined(o.runtime)
-    const agent = Option.getOrElse(o.agent, () => ENTRY_AGENT)
+    const agent = Option.getOrElse(o.agent, () => DEFAULT_AGENT)
     const agentNamed = Option.isSome(o.agent)
-
-    const again = [
-      ...(yield* VibestCommand),
-      ...(harness ? ["--harness", harness] : []),
-      ...(provider ? ["--provider", provider] : []),
-      ...(model ? ["--model", model] : []),
-      ...(runtimeKind ? ["--runtime", runtimeKind] : []),
-      ...(Option.isSome(o.agent) ? ["--agent", o.agent.value] : []),
-      ...(o.fresh ? ["--new"] : []),
-    ]
 
     const claim = (yield* caller).claim
     const path = yield* Path.Path
@@ -80,26 +67,66 @@ export default Runtime.handler(Commands, (o) =>
         if (agentNamed && ping.capabilities?.agents !== true)
           return yield* new LaunchFailed({ message: "this vibestd does not take --agent; run vibest update" })
 
-        const [, placed] = yield* Effect.all(
-          [
-            client["Project.Open"]({}),
-            client["Project.EntryPlace"]({
+        const attach = (runtime: string | undefined) =>
+          client["server.session"]["session.attach"]({
+            payload: {
               callerEnv: callerEnvOf(),
-              ...(runtimeKind !== undefined && { runtime: runtimeKind }),
-            }),
-          ],
-          { concurrency: "unbounded" },
+              fresh: o.fresh,
+              ...(agentNamed && { agent, agentNamed: true }),
+              ...(runtime !== undefined && { runtime }),
+            },
+          })
+
+        const inPlainTerminal = (refused: LaunchFailed) =>
+          Effect.gen(function* () {
+            const chosen = yield* chooseRuntime(client, { reuse: true, saveWithoutAsking: false })
+
+            if (chosen === undefined)
+              return yield* new LaunchFailed({ message: `${refused.message}; or run vibest onboard` })
+
+            return { ...(yield* attach(chosen)), onboarded: true }
+          })
+
+        const placed = yield* attach(runtimeKind).pipe(
+          Effect.map((found) => ({ ...found, onboarded: false })),
+          Effect.catchTag("LaunchFailed", (refused) =>
+            runtimeKind === undefined && refused.message.startsWith(NO_RUNTIME_DETECTED)
+              ? inPlainTerminal(refused)
+              : Effect.fail(refused),
+          ),
         )
 
+        const chosenHarness = yield* Effect.gen(function* () {
+          if (harness !== undefined || agentNamed || !placed.onboarded) return harness
+
+          if ((yield* savedSetting("defaultHarness")) !== undefined) return undefined
+
+          if (!o.fresh && placed.hasRoot) return undefined
+
+          return yield* chooseHarness(client, { saveWithoutAsking: false })
+        })
+
+        const action = o.fresh ? undefined : yield* resolveRunning(placed.running)
+        const fresh = o.fresh || action?._tag === "New"
+        const move = action?._tag === "Move"
+
         if (placed.place.in === "launch") {
-          const opened = yield* client.Launch({
-            argv: again,
-            agent,
-            agentNamed,
-            focus: !o.headless,
-            runtime: placed.place.runtime,
-            callerEnv: callerEnvOf(),
-            ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
+          const opened = yield* client["server.session"]["session.launch"]({
+            payload: {
+              projectId: placed.projectId,
+              ...(action?._tag === "Move" && { sessionId: action.sessionId }),
+              fresh,
+              ...(move && { move: true }),
+              ...(chosenHarness !== undefined && { harness: chosenHarness }),
+              ...(provider !== undefined && { provider }),
+              ...(model !== undefined && { model }),
+              agent,
+              agentNamed,
+              focus: !o.headless,
+              runtime: placed.place.runtime,
+              callerEnv: callerEnvOf(),
+              ...(Option.isSome(o.session) && { runtimeSession: o.session.value }),
+            },
           })
 
           return { launched: opened } as const
@@ -113,40 +140,23 @@ export default Runtime.handler(Commands, (o) =>
         if (here !== placed.directory) yield* Effect.sync(() => process.chdir(placed.directory))
         const terminal = placed.place.terminal
 
-        const [chosen, running] = yield* Effect.all(
-          [
-            client["Project.StartEntry"]({
-              harness,
-              agent,
-              agentNamed,
-              fresh: o.fresh,
-              provider,
-              model,
-              runtime: placed.place.runtime,
-            }),
-            client["Project.RunningEntry"]({ terminal }),
-          ],
-          { concurrency: "unbounded" },
-        )
-
-        if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`entry session: ${describeSpawn(chosen)}`)
-
-        const started = yield* soleEntry(
-          client,
-          running,
-          client["Project.EntrySession"]({
-            harness: chosen.harness,
+        const started = yield* client["server.session"]["session.claim"]({
+          payload: {
+            ...(action?._tag === "Move" && { sessionId: action.sessionId }),
+            ...(chosenHarness !== undefined && { harness: chosenHarness }),
             agent,
             agentNamed,
-            fresh: o.fresh,
+            fresh,
+            ...(move && { move: true }),
             terminal,
-            runtime: chosen.runtime,
-            provider: chosen.provider,
-            model: chosen.model,
-            routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
+            runtime: placed.place.runtime,
+            ...(provider !== undefined && { provider }),
+            ...(model !== undefined && { model }),
             pid: process.pid,
-          }),
-        )
+          },
+        })
+
+        if (started.routing !== undefined) yield* Console.error(`session: ${started.routing}`)
 
         return { started } as const
       }),
@@ -160,12 +170,12 @@ export default Runtime.handler(Commands, (o) =>
 
     const opened = entered.launched
 
-    if (opened.routing !== undefined) yield* Console.error(`entry session: ${opened.routing}`)
-    yield* Console.log(`the entry session is starting in ${opened.place}`)
+    if (opened.routing !== undefined) yield* Console.error(`session: ${opened.routing}`)
+    yield* Console.log(`session ${opened.sessionId} is starting in ${opened.place}`)
 
     if (o.headless || !opened.attach) return
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const [file, ...args] = opened.attach
-    yield* spawner.exitCode(ChildProcess.make(file!, args, { stdin: "inherit", stdout: "inherit", stderr: "inherit" }))
+    const [file, ...args] = yield* attachCommand(opened.attach)
+
+    return yield* Effect.sync(() => exec(file!, args, {}))
   }),
 )

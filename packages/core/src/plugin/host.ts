@@ -1,63 +1,69 @@
 import * as VibestPlugin from "@vibest/plugin/effect"
-import { Catalog, type FactOf, type FactType } from "@vibest/schema/event"
+import {
+  isPublicEventType,
+  type PublicDurableEvent,
+  type PublicEventOf,
+  PublicEvents,
+  type PublicEventType,
+} from "@vibest/schema/durable-event-manifest"
 import { Effect, Predicate, type Scope, Stream } from "effect"
 
-import { Agents } from "../agents.ts"
+import { Agents } from "../agent/registry.ts"
 import { Bus } from "../bus.ts"
-import { Harnesses } from "../harnesses.ts"
-import { Runtimes } from "../runtimes.ts"
+import { Harnesses } from "../harness/registry.ts"
+import { Subscriptions } from "../harness/subscriptions.ts"
+import { Runtimes } from "../runtime/registry.ts"
 import { Archive } from "../session/archive.ts"
 import { Sends } from "../session/sends.ts"
 import { Summaries } from "../session/summaries.ts"
-import { Subscriptions } from "../subscriptions/service.ts"
 import { Hooks } from "./hooks.ts"
 
-type Short = keyof VibestPlugin.AgentHooks
+type Short = keyof VibestPlugin.SessionHooks
 
-const HOOKS: ReadonlyArray<Short> = ["start.before"]
-
-type AgentRegistrations = {
+type SessionRegistrations = {
   readonly [S in Short]: (
-    callback: (event: VibestPlugin.AgentHooks[S]) => Effect.Effect<void, VibestPlugin.AgentFailures[S]>,
+    callback: (event: VibestPlugin.SessionHooks[S]) => Effect.Effect<void, VibestPlugin.SessionFailures[S]>,
   ) => Effect.Effect<VibestPlugin.Registration, never, Scope.Scope>
 }
 
-const factsFor =
-  (bus: Bus.Interface, plugin: string): VibestPlugin.EventDomain["subscribe"] =>
-  <T extends FactType>(input?: { readonly types?: ReadonlyArray<T> }) => {
-    const asked: ReadonlyArray<T> = input?.types ?? []
-    const known = new Set(asked.filter((type) => Object.hasOwn(Catalog, type)))
+export const factsFor = (bus: Bus.Interface, plugin: string): VibestPlugin.EventDomain["subscribe"] => {
+  function subscribe<T extends PublicEventType = PublicEventType>(input?: {
+    readonly types?: ReadonlyArray<T>
+  }): Stream.Stream<PublicEventOf<T>>
+  function subscribe(input?: { readonly types?: ReadonlyArray<PublicEventType> }): Stream.Stream<PublicDurableEvent> {
+    const asked = input?.types ?? []
+    const known = new Set(asked.filter((type) => isPublicEventType(type)))
     const unknown = asked.filter((type) => !known.has(type))
 
     const warned =
       unknown.length === 0
         ? Effect.void
-        : Effect.logWarning(`plugin ${plugin} event.subscribe: ignoring unknown fact types ${unknown.join(", ")}`)
+        : Effect.logWarning(`plugin ${plugin} event.subscribe: ignoring unknown event types ${unknown.join(", ")}`)
 
     if (asked.length > 0 && known.size === 0) return Stream.unwrap(Effect.as(warned, Stream.never))
 
-    const definitions: ReadonlyArray<{ readonly type: FactType }> =
-      known.size === 0 ? Object.values(Catalog) : [...known].map((type) => ({ type }))
-
-    const wanted: ReadonlySet<string> = new Set(definitions.map((definition) => definition.type))
-    const isWanted = (event: Bus.BusEvent): event is FactOf<T> => wanted.has(event.type)
-
-    return Stream.unwrap(
-      Effect.andThen(
-        warned,
-        Effect.map(bus.subscribe(definitions), (subscription) =>
-          Stream.fromSubscription(subscription).pipe(Stream.filter(isWanted)),
+    if (known.size > 0)
+      return Stream.unwrap(
+        Effect.andThen(
+          warned,
+          Effect.map(bus.subscribe([...known].map((type) => ({ type }))), Stream.fromSubscription),
         ),
-      ),
-    )
+      )
+
+    return Stream.unwrap(Effect.map(bus.subscribe(PublicEvents), Stream.fromSubscription))
   }
+
+  return subscribe
+}
 
 const sessionsFor = (
   summaries: Summaries.Interface,
   sends: Sends.Interface,
   archive: Archive.Interface,
+  hook: VibestPlugin.SessionDomain["hook"],
   plugin: string,
 ): VibestPlugin.SessionDomain => ({
+  hook,
   list: summaries.list,
   get: summaries.get,
   sentIn: summaries.sentIn,
@@ -98,20 +104,25 @@ export const make = Effect.gen(function* () {
       runtime: string | undefined = undefined,
     ) => hooks.register(name, { plugin, activation, stats, runtime, callback })
 
-    const agentRegistrations: AgentRegistrations = {
-      "start.before": (callback) => register("agent.start.before", callback),
+    const sessionRegistrations: SessionRegistrations = {
+      "start.before": (callback) => register("session.start.before", callback),
+      "tool.execute.before": (callback) => register("session.tool.execute.before", callback),
     }
 
-    const hook: VibestPlugin.AgentDomain["hook"] = (short, callback) => {
-      if (!Predicate.isString(short) || !HOOKS.includes(short)) {
+    const hook: VibestPlugin.SessionDomain["hook"] = (short, callback) => {
+      if (!Predicate.isString(short) || !Object.hasOwn(sessionRegistrations, short)) {
         return Effect.die(
           new Error(
-            `unsupported hook ${JSON.stringify(`agent.${String(short)}`)}; supported: ${HOOKS.map((s) => `agent.${s}`).join(", ")}`,
+            `unsupported hook ${JSON.stringify(`session.${String(short)}`)}; supported: ${Object.keys(
+              sessionRegistrations,
+            )
+              .map((s) => `session.${s}`)
+              .join(", ")}`,
           ),
         )
       }
 
-      return agentRegistrations[short](callback)
+      return sessionRegistrations[short](callback)
     }
 
     const machine: VibestPlugin.MachineDomain["hook"] = (name, callback, options) => {
@@ -127,13 +138,13 @@ export const make = Effect.gen(function* () {
 
     return {
       options,
-      agent: { hook, transform: agents.transformFor(plugin) },
+      agent: { transform: agents.transformFor(plugin) },
       machine: { hook: machine },
       runtime: { transform: runtimes.transform },
       harness: { transform: harnesses.transform },
       subscription: { report: (input) => subscriptions.report(input) },
       event: { subscribe: factsFor(bus, plugin) },
-      session: sessionsFor(summaries, sends, archive, plugin),
+      session: sessionsFor(summaries, sends, archive, hook, plugin),
     }
   }
 })

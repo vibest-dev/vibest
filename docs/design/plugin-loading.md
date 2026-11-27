@@ -4,7 +4,7 @@ Implementation notes for the [plugin architecture](architecture.md#7-plugin-arch
 
 ## Order and boundary
 
-Builtin plugins load first, in the order of `pre` in `packages/builtins/src/index.ts` (`vibest.harness-pi`, `vibest.harness-claude`,
+Builtin plugins load first, in the order of `pre` in `packages/plugin-builtins/src/index.ts` (`vibest.harness-pi`, `vibest.harness-claude`,
 `vibest.runtime-herdr-core`, `vibest.runtime-herdr`, `vibest.runtime-choice`, `vibest.harness-default`,
 `vibest.agent-files`, then the optional `vibest.report-reminder` and `vibest.idle-stop` when `vibest.json` names their ids), then the plugins
 directory, then
@@ -13,8 +13,8 @@ herdr) and the order of `transform`s on a registry, so a user plugin sees and ma
 `vibest plugins` lists them in that order.
 
 Builtin plugins and harness integrations are written like a user plugin: `packages/plugin-harnesses`,
-`packages/runtime-herdr`, `packages/runtime-herdr-core` and `packages/integration/*/src` import only `@vibest/plugin`,
-`@vibest/schema`, `@vibest/protocol` and `@vibest/client`, and `packages/builtins` never imports core, server or the
+`packages/runtime-herdr`, `packages/runtime-herdr-core` and `packages/harness-*/src` import only `@vibest/plugin`,
+`@vibest/schema`, `@vibest/protocol` and `@vibest/client`, and `packages/plugin-builtins` never imports core, server or the
 CLI. `.oxlintrc.json` enforces it with `no-restricted-imports` overrides (static, type-only and dynamic imports alike),
 and `vibest/no-restricted-disable` reports a disable comment for that rule. What a builtin needs from the platform
 (child processes, files, HTTP) it provides itself from `@effect/platform-node-shared`.

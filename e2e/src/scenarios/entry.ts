@@ -1,9 +1,12 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import type { Schema } from "effect"
+
 import type { Check } from "../check.ts"
 import { ask, entryRun, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
-import { replyOf, expect, fail, herdr, paneOf, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { binary, replyOf, expect, fail, herdr, paneOf, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { isolatedCore } from "./hc.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type EntryRow = { id: string; directory: string; conversation: string | null; runtime: string | null }
@@ -133,11 +136,12 @@ const checks: ReadonlyArray<Check> = [
         const sub = path.join(w.repository, "src")
         await fs.mkdir(sub)
         const out = await w.ok(["--harness", "pi", "--headless"], { cwd: sub, env, timeoutMs: 60_000 })
-        expect(out.includes("the entry session is starting in"), `vibest printed: ${out}`)
+        expect(/^session \S+ is starting in /m.test(out), `vibest printed: ${out}`)
         const socket = socketOf(w, w.herdrSession)
         const { pane } = await piReady(w, "the launched entry session")
         await until("the entry session's row", () => liveEntry(w) !== undefined, 30_000)
         const entry = liveEntry(w)!
+        expect(out.includes(`session ${entry.id} is starting in`), `vibest printed: ${out}`)
         const root = await fs.realpath(w.repository)
         expect(entry.directory === root, `entry session directory ${entry.directory}, not ${root}`)
         const terminal = (JSON.parse(entry.runtime ?? "{}") as { id?: string }).id ?? ""
@@ -343,6 +347,64 @@ const checks: ReadonlyArray<Check> = [
         }
       } finally {
         model.stop()
+      }
+    },
+  },
+  {
+    id: "S69",
+    title:
+      "plain terminal: bare vibest --headless outside any runtime terminal starts the entry session on herdr-core from defaultRuntime in a commented vibest.json, on defaultHarness Pi chosen by vibest.harness-default",
+    run: async (w) => {
+      needs("pi", "hc", "git")
+      const model = heldModel()
+      model.release()
+      w.ownRuntimes.add("hc")
+      await w.stopDaemon()
+      const piAgentDir = await piDir(w, "pi-s69", model.url)
+      const core = await isolatedCore(w, piAgentDir, "s69")
+      const config = path.join(w.vibestHome, "vibest.json")
+      const before = await fs.readFile(config, "utf8").catch(() => undefined)
+      const kept = before === undefined ? {} : (JSON.parse(before) as Schema.JsonObject)
+
+      try {
+        await fs.writeFile(
+          config,
+          `// S69\n${JSON.stringify({ ...kept, defaultRuntime: "hc", defaultHarness: "pi" }, null, 2)}\n`,
+        )
+        const repo = await project(w, "s69")
+        const env = { PI_CODING_AGENT_DIR: piAgentDir }
+        const plain = await w.run(repo, [binary, "--headless"], { env, timeoutMs: 60_000 })
+        expect(
+          plain.code === 0 && /session \S+ is starting in herdr-core/.test(plain.stdout),
+          `vibest exited ${plain.code}: ${plain.stdout}${plain.stderr}`,
+        )
+
+        type Listed = { agent: string; harness: string; routing?: { decidedBy: Record<string, string> } }
+
+        let entry: Listed | undefined
+
+        await until(
+          "the entry session in vibest ls",
+          async () => {
+            entry = (await w.json<{ sessions: Array<Listed> }>(["ls"], { cwd: repo })).sessions.find(
+              (s) => s.agent === "coordinator",
+            )
+
+            return entry !== undefined
+          },
+          60_000,
+        )
+        expect(entry!.harness === "pi", `entry session harness ${entry!.harness}`)
+        expect(
+          entry!.routing?.decidedBy["harness"] === "vibest.harness-default",
+          `harness decided by ${JSON.stringify(entry!.routing)}`,
+        )
+        expect((await core.terminals()).length > 0, "no terminal in the isolated herdr-core")
+      } finally {
+        model.stop()
+        await (before === undefined ? fs.rm(config, { force: true }) : fs.writeFile(config, before))
+        await w.stopDaemon()
+        await core.stop()
       }
     },
   },

@@ -1,27 +1,29 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import type { Change, TraceEntry } from "@vibest/schema/plugin"
+import { Bounded } from "@vibest/util/bounded"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, Predicate, type Scope } from "effect"
-
-import { Bounded } from "../effect/bounded.ts"
-import { LayerNode } from "../effect/layer-node.ts"
 
 export * as Hooks from "./hooks.ts"
 
 export interface Events {
-  readonly "agent.start.before": VibestPlugin.AgentStartBefore
+  readonly "session.start.before": VibestPlugin.SessionStartBefore
+  readonly "session.tool.execute.before": VibestPlugin.SessionToolExecuteBefore
   readonly "machine.connect": VibestPlugin.MachineEvent
   readonly "machine.remove": VibestPlugin.MachineEvent
 }
 
 export interface Results extends Record<keyof Events, unknown> {
-  readonly "agent.start.before": void
+  readonly "session.start.before": void
+  readonly "session.tool.execute.before": void
   readonly "machine.connect": ReadonlyArray<VibestPlugin.MachineNote>
   readonly "machine.remove": ReadonlyArray<VibestPlugin.MachineNote>
 }
 
 interface Failures extends Record<keyof Events, unknown> {
-  readonly "agent.start.before": VibestPlugin.AgentRefused
+  readonly "session.start.before": VibestPlugin.SessionRefused
+  readonly "session.tool.execute.before": VibestPlugin.ToolRefused
   readonly "machine.connect": never
   readonly "machine.remove": never
 }
@@ -60,7 +62,15 @@ export type Outcome<N extends Name> = { readonly ms: number } & (
 
 export const errorMessage = (cause: Cause.Cause<unknown>) => messageOf(Cause.squash(cause))
 
-const isAgentRefused = (e: unknown): e is VibestPlugin.AgentRefused => Predicate.isTagged(e, "AgentRefused")
+const REFUSAL_TAG: Partial<Record<Name, "SessionRefused" | "ToolRefused">> = {
+  "session.start.before": "SessionRefused",
+  "session.tool.execute.before": "ToolRefused",
+}
+
+const isRefusal =
+  (tag: "SessionRefused" | "ToolRefused") =>
+  (e: unknown): e is VibestPlugin.SessionRefused | VibestPlugin.ToolRefused =>
+    Predicate.isTagged(e, tag)
 
 const decision = <A>(value: A | void) => (Predicate.isObjectOrArray(value) ? value : undefined)
 
@@ -79,7 +89,12 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("vibest/PluginHooks") {}
 
 export const layer = Layer.sync(Service, () => {
-  let table: Table = { "agent.start.before": [], "machine.connect": [], "machine.remove": [] }
+  let table: Table = {
+    "session.start.before": [],
+    "session.tool.execute.before": [],
+    "machine.connect": [],
+    "machine.remove": [],
+  }
 
   const register: Interface["register"] = (name, entry) =>
     Effect.gen(function* () {
@@ -135,12 +150,13 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
 
   if (Exit.isSuccess(exit.value)) return { ms, outcome: "ok", value: decision(exit.value.value) } satisfies Outcome<N>
   const cause = exit.value.cause
-  const refused = Option.filter(Cause.findErrorOption(cause), isAgentRefused)
+  const refusalTag = REFUSAL_TAG[name]
+  const failure: unknown = Option.getOrUndefined(Cause.findErrorOption(cause))
 
-  if (name === "agent.start.before" && Option.isSome(refused)) {
+  if (refusalTag !== undefined && isRefusal(refusalTag)(failure)) {
     stats.refused++
 
-    return { ms, outcome: "refused", reason: refused.value.reason } satisfies Outcome<N>
+    return { ms, outcome: "refused", reason: failure.reason } satisfies Outcome<N>
   }
 
   const error = errorMessage(cause)
@@ -152,9 +168,9 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
 
 export type Stopped = { readonly plugin: string; readonly reason: string }
 
-type AgentName = "agent.start.before"
+type SessionName = "session.start.before"
 
-export const dispatch = Effect.fnUntraced(function* <N extends AgentName>(
+export const dispatch = Effect.fnUntraced(function* <N extends SessionName>(
   name: N,
   hooks: ReadonlyArray<Entry<N>>,
   event: Events[N],

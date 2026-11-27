@@ -10,7 +10,7 @@
 8. A usage limit restarts nothing: its execution ends failed and the harness keeps running in its terminal.
 9. An entry session moved from another terminal (`vibest` there, answered y) ends the same way: SIGTERM to the pid it last reported, its terminal and shell kept, then it starts in the new terminal. While a restart is between its harnesses, that start is refused and nothing is signalled.
 
-Status: decided, planned in the update-restart pipeline plan (`pipeline-update-restart-plan.md` in the project artifacts). 1 to 9 are built on `feat/update-restart-agents-v3` (runtime-herdr implements `run`; core in `packages/core/src/session/restart.ts`); `vibest daemon restart` offers it too since `feat/multi-install-daemon-restart`.
+Status: in force.
 
 Known limits:
 

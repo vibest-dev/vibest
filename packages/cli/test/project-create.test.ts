@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/database/db"
-import { exitedAt, executionStateOf } from "@vibest/core/database/db-rows"
+import { exitedAt, executionStateOf } from "@vibest/core/database/rows"
 import { Project } from "@vibest/core/project"
 import {
   createIsolatedWorktrees,
@@ -10,7 +9,14 @@ import {
   projectRepositories,
   projectRoot,
 } from "@vibest/core/project/create"
+import { ProjectStore } from "@vibest/core/project/store"
 import { Session } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
+import { sessionHeaders } from "@vibest/protocol/protocol"
+import { liveDaemon } from "@vibest/runtime-herdr/commands"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Layout } from "@vibest/schema/layout"
+import * as Server from "@vibest/server/server"
 import {
   authed,
   FakeGit,
@@ -22,12 +28,7 @@ import {
   until,
   writeEnd,
   projectOf,
-} from "@vibest/platform-bun/test/lib/fakes"
-import { sessionHeaders } from "@vibest/protocol/protocol"
-import { liveDaemon } from "@vibest/runtime-herdr/commands"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Layout } from "@vibest/schema/layout"
-import * as Server from "@vibest/server/server"
+} from "@vibest/testkit/fakes"
 import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -203,7 +204,7 @@ describe("multi-repository project", () => {
 })
 
 const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
   Layer.provideMerge(testLayer()),
 )
@@ -278,7 +279,7 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
@@ -288,13 +289,13 @@ describe("multi-repository isolated workspace", () => {
       const app = yield* repositoryWithOneCommitOnMain(root, "app")
       const sdk = yield* repositoryWithOneCommitOnMain(root, "sdk")
 
-      const entry = yield* db.session.startEntry(
+      const entry = yield* sessionStore.startRoot(
         yield* projectOf(root),
         "pi",
         false,
         {
           runtime: RUNTIME,
-          address: { machine: "local", id: "test/coord" },
+          target: { id: "test/coord" },
         },
         { agent: "coordinator" },
       )
@@ -314,12 +315,12 @@ describe("multi-repository isolated workspace", () => {
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = JSON.parse(spawned.stdout) as { id: string }
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
       )
       yield* sessions.check(id)
-      const row = (yield* db.session.getSession(id))!
-      const workspace = (yield* db.session.sessionDirectory(row.id))!
+      const row = (yield* sessionStore.getSession(id))!
+      const workspace = (yield* sessionStore.sessionDirectory(row.id))!
       assert.strictEqual(path.basename(path.dirname(workspace)), "combo")
       const appWt = path.join(workspace, "app")
       const sdkWt = path.join(workspace, "sdk")
@@ -339,19 +340,19 @@ describe("multi-repository isolated workspace", () => {
       yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual(executionStateOf((yield* db.session.getSession(id))!), "completed")
+      assert.strictEqual(executionStateOf((yield* sessionStore.getSession(id))!), "completed")
 
       yield* fakeGit.checkout(sdkWt, { state: { branch: "feat/sdk", pushed: false, saved: true, why: "" } })
       yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: false, why: "uncommitted changes" } })
-      const kept = (yield* sessions.remove(id))!
+      const kept = (yield* sessions.archive(id))!
       assert.strictEqual(kept.worktree, "kept")
       assert.match(kept.reasons.join("\n"), /app: worktree kept: uncommitted changes/)
-      assert.strictEqual(kept.branch, "sdk=feat/sdk")
+      assert.deepStrictEqual(kept.branches, [{ repository: "sdk", branch: "feat/sdk" }])
       assert.isTrue(yield* fs.exists(appWt))
       assert.isFalse(yield* fs.exists(sdkWt))
 
       yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: true, why: "" } })
-      const removed = (yield* sessions.remove(id))!
+      const removed = (yield* sessions.archive(id))!
       assert.strictEqual(removed.worktree, "removed")
       assert.isFalse(yield* fs.exists(workspace))
     }),
@@ -362,7 +363,8 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db.Service
+      const projectStore = yield* ProjectStore.Service
+      const sessionStore = yield* SessionStore.Service
       const layout = yield* Layout
       const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
       const root = path.join(parent, "combo")
@@ -371,25 +373,29 @@ describe("multi-repository isolated workspace", () => {
       yield* repositoryWithOneCommitOnMain(root, "sdk")
       const raw = yield* connect(layout.socket)
 
-      const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["Project.EntrySession"]({
-        agent: "coordinator",
-        harness: "pi",
-        fresh: false,
-        terminal: "coord",
+      const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["server.session"]["session.claim"]({
+        payload: {
+          agent: "coordinator",
+          harness: "pi",
+          fresh: false,
+          terminal: { id: "coord" },
+        },
       })
 
       const { id } = yield* authed(
         raw,
         sessionHeaders({ sessionId, repositoryRoot: app, projectId: String(projectId) }),
-      ).Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      )["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
 
       yield* until(
-        db.session.getSession(id),
+        sessionStore.getSession(id),
         (row) => !!row && ((row.process?.placedAt ?? null) !== null || exitedAt(row) !== null),
       )
-      const row = (yield* db.session.getSession(id))!
-      assert.strictEqual(row.projectId, (yield* db.project.projectAt(root))?.id)
-      const workspace = (yield* db.session.sessionDirectory(row.id))!
+      const row = (yield* sessionStore.getSession(id))!
+      assert.strictEqual(row.projectId, (yield* projectStore.projectAt(root))?.id)
+      const workspace = (yield* sessionStore.sessionDirectory(row.id))!
       assert.isTrue(yield* fs.exists(path.join(workspace, "app")))
       assert.isTrue(yield* fs.exists(path.join(workspace, "sdk")))
     }),
@@ -400,7 +406,8 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db.Service
+      const projectStore = yield* ProjectStore.Service
+      const sessionStore = yield* SessionStore.Service
       const herdr = yield* FakeRuntime
       const sessions = yield* Session.Service
       const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
@@ -413,21 +420,25 @@ describe("multi-repository isolated workspace", () => {
       const raw = yield* connect((yield* Layout).socket)
       const cli = authed(raw, cliHeaders(root))
 
-      const { sessionId, projectId } = yield* cli["Project.EntrySession"]({
-        agent: "coordinator",
-        harness: "pi",
-        fresh: false,
-        terminal: "coord",
+      const { sessionId, projectId } = yield* cli["server.session"]["session.claim"]({
+        payload: {
+          agent: "coordinator",
+          harness: "pi",
+          fresh: false,
+          terminal: { id: "coord" },
+        },
       })
 
       const { id } = yield* authed(
         raw,
         sessionHeaders({ sessionId, repositoryRoot: workspace, projectId: String(projectId) }),
-      ).Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
+      )["server.session"]["session.spawn"]({
+        payload: { agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" },
+      })
 
-      yield* until(db.session.getSession(id), (row) => (row ? executionStateOf(row) : undefined) === "open")
-      assert.strictEqual((yield* db.session.getSession(id))!.projectId, (yield* db.project.projectAt(root))?.id)
-      assert.isUndefined(yield* db.project.projectAt(workspace))
+      yield* until(sessionStore.getSession(id), (row) => (row ? executionStateOf(row) : undefined) === "open")
+      assert.strictEqual((yield* sessionStore.getSession(id))!.projectId, (yield* projectStore.projectAt(root))?.id)
+      assert.isUndefined(yield* projectStore.projectAt(workspace))
       assert.strictEqual((yield* herdr.callsTo("open"))[0]!.project, root)
 
       const listed = yield* liveDaemon(clients).list(workspace)
@@ -442,7 +453,7 @@ describe("multi-repository isolated workspace", () => {
       yield* sessions.check(id)
       yield* herdr.updateAgent(id, (agent) => ({ ...agent, alive: false }))
       yield* sessions.check(id)
-      yield* until(db.session.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
+      yield* until(sessionStore.getSession(id), (row) => (row ? exitedAt(row) : undefined) != null)
       const before = (yield* herdr.callsTo("open")).length
       yield* sessions.send(id, "again")
       const places = yield* until(herdr.callsTo("open"), (calls) => calls.length > before)

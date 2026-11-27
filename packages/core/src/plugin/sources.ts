@@ -2,10 +2,9 @@ import type { Plugin as PromisePlugin } from "@vibest/plugin"
 import type { Plugin as EffectPlugin } from "@vibest/plugin/effect"
 import { messageOf } from "@vibest/schema/error"
 import { Layout } from "@vibest/schema/layout"
-import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Predicate, Result, Schema } from "effect"
-import { Hex } from "effect/encoding"
-
-import { LayerNode } from "../effect/layer-node.ts"
+import { LayerNode } from "@vibest/util/layer-node"
+import { Context, Duration, Effect, FileSystem, Option, Path, Predicate, Result, Schema } from "effect"
+import { Digest } from "effect/crypto"
 
 export class PluginLoader extends Context.Service<
   PluginLoader,
@@ -57,6 +56,7 @@ const ConfigEntry = Schema.Union([
 const ConfigFile = Schema.Struct({
   plugins: Schema.optional(Schema.Array(ConfigEntry)),
   concurrency: Schema.optional(Schema.Json),
+  websocket: Schema.optional(Schema.Boolean),
 })
 
 type ConfigFile = typeof ConfigFile.Type
@@ -140,7 +140,7 @@ export const openSources = Effect.fnUntraced(function* (
 ) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const crypto = yield* Crypto.Crypto
+  const digest = yield* Digest.Digest
   const layout = yield* Layout
   const loader = yield* PluginLoader
   const imported = new Map<string, Imported>()
@@ -149,7 +149,7 @@ export const openSources = Effect.fnUntraced(function* (
   const quiet = options?.quiet === true
   const warn = (message: string) => (quiet ? Effect.void : Effect.logWarning(message))
 
-  const sha = (bytes: Uint8Array) => crypto.digest("SHA-256", bytes).pipe(Effect.map(Hex.encode))
+  const sha = (bytes: Uint8Array) => digest.digestHex(Digest.sha256, bytes)
   const utf8 = (s: string) => new TextEncoder().encode(s)
 
   const isDirectory = (target: string) =>
@@ -303,7 +303,9 @@ export const openSources = Effect.fnUntraced(function* (
 
           if (!configured || warnedConfiguredRuntime) return
           warnedConfiguredRuntime = true
-          yield* warn(`${layout.config}: "runtime" is ignored; run vibest in the runtime's terminal, or pass --runtime`)
+          yield* warn(
+            `${layout.config}: "runtime" is ignored; run vibest in the runtime's terminal, pass --runtime, or set "defaultRuntime" with vibest onboard`,
+          )
         }),
       ),
       Effect.flatMap(Schema.decodeUnknownEffect(ConfigFile)),

@@ -10,7 +10,6 @@
     }
   },
   "exports": {
-    "./test/*": "./test/*.ts",
     "./*": "./src/*.ts"
   },
   "scripts": {
@@ -20,14 +19,17 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
-    "@vibest/builtins": "workspace:*",
     "@vibest/client": "workspace:*",
+    "@vibest/codemode": "workspace:*",
     "@vibest/core": "workspace:*",
+    "@vibest/herdr-sdk": "workspace:*",
+    "@vibest/mcp": "workspace:*",
     "@vibest/plugin": "workspace:*",
+    "@vibest/plugin-builtins": "workspace:*",
     "@vibest/schema": "workspace:*",
     "@vibest/server": "workspace:*",
-    "effect": "catalog:",
-    "effect-herdr-sdk": "workspace:*"
+    "@vibest/util": "workspace:*",
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@vibest/protocol": "workspace:*",

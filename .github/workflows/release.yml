@@ -88,7 +88,7 @@ env:
   CURSOR_VERSION: 2026.11.05-86047df
   # Every workspace package moves together: workspace:* resolves to it, and the binary and plugins embed it. A run sets
   # the release version in each, in its own checkout.
-  VERSIONED: packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json
+  VERSIONED: packages/*/package.json tools/tsconfig/package.json tools/verify/package.json
 
 jobs:
   # Decides the commit and the version every other job builds, verifies, tags and publishes. It changes nothing.
@@ -240,22 +240,29 @@ jobs:
       - uses: ./.github/actions/set-version
         with:
           version: ${{ env.VERSION }}
-      # What ships: the linux-x64 archive the curl install takes, and every package tarball, packed once. The e2e jobs
-      # install from these files, not from anything they build.
+      # What ships: the curl archives for all targets except darwin-arm64 (built natively on macOS), and every npm
+      # package tarball, packed once. The e2e jobs install from these files, not from anything they build.
       - run: >-
           pnpm run verify --no-cache --stage build,archive,pack
           --keep-archive "$RUNNER_TEMP/release/github" --packs "$RUNNER_TEMP/release/npm"
-      # Checks the tarballs (one per published package; the darwin-arm64 binary is cross-compiled here) without
+          --exclude-archive darwin-arm64
+      # Checks the tarballs (one per published package; all 6 platform binaries are built here) without
       # repacking them: what each holds, @vibest/cli with the linux-x64 binary installed from them and run.
       # Writes their publish order, dependencies first.
       - name: Check the tarballs
         run: bun tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
-      # What install.sh downloads (releases/latest/download/...): an archive per platform (linux-x64 here, darwin-arm64
+      # What install.sh downloads (releases/latest/download/...): an archive per platform (5 targets here, darwin-arm64
       # from the darwin job), install.sh itself, and `version`, which `vibest update` reads.
       - name: GitHub Release files
         run: |
           out="$RUNNER_TEMP/release/github"
-          test "$(ls "$out")" = vibest-linux-x64.tar.gz
+          expected=$(printf '%s\n' \
+            vibest-darwin-x64.tar.gz \
+            vibest-linux-arm64-musl.tar.gz \
+            vibest-linux-arm64.tar.gz \
+            vibest-linux-x64-musl.tar.gz \
+            vibest-linux-x64.tar.gz)
+          test "$(LC_ALL=C ls "$out")" = "$expected"
           check=$(mktemp -d) && tar -xzf "$out/vibest-linux-x64.tar.gz" -C "$check"
           test "$("$check/bin/vibest" --version)" = "vibest v$VERSION"
           cp packages/cli/install.sh "$out/install.sh"
@@ -331,7 +338,7 @@ jobs:
         suite:
           - { name: sessions, areas: start entry sessions }
           - { name: delivery-inbox, areas: delivery inbox }
-          - { name: exits-hc, areas: exits hc terminal-status }
+          - { name: exits-hc, areas: exits hc rex terminal-status }
           - { name: machines, areas: machines }
           - { name: agents-plugins, areas: agents plugins }
           - { name: harnesses, areas: harness integration routing agy }
@@ -353,7 +360,7 @@ jobs:
 
       - uses: ./.github/actions/e2e-tools
       - run: >-
-          pnpm run verify --no-cache --elsewhere H4 --stage e2e
+          pnpm run verify --no-cache --elsewhere H4,RX1,RX2 --stage e2e
           --leg curl --jobs 1
           --keep-archive "$RUNNER_TEMP/release/github" --packs "$RUNNER_TEMP/release/npm"
           ${{ matrix.suite.areas }}
@@ -437,7 +444,7 @@ jobs:
           version: ${{ env.VERSION }}
       - run: pnpm run verify --no-cache H4 --keep-archive "$RUNNER_TEMP/darwin/github" --packs "$RUNNER_TEMP/release/npm"
       - name: Check the tarballs
-        run: node tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
+        run: bun tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
       - name: Check the archive and record its hash
         run: |
           cd "$RUNNER_TEMP/darwin"

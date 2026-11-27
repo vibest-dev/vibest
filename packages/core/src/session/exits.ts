@@ -1,4 +1,5 @@
 import { sessionLabel } from "@vibest/schema/id"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, Layer } from "effect"
 
 import {
@@ -9,13 +10,13 @@ import {
   terminalOf,
   exitedAt,
   executionStateOf,
-} from "../database/db-rows.ts"
-import { Db } from "../database/db.ts"
-import { LayerNode } from "../effect/layer-node.ts"
+} from "../database/rows.ts"
 import { Inbox } from "../inbox.ts"
-import { paneTail, type Runtime } from "../runtimes.ts"
+import { InboxStore } from "../inbox/store.ts"
+import { paneTail, type Runtime } from "../runtime/registry.ts"
 import { Archive } from "./archive.ts"
 import { Placement } from "./placement.ts"
+import { SessionStore } from "./store.ts"
 
 export * as Exits from "./exits.ts"
 
@@ -34,16 +35,17 @@ const shownTail = (text: string) =>
     .slice(0, TAIL_CHARS)
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
+  const inboxStore = yield* InboxStore.Service
   const inbox = yield* Inbox.Service
   const { undoCutOffStart } = yield* Archive.Service
   const { notice, recount } = yield* Placement.Service
 
   const lastScreen = (h: Runtime, session: SessionRow, execution: number | undefined) =>
     Effect.gen(function* () {
-      const tail = shownTail(yield* paneTail(h, terminalOf(session), TAIL_LINES))
+      const tail = shownTail(yield* paneTail(h, terminalOf(session)?.target, TAIL_LINES))
       const output = tail === "" ? "" : `\n\nIts terminal shows:\n\n${tail}`
-      const beforeWork = execution !== undefined && !(yield* db.session.executionTaken(session.id))
+      const beforeWork = execution !== undefined && !(yield* sessionStore.executionTaken(session.id))
 
       return { how: beforeWork ? " before it started working" : "", output }
     })
@@ -51,12 +53,12 @@ export const make = Effect.gen(function* () {
   const announceExit = (h: Runtime, session: SessionRow, execution: number | undefined) =>
     Effect.gen(function* () {
       const failed = yield* lastScreen(h, session, execution)
-      const queued = yield* db.inbox.pendingInbox(session.id)
+      const queued = yield* inboxStore.pendingInbox(session.id)
       const signed = queued.filter((r) => localSessionOf(r.sender) !== undefined)
       const unsigned = queued.filter((r) => !signed.includes(r))
 
       if (signed.length > 0) yield* inbox.undelivered(session, signed, "it exited")
-      yield* db.inbox.setInboxStatus(
+      yield* inboxStore.setInboxStatus(
         session.id,
         unsigned.map((r) => r.id),
         "failed",
@@ -71,16 +73,16 @@ export const make = Effect.gen(function* () {
 
       if (
         execution !== undefined &&
-        (yield* db.session.executionAccepted(session.id)) &&
-        (yield* db.session.closeExecution(session.id, execution, "failed", {
+        (yield* sessionStore.executionAccepted(session.id)) &&
+        (yield* sessionStore.closeExecution(session.id, execution, "failed", {
           failure: { message: "the harness exited" },
           notice: text(" during an execution"),
         }))
       )
         return
 
-      if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "not_started")
-      const last = yield* db.session.latestReply(session.id)
+      if (execution !== undefined) yield* sessionStore.closeExecution(session.id, execution, "not_started")
+      const last = yield* sessionStore.latestReply(session.id)
       yield* notice(
         session,
         text(last?.status === "failed" ? ` after its execution ended with an error: ${last.failure ?? ""}` : ""),
@@ -94,31 +96,32 @@ export const make = Effect.gen(function* () {
   ) {
     const cutOff = (session.process?.placedAt ?? null) === null
     const announce = !cutOff && (executionStateOf(session) === "open" || exitedAt(session) === null)
+    const root = (yield* sessionStore.creatorOf(session.id)) === undefined
 
-    if (announce && session.entry) {
-      if (execution !== undefined && (yield* db.session.executionAccepted(session.id)))
-        yield* db.session.closeExecution(session.id, execution, "failed", {
+    if (announce && root) {
+      if (execution !== undefined && (yield* sessionStore.executionAccepted(session.id)))
+        yield* sessionStore.closeExecution(session.id, execution, "failed", {
           failure: { message: "the harness exited" },
         })
-      else if (execution !== undefined) yield* db.session.closeExecution(session.id, execution, "not_started")
+      else if (execution !== undefined) yield* sessionStore.closeExecution(session.id, execution, "not_started")
     } else if (announce) yield* announceExit(h, session, execution)
 
     if (
       exitedAt(session) === null &&
-      (yield* db.session.endExited(session.id, cutOff ? "launch_failed" : "exited", session.process?.id))
+      (yield* sessionStore.endProcess(session.id, cutOff ? "launch_failed" : "exited", session.process?.id))
     )
       yield* recount(runtimeOf(session), session.projectId).pipe(Effect.ignore)
 
     if (cutOff) yield* undoCutOffStart(h, session)
 
-    if (!announce) yield* inbox.dropQueue(session, "it exited; send it again to resume it")
+    if (!announce && !root) yield* inbox.dropQueue(session, "it exited; send it again to resume it")
   })
 
   const settle = Effect.fn("Exits.settle")(function* (h: Runtime, id: string, process: number | undefined) {
-    const session = yield* db.session.getSession(id)
+    const session = yield* sessionStore.getSession(id)
 
     if (session === undefined || session.process?.id !== process) return
-    const execution = executionStateOf(session) === "open" ? yield* db.session.openExecution(session.id) : undefined
+    const execution = executionStateOf(session) === "open" ? yield* sessionStore.openExecution(session.id) : undefined
     yield* recordExit(h, session, execution)
   })
 
@@ -134,5 +137,5 @@ export const layer = Layer.effect(Service, make)
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Archive.node, Db.node, Inbox.node, Placement.node],
+  deps: [Archive.node, SessionStore.node, InboxStore.node, Inbox.node, Placement.node],
 })

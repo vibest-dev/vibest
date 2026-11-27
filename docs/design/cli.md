@@ -34,7 +34,7 @@ The user, or a session for a session it started.
 
 Process level. Planned, not a command on this tree: another pull request adds it. `vibest stop <id>` ends the session's process and its terminal. The session stays. The next `vibest send` resumes it.
 
-This is not `vibest integration stop`, which is a harness hook, and not the herdr plugin action `vibest herdr stop`, which interrupts the session in the focused pane and keeps its terminal.
+This is not the herdr plugin action `vibest herdr stop`, which interrupts the session in the focused pane and keeps its terminal.
 
 ### archive
 
@@ -112,13 +112,14 @@ Only the user. Another machine's vibestd is reached over ssh.
 | `vibest machine rm <name>`           | Forget the machine and stop the connection. Agents there keep running; adding it again delivers their results. |
 | `vibest connect`                     | What the other machine's vibestd runs over ssh. Not for direct use.                                            |
 
-`vibest run --machine` starts a session there. `send`, `result`, `peek`, `interrupt` and `archive` take `<machine>/<id>`. `ls` takes no id; its list includes sessions on other machines.
+`vibest run --machine` starts a session there. `send`, `result`, `peek`, `interrupt`, `stop` and `archive` take `--machine <machine>` (never `<machine>/<id>`); `session link` and `session unlink` take `--machine` and `--to-machine` (or resolve an unambiguous 8+ char prefix across connected machines). `ls` takes no id; its list includes sessions on other machines.
 
 ### Maintenance
 
 | Command                      | For                                                                                                                                                                                                                                                                                                                           | Who           |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
 | `vibest status`              | This vibest, whether vibestd is running, this machine's load when it is, and the terminal runtimes it has. Does not start vibestd.                                                                                                                                                                                            | User or agent |
+| `vibest onboard`             | Choose where agents run (offering to install herdr-core when no runtime is found) and which harness starts, and save them as `defaultRuntime` and `defaultHarness` in `vibest.json`. Works outside a git repository.                                                                                                          | User          |
 | `vibest doctor`              | Whether vibest can work here. Each problem says how to fix it. Starts vibestd when it is not running.                                                                                                                                                                                                                         | User or agent |
 | `vibest daemon`              | Start vibestd in the background. Exits 0 when it is already running. `--foreground` runs it in this process.                                                                                                                                                                                                                  | User          |
 | `vibest daemon restart`      | Replace the running vibestd with this vibest, after a confirmation. May refuse while work is still finishing. Then asks whether to restart agents still on the old version, keeping their conversations.                                                                                                                      | User          |
@@ -126,17 +127,6 @@ Only the user. Another machine's vibestd is reached over ssh.
 | `vibest update`              | Update vibest the way it was installed, try the new one aside (it must open the database), replace the running vibestd, then ask about restarting agents still on the old version. A stable install takes the newest stable release; a beta install takes the newest of either channel. `--yes` answers the restart question. | User          |
 | `vibest events`              | The event log as JSON lines. `--session` and `--after <seq>` read one session from a cursor; `--follow` keeps printing.                                                                                                                                                                                                       | User          |
 | `vibest plugins`             | Plugins loaded from `~/.vibest/plugins` and `vibest.json`, with hook counts since vibestd started.                                                                                                                                                                                                                            | User or agent |
-
-### Harness integration
-
-Not for direct use. The harness plugin calls them. They do not start vibestd; a report that does not arrive exits non-zero. `--harness` names which harness.
-
-| Command                     | For                                                                                                         |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `vibest integration prompt` | Execution start: the harness's prompt or activity event as JSON on stdin.                                   |
-| `vibest integration stop`   | Execution end: the harness's execution-end event as JSON on stdin.                                          |
-| `vibest integration ready`  | Session start: the session takes input.                                                                     |
-| `vibest integration guard`  | Pre-tool: the harness's pre-tool input on stdin. Prints a refusal when the session's rules refuse the call. |
 
 ### herdr plugin
 

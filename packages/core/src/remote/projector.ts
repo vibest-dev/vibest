@@ -1,11 +1,4 @@
-import {
-  MachineAdded,
-  MachineConnected,
-  MachineRemoved,
-  OutboxAcked,
-  OutboxQueued,
-  PeerSeen,
-} from "@vibest/schema/event"
+import { MachineEvent } from "@vibest/schema/machine-event"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -16,38 +9,38 @@ export const layer = Layer.effectDiscard(
     const bus = yield* Bus.Service
     const sql = yield* SqlClient.SqlClient
     yield* bus.project(
-      MachineAdded,
-      (fact) =>
-        sql`INSERT INTO machine (name, target, vibestd_id, connected_at, created_at)
-          VALUES (${fact.data.name}, ${fact.data.target}, ${fact.data.vibestd}, ${fact.at}, ${fact.at})`,
+      MachineEvent.Added,
+      (event) =>
+        sql`INSERT INTO machine (name, target, remote_id, connected_at, created_at)
+          VALUES (${event.data.name}, ${event.data.target}, ${event.data.remote}, ${event.created}, ${event.created})`,
     )
     yield* bus.project(
-      MachineConnected,
-      (fact) => sql`UPDATE machine SET connected_at = ${fact.at} WHERE name = ${fact.data.name}`,
+      MachineEvent.Connected,
+      (event) => sql`UPDATE machine SET connected_at = ${event.created} WHERE name = ${event.data.name}`,
     )
-    yield* bus.project(MachineRemoved, (fact) => sql`DELETE FROM machine WHERE name = ${fact.data.name}`)
+    yield* bus.project(MachineEvent.Removed, (event) => sql`DELETE FROM machine WHERE name = ${event.data.name}`)
     yield* bus.project(
-      PeerSeen,
-      (fact) =>
-        sql`INSERT INTO peer (id, name, connected_at)
-          VALUES (${fact.data.id}, ${fact.data.name}, ${fact.at})
+      MachineEvent.RemoteSeen,
+      (event) =>
+        sql`INSERT INTO remote (id, name, connected_at)
+          VALUES (${event.data.remoteId}, ${event.data.name}, ${event.created})
           ON CONFLICT (id) DO UPDATE SET name = excluded.name, connected_at = excluded.connected_at`,
     )
     yield* bus.project(
-      OutboxQueued,
-      (fact) =>
-        sql`INSERT INTO outbox (id, seq, peer_id, session_id, recipient, kind, content, from_session, from_agent,
+      MachineEvent.OutboxQueued,
+      (event) =>
+        sql`INSERT INTO outbox (id, seq, remote_id, session_id, recipient, kind, content, from_session, from_agent,
             from_title, from_machine, execution_id, created_at)
-          VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.peer}, ${fact.data.session}, ${fact.data.recipient ?? null},
-            ${fact.data.kind ?? "notice"}, ${fact.data.content}, ${fact.data.from?.session ?? null},
-            ${fact.data.from?.agent ?? null}, ${fact.data.from?.title ?? null}, ${fact.data.from?.machine ?? null},
-            ${fact.data.execution ?? null}, ${fact.at})`,
+          VALUES (${event.data.id}, ${event.durable.seq}, ${event.data.remoteId}, ${event.data.session}, ${event.data.recipient ?? null},
+            ${event.data.kind ?? "notice"}, ${event.data.content}, ${event.data.from?.session ?? null},
+            ${event.data.from?.agent ?? null}, ${event.data.from?.title ?? null}, ${event.data.from?.machine ?? null},
+            ${event.data.execution ?? null}, ${event.created})`,
     )
     yield* bus.project(
-      OutboxAcked,
-      (fact) =>
-        sql`UPDATE outbox SET acked_at = ${fact.at}
-          WHERE peer_id = ${fact.data.peer} AND acked_at IS NULL AND ${sql.in("id", fact.data.ids)}`,
+      MachineEvent.OutboxAcked,
+      (event) =>
+        sql`UPDATE outbox SET acked_at = ${event.created}
+          WHERE remote_id = ${event.data.remoteId} AND acked_at IS NULL AND ${sql.in("id", event.data.ids)}`,
     )
   }),
 )

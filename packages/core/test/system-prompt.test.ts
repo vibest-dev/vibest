@@ -1,9 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
-import { projectText, systemPrompt } from "@vibest/core/system-prompt"
+import { configuredMcpServers, projectText, systemPrompt } from "@vibest/core/session/system-prompt"
+import * as Platform from "@vibest/testkit/bun"
+import { tempDirectory } from "@vibest/testkit/directory"
 import { Deferred, Effect, Fiber, FileSystem, Path } from "effect"
-
-import { tempDirectory } from "./lib/directory.ts"
-import * as Platform from "./platform/bun.ts"
 
 const promptOf = (dir: string, text: { preferences: string; memories: string }) =>
   systemPrompt({ system: "You are an agent.\n", id: "a", projectDir: dir, agents: [], ...text })
@@ -28,16 +27,31 @@ describe("systemPrompt: the definition body first, then facts that name the chan
     assert.notInclude(prompt, "To send it your report")
   })
 
-  it("a session another session started sends its report with vibest send, and says who inherits it when that one ends", () => {
-    const prompt = facts({ creator: { id: "c1", label: "agent lead" } })
-    assert.include(prompt, "You were started by c1 (agent lead)")
-    assert.include(prompt, "vibest send c1 --")
+  it("a session another session started sends its report with vibest send using 8-char short ids, and says who inherits it when that one ends", () => {
+    const prompt = facts({
+      id: "756c38b6-101c-4da9-b8ba-b63399edb05a",
+      creator: { id: "c1234567-89ab-4cde-8f01-234567890abc", label: "agent lead" },
+      linkedTo: [
+        { id: "d1234567-89ab-4cde-8f01-234567890abc", label: "agent reviewer" },
+        { id: "f1234567-89ab-4cde-8f01-234567890abc", label: "on cloudide" },
+      ],
+    })
+
+    assert.include(prompt, "You are session 756c38b6.")
+    assert.notInclude(prompt, "756c38b6-101c")
+    assert.include(prompt, "You were started by c1234567 (agent lead)")
+    assert.include(prompt, "vibest send c1234567 --")
+    assert.notInclude(prompt, "c1234567-89ab")
+    assert.include(prompt, "d1234567 (agent reviewer), f1234567 (on cloudide).")
+    assert.notInclude(prompt, "d1234567-89ab")
     assert.include(prompt, "nearest session above it that is still running")
     assert.include(prompt, "a worktree that only you use")
   })
 
-  it("a worktree shared with an earlier session says so", () => {
-    assert.include(facts({ sharer: "e1" }), "shared with session e1")
+  it("a worktree shared with an earlier session says so with its 8-char short id", () => {
+    const prompt = facts({ sharer: "e1234567-89ab-4cde-8f01-234567890abc" })
+    assert.include(prompt, "shared with session e1234567")
+    assert.notInclude(prompt, "e1234567-89ab")
   })
 
   it("every session is told what the two envelopes and the unwrapped text mean", () => {
@@ -48,7 +62,65 @@ describe("systemPrompt: the definition body first, then facts that name the chan
     assert.notInclude(prompt, "<title>")
     assert.include(prompt, "`<vibest-message>`")
     assert.include(prompt, "Text with no wrapper is from the user")
+    assert.include(prompt, "MCP servers, the CodeMode JS sandbox, and background automations run through `vibest mcp`")
+    assert.include(prompt, "and `vibest automation`")
+    assert.include(prompt, "read the `mcp` skill when using them.")
+    assert.notInclude(prompt, "Configured MCP servers in this workspace:")
   })
+
+  it("lists configured MCP server names and types in Session facts when present", () => {
+    const prompt = facts({
+      mcpServers: [
+        { name: "context7", type: "remote" },
+        { name: "team_kb", type: "local" },
+      ],
+    })
+
+    assert.include(
+      prompt,
+      "Configured MCP servers in this workspace: context7 (remote), team_kb (local) (inspect tools with `vibest mcp list <server>` or `vibest mcp search <query>`; batch multi-tool calls with `vibest mcp exec`).",
+    )
+  })
+
+  it.effect("configuredMcpServers merges global mcp.json with project .mcp.json and skips disabled servers", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* tempDirectory("vibest-prompt-mcp-")
+      const home = path.join(root, "home")
+      const repo = path.join(root, "repo")
+      yield* fs.makeDirectory(home, { recursive: true })
+      yield* fs.makeDirectory(repo, { recursive: true })
+
+      yield* fs.writeFileString(
+        path.join(home, "mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            context7: { type: "remote", url: "https://mcp.context7.com/mcp" },
+            legacy_off: { type: "local", command: ["echo"], disabled: true },
+            overridden: { type: "local", command: ["echo"] },
+          },
+        }),
+      )
+
+      yield* fs.writeFileString(
+        path.join(repo, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            overridden: { type: "remote", url: "https://override.example.com/mcp" },
+            project_db: { type: "local", command: ["npx", "db-mcp"] },
+          },
+        }),
+      )
+
+      const servers = yield* configuredMcpServers(home, repo)
+      assert.deepStrictEqual(servers, [
+        { name: "context7", type: "remote" },
+        { name: "overridden", type: "remote" },
+        { name: "project_db", type: "local" },
+      ])
+    }).pipe(Effect.provide(Platform.services)),
+  )
 })
 
 describe("projectText: preferences.md and the curated memories/MEMORY.md index injected into every session's system prompt", () => {

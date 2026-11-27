@@ -1,15 +1,17 @@
 #!/usr/bin/env bun
-import { commands } from "@vibest/builtins"
 import * as Logging from "@vibest/client/logging"
-import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { commands } from "@vibest/plugin-builtins"
+import { EmbeddedHarnesses, Layout, VibestCommand } from "@vibest/schema/layout"
 import { Effect } from "effect"
 
 import * as Platform from "#platform"
 
+import { TypedAhead } from "./ask.ts"
 import { userOnly } from "./caller.ts"
 import * as Cli from "./cli.ts"
 import { clients } from "./client.ts"
-import { bareTeam, Commands } from "./commands/commands.ts"
+import { Commands } from "./commands/commands.ts"
+import { materializeEmbedded } from "./embedded-assets.ts"
 import { Runtime } from "./framework/runtime.ts"
 import { Host } from "./host.ts"
 import { updater } from "./update-check.ts"
@@ -31,6 +33,10 @@ const Handlers = Runtime.handlers(Commands, {
   peek: () => import("./commands/handlers/peek.ts"),
   archive: () => import("./commands/handlers/archive.ts"),
   ls: () => import("./commands/handlers/ls.ts"),
+  session: {
+    link: () => import("./commands/handlers/session/link.ts"),
+    unlink: () => import("./commands/handlers/session/unlink.ts"),
+  },
   events: () => import("./commands/handlers/events.ts"),
   models: () => import("./commands/handlers/models.ts"),
   harness: {
@@ -53,35 +59,62 @@ const Handlers = Runtime.handlers(Commands, {
     list: () => import("./commands/handlers/worktree/list.ts"),
   },
   plugins: () => import("./commands/handlers/plugins.ts"),
-  subscriptions: () => import("./commands/handlers/subscriptions.ts"),
-  integration: {
-    guard: () => import("./commands/handlers/integration/guard.ts"),
-    prompt: () => import("./commands/handlers/integration/prompt.ts"),
-    stop: () => import("./commands/handlers/integration/stop.ts"),
-    ready: () => import("./commands/handlers/integration/ready.ts"),
+  mcp: {
+    list: () => import("./commands/handlers/mcp/list.ts"),
+    add: () => import("./commands/handlers/mcp/add.ts"),
+    remove: () => import("./commands/handlers/mcp/remove.ts"),
+    search: () => import("./commands/handlers/mcp/search.ts"),
+    read: () => import("./commands/handlers/mcp/read.ts"),
+    call: () => import("./commands/handlers/mcp/call.ts"),
+    exec: () => import("./commands/handlers/mcp/exec.ts"),
+    auth: {
+      start: () => import("./commands/handlers/mcp/auth/start.ts"),
+      complete: () => import("./commands/handlers/mcp/auth/complete.ts"),
+      "set-token": () => import("./commands/handlers/mcp/auth/set-token.ts"),
+      logout: () => import("./commands/handlers/mcp/auth/logout.ts"),
+    },
   },
+  automation: {
+    create: () => import("./commands/handlers/automation/create.ts"),
+    list: () => import("./commands/handlers/automation/list.ts"),
+    get: () => import("./commands/handlers/automation/get.ts"),
+    pause: () => import("./commands/handlers/automation/pause.ts"),
+    resume: () => import("./commands/handlers/automation/resume.ts"),
+    remove: () => import("./commands/handlers/automation/remove.ts"),
+    "run-now": () => import("./commands/handlers/automation/run-now.ts"),
+  },
+  subscriptions: () => import("./commands/handlers/subscriptions.ts"),
+  onboard: () => import("./commands/handlers/onboard.ts"),
   doctor: () => import("./commands/handlers/doctor.ts"),
   update: () => import("./commands/handlers/update.ts"),
   connect: () => import("./commands/handlers/connect.ts"),
   machine: {
     add: () => import("./commands/handlers/machine/add.ts"),
-    ls: () => import("./commands/handlers/machine/ls.ts"),
-    rm: () => import("./commands/handlers/machine/rm.ts"),
+    list: () => import("./commands/handlers/machine/ls.ts"),
+    remove: () => import("./commands/handlers/machine/rm.ts"),
   },
 })
+
+const embeddedHarnesses = (home: string) => materializeEmbedded(home)?.harnesses
 
 const replacements = [...Platform.replacements, Platform.app({ version: VERSION }), Platform.updateCheck(updater)]
 
 Runtime.run(Commands, Handlers, {
   version: VERSION,
-  args: bareTeam,
   extra: { after: "update", commands: commands(userOnly, clients) },
 }).pipe(
   Cli.printFailure,
+  Effect.provideService(EmbeddedHarnesses, embeddedHarnesses),
   Effect.provide(Layout.layer),
   Effect.provide(Logging.layer),
   Effect.provideService(VibestCommand, Platform.selfCommand),
-  Effect.provideService(Host, { daemon: Platform.daemon, replacements, exec: Platform.exec }),
+  Effect.provideService(Host, {
+    daemon: Platform.daemon,
+    replacements,
+    exec: Platform.exec,
+    parseJsonc: Platform.parseJsonc,
+  }),
+  Effect.provide(TypedAhead.layer),
   Effect.provide(Platform.services),
   (program) => Platform.runMain(program, { disableErrorReporting: true, teardown: Cli.teardown }),
 )

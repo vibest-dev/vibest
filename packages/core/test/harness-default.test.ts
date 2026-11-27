@@ -1,11 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
+import { memoryPluginHost } from "@vibest/testkit/bun"
+import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "@vibest/testkit/harnesses"
 import { Effect } from "effect"
 
-import { harnessDefaultPlugin } from "../../builtins/src/harness-default.ts"
-import { Agents } from "../src/agents.ts"
+import { harnessDefaultPlugin } from "../../plugin-builtins/src/harness-default.ts"
+import { Agents } from "../src/agent/registry.ts"
 import { makePlugins } from "../src/plugin.ts"
-import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
-import { memoryPluginHost } from "./platform/bun.ts"
 
 const event = (harness: string | undefined, claude: boolean) => ({
   project: "/r",
@@ -26,9 +26,14 @@ const event = (harness: string | undefined, claude: boolean) => ({
   ],
 })
 
-const chosen = (harness: string | undefined, claude: boolean) =>
+const chosen = (harness: string | undefined, claude: boolean, saved?: string) =>
   makePlugins([
-    { source: "builtin:vibest.harness-default", revision: "1", options: {}, plugin: harnessDefaultPlugin() },
+    {
+      source: "builtin:vibest.harness-default",
+      revision: "1",
+      options: {},
+      plugin: harnessDefaultPlugin(Effect.succeed(saved)),
+    },
   ]).pipe(
     Effect.flatMap((plugins) => plugins.start(event(harness, claude))),
     Effect.map((decision) => decision.harness),
@@ -47,6 +52,14 @@ describe("vibest.harness-default", () => {
       assert.strictEqual(yield* chosen(undefined, true), "claude")
       assert.strictEqual(yield* chosen("pi", true), "pi")
       assert.strictEqual(yield* chosen(undefined, false), undefined)
+    }),
+  )
+
+  it.effect("a saved defaultHarness comes before claude, and only when it is available", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* chosen(undefined, true, "pi"), "pi")
+      assert.strictEqual(yield* chosen(undefined, true, "cursor"), "claude")
+      assert.strictEqual(yield* chosen("claude", true, "pi"), "claude")
     }),
   )
 })

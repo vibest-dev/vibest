@@ -1,26 +1,32 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Agents } from "@vibest/core/agents"
-import { Concurrency } from "@vibest/core/concurrency"
-import { Db } from "@vibest/core/database/db"
-import { harnessIdOf } from "@vibest/core/database/db-rows"
+import { Agents } from "@vibest/core/agent/registry"
+import { harnessIdOf } from "@vibest/core/database/rows"
 import { Builtins, makePlugins, PluginLoader, Plugins } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
 import { Session } from "@vibest/core/session"
+import { SessionStore } from "@vibest/core/session/store"
 import { mainCheckout } from "@vibest/core/worktree"
-import { Plugin as PromisePlugin } from "@vibest/plugin"
-import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore, type Registration } from "@vibest/plugin/effect"
-import type { Fact } from "@vibest/schema/event"
+import { Plugin as PromisePlugin, ToolRefused as PromiseToolRefused } from "@vibest/plugin"
+import {
+  SessionRefused as PluginRefused,
+  Plugin,
+  ToolRefused,
+  type SessionStartBefore,
+  type SessionToolExecuteBefore,
+  type Registration,
+} from "@vibest/plugin/effect"
+import { isPublicEventType, type PublicDurableEvent } from "@vibest/schema/durable-event-manifest"
 import { Layout } from "@vibest/schema/layout"
+import { memoryPluginHost } from "@vibest/testkit/bun"
+import { projectOf } from "@vibest/testkit/directory"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "@vibest/testkit/harnesses"
+import { until, yieldToIo } from "@vibest/testkit/observe"
+import * as Platform from "@vibest/testkit/platform"
+import { makeRepository, testLayer, type TestOptions, type TestServices } from "@vibest/testkit/session"
 import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
-
-import * as Platform from "../../platform-bun/src/bun.ts"
-import { projectOf } from "./lib/directory.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { until, yieldToIo } from "./lib/observe.ts"
-import { makeRepository, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
-import { memoryPluginHost } from "./platform/bun.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(projectOf(repo), (projectId) => ({
@@ -35,10 +41,10 @@ const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: st
     ...extra,
   }))
 
-const hook = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void, PluginRefused>) =>
-  Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) })
+const hook = (id: string, callback: (e: SessionStartBefore) => Effect.Effect<void, PluginRefused>) =>
+  Plugin.define({ id, effect: (ctx) => ctx.session.hook("start.before", callback) })
 
-const write = (id: string, f: (e: AgentStartBefore) => Partial<AgentStartBefore> | void) =>
+const write = (id: string, f: (e: SessionStartBefore) => Partial<SessionStartBefore> | void) =>
   hook(id, (e) => Effect.sync(() => void Object.assign(e, f(e))))
 
 const HARNESS_MODELS = ["claude-haiku-5-5", "a", "b", "two", "after", "m"]
@@ -47,10 +53,10 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ models: HARNESS_MODELS, ...options }))))
 
 const sessionRowsAndRuntimeOpens = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const herdr = yield* FakeRuntime
 
-  return { rows: (yield* db.session.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
+  return { rows: (yield* sessionStore.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
 })
 
 describe("plugins: spawn hook", () => {
@@ -58,7 +64,7 @@ describe("plugins: spawn hook", () => {
     "P5/P8: the event has the resolved root; writes reach the row and the launch args",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const db = yield* Db.Service
+      const sessionStore = yield* SessionStore.Service
       const herdr = yield* FakeRuntime
       const nested = `${repo}/sub`
       yield* (yield* FileSystem.FileSystem).makeDirectory(nested)
@@ -70,7 +76,7 @@ describe("plugins: spawn hook", () => {
       assert.strictEqual(s.harness, "claude")
       assert.strictEqual(s.model, "claude-haiku-5-5")
       assert.deepStrictEqual(s.decidedBy, { harness: "route", model: "route" })
-      const row = (yield* db.session.getSession(s.id))!
+      const row = (yield* sessionStore.getSession(s.id))!
       assert.strictEqual(harnessIdOf(row), "claude")
       assert.strictEqual(row.process?.model ?? null, "claude-haiku-5-5")
       assert.deepStrictEqual(row.process?.routing?.decidedBy, {
@@ -111,7 +117,7 @@ describe("plugins: spawn hook", () => {
       )
       yield* TestClock.adjust("5 seconds")
       const error = yield* Effect.flip(Fiber.join(spawning))
-      assert.strictEqual(error._tag, "AgentRefused")
+      assert.strictEqual(error._tag, "SessionRefused")
       assert.deepInclude(error, { plugin: "stuck", reason: "plugin stuck timed out after 5s" })
       assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
       yield* TestClock.adjust(pastUninterruptibleSleep)
@@ -198,7 +204,7 @@ describe("plugins: spawn hook", () => {
         Plugin.define({
           id: "broken",
           effect: (ctx) =>
-            ctx.agent
+            ctx.session
               .hook("start.before", () => Effect.sync(() => assert.fail("hook of a failed setup ran")))
               .pipe(Effect.andThen(Effect.die("setup boom"))),
         }),
@@ -212,7 +218,7 @@ describe("plugins: spawn hook", () => {
     Plugin.define({
       id,
       effect: (ctx) =>
-        ctx.agent.hook(name as never, () => Effect.sync(() => assert.fail(`${name} ran as a startup hook`))),
+        ctx.session.hook(name as never, () => Effect.sync(() => assert.fail(`${name} ran as a startup hook`))),
     })
 
   test(
@@ -232,6 +238,7 @@ describe("plugins: spawn hook", () => {
         listed.map((p) => [p.id, p.status]),
         [
           ["vibest.agent", "active"],
+          ["vibest.guard", "active"],
           ["vibest.runtime-choice", "active"],
           ["session", "failed"],
           ["worker", "failed"],
@@ -240,11 +247,11 @@ describe("plugins: spawn hook", () => {
           ["current", "active"],
         ],
       )
-      const supported = "agent.start.before"
-      assert.include(listed[2]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
-      assert.include(listed[3]!.error, `unsupported hook "agent.worker.spawn"`)
-      assert.include(listed[4]!.error, `unsupported hook "agent.session.start"`)
-      assert.include(listed[5]!.error, `unsupported hook "agent.toString"`)
+      const supported = "session.start.before, session.tool.execute.before"
+      assert.include(listed[3]!.error, `unsupported hook "session.session.spawn"; supported: ${supported}`)
+      assert.include(listed[4]!.error, `unsupported hook "session.worker.spawn"`)
+      assert.include(listed[5]!.error, `unsupported hook "session.session.start"`)
+      assert.include(listed[6]!.error, `unsupported hook "session.toString"`)
     }),
     {
       plugins: [
@@ -333,7 +340,7 @@ describe("plugins: spawn hook", () => {
           Plugin.define({
             id,
             effect: (ctx) =>
-              ctx.agent
+              ctx.session
                 .hook("start.before", () => Effect.sync(() => calls.push(id)).pipe(Effect.andThen(after())))
                 .pipe(Effect.map((registration) => void (registrations[id] = registration))),
           })
@@ -381,7 +388,7 @@ const packageHome = Effect.gen(function* () {
 
 const source = (id: string, model: string) => `import { Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
-export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = ${JSON.stringify(model)} })) })
+export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.session.hook("start.before", (e) => Effect.sync(() => { e.model = ${JSON.stringify(model)} })) })
 `
 
 const loaded = (dir: string) =>
@@ -514,15 +521,15 @@ describe("plugins: loading", () => {
   )
 })
 
-const held: Array<Fact> = []
+const held: Array<PublicDurableEvent> = []
 const { promise: gate, resolve: release } = Promise.withResolvers<void>()
 
 const watcher = Plugin.define({
   id: "watcher",
   effect: (ctx) =>
     ctx.event.subscribe().pipe(
-      Stream.runForEach((fact) =>
-        Effect.promise(() => gate).pipe(Effect.andThen(Effect.sync(() => void held.push(fact)))),
+      Stream.runForEach((event) =>
+        Effect.promise(() => gate).pipe(Effect.andThen(Effect.sync(() => void held.push(event)))),
       ),
       Effect.forkScoped,
       Effect.asVoid,
@@ -531,7 +538,7 @@ const watcher = Plugin.define({
 
 describe("plugins: event.subscribe", () => {
   test(
-    "a consumer that holds up its facts does not hold up the commits, and gets every fact in order once it goes on",
+    "a consumer that holds up its events does not hold up the commits, and gets every event in order once it goes on",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const sessions = yield* Session.Service
@@ -542,19 +549,166 @@ describe("plugins: event.subscribe", () => {
       release()
       yield* until(
         Effect.sync(() => held),
-        (facts) => facts.some((fact) => fact.sessionId === second.id && fact.type === "process.started"),
+        (events) =>
+          events.some(
+            (event) => event.durable.aggregateId === second.id && event.type === "session.execution.allocated",
+          ),
       )
 
-      for (const aggregate of new Set(held.map((fact) => fact.aggregate))) {
-        const seqs = held.flatMap((fact) => (fact.aggregate === aggregate ? [fact.seq] : []))
-        assert.deepStrictEqual(
-          seqs,
-          seqs.map((_, i) => seqs[0]! + i),
-        )
+      assert.isTrue(held.every((event) => isPublicEventType(event.type)))
+
+      for (const aggregate of new Set(held.map((event) => event.durable.aggregateId))) {
+        const seqs = held.flatMap((event) => (event.durable.aggregateId === aggregate ? [event.durable.seq] : []))
+        assert.isTrue(seqs.every((seq, i) => i === 0 || seq > seqs[i - 1]!))
       }
 
-      assert.isTrue(held.some((fact) => fact.sessionId === second.id && fact.type === "session.created"))
+      assert.isTrue(held.some((event) => event.durable.aggregateId === second.id && event.type === "session.created"))
     }),
     { plugins: [watcher] },
+  )
+})
+
+describe("plugins: tool.execute.before hook", () => {
+  const sampleEvent: SessionToolExecuteBefore = {
+    session: { id: "s1", agent: "general", project: "p1", projectDir: "/tmp/projects/p1", directory: "/tmp/work" },
+    tool: "Bash",
+    input: { command: "echo hi" },
+    cwd: "/tmp/work",
+  }
+
+  test(
+    "Effect and Promise tool.execute.before hooks run in load order, receive frozen events, refuse with ToolRefused, and ignore crashes",
+    Effect.gen(function* () {
+      const plugins = yield* Plugins.Service
+
+      const crasher = yield* plugins.guard({ ...sampleEvent, tool: "Read", input: { file_path: "/a" } })
+      assert.isUndefined(crasher)
+
+      const effectRefused = yield* plugins.guard({ ...sampleEvent, tool: "Write", input: { file_path: "/blocked" } })
+      assert.strictEqual(effectRefused, "effect blocked")
+
+      const promiseRefused = yield* plugins.guard({ ...sampleEvent, tool: "Bash", input: { command: "danger" } })
+      assert.strictEqual(promiseRefused, "promise blocked")
+
+      const listed = yield* plugins.list
+      assert.deepInclude(
+        listed.find((p) => p.id === "crasher"),
+        { calls: 3, crashed: 3, refused: 0 },
+      )
+      assert.deepInclude(
+        listed.find((p) => p.id === "effect-tool"),
+        { calls: 3, refused: 1 },
+      )
+      assert.deepInclude(
+        listed.find((p) => p.id === "promise-tool"),
+        { calls: 2, refused: 1 },
+      )
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "crasher",
+          effect: (ctx) => ctx.session.hook("tool.execute.before", () => Effect.die("boom")),
+        }),
+        Plugin.define({
+          id: "effect-tool",
+          effect: (ctx) =>
+            ctx.session.hook("tool.execute.before", (event) => {
+              assert.isTrue(Object.isFrozen(event))
+              assert.isTrue(Object.isFrozen(event.session))
+              assert.isTrue(Object.isFrozen(event.input))
+
+              return event.tool === "Write" && event.input.file_path === "/blocked"
+                ? Effect.fail(new ToolRefused({ reason: "effect blocked" }))
+                : Effect.void
+            }),
+        }),
+        PromisePlugin.define({
+          id: "promise-tool",
+          setup: async (ctx) => {
+            await ctx.session.hook("tool.execute.before", async (event) => {
+              if (event.tool === "Bash" && event.input.command === "danger")
+                throw new PromiseToolRefused({ reason: "promise blocked" })
+            })
+          },
+        }) as never,
+      ],
+    },
+  )
+
+  const toolTimeoutEntered = { value: false }
+  const pastToolSleep = "1 minute"
+
+  test(
+    "a tool.execute.before hook that times out is logged, counted, and skipped so later hooks still run",
+    Effect.gen(function* () {
+      const plugins = yield* Plugins.Service
+
+      const checking = yield* Effect.forkChild(
+        plugins.guard({ ...sampleEvent, tool: "Write", input: { file_path: "/after-timeout" } }),
+      )
+
+      yield* until(
+        Effect.sync(() => toolTimeoutEntered.value),
+        (x) => x,
+      )
+      yield* TestClock.adjust("5 seconds")
+      const refused = yield* Fiber.join(checking)
+      assert.strictEqual(refused, "after timeout refused")
+
+      const listed = yield* plugins.list
+      assert.deepInclude(
+        listed.find((p) => p.id === "slow-tool"),
+        { calls: 1, timedOut: 1, refused: 0 },
+      )
+      assert.deepInclude(
+        listed.find((p) => p.id === "after-slow"),
+        { calls: 1, timedOut: 0, refused: 1 },
+      )
+      yield* TestClock.adjust(pastToolSleep)
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "slow-tool",
+          effect: (ctx) =>
+            ctx.session.hook("tool.execute.before", () =>
+              Effect.sync(() => (toolTimeoutEntered.value = true)).pipe(
+                Effect.andThen(Effect.uninterruptible(Effect.sleep(pastToolSleep))),
+              ),
+            ),
+        }),
+        Plugin.define({
+          id: "after-slow",
+          effect: (ctx) =>
+            ctx.session.hook("tool.execute.before", () =>
+              Effect.fail(new ToolRefused({ reason: "after timeout refused" })),
+            ),
+        }),
+      ],
+    },
+  )
+
+  test(
+    "tool.execute.before refuses fail-closed when plugin activation does not settle within the activation wait",
+    Effect.gen(function* () {
+      const plugins = yield* Plugins.Service
+      const checking = yield* Effect.forkChild(plugins.guard(sampleEvent))
+      yield* TestClock.adjust("10 seconds")
+      const refused = yield* Fiber.join(checking)
+      assert.include(refused ?? "", "plugins are still activating")
+      assert.include(refused ?? "", "hanging-setup")
+      yield* TestClock.adjust(pastToolSleep)
+    }),
+    {
+      activateLate: true,
+      pluginTimeout: "20 seconds",
+      plugins: [
+        Plugin.define({
+          id: "hanging-setup",
+          effect: () => Effect.uninterruptible(Effect.sleep(pastToolSleep)),
+        }),
+      ],
+    },
   )
 })

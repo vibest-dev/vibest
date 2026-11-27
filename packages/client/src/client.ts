@@ -1,3 +1,4 @@
+import { VibestApi } from "@vibest/protocol/api"
 import {
   CALLER_HEADER,
   MISMATCH_ACTION,
@@ -6,7 +7,7 @@ import {
   REPOSITORY_HEADER,
   sessionHeaders,
 } from "@vibest/protocol/protocol"
-import { DaemonIdentity, VibestRpcs, type Ping } from "@vibest/protocol/rpc"
+import type { DaemonIdentity, Ping } from "@vibest/protocol/schemas"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 import { PROTOCOL } from "@vibest/schema/version"
 import {
@@ -17,22 +18,27 @@ import {
   Effect,
   Exit,
   FileSystem,
-  Layer,
   Option,
   Path,
   Predicate,
   Schedule,
   Schema,
-  Scope,
   Stream,
 } from "effect"
+import { HttpApiClient } from "effect/http-api"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { RpcClient, RpcSerialization } from "effect/rpc"
-import * as Socket from "effect/socket/Socket"
 
 import { SocketConnector } from "./socket-connector.ts"
+import { applyRequestHeaders, HttpConnector, withHeaders } from "./unix-http.ts"
 
-export type ClientServices = Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector.Service
+export { HttpConnector, withHeaders, withStreamHeaders } from "./unix-http.ts"
+
+export type ClientServices =
+  | Layout
+  | Path.Path
+  | ChildProcessSpawner.ChildProcessSpawner
+  | SocketConnector.Service
+  | HttpConnector.Service
 
 export const SHUTDOWN_DEADLINE = Duration.seconds(10)
 export const SHUTDOWN_FLUSH = Duration.millis(1_500)
@@ -59,7 +65,12 @@ export class IncompatibleDaemon extends Schema.TaggedError<IncompatibleDaemon>()
   socket: Schema.String,
   daemonVersion: Schema.String,
   daemonProtocol: Schema.NullOr(Schema.Number),
-  daemon: DaemonIdentity,
+  daemon: Schema.Struct({
+    pid: Schema.optional(Schema.Number),
+    instance: Schema.optional(Schema.String),
+    command: Schema.optional(Schema.Array(Schema.String)),
+    startedAt: Schema.optional(Schema.Number),
+  }),
   client: Schema.Struct({ version: Schema.String, command: Schema.Array(Schema.String) }),
   missing: Schema.optional(Schema.String),
 }) {
@@ -84,6 +95,11 @@ export class IncompatibleDaemon extends Schema.TaggedError<IncompatibleDaemon>()
     return `${mismatch.message}. ${described(this.daemonVersion, this.daemon)} on ${this.socket} speaks ${got}; ${self} speaks protocol ${PROTOCOL}. If \`vibest daemon restart\` cannot replace it: ${byHand}. A package-version difference alone does not require a restart.`
   }
 }
+
+export const connect = (socket: string) =>
+  Effect.flatMap(HttpConnector.Service, (makeHttp) =>
+    HttpApiClient.makeWith(VibestApi, { httpClient: applyRequestHeaders(makeHttp(socket)), baseUrl: "http://vibest" }),
+  )
 
 export type VibestClient = Effect.Success<ReturnType<typeof connect>>
 
@@ -138,26 +154,6 @@ export const claimHeaders = (claim: Claim) =>
         }),
       )
 
-export const clientOver = <E, R>(
-  socket: Layer.Layer<Socket.Socket, E, R>,
-  options?: Parameters<typeof RpcClient.layerProtocolSocket>[0],
-) =>
-  Layer.build(
-    RpcClient.layerProtocolSocket(options).pipe(
-      Layer.provide(socket),
-      Layer.provide(RpcSerialization.layerNdJsonRpc()),
-    ),
-  ).pipe(Effect.flatMap((protocol) => RpcClient.make(VibestRpcs).pipe(Effect.provide(protocol))))
-
-export const connect = (socket: string) =>
-  clientOver(
-    Layer.effect(
-      Socket.Socket,
-      Effect.flatMap(SocketConnector.Service, (dial) => dial(socket)),
-    ),
-    { pingInterval: "1 minute", pingTimeout: "1 day" },
-  )
-
 export const HOOK_TIMEOUT = Duration.seconds(2)
 export const HOOK_RETRY_DELAY = Duration.millis(300)
 
@@ -166,8 +162,7 @@ const CONNECT_CODES = new Set(["ECONNREFUSED", "ENOENT"])
 const notConnected = (cause: unknown) => {
   if (!Predicate.hasProperty(cause, "reason")) return false
 
-  if (!Predicate.isTagged(cause.reason, "SocketOpenError") || !Predicate.hasProperty(cause.reason, "cause"))
-    return false
+  if (!Predicate.isTagged(cause.reason, "TransportError") || !Predicate.hasProperty(cause.reason, "cause")) return false
   const socketCause = cause.reason.cause
 
   return (
@@ -182,8 +177,7 @@ export const hookCall = <A = void>(
   headers: Readonly<Record<string, string>>,
   send: (client: VibestClient) => Effect.Effect<A, unknown>,
 ) => {
-  const once = RpcClient.withHeaders(connect(socket).pipe(Effect.flatMap(send)), headers).pipe(
-    Effect.scoped,
+  const once = withHeaders(connect(socket).pipe(Effect.flatMap(send)), headers).pipe(
     Effect.timeout(HOOK_TIMEOUT),
     Effect.exit,
   )
@@ -199,27 +193,14 @@ export const hookCall = <A = void>(
 }
 
 const pinged = (socket: string) =>
-  Effect.gen(function* () {
-    const own = yield* Scope.fork(yield* Effect.scope)
+  connect(socket).pipe(
+    Effect.flatMap((client) => Effect.map(client["server.daemon"]["daemon.ping"](), (ping) => ({ client, ping }))),
+    Effect.timeout("1 second"),
+    Effect.option,
+    Effect.catchDefect(() => Effect.succeed(Option.none<{ readonly client: VibestClient; readonly ping: Ping }>())),
+  )
 
-    return yield* connect(socket).pipe(
-      Effect.flatMap((client) => Effect.map(client.Ping(undefined), (ping) => ({ client, ping }))),
-      Effect.timeout("1 second"),
-      Effect.option,
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.succeed(Option.none<{ readonly client: VibestClient; readonly ping: Ping }>())
-          : Effect.failCause(cause),
-      ),
-      Scope.provide(own),
-      Effect.onExit((exit) =>
-        Exit.isSuccess(exit) && Option.isSome(exit.value) ? Effect.void : Scope.close(own, exit),
-      ),
-    )
-  })
-
-export const readPing = (socket: string) =>
-  pinged(socket).pipe(Effect.map(Option.map(({ ping }) => ping)), Effect.scoped)
+export const readPing = (socket: string) => pinged(socket).pipe(Effect.map(Option.map(({ ping }) => ping)))
 
 export const probe = (socket: string) =>
   readPing(socket).pipe(
@@ -426,7 +407,7 @@ const withVibest =
 
       if (incompatible) return yield* incompatible
 
-      return yield* RpcClient.withHeaders(f(client, ping), yield* claimHeaders(claim))
+      return yield* withHeaders(f(client, ping), yield* claimHeaders(claim))
     }).pipe(Effect.scoped)
 
 export interface ClientOptions {

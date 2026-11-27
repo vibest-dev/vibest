@@ -18,16 +18,11 @@ export const ExecutionState = Schema.Literals([
 
 export type ExecutionState = typeof ExecutionState.Type
 
-export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped", "unresolved"])
+export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped"])
 
 export type InboxStatus = typeof InboxStatus.Type
 
-export const RuntimeAddress = Schema.Struct({
-  machine: Schema.String,
-  id: Schema.String,
-})
-
-export type RuntimeAddress = typeof RuntimeAddress.Type
+export { canonicalTarget, formatTerminalTarget, SessionRef, Terminal, TerminalTarget } from "./terminal.ts"
 
 export const RuntimeLocation = Schema.Union([
   Schema.Struct({ socketPath: Schema.String }),
@@ -60,6 +55,45 @@ export const Detail = Schema.Struct({
 
 export type Detail = typeof Detail.Type
 
+const PREVIEW = 120
+
+const titledSender = (agent: string) => (agent === "" ? "" : `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`)
+
+const clipPreview = (s: string) => {
+  const cps = [...s]
+
+  return cps.length <= PREVIEW ? s : `${cps.slice(0, PREVIEW - 1).join("")}…`
+}
+
+const agentHead = (sender: Extract<Detail["sender"], { readonly type: "agent" }>) => {
+  const id = sender.session.slice(0, 8)
+
+  if (sender.agent !== undefined)
+    return `Message from @${titledSender(sender.agent)} · ${sender.title ?? ""} (${sender.machine === undefined ? id : `${id} on ${sender.machine}`})`
+
+  return sender.machine === undefined
+    ? `Message from @${titledSender(id)}`
+    : `Message from @${titledSender(sender.machine)} · (${id} on ${sender.machine})`
+}
+
+const senderHead = (sender: Detail["sender"]) => {
+  switch (sender.type) {
+    case "vibest":
+      return "Message from Vibest"
+    case "user":
+      return "Message from You"
+    case "plugin":
+      return `Message from Vibest · ${sender.plugin}`
+    case "agent":
+      return agentHead(sender)
+  }
+}
+
+export const formatDelivery = (detail: ReadonlyArray<Detail>) =>
+  detail
+    .map((entry) => `${senderHead(entry.sender)}\n${clipPreview(entry.message.trim().split("\n")[0] ?? "")}`)
+    .join("\n\n")
+
 export const Taken = Schema.Struct({
   execution: Schema.Number,
   ids: Schema.Array(Schema.Number),
@@ -74,66 +108,114 @@ export type HarnessId = string
 export const addPluginHint =
   "a harness comes from a plugin: add one that provides it to `plugins` in vibest.json in the vibest home"
 
-export class HarnessUnavailable extends Schema.TaggedError<HarnessUnavailable>()("HarnessUnavailable", {
-  harness: Schema.String,
-  message: Schema.String,
-}) {}
+export class HarnessUnavailable extends Schema.TaggedError<HarnessUnavailable>()(
+  "HarnessUnavailable",
+  {
+    harness: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 503 },
+) {}
 
-export class RuntimeUnreachable extends Schema.TaggedError<RuntimeUnreachable>()("RuntimeUnreachable", {
-  session: Schema.String,
-  message: Schema.String,
-}) {}
+export class RuntimeUnreachable extends Schema.TaggedError<RuntimeUnreachable>()(
+  "RuntimeUnreachable",
+  {
+    session: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 503 },
+) {}
 
-export class NoRuntime extends Schema.TaggedError<NoRuntime>()("NoRuntime", { message: Schema.String }) {}
+export class NoRuntime extends Schema.TaggedError<NoRuntime>()(
+  "NoRuntime",
+  { message: Schema.String },
+  { httpApiStatus: 503 },
+) {}
 
-export class RuntimeIncompatible extends Schema.TaggedError<RuntimeIncompatible>()("RuntimeIncompatible", {
-  session: Schema.String,
-  message: Schema.String,
-}) {}
+export class RuntimeIncompatible extends Schema.TaggedError<RuntimeIncompatible>()(
+  "RuntimeIncompatible",
+  {
+    session: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 409 },
+) {}
 
-export class NoSuchSession extends Schema.TaggedError<NoSuchSession>()("NoSuchSession", {
-  id: Schema.String,
-  message: Schema.String,
-}) {}
+export class NoSuchSession extends Schema.TaggedError<NoSuchSession>()(
+  "NoSuchSession",
+  {
+    id: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
 
-export class AmbiguousSession extends Schema.TaggedError<AmbiguousSession>()("AmbiguousSession", {
-  prefix: Schema.String,
-  matches: Schema.Array(Schema.String),
-}) {
+export class AmbiguousSession extends Schema.TaggedError<AmbiguousSession>()(
+  "AmbiguousSession",
+  {
+    prefix: Schema.String,
+    matches: Schema.Array(Schema.String),
+  },
+  { httpApiStatus: 409 },
+) {
   override get message() {
-    return `${this.prefix} matches ${this.matches.join(", ")}; give more characters of the session id`
+    return `${this.prefix} matches ${this.matches.join(", ")}; retry with more characters of the session id`
   }
 }
 
-export class MoveRefused extends Schema.TaggedError<MoveRefused>()("MoveRefused", {
-  message: Schema.String,
-}) {}
+export class MoveRefused extends Schema.TaggedError<MoveRefused>()(
+  "MoveRefused",
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 403 },
+) {}
 
-export class AllocationFailed extends Schema.TaggedError<AllocationFailed>()("AllocationFailed", {
-  message: Schema.String,
-}) {}
+export class AllocationFailed extends Schema.TaggedError<AllocationFailed>()(
+  "AllocationFailed",
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 500 },
+) {}
 
-export class SessionBusy extends Schema.TaggedError<SessionBusy>()("SessionBusy", {
-  id: Schema.String,
-  message: Schema.String,
-}) {}
+export class SessionBusy extends Schema.TaggedError<SessionBusy>()(
+  "SessionBusy",
+  {
+    id: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 409 },
+) {}
 
-export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", {
-  id: Schema.String,
-  message: Schema.String,
-}) {}
+export class NotReady extends Schema.TaggedError<NotReady>()(
+  "NotReady",
+  {
+    id: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 503 },
+) {}
 
-export class NoCallingSession extends Schema.TaggedError<NoCallingSession>()("NoCallingSession", {}) {
+export class NoCallingSession extends Schema.TaggedError<NoCallingSession>()(
+  "NoCallingSession",
+  {},
+  { httpApiStatus: 422 },
+) {
   override get message() {
     return "vibest run is run by an agent in a session; to start working, run vibest in a terminal"
   }
 }
 
-export class UnknownAgent extends Schema.TaggedError<UnknownAgent>()("UnknownAgent", {
-  agent: Schema.String,
-  known: Schema.Array(Schema.Struct({ id: Schema.String, description: Schema.String })),
-  invalid: Schema.optional(Schema.String),
-}) {
+export class UnknownAgent extends Schema.TaggedError<UnknownAgent>()(
+  "UnknownAgent",
+  {
+    agent: Schema.String,
+    known: Schema.Array(Schema.Struct({ id: Schema.String, description: Schema.String })),
+    invalid: Schema.optional(Schema.String),
+  },
+  { httpApiStatus: 404 },
+) {
   override get message() {
     if (this.invalid !== undefined) return `agent definition ${this.agent} is invalid: ${this.invalid}`
     const known = this.known.map((definition) => `${definition.id} (${definition.description})`).join("; ")
@@ -145,19 +227,33 @@ export class UnknownAgent extends Schema.TaggedError<UnknownAgent>()("UnknownAge
 export const runnableNote = (runnable: ReadonlyArray<string>) =>
   runnable.length === 0 ? "" : `; this machine can run: ${runnable.join(", ")}`
 
-export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {
-  runnable: Schema.Array(Schema.String),
-}) {
+export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()(
+  "NoHarnessChosen",
+  {
+    runnable: Schema.Array(Schema.String),
+  },
+  { httpApiStatus: 422 },
+) {
   override get message() {
     return `no harness to inherit: name one, for example \`vibest run claude -- <prompt>\`${runnableNote(this.runnable)}`
   }
 }
 
-export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("LaunchFailed", {
-  message: Schema.String,
-}) {}
+export const NO_RUNTIME_DETECTED = "no runtime was detected in this environment"
 
-export class NotInRepository extends Schema.TaggedError<NotInRepository>()("NotInRepository", { path: Schema.String }) {
+export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()(
+  "LaunchFailed",
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 500 },
+) {}
+
+export class NotInRepository extends Schema.TaggedError<NotInRepository>()(
+  "NotInRepository",
+  { path: Schema.String },
+  { httpApiStatus: 422 },
+) {
   override get message() {
     return `${this.path} is not inside a git repository`
   }

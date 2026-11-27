@@ -1,12 +1,13 @@
 import { callerTarget, filterCallerEnv } from "@vibest/core/caller"
-import { Db } from "@vibest/core/database/db"
 import { locateProject, resolveProject } from "@vibest/core/project/identity"
-import { Runtimes } from "@vibest/core/runtimes"
+import { ProjectStore } from "@vibest/core/project/store"
+import { Runtimes } from "@vibest/core/runtime/registry"
+import { Git } from "@vibest/core/worktree/git"
 import type { ACCESS } from "@vibest/protocol/access"
-import { Caller, type CallerIdentity, Forbidden, VibestRpcs } from "@vibest/protocol/rpc"
+import { Forbidden } from "@vibest/protocol/errors"
+import { Caller, type CallerIdentity } from "@vibest/protocol/middleware"
 import { NotInRepository } from "@vibest/schema/session"
-import { Context, Effect, Layer, Predicate } from "effect"
-import type { RpcGroup } from "effect/rpc"
+import { Context, Effect, FileSystem, Layer, Path, Predicate } from "effect"
 
 type Access = typeof ACCESS
 
@@ -16,19 +17,20 @@ export type MethodOf<A> = {
   [K in keyof Access]: [Extract<Allowed<K>, A>] extends [never] ? never : K
 }[keyof Access]
 
-export type Handlers = Partial<RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof VibestRpcs>>>
-
-export type Agent = Extract<CallerIdentity, { _tag: "Cli" | "Session" }>
+export type Agent = Extract<CallerIdentity, { _tag: "Cli" | "Ui" | "Session" }>
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const projectStore = yield* ProjectStore.Service
   const runtimes = yield* Runtimes.Service
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const git = yield* Git.Service
 
   const agent = (method: MethodOf<"agent" | "owner">) =>
     Effect.gen(function* () {
       const c = yield* Caller
 
-      if (Predicate.isTagged(c, "Cli") || Predicate.isTagged(c, "Session")) return c
+      if (Predicate.isTagged(c, "Cli") || Predicate.isTagged(c, "Ui") || Predicate.isTagged(c, "Session")) return c
 
       return yield* new Forbidden({
         method,
@@ -38,19 +40,28 @@ export const make = Effect.gen(function* () {
 
   const atProject = (directory: string) =>
     locateProject(directory).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(Git.Service, git),
       Effect.catchIf(
         (error) => !Predicate.isTagged(error, "NotInRepository"),
         (error) => Effect.die(error),
       ),
     )
 
-  const resolveAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => resolveProject(db, at)))
-  const findAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => db.project.projectAt(at.root)))
+  const resolveAt = (directory: string) =>
+    atProject(directory).pipe(Effect.flatMap((at) => resolveProject(projectStore, at)))
+
+  const findAt = (directory: string) =>
+    atProject(directory).pipe(Effect.flatMap((at) => projectStore.projectAt(at.root)))
 
   const projectOf = (c: Agent, method: string) =>
     Effect.gen(function* () {
       if (Predicate.isTagged(c, "Cli")) return yield* resolveAt(c.repositoryRoot)
-      const directory = yield* db.project.projectDirectory(c.projectId)
+
+      if (!Predicate.isTagged(c, "Session"))
+        return yield* new Forbidden({ method, message: `${method} needs a project` })
+      const directory = yield* projectStore.projectDirectory(c.projectId)
 
       if (directory !== undefined) return { id: c.projectId, directory }
 
@@ -70,7 +81,7 @@ export const make = Effect.gen(function* () {
   const scope = (method: MethodOf<"agent">) => agent(method).pipe(Effect.flatMap((c) => projectOf(c, method)))
 
   const machineFromCaller = (
-    method: "Launch" | "Spawn",
+    method: "session.launch" | "session.spawn",
     input: {
       readonly callerEnv: Readonly<Record<string, string>>
       readonly runtime?: string | undefined
@@ -93,6 +104,13 @@ export const make = Effect.gen(function* () {
         : Effect.fail(new Forbidden({ method, message: `only the user runs ${method}` })),
     )
 
+  const userOnly = (method: MethodOf<"cli">) =>
+    Effect.flatMap(Caller, (c) =>
+      Predicate.isTagged(c, "Cli") || Predicate.isTagged(c, "Ui")
+        ? Effect.succeed(c)
+        : Effect.fail(new Forbidden({ method, message: `only the user runs ${method}` })),
+    )
+
   const self = (method: MethodOf<"self">, id: string) =>
     Effect.gen(function* () {
       const c = yield* Caller
@@ -102,7 +120,7 @@ export const make = Effect.gen(function* () {
       return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
     })
 
-  return { agent, atProject, resolveAt, findAt, projectOf, scope, machineFromCaller, cliOnly, self }
+  return { agent, atProject, resolveAt, findAt, projectOf, scope, machineFromCaller, cliOnly, userOnly, self }
 })
 
 export type Checks = Effect.Success<typeof make>

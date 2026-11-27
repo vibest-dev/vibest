@@ -1,6 +1,12 @@
 {
   "$schema": "https://turborepo.com/schema.v2.json",
-  "globalDependencies": ["tools/tsconfig/base.json", "vitest.config.ts"],
+  "globalDependencies": [
+    "tools/tsconfig/base.json",
+    "tools/tsconfig/neutral.json",
+    "tools/tsconfig/web-globals.d.ts",
+    "packages/testkit/src/**",
+    "vitest.config.ts"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -10,25 +16,17 @@
       "dependsOn": ["^build"],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/packages/integration/*/src/**",
-        "$TURBO_ROOT$/packages/integration/*/{scripts,hooks}/**",
-        "$TURBO_ROOT$/packages/integration/*/{package.json,README.md,LICENSE}",
+        "$TURBO_ROOT$/packages/harness-*/src/**",
+        "$TURBO_ROOT$/packages/harness-*/{script,hooks}/**",
+        "$TURBO_ROOT$/packages/harness-*/{package.json,README.md,LICENSE}",
         "$TURBO_ROOT$/packages/skills/**"
       ],
       "outputs": ["dist/**", "bin/vibest", "harnesses/**"]
     },
-    "@vibest/claude#build": { "cache": false },
-    "@vibest/cursor#build": { "cache": false },
-    "@vibest/agy#build": { "cache": false },
-    "@vibest/pi#build": { "cache": false },
-    "@vibest/cli-darwin-arm64#build": {
-      "outputs": ["bin/vibest"],
-      "cache": false
-    },
-    "@vibest/cli-linux-x64#build": {
-      "outputs": ["bin/vibest"],
-      "cache": false
-    },
+    "@vibest/harness-claude#build": { "cache": false },
+    "@vibest/harness-cursor#build": { "cache": false },
+    "@vibest/harness-agy#build": { "cache": false },
+    "@vibest/harness-pi#build": { "cache": false },
     "typecheck": {
       "dependsOn": ["^typecheck"]
     },

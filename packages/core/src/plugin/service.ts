@@ -1,6 +1,6 @@
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import type { MachineEvent } from "@vibest/plugin/effect"
-import type { AgentRefused, PluginInfo, PluginsNotActive, Routing } from "@vibest/schema/plugin"
+import type { SessionRefused, PluginInfo, PluginsNotActive, Routing } from "@vibest/schema/plugin"
 import { Context, type Effect } from "effect"
 
 export type MachineHook = keyof VibestPlugin.MachineHooks
@@ -9,7 +9,7 @@ export interface PluginNote extends VibestPlugin.MachineNote {
   readonly plugin?: string
 }
 
-export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions" | "files"> & {
+export type StartInput = Omit<VibestPlugin.SessionStartBefore, "subscriptions" | "files"> & {
   readonly files?: ReadonlyArray<string>
 }
 
@@ -26,7 +26,8 @@ export interface Interface {
   readonly start: (
     input: StartInput,
     decidedBy?: Readonly<Record<string, string>>,
-  ) => Effect.Effect<SpawnDecision, AgentRefused | PluginsNotActive>
+  ) => Effect.Effect<SpawnDecision, SessionRefused | PluginsNotActive>
+  readonly guard: (event: VibestPlugin.SessionToolExecuteBefore) => Effect.Effect<string | undefined>
   readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   readonly settled: Effect.Effect<boolean>
   readonly machine: (

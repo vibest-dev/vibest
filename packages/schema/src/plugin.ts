@@ -1,17 +1,25 @@
 import { Schema } from "effect"
 
-export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", {
-  plugin: Schema.String,
-  reason: Schema.String,
-}) {
+export class SessionRefused extends Schema.TaggedError<SessionRefused>()(
+  "SessionRefused",
+  {
+    plugin: Schema.String,
+    reason: Schema.String,
+  },
+  { httpApiStatus: 403 },
+) {
   override get message() {
     return `refused by ${this.plugin}: ${this.reason}`
   }
 }
 
-export class PluginsNotActive extends Schema.TaggedError<PluginsNotActive>()("PluginsNotActive", {
-  plugins: Schema.Array(Schema.String),
-}) {
+export class PluginsNotActive extends Schema.TaggedError<PluginsNotActive>()(
+  "PluginsNotActive",
+  {
+    plugins: Schema.Array(Schema.String),
+  },
+  { httpApiStatus: 503 },
+) {
   override get message() {
     return this.plugins.length === 0 ? "plugins still loading" : `plugins still loading: ${this.plugins.join(", ")}`
   }

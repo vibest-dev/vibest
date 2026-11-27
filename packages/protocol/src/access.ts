@@ -1,79 +1,131 @@
-import type { RpcGroup } from "effect/rpc"
+import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
 
-import type { VibestRpcs } from "./rpc.ts"
+import type { VibestApi } from "./api.ts"
 
-type Access = "open" | "session" | "agent" | "owner" | "cli" | "self" | "peer"
+type Access = "open" | "session" | "agent" | "owner" | "cli" | "self" | "remote"
+
+type ApiGroups<A> = A extends HttpApi.HttpApi<infer _Id, infer G> ? G : never
+
+export type EndpointId = HttpApiEndpoint.Identifier<HttpApiGroup.Endpoints<ApiGroups<VibestApi>>>
 
 export const ACCESS = {
-  Ping: ["open", "peer"],
-  Plugins: "open",
-  Concurrency: "open",
-  "Harnesses.List": ["open", "peer"],
-  "Agents.List": ["open", "peer"],
-  "Worktree.List": ["open", "peer"],
-  "Integration.Guard": "open",
-  "Runtimes.Doctor": "open",
-  Subscriptions: "open",
-  Republish: "open",
-  ExecutionEnd: "open",
-  Prompt: "open",
-  Spawn: "agent",
-  Launch: "cli",
-  List: ["agent", "peer"],
-  "Team.List": "session",
-  Get: ["agent", "peer"],
-  "Inbox.Subscribe": "session",
-  "Inbox.Take": "session",
-  Watch: "cli",
-  Events: "cli",
-  "Session.Seen": "cli",
-  "Project.Open": "cli",
-  "Project.Move": "cli",
-  "Project.EntryPlace": "cli",
-  "Project.EntrySession": "cli",
-  "Project.StartEntry": "cli",
-  "Project.FocusEntry": "cli",
-  "Project.RunningEntry": "agent",
-  "Project.StopEntry": "cli",
-  "Project.Create": "cli",
-  "Project.Clone": ["agent", "peer"],
-  "Project.Info": "agent",
-  "Project.Search": "agent",
-  Send: ["owner", "session", "peer"],
-  Interrupt: ["owner", "peer"],
-  Stop: ["owner", "peer"],
-  Peek: ["owner", "peer"],
-  Remove: ["owner", "peer"],
-  "Daemon.Stop": "cli",
-  "Daemon.Handoff": "cli",
-  "Session.Ready": "self",
-  "Agents.Outdated": "cli",
-  "Agents.Restart": "cli",
-  "Peer.Hello": "peer",
-  "Peer.Spawn": "peer",
-  "Peer.Outbox": "peer",
-  "Peer.Ack": "peer",
-  "Machine.Add": "cli",
-  "Machine.Load": ["cli", "peer"],
-  "Machine.List": "cli",
-  "Machine.Remove": "cli",
-} as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly Access[]>
+  "daemon.ping": ["open", "remote"],
+  "daemon.concurrency": "open",
+  "daemon.republish": "open",
+  "daemon.stop": "cli",
+  "daemon.handoff": "cli",
+  "project.open": ["cli", "remote"],
+  "project.create": "cli",
+  "project.move": "cli",
+  "project.info": "agent",
+  "project.search": "agent",
+  "project.clone": ["agent", "remote"],
+  "session.list": ["agent", "remote"],
+  "session.get": ["agent", "remote"],
+  "session.peek": ["owner", "remote"],
+  "session.spawn": "agent",
+  "session.launch": ["cli", "remote"],
+  "session.attach": "cli",
+  "session.focus": "cli",
+  "session.claim": "cli",
+  "session.send": ["owner", "session", "remote"],
+  "session.interrupt": ["owner", "remote"],
+  "session.stop": ["owner", "remote"],
+  "session.archive": ["owner", "remote"],
+  "session.link": "agent",
+  "session.unlink": "agent",
+  "session.seen": "cli",
+  "inbox.take": "session",
+  "inbox.subscribe": "session",
+  "hook.ready": "session",
+  "hook.prompt": "session",
+  "hook.executionEnd": "session",
+  "hook.guard": "session",
+  "worktree.list": ["open", "remote"],
+  "agent.list": ["open", "remote"],
+  "agent.outdated": "cli",
+  "agent.restart": "cli",
+  "harness.list": ["open", "remote"],
+  "runtime.doctor": "open",
+  "plugin.list": "open",
+  "mcp.list": "agent",
+  "mcp.add": "cli",
+  "mcp.remove": "cli",
+  "mcp.connect": "agent",
+  "mcp.disconnect": "agent",
+  "mcp.tools": "agent",
+  "mcp.search": "agent",
+  "mcp.describe": "agent",
+  "mcp.call": "agent",
+  "mcp.events": "agent",
+  "mcp.skills": "agent",
+  "mcp.read": "agent",
+  "mcp.authStart": "cli",
+  "mcp.authComplete": "cli",
+  "mcp.authSetToken": "cli",
+  "mcp.authLogout": "cli",
+  "codemode.execute": "agent",
+  "codemode.declarations": "agent",
+  "subscription.list": "open",
+  "machine.list": "cli",
+  "machine.add": "cli",
+  "machine.load": ["cli", "remote"],
+  "machine.remove": "cli",
+  "remote.hello": "remote",
+  "remote.spawn": "remote",
+  "remote.outbox": "remote",
+  "remote.ack": "remote",
+  "remote.link": "remote",
+  "remote.unlink": "remote",
+  "event.subscribe": "cli",
+  "watch.subscribe": ["cli", "remote"],
+  "automation.create": "agent",
+  "automation.list": "agent",
+  "automation.get": "agent",
+  "automation.pause": "agent",
+  "automation.resume": "agent",
+  "automation.remove": "agent",
+  "automation.tick": "agent",
+  "automation.runNow": "agent",
+} as const satisfies Record<EndpointId, Access | readonly Access[]>
 
-export const PEER_CALLS: ReadonlySet<string> = new Set(
+export const UI_CALLS: ReadonlySet<string> = new Set([
+  "watch.subscribe",
+  "session.launch",
+  "project.open",
+  "project.create",
+  "session.send",
+  "session.link",
+  "session.unlink",
+  "session.interrupt",
+  "session.stop",
+  "session.archive",
+  "session.peek",
+  "session.get",
+  "session.seen",
+  "machine.list",
+  "harness.list",
+  "agent.list",
+])
+
+export const REMOTE_CALLS: ReadonlySet<string> = new Set(
   Object.entries(ACCESS)
-    .filter(([, access]) => [access].flat().includes("peer"))
+    .filter(([, access]) => [access].flat().includes("remote"))
     .map(([method]) => method),
 )
 
 export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
-  [...PEER_CALLS].filter(
+  [...REMOTE_CALLS].filter(
     (method) =>
-      method !== "Ping" &&
-      method !== "Harnesses.List" &&
-      method !== "Agents.List" &&
-      method !== "Machine.Load" &&
-      method !== "Worktree.List" &&
-      method !== "Project.Clone" &&
-      !method.startsWith("Peer."),
+      method !== "daemon.ping" &&
+      method !== "harness.list" &&
+      method !== "agent.list" &&
+      method !== "machine.load" &&
+      method !== "worktree.list" &&
+      method !== "project.clone" &&
+      method !== "project.open" &&
+      method !== "session.launch" &&
+      method !== "watch.subscribe" &&
+      !method.startsWith("remote."),
   ),
 )

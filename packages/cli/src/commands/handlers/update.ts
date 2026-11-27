@@ -1,10 +1,11 @@
 import { described, importCheck, readPing, runCaptured } from "@vibest/client/client"
-import { channelOf, compareVersions, installMethod, latestOf, UpdateError } from "@vibest/client/release"
-import { Layout, shellQuote, VibestCommand } from "@vibest/schema/layout"
-import { Config, Console, Duration, Effect, FileSystem, Match, Option } from "effect"
+import { channelOf, compareVersions, latestOf, UpdateError } from "@vibest/client/release"
+import { Layout, shellQuote } from "@vibest/schema/layout"
+import { Console, Duration, Effect, FileSystem, Match, Option } from "effect"
 
 import { userOnly } from "../../caller.ts"
 import { Runtime } from "../../framework/runtime.ts"
+import { detectPlatformTarget } from "../../platform-target.ts"
 import { replaceAnyway, type Target, versionOf } from "../../replace.ts"
 import {
   daemonPlan,
@@ -14,6 +15,7 @@ import {
   megabytes,
   progressLine,
   replaceForUpdate,
+  resolveInstallMethod,
   restartAgents,
   runInherit,
   stageCommand,
@@ -32,8 +34,8 @@ export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, r
 
       if (Option.isSome(restartAgentsAfter))
         return yield* restartAgents(VERSION, yes, "vibest update", restartAgentsAfter.value)
-      const self = yield* VibestCommand
-      const method = installMethod(self, Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))))
+      const { self, real, method } = yield* resolveInstallMethod
+      const fs = yield* FileSystem.FileSystem
       const layout = yield* Layout
 
       let target: Target = {
@@ -58,20 +60,20 @@ export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, r
             `vibest ${VERSION} is up to date${latest === VERSION ? "" : ` (the newest ${channel === "stable" ? "stable release" : "release"} is ${latest})`}`,
           )
         else {
-          const fs = yield* FileSystem.FileSystem
-          const real = yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!))
+          const resolvedReal = real ?? self[0]!
+          const platform = detectPlatformTarget()
 
           yield* Effect.scoped(
             Effect.gen(function* () {
               const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-update-" })
               const release = `${dir}/release`
-              const archive = `vibest-${process.platform}-${process.arch}.tar.gz`
+              const archive = `vibest-${platform}.tar.gz`
 
               const stage = Effect.gen(function* () {
                 yield* line.stage(`Downloading vibest ${latest}…`)
 
                 if (found.kind === "npm") {
-                  const argv = stageCommand(real, dir, latest)
+                  const argv = stageCommand(resolvedReal, dir, latest, platform)
                   const failed = yield* runCaptured(argv, Duration.infinity)
 
                   return failed === undefined ? undefined : `it could not be fetched (${argv.join(" ")}: ${failed})`
@@ -136,7 +138,7 @@ export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, r
                       ["sh", `${release}/install.sh`],
                       { VIBEST_DOWNLOAD_URL: encodeURI(`file://${release}`), VIBEST_INSTALL: method.share },
                     ]
-                  : [upgradeCommand(real, latest), {}]
+                  : [upgradeCommand(resolvedReal, latest, platform), {}]
 
               yield* line.stage(`Installing vibest ${latest}…`)
               const failed = yield* runCaptured(installArgv, Duration.infinity, installEnv)
@@ -154,7 +156,7 @@ export default Runtime.handler(Commands.commands.update, ({ yes, beta, stable, r
           }
           back =
             method.kind === "npm"
-              ? upgradeCommand(real, VERSION).map(shellQuote).join(" ")
+              ? upgradeCommand(resolvedReal, VERSION, platform).map(shellQuote).join(" ")
               : `ln -sfn ${shellQuote(self[0]!)} "$(cat ${shellQuote(`${method.share}/bin`)} 2>/dev/null || echo ~/.local/bin)/vibest"`
         }
       }

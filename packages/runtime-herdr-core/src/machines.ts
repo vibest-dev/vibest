@@ -1,14 +1,14 @@
+import type { api, HcFailure, HcClient } from "@vibest/herdr-core-sdk"
 import type * as VibestPlugin from "@vibest/plugin/effect"
 import { Duration, Effect, Predicate, type Scope, Stream } from "effect"
-import type { api, HcFailure, HcClient } from "effect-herdr-core-sdk"
 
-import { KIND, LABEL, terminalId } from "./terminal-runtime.ts"
+import { type HcTerminal, KIND, LABEL } from "./terminal-runtime.ts"
 
 type Hc = Pick<HcClient, "call">
 
 type Event = VibestPlugin.MachineEvent
 
-type Terminal = VibestPlugin.Runtime.Terminal
+type Terminal = HcTerminal
 
 const offline = (e: HcFailure) =>
   Predicate.isTagged(e, "HcTransportError") ? `hc here is offline (${e.message})` : `hc here: ${e.message}`
@@ -174,20 +174,19 @@ const NONE: ReadonlyMap<string, Terminal> = new Map()
 
 export const locate = (
   hc: Hc,
-  socket: string,
-  peer: VibestPlugin.Runtime.Peer,
-  sessions: ReadonlyMap<string, string>,
-): Effect.Effect<VibestPlugin.Runtime.Located> =>
+  remote: VibestPlugin.Runtime.Remote,
+  sessions: ReadonlyMap<string, HcTerminal>,
+): Effect.Effect<VibestPlugin.Runtime.Located<HcTerminal>> =>
   Effect.gen(function* () {
-    const core = peer.link.core
+    const core = remote.link.core
 
-    if (core === undefined) return { missing: false, terminals: NONE, note: `${peer.id} gave no hc link` }
+    if (core === undefined) return { missing: false, terminals: NONE, note: `${remote.id} gave no hc link` }
     const row = (yield* hc.call("machine.list", {})).machines.find((r) => r.id === core)
 
     if (row === undefined) return { missing: true, terminals: NONE }
 
     if (row.state !== "connected") {
-      const note = stateNote(peer.id, row)
+      const note = stateNote(remote.id, row)
 
       return {
         missing: false,
@@ -199,13 +198,13 @@ export const locate = (
 
     if (sessions.size === 0) return { missing: false, terminals: NONE, as: row.name }
     const wanted = new Set(sessions.keys())
-    const terminals = new Map<string, Terminal>()
+    const terminals = new Map<string, HcTerminal>()
 
     for (const t of (yield* hc.call("terminal.list", { labels: { [LABEL.runtime]: KIND } })).terminals) {
       const session = t.labels[LABEL.session]
 
       if (t.address.startsWith(`${row.name}/`) && session !== undefined && wanted.has(session))
-        terminals.set(session, { id: terminalId(socket, t.address) })
+        terminals.set(session, { address: t.address })
     }
 
     return {

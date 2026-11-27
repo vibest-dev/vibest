@@ -1,7 +1,7 @@
+import type { ArchiveOutcome } from "@vibest/schema/archive"
 import { messageOf } from "@vibest/schema/error"
 import type { Sender } from "@vibest/schema/event"
-import type { AgentRefused, PluginsNotActive } from "@vibest/schema/plugin"
-import type { RemoveOutcome } from "@vibest/schema/remove"
+import type { SessionRefused, PluginsNotActive } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
   type AmbiguousSession,
@@ -14,16 +14,17 @@ import {
   type UnknownAgent,
   HarnessUnavailable,
 } from "@vibest/schema/session"
+import { canonicalTarget } from "@vibest/schema/terminal"
+import { KeyedMutex } from "@vibest/util/keyed-mutex"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import { type SessionRow, runtimeOf, terminalOf, exitedAt } from "./database/db-rows.ts"
-import { Db, type SessionFilter } from "./database/db.ts"
-import { LayerNode } from "./effect/layer-node.ts"
+import { type SessionRow, terminalOf, exitedAt } from "./database/rows.ts"
 import { PlatformNode } from "./effect/platform.ts"
-import { Git, type GitState } from "./git.ts"
+import { raisesSeen } from "./project/activity.ts"
 import { projectRoot, workspaceGit } from "./project/create.ts"
-import { Runtimes, RuntimeError } from "./runtimes.ts"
+import { Runtimes, RuntimeError } from "./runtime/registry.ts"
 import { Archive } from "./session/archive.ts"
 import { Delivery, unreachable } from "./session/delivery.ts"
 import { SessionLive } from "./session/live.ts"
@@ -33,8 +34,10 @@ import { Placement } from "./session/placement.ts"
 import { Reconcile } from "./session/reconcile.ts"
 import { type Outdated, Restart } from "./session/restart.ts"
 import type { SendRefused } from "./session/sends.ts"
-import { Spawn, type SpawnInput, type Spawned, type TeamRefused } from "./session/spawn.ts"
+import { type LinkRefused, Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
+import { SessionStore, type SessionFilter } from "./session/store.ts"
 import { gitState, mainCheckout } from "./worktree.ts"
+import { Git, type GitState } from "./worktree/git.ts"
 
 export * as Session from "./session.ts"
 
@@ -56,9 +59,11 @@ export { HOOK_GRACE, START_TIMEOUT } from "./session/reconcile.ts"
 
 export { defaultSessionName, type SpawnInput, type Spawned } from "./session/spawn.ts"
 
+const LIST_CONCURRENCY = 8
+
 const SESSION_DEPS = [
   Archive.node,
-  Db.node,
+  SessionStore.node,
   Delivery.node,
   Git.node,
   Placement.node,
@@ -102,18 +107,13 @@ export interface Interface {
     | UnknownAgent
     | NoHarnessChosen
     | NoRuntime
-    | AgentRefused
+    | SessionRefused
     | PluginsNotActive
     | NoSuchSession
-    | TeamRefused
+    | AmbiguousSession
+    | LinkRefused
   >
   readonly send: (id: string, message: string, sender?: Sender, request?: string) => Effect.Effect<void, NoSuchSession>
-  readonly deliverTo: (
-    id: string,
-    message: string,
-    sender?: Sender,
-    request?: string,
-  ) => Effect.Effect<void, NoSuchSession>
   readonly admit: (
     sender: { readonly sessionId: string; readonly projectId: string },
     input: string,
@@ -123,11 +123,11 @@ export interface Interface {
   readonly interrupt: (
     id: string,
   ) => Effect.Effect<{ message: string }, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable>
-  readonly remove: (
+  readonly archive: (
     id: string,
     options?: { readonly keepWorktree?: boolean | undefined },
   ) => Effect.Effect<
-    RemoveOutcome | undefined,
+    ArchiveOutcome | undefined,
     NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable | RuntimeError
   >
   readonly stop: (
@@ -140,6 +140,7 @@ export interface Interface {
   >
   readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
   readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
+  readonly seen: (id: string, finished: number) => Effect.Effect<void, NoSuchSession | RuntimeUnreachable>
   readonly list: (filter?: SessionFilter) => Effect.Effect<ReadonlyArray<SessionView>>
   readonly check: (id: string, bound?: number) => Effect.Effect<void>
   readonly userPrompt: (id: string, text: string, at?: number, process?: number) => Effect.Effect<void>
@@ -158,7 +159,7 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("vibest/Sessions") {}
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const runtimes = yield* Runtimes.Service
   const sessionLive = yield* SessionLive.Service
   const locks = yield* SessionLocks.Service
@@ -167,14 +168,39 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const git = yield* Git.Service
   const { worktreeOf, republish } = yield* Placement.Service
-  const { send, deliverTo, admit, interrupt, userPrompt, typeTaken } = yield* Delivery.Service
+  const { send, admit, interrupt, userPrompt, typeTaken } = yield* Delivery.Service
   const reconcile = yield* Reconcile.Service
   const { spawn } = yield* Spawn.Service
-  const { remove, stop } = yield* Archive.Service
+  const { archive, stop } = yield* Archive.Service
   const { outdated, restart, restartLater } = yield* Restart.Service
+  const seenLocked = yield* KeyedMutex.make<string>()
+
+  const seen = Effect.fn("Session.seen")(function* (id: string, finished: number) {
+    const identity = yield* sessionStore.sessionIdentity(id)
+
+    if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
+    const at = yield* sessionStore.getSession(id)
+    const terminal = at === undefined ? null : terminalOf(at)
+
+    if (terminal === null) return
+    const rt = runtimes.find(terminal.runtime)
+
+    if (rt === undefined || rt.seen === undefined || rt.see === undefined) return
+    const see = rt.see
+    const readSeen = rt.seen
+
+    const unreachableSeen = (e: { readonly message: string }) =>
+      new RuntimeUnreachable({ session: id, message: e.message })
+
+    yield* Effect.gen(function* () {
+      const now = yield* readSeen(terminal.target).pipe(Effect.mapError(unreachableSeen))
+
+      if (raisesSeen(now, finished)) yield* see(terminal.target, finished).pipe(Effect.mapError(unreachableSeen))
+    }).pipe(seenLocked.withLock(`${terminal.runtime}\n${canonicalTarget(terminal.target)}`))
+  })
 
   const getRow = (id: string) =>
-    db.session
+    sessionStore
       .getSession(id)
       .pipe(
         Effect.flatMap((session) =>
@@ -184,16 +210,17 @@ export const make = Effect.gen(function* () {
 
   const peek = Effect.fn("Session.peek")(function* (id: string, lines: number) {
     const session = yield* getRow(id)
+    const terminal = terminalOf(session)
 
-    if (exitedAt(session) !== null || terminalOf(session).id === "")
+    if (exitedAt(session) !== null || terminal === null)
       return yield* new NoSuchSession({
         id,
         message: `${id} has no terminal to peek at (it exited or never started)`,
       })
-    const h = yield* runtimes.route(runtimeOf(session))
+    const h = yield* runtimes.route(terminal.runtime)
 
     const text = yield* h
-      .read(terminalOf(session), Math.max(1, Math.min(Math.floor(lines), 500)))
+      .read(terminal.target, Math.max(1, Math.min(Math.floor(lines), 500)))
       .pipe(Effect.catchTag("RuntimeError", unreachable(session)))
 
     return text.trimEnd()
@@ -259,12 +286,14 @@ export const make = Effect.gen(function* () {
   const get = Effect.fn("Session.get")((id: string) => getRow(id).pipe(Effect.flatMap(view)))
 
   const list = Effect.fn("Session.list")((filter: SessionFilter = {}) =>
-    db.session
+    sessionStore
       .listSessions(filter)
       .pipe(
         Effect.flatMap((rows) =>
-          Effect.forEach(rows, (row) =>
-            view(row).pipe(Effect.catchTag("NoSuchSession", () => Effect.succeed(unlocated(row)))),
+          Effect.forEach(
+            rows,
+            (row) => view(row).pipe(Effect.catchTag("NoSuchSession", () => Effect.succeed(unlocated(row)))),
+            { concurrency: LIST_CONCURRENCY },
           ),
         ),
       ),
@@ -273,11 +302,11 @@ export const make = Effect.gen(function* () {
   return Service.of({
     spawn,
     send,
-    deliverTo,
     admit,
     interrupt,
     peek,
-    remove,
+    seen,
+    archive,
     stop,
     get,
     list,

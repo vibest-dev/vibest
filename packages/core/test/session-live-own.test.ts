@@ -1,9 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { SessionLive, type Restarted } from "@vibest/core/session/live"
+import { interruptOnceReady } from "@vibest/testkit/interrupt-at"
 import { Effect, Fiber, Option, Scheduler } from "effect"
 import { TestClock } from "effect/testing"
-
-import { interruptOnceReady } from "./lib/interrupt-at.ts"
 
 const restarted: Restarted = { id: "a", projectId: "p", ok: true, message: "restarted" }
 

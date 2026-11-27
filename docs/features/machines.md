@@ -5,17 +5,17 @@ One machine's vibestd (A) can run agents on another machine (B) over ssh. Design
 
 ## M1. Adding a machine and running on it
 
-`vibest machine add` records B, B records A as a peer, and a second name for the same B is refused. `vibest run
---machine`, run by A's entry session, starts a session on B and none on A; A's entry session gets one message from `<machine>/<id>` with what the session sent, and nothing stays
-waiting on B. `send`, `result`, `peek`, `ls` and `archive` reach the session on B. Each checkout is known by one remote, chosen the same way on
+`vibest machine add` records B, B records A as a remote, and a second name for the same B is refused. `vibest run
+--machine`, run by A's session, starts a session on B and none on A; A's session gets one message (`<session-id>` short id and `<machine>` tag) with what the session sent, and nothing stays
+waiting on B. `send`, `result`, `peek`, `ls`, `stop` and `archive` (with `--machine <machine>`) reach the session on B. Each checkout is known by one remote, chosen the same way on
 both machines (the GitHub CLI default, then `upstream`, then `origin`, then the others by name; network URLs only),
 and the same repository matches across URL forms and ssh aliases for any host; a checkout with no such remote is refused
 naming it.
 
 ## M8. A remote execution end sends nothing
 
-When an execution ends on B without the session sending anything, B queues nothing for A, A's entry session gets no notice, and
-`vibest result <machine>/<id>` on A returns the execution's reply.
+When an execution ends on B without the session sending anything, B queues nothing for A, A's session gets no notice, and
+`vibest result <id> --machine <machine>` on A returns the execution's reply.
 
 ## M2. Messages survive a lost connection
 
@@ -50,7 +50,7 @@ even when B keeps that checkout inside a project folder.
 
 ## M12. A B too old for several repositories
 
-A `vibest run --machine` from a project of several repositories to a B whose vibest does not take a repository list is
+A `vibest run --machine` from a project of several repositories to a B whose vibest predates repository lists (or speaks an older protocol) is
 refused on A with `run vibest update on <B>`; B starts nothing.
 
 ## M13. Choosing B's project

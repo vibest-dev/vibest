@@ -82,9 +82,9 @@ export const entryModel = () => {
 
 const projectFolderIn = (system: string) => /The project folder is (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)
 
-export const creatorIn = (system: string) => /started by ([0-9a-f-]{36})/.exec(system)?.[1]
+export const creatorIn = (system: string) => /started by ([0-9a-f-]{8,36})/.exec(system)?.[1]
 
-const sendToCreatorIn = (system: string) => /run `([^`]+ send [0-9a-f-]{36}) -- '<message>'`/.exec(system)?.[1]
+const sendToCreatorIn = (system: string) => /run `([^`]+ send [0-9a-f-]{8,36}) -- '<message>'`/.exec(system)?.[1]
 
 export const sendOrReply = (messages: ReadonlyArray<Message>, done: string) => {
   const send = sendToCreatorIn(text(messages.find((m) => m.role === "system" || m.role === "developer")))

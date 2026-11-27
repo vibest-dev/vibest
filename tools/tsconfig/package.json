@@ -5,6 +5,8 @@
   "description": "The TypeScript compiler options every vibest package extends: `\"extends\": \"@vibest/tsconfig/base.json\"`.",
   "license": "MIT",
   "files": [
-    "base.json"
+    "base.json",
+    "neutral.json",
+    "web-globals.d.ts"
   ]
 }

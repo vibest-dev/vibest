@@ -1,6 +1,6 @@
 import { Effect, Predicate, type Scope, Stream } from "effect"
 
-import type { AgentFailures, AgentHooks, AgentRefused } from "../domain.ts"
+import type { SessionFailures, SessionHooks, SessionRefused, ToolRefused } from "../domain.ts"
 import type { Context as EffectContext } from "../effect/index.ts"
 import type { Registration as EffectRegistration, Transform } from "../effect/registration.ts"
 import type { Cleanup, Context, Plugin } from "./plugin.ts"
@@ -8,19 +8,23 @@ import type { Definitions, Registration } from "./registration.ts"
 
 type Awaitable<A> = Promise<A> | A
 
-const isRefusal = (cause: unknown): cause is AgentRefused => Predicate.isTagged(cause, "AgentRefused")
+const isSessionRefused = (cause: unknown): cause is SessionRefused => Predicate.isTagged(cause, "SessionRefused")
+const isToolRefused = (cause: unknown): cause is ToolRefused => Predicate.isTagged(cause, "ToolRefused")
 
 const settle = <A>(callback: () => Awaitable<A>) => Effect.promise(() => Promise.resolve().then(callback))
 
-type Refusals = {
-  readonly [N in keyof AgentHooks]: (refusal: AgentRefused) => Effect.Effect<never, AgentFailures[N]>
+type FailureHandlers = {
+  readonly [N in keyof SessionHooks]: (cause: unknown) => Effect.Effect<never, SessionFailures[N]>
 }
 
-const refusalAs: Refusals = { "start.before": Effect.fail }
+const handleFailure: FailureHandlers = {
+  "start.before": (cause) => (isSessionRefused(cause) ? Effect.fail(cause) : Effect.die(cause)),
+  "tool.execute.before": (cause) => (isToolRefused(cause) ? Effect.fail(cause) : Effect.die(cause)),
+}
 
-const refusable = <N extends keyof AgentHooks, A>(name: N, callback: () => Awaitable<A>) =>
+const refusable = <N extends keyof SessionHooks, A>(name: N, callback: () => Awaitable<A>) =>
   Effect.tryPromise({ try: () => Promise.resolve().then(callback), catch: (e) => e }).pipe(
-    Effect.catch((e) => (isRefusal(e) ? refusalAs[name](e) : Effect.die(e))),
+    Effect.catch(handleFailure[name]),
   )
 
 export const fromPromise =
@@ -70,7 +74,6 @@ export const fromPromise =
       const context: Context = {
         options: host.options,
         agent: {
-          hook: (name, callback) => register(host.agent.hook(name, (event) => refusable(name, () => callback(event)))),
           transform: (callback) => register(host.agent.transform(callback)),
         },
         machine: {
@@ -82,6 +85,8 @@ export const fromPromise =
         subscription: { report: (input) => run(host.subscription.report(input)) },
         event: { subscribe: (input) => iterable(host.event.subscribe(input)) },
         session: {
+          hook: (name, callback) =>
+            register(host.session.hook(name, (event) => refusable(name, () => callback(event)))),
           list: () => run(host.session.list()),
           get: (id) => run(host.session.get(id)),
           sentIn: (id, execution) => run(host.session.sentIn(id, execution)),

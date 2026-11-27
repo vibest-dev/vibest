@@ -1,10 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
-import { makeRepository, projectOf, runVibest, testLayer } from "@vibest/platform-bun/test/lib/fakes"
+import { SessionStore } from "@vibest/core/session/store"
 import { Plugin } from "@vibest/plugin/effect"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layout } from "@vibest/schema/layout"
 import * as Server from "@vibest/server/server"
+import { makeRepository, projectOf, runVibest, testLayer } from "@vibest/testkit/fakes"
 import { Effect, FileSystem, Layer, Path } from "effect"
 
 import * as Platform from "#platform"
@@ -21,7 +21,7 @@ const seen: Seen = { prompt: "", files: [] }
 const capture = Plugin.define({
   id: "see-prompt",
   effect: (ctx) =>
-    ctx.agent.hook("start.before", (event) =>
+    ctx.session.hook("start.before", (event) =>
       Effect.sync(() => {
         seen.prompt = event.prompt
         seen.files = event.files
@@ -30,7 +30,7 @@ const capture = Plugin.define({
 })
 
 const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.httpServer(layout.socket)))),
   Layer.provideMerge(testLayer({ plugins: [capture] })),
 )
 
@@ -49,7 +49,7 @@ describe("vibest run --file", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
-        const db = yield* Db.Service
+        const sessionStore = yield* SessionStore.Service
         const layout = yield* Layout
         const repo = yield* makeRepository
         const task = path.join(repo, "task.md")
@@ -60,11 +60,11 @@ describe("vibest run --file", () => {
         yield* fs.writeFileString(other, "second\n")
         yield* fs.writeFile(binary, new Uint8Array([0x68, 0x00, 0xff]))
 
-        const entry = yield* db.session.startEntry(
+        const entry = yield* sessionStore.startRoot(
           yield* projectOf(repo),
           "pi",
           false,
-          { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
+          { runtime: RUNTIME, target: { id: "test/coord" } },
           { agent: "coordinator" },
         )
 

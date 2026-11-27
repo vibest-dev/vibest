@@ -1,17 +1,19 @@
 import { Layout } from "@vibest/schema/layout"
-import { Context, Crypto, Effect, FileSystem, Layer, Path } from "effect"
+import { LayerNode } from "@vibest/util/layer-node"
+import { Context, Effect, FileSystem, Layer, Path } from "effect"
+import { Digest, SecureRandom } from "effect/crypto"
 import { FetchHttpClient, HttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import type { DatabaseOpenFailed, SchemaMismatch } from "../database/db-schema.ts"
-import { LayerNode } from "./layer-node.ts"
+import type { DatabaseOpenFailed, SchemaMismatch } from "../database/schema.sql.ts"
 
 export * as PlatformNode from "./platform.ts"
 
 export const fileSystem = LayerNode.unbound(FileSystem.FileSystem)
 export const path = LayerNode.unbound(Path.Path)
-export const crypto = LayerNode.unbound(Crypto.Crypto)
+export const digest = LayerNode.unbound(Digest.Digest)
+export const secureRandom = LayerNode.unbound(SecureRandom.SecureRandom)
 export const childProcessSpawner = LayerNode.unbound(ChildProcessSpawner.ChildProcessSpawner)
 
 export class SqlClientLayer extends Context.Service<
@@ -29,3 +31,4 @@ export const sqlClient = LayerNode.make({
 
 export const layout = LayerNode.unbound(Layout)
 export const httpClient = LayerNode.make({ service: HttpClient.HttpClient, layer: FetchHttpClient.layer, deps: [] })
+export const fetch = LayerNode.unbound(FetchHttpClient.Fetch)

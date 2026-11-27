@@ -8,15 +8,16 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast"
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p test/tsconfig.json",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/runtime-herdr/"
   },
   "dependencies": {
     "@effect/platform-node-shared": "catalog:",
     "@vibest/client": "workspace:*",
+    "@vibest/herdr-sdk": "workspace:*",
     "@vibest/plugin": "workspace:*",
     "@vibest/protocol": "workspace:*",
     "@vibest/schema": "workspace:*",
-    "effect": "catalog:",
-    "effect-herdr-sdk": "workspace:*"
+    "effect": "catalog:"
   }
 }

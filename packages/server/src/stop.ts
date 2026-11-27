@@ -1,6 +1,6 @@
 import { awaitEvent, Bus } from "@vibest/core/bus"
-import type { Drain } from "@vibest/core/drain"
-import { DaemonBusy, DaemonStopping } from "@vibest/protocol/rpc"
+import type { Drain } from "@vibest/core/runtime/drain"
+import { DaemonBusy, DaemonStopping } from "@vibest/protocol/errors"
 import { Deferred, Duration, Effect, Option } from "effect"
 
 export const DRAIN_TIMEOUT = Duration.seconds(5)

@@ -1,0 +1,63 @@
+import fs from "node:fs/promises"
+import process from "node:process"
+
+import { BunServices, BunSocket } from "@effect/platform-bun"
+import { SqliteClient } from "@effect/sql-sqlite-bun"
+import { SocketConnector } from "@vibest/client/socket-connector"
+import { HttpConnector } from "@vibest/client/unix-http"
+import { nodeUnixHttpClient } from "@vibest/client/unix-http.node"
+import { Bus } from "@vibest/core/bus"
+import { SQL_NAMES } from "@vibest/core/database/database"
+import { Archive } from "@vibest/core/session/archive"
+import { Sends } from "@vibest/core/session/sends"
+import { Summaries } from "@vibest/core/session/summaries"
+import { UserPlatform } from "@vibest/core/session/system-prompt"
+import { Effect, Layer } from "effect"
+import { Digest, SecureRandom } from "effect/crypto"
+import { FetchHttpClient } from "effect/http"
+
+const user = Layer.succeed(UserPlatform, {
+  uid: process.getuid?.(),
+  lstat: async (file) => {
+    const st = await fs.lstat(file)
+
+    return { symlink: st.isSymbolicLink(), directory: st.isDirectory(), uid: st.uid, mode: st.mode }
+  },
+})
+
+export const services = Layer.mergeAll(
+  BunServices.layer,
+  Digest.layerWebCrypto,
+  SecureRandom.layerWebCrypto,
+  FetchHttpClient.layer,
+  Layer.succeed(FetchHttpClient.Fetch, globalThis.fetch),
+  user,
+  Layer.succeed(SocketConnector.Service, (endpoint: string) => BunSocket.makeNet({ path: endpoint })),
+  Layer.succeed(HttpConnector.Service, nodeUnixHttpClient),
+)
+
+export const memorySqlite = SqliteClient.layer({ filename: ":memory:", disableWAL: true, ...SQL_NAMES })
+
+export const memoryBus = Bus.layer.pipe(Layer.provide(memorySqlite))
+
+const noSessions = Effect.die(new Error("this test has no sessions"))
+
+export const memoryPluginHost = Layer.mergeAll(
+  memoryBus,
+  Layer.succeed(Summaries.Service, {
+    list: () => Effect.succeed([]),
+    get: () => Effect.succeed(undefined),
+    sentIn: () => Effect.succeed(0),
+  }),
+  Layer.succeed(Sends.Service, {
+    send: () => noSessions,
+    admit: () => noSessions,
+    relay: () => noSessions,
+  }),
+  Layer.succeed(Archive.Service, {
+    undoCutOffStart: () => noSessions,
+    archive: () => noSessions,
+    stop: () => noSessions,
+    finishArchive: () => noSessions,
+  }),
+)

@@ -1,6 +1,10 @@
 import { shellQuote } from "@vibest/schema/layout"
 import { Config, Context, Data, Effect, FileSystem, Option, Path, Predicate, Random } from "effect"
 
+import type { Launch } from "./runtime.ts"
+
+export type { Launch } from "./runtime.ts"
+
 export class SystemPromptDirUnsafe extends Data.TaggedError("SystemPromptDirUnsafe")<{ readonly message: string }> {}
 
 export interface LinkInfo {
@@ -98,13 +102,12 @@ export const removeSystemPrompt = (id: string) =>
     yield* fs.remove(path.join(yield* systemPromptRoot, id), { recursive: true, force: true })
   }).pipe(Effect.ignore)
 
-export interface Launch {
-  readonly harness?: string
-  readonly argv: ReadonlyArray<string>
-  readonly prompt?: string
-  readonly system?: string
-  readonly env: Readonly<Record<string, string>>
-}
+export const SHELL_HANDOFF: ReadonlyArray<string> = ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh"]
+
+export const isShellHandoff = (launch: Launch) =>
+  launch.prompt === undefined &&
+  launch.argv.length === SHELL_HANDOFF.length &&
+  launch.argv.every((arg, i) => arg === SHELL_HANDOFF[i])
 
 const IDENTITY_ENV = [
   "VIBEST_SESSION_ID",
@@ -112,6 +115,7 @@ const IDENTITY_ENV = [
   "VIBEST_EXECUTION",
   "VIBEST_PROJECT_ID",
   "VIBEST_PROJECT_DIR",
+  "VIBEST_SCRATCHPAD_DIR",
   "VIBEST_HARNESS",
   "VIBEST_RUNTIME",
   "VIBEST_HOME",

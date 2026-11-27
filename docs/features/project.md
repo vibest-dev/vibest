@@ -1,7 +1,12 @@
 # Projects
 
-Each repository (or directory of repositories) is a Project with its own folder of knowledge: `preferences.md`, `docs/`,
-`memories/` and `artifacts/`. Each capability below says what it is and when it counts as working.
+Each repository (or directory of repositories) is a Project with its own folder of knowledge (`VIBEST_PROJECT_DIR`):
+`preferences.md`, `docs/`, `memories/`, and `artifacts/` (reserved strictly for human-facing deliverables: agreed
+`pipeline` plans, UI mockups, diagrams, acceptance reports, explicit user-requested reports). Each Project also gets a
+shared temporary scratchpad (`VIBEST_SCRATCHPAD_DIR`, under `<os.tmpdir()>/vibest-<uid>/<project-id>/scratchpad`,
+left in OS temp after `vibest archive` so parent agents and users can still inspect it) for temporary agent-to-agent
+handoffs, `--file` briefs, review notes, repro scripts, and scratch files. Each capability below says what it is and
+when it counts as working.
 
 ## P1. Project info
 
@@ -24,7 +29,7 @@ or when the old directory still exists. An agent may not run it.
 
 A Pi entry session, a Pi subagent and a Claude subagent each write and read the Project's artifacts with their own file
 tools, without a permission prompt. Every Claude session also has all of Bash pre-approved (a rule the user sets to ask
-for Bash still asks). Writing into another Project's folder is refused. Every session's system prompt carries
+for Bash still asks). Custom path boundaries (such as refusing writes outside `VIBEST_PROJECT_DIR`) can be enforced by a user `session.tool.execute.before` plugin (G21). Every session's system prompt carries
 `preferences.md` and the curated memory index `memories/MEMORY.md` (capped at 100 lines and 8,000 bytes on a line
 boundary, with a warning when truncated to compact under 70 lines; bootstrapped once newest-first up to 70 lines and
 5,600 bytes when `MEMORY.md` is missing and `memories/` holds `.md` files), while topic file bodies in

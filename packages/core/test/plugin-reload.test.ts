@@ -1,8 +1,8 @@
 import module from "node:module"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Agents } from "@vibest/core/agents"
-import { Concurrency } from "@vibest/core/concurrency"
+import { Agents } from "@vibest/core/agent/registry"
+import { Subscriptions } from "@vibest/core/harness/subscriptions"
 import {
   Builtins,
   type Candidate,
@@ -14,9 +14,12 @@ import {
   RECHECK,
 } from "@vibest/core/plugin"
 import { Hooks } from "@vibest/core/plugin/hooks"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { Concurrency } from "@vibest/core/runtime/concurrency"
 import { Plugin } from "@vibest/plugin/effect"
 import { Layout } from "@vibest/schema/layout"
+import { memoryPluginHost } from "@vibest/testkit/bun"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "@vibest/testkit/harnesses"
+import * as Platform from "@vibest/testkit/platform"
 import {
   Clock,
   Context,
@@ -32,10 +35,6 @@ import {
 } from "effect"
 import { TestClock } from "effect/testing"
 
-import * as Platform from "../../platform-bun/src/bun.ts"
-import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { memoryPluginHost } from "./platform/bun.ts"
-
 const events: Array<string> = []
 
 const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.void) =>
@@ -45,7 +44,7 @@ const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.voi
       Effect.gen(function* () {
         events.push(`setup ${tag}`)
         yield* Effect.addFinalizer(() => Effect.sync(() => events.push(`close ${tag}`)))
-        yield* ctx.agent.hook("start.before", (e) => Effect.sync(() => void (e.model = tag)))
+        yield* ctx.session.hook("start.before", (e) => Effect.sync(() => void (e.model = tag)))
         yield* setup
       }),
   })
@@ -165,7 +164,7 @@ describe("plugins: activation", () => {
           effect: (ctx) =>
             Effect.gen(function* () {
               yield* Effect.addFinalizer(() => Effect.sync(() => events.push("close slow")))
-              yield* ctx.agent.hook("start.before", (e) =>
+              yield* ctx.session.hook("start.before", (e) =>
                 Deferred.succeed(entered, undefined).pipe(
                   Effect.andThen(Deferred.await(gate)),
                   Effect.andThen(Effect.sync(() => void (e.model = "slow"))),
@@ -224,13 +223,13 @@ const counters = ((globalThis as { __vibestReload?: Record<string, number> }).__
 const count = (key: string) => counters[key] ?? 0
 
 const pluginFile = (id: string, key: string, model: string, imports = "") => `${imports}
-import { type AgentStartBefore, Plugin } from "@vibest/plugin/effect"
+import { type SessionStartBefore, Plugin } from "@vibest/plugin/effect"
 import { Effect } from "effect"
 const c = (globalThis.__vibestReload ??= {})
 c["import:${key}"] = (c["import:${key}"] ?? 0) + 1
 export default Plugin.define({
   id: ${JSON.stringify(id)},
-  effect: (ctx) => Effect.sync(() => { c["setup:${key}"] = (c["setup:${key}"] ?? 0) + 1 }).pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = ${model} })))),
+  effect: (ctx) => Effect.sync(() => { c["setup:${key}"] = (c["setup:${key}"] ?? 0) + 1 }).pipe(Effect.andThen(ctx.session.hook("start.before", (e) => Effect.sync(() => { e.model = ${model} })))),
 })
 `
 
@@ -432,7 +431,7 @@ describe("plugins: supervisor", () => {
     candidate(
       `builtin:${id}`,
       id,
-      Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.void) }),
+      Plugin.define({ id, effect: (ctx) => ctx.session.hook("start.before", () => Effect.void) }),
     )
 
   const startedWith = (plugins: Plugins.Interface) =>
@@ -574,7 +573,7 @@ describe("plugins: supervisor", () => {
         assert.strictEqual((yield* service.start(event)).model, "a1")
         yield* fs.writeFileString(
           file,
-          `import { Plugin } from "@vibest/plugin/effect"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: (ctx) => Effect.promise(() => { globalThis.__vibestGate.gate.entered = true; return globalThis.__vibestGate.released }).pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = "a2" })))) })\n`,
+          `import { Plugin } from "@vibest/plugin/effect"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: (ctx) => Effect.promise(() => { globalThis.__vibestGate.gate.entered = true; return globalThis.__vibestGate.released }).pipe(Effect.andThen(ctx.session.hook("start.before", (e) => Effect.sync(() => { e.model = "a2" })))) })\n`,
         )
         yield* rescanned(
           Effect.sync(() => gate.entered),

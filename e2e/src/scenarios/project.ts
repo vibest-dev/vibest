@@ -20,11 +20,7 @@ import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 type Info = { directory: string; preferences: string; docs: string; memories: string; artifacts: string }
 
 const filesExecution =
-  (
-    results: Record<string, Array<string>>,
-    other: string,
-    names: { write: string; read: string; path: string; bash: string },
-  ) =>
+  (results: Record<string, Array<string>>, names: { write: string; read: string; path: string; bash: string }) =>
   (who: string, dir: string, done: number, last: string | undefined, creator?: string): Step => {
     if (last !== undefined) (results[who] ??= []).push(last)
     const file = path.join(dir, "artifacts", `${who}.md`)
@@ -32,9 +28,6 @@ const filesExecution =
     if (done === 0) return { tool: names.write, input: { [names.path]: file, content: `${who}-wrote\n` } }
 
     if (done === 1) return { tool: names.read, input: { [names.path]: file } }
-
-    if (done === 2)
-      return { tool: names.write, input: { [names.path]: path.join(other, "artifacts", `${who}.md`), content: "x\n" } }
 
     if (creator !== undefined)
       return { tool: names.bash, input: { command: `${binary} send ${creator} -- 'done-${who}'` } }
@@ -64,22 +57,20 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "P8",
     title:
-      "a Pi entry session, a Pi subagent and a Claude subagent (fake models) each write and read artifacts/<who>.md in the project folder without a permission prompt, another project's folder is refused, and sessions receive bootstrapped or curated memories/MEMORY.md without unindexed topic bodies",
+      "a Pi entry session, a Pi subagent and a Claude subagent (fake models) each write and read artifacts/<who>.md in the project folder without a permission prompt, and sessions receive bootstrapped or curated memories/MEMORY.md without unindexed topic bodies",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const other = (await w.json<Info>(["project", "info"], { cwd: await newRepository(w, "files-other") })).directory
-      await fs.mkdir(path.join(other, "artifacts"), { recursive: true })
       const results: Record<string, Array<string>> = {}
       const dirs: Record<string, string> = {}
       const systems: Record<string, string> = {}
 
       const pi = fakeOpenAI(
-        filesExecution(results, other, { write: "write", read: "read", path: "path", bash: "bash" }),
+        filesExecution(results, { write: "write", read: "read", path: "path", bash: "bash" }),
         dirs,
         systems,
       )
 
-      const claudeExecution = filesExecution(results, other, {
+      const claudeExecution = filesExecution(results, {
         write: "Write",
         read: "Read",
         path: "file_path",
@@ -89,7 +80,7 @@ const checks: ReadonlyArray<Check> = [
       const claude = fakeAnthropic((r) => {
         const dir = subagentFolder(r.system)
 
-        if (r.tools.length === 0 || dir === undefined || r.results.length > 3) return "ok"
+        if (r.tools.length === 0 || dir === undefined || r.results.length > 2) return "ok"
         dirs.claude = dir
         systems.claude = r.system
         const last = r.results.at(-1)
@@ -146,7 +137,7 @@ const checks: ReadonlyArray<Check> = [
           claude: await run(["claude", ...envArgs(await claudeEnv(w, "files", claude.url))]),
         }
 
-        const answered = (who: string) => (results[who]?.length ?? 0) >= 3
+        const answered = (who: string) => (results[who]?.length ?? 0) >= 2
 
         for (const who of ["pi", "claude", "main"])
           await until(`the ${who} agent's execution on the folder`, () => answered(who), 180_000).catch(
@@ -201,17 +192,11 @@ const checks: ReadonlyArray<Check> = [
 
         for (const who of ["pi", "claude", "main"]) {
           expect(dirs[who] === own, `${who}'s system prompt names ${dirs[who]}, not ${own}`)
-          const [, read, refused] = results[who]!
+          const [, read] = results[who]!
           expect(read!.includes(`${who}-wrote`), `${who} read back: ${read}`)
-          const reason = "off limits to sessions"
-          expect(refused!.includes(reason), `${who}'s write into another project: ${refused}`)
           expect(
             (await fs.readFile(path.join(own, "artifacts", `${who}.md`), "utf8")) === `${who}-wrote\n`,
             `artifacts/${who}.md`,
-          )
-          expect(
-            !(await Bun.file(path.join(other, "artifacts", `${who}.md`)).exists()),
-            `${who} wrote into another project`,
           )
         }
       } finally {

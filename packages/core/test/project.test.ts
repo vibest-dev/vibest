@@ -1,12 +1,17 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Project, type ProjectScope } from "@vibest/core/project"
+import { RepositoryUrl } from "@vibest/core/project/repository-url"
 import { Layout } from "@vibest/schema/layout"
+import * as Platform from "@vibest/testkit/bun"
+import { tempDirectory } from "@vibest/testkit/directory"
+import { FakeGit } from "@vibest/testkit/fake-git"
 import { Effect, FileSystem, Layer, Path } from "effect"
 
-import { tempDirectory } from "./lib/directory.ts"
-import * as Platform from "./platform/bun.ts"
-
 const scope: ProjectScope = { id: "0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b" }
+
+const sshHosts = Layer.succeed(RepositoryUrl.Service, {
+  hostName: (alias) => Effect.succeed(alias === "work" ? "Git.Internal.Example" : alias),
+})
 
 const withProjectInTempHome = <A, E>(
   program: Effect.Effect<A, E, Project.Service | Layout | FileSystem.FileSystem | Path.Path>,
@@ -15,7 +20,11 @@ const withProjectInTempHome = <A, E>(
     const home = yield* tempDirectory("vibest-project-")
     const layout = Layer.succeed(Layout, yield* Layout.make(home))
 
-    return yield* program.pipe(Effect.provide(Project.layer.pipe(Layer.provideMerge(layout))))
+    return yield* program.pipe(
+      Effect.provide(
+        Project.layer.pipe(Layer.provideMerge(layout), Layer.provide(FakeGit.layers), Layer.provide(sshHosts)),
+      ),
+    )
   })
 
 describe("Project", () => {
@@ -53,6 +62,16 @@ describe("Project", () => {
           memories: path.join(dir, "memories"),
           artifacts: layout.artifacts(scope.id),
         })
+        assert.deepStrictEqual(
+          yield* project.repositories("/missing/unmounted/dir", [
+            { path: "/missing/unmounted/dir", remote: "work:team/app.git" },
+            { path: "/missing/unmounted/local", remote: null },
+          ]),
+          [
+            { path: "/missing/unmounted/dir", identity: "git.internal.example/team/app" },
+            { path: "/missing/unmounted/local", identity: null },
+          ],
+        )
       }),
     ).pipe(Effect.provide(Platform.services)),
   )

@@ -25,6 +25,7 @@
     "access": "public"
   },
   "scripts": {
+    "pack:npm": "bun script/pack.ts",
     "typecheck": "tsrs --noEmit --fast",
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/plugin/"
   },
@@ -35,6 +36,6 @@
     "effect": "catalog:"
   },
   "peerDependencies": {
-    "effect": "^4.0.2"
+    "effect": "^4.1.5"
   }
 }

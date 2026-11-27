@@ -1,60 +1,47 @@
+import { withHeaders } from "@vibest/client/client"
 import type { PipeClient } from "@vibest/client/pipe"
 import { callerKind } from "@vibest/core/caller"
-import { Db } from "@vibest/core/database/db"
-import type { PeerScope } from "@vibest/core/database/remote"
-import { LayerNode } from "@vibest/core/effect/layer-node"
 import { PlatformNode } from "@vibest/core/effect/platform"
-import { Git } from "@vibest/core/git"
 import { Identity } from "@vibest/core/identity"
 import { PluginLoader, pluginLoaderNode } from "@vibest/core/plugin/sources"
 import { cloneDestination } from "@vibest/core/project/clone"
 import { listProjectRepositories } from "@vibest/core/project/create"
 import { locateProject, resolveProject } from "@vibest/core/project/identity"
-import { repositoryIdentity } from "@vibest/core/repository-url"
-import { Runtimes } from "@vibest/core/runtimes"
-import { peerHeaders } from "@vibest/protocol/protocol"
-import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
+import { repositoryIdentity } from "@vibest/core/project/repository-url"
+import { ProjectStore } from "@vibest/core/project/store"
+import type { RemoteScope } from "@vibest/core/remote/sql"
+import { RemoteStore } from "@vibest/core/remote/store"
+import { Runtimes } from "@vibest/core/runtime/registry"
+import { SessionStore } from "@vibest/core/session/store"
+import { Git } from "@vibest/core/worktree/git"
+import type { SpawnPayload } from "@vibest/protocol/payloads"
+import { REMOTE_BY_USER, remoteHeaders } from "@vibest/protocol/protocol"
+import type { SessionInfo } from "@vibest/protocol/schemas"
 import { randomId } from "@vibest/schema/id"
 import { Layout } from "@vibest/schema/layout"
 import { type ListedMachine, MachineFailed, MachineIncompatible } from "@vibest/schema/machine"
 import { ProjectCloneFailed } from "@vibest/schema/project"
+import { LayerNode } from "@vibest/util/layer-node"
 import { Context, Data, Effect, FileSystem, Layer, Path, Predicate, Stream } from "effect"
 
 import { Machines } from "./machines.ts"
 
 export * as Remote from "./remote.ts"
 
-type Address =
-  | { readonly _tag: "Local"; readonly id: string }
-  | { readonly _tag: "Remote"; readonly machine: string; readonly id: string }
-
-const Address = Data.taggedEnum<Address>()
-
-export const address = (input: string): Address => {
-  const at = input.indexOf("/")
-
-  return at <= 0
-    ? Address.Local({ id: input })
-    : Address.Remote({ machine: input.slice(0, at), id: input.slice(at + 1) })
+export type At = {
+  readonly machine: string
+  readonly id: string
 }
-
-export type At = Extract<Address, { readonly _tag: "Remote" }>
 
 export type ListScope =
   | { readonly _tag: "All" }
   | { readonly _tag: "Project"; readonly id: string }
   | { readonly _tag: "Nothing" }
-  | ({ readonly _tag: "Peer" } & PeerScope)
+  | ({ readonly _tag: "Remote" } & RemoteScope)
 
 export const ListScope = Data.taggedEnum<ListScope>()
 
-type Forwarded<A, E> = (
-  client: PipeClient,
-  at: At,
-  options: { readonly headers: Record<string, string> },
-) => Effect.Effect<A, E>
-
-const addressed = (machine: string, id: string) => `${machine}/${id}`
+type Forwarded<A, E> = (client: PipeClient, at: At) => Effect.Effect<A, E>
 
 const REFUSED = [
   ["env", "--env"],
@@ -65,7 +52,9 @@ const REFUSED = [
 type Away = { readonly machine: ListedMachine; readonly sessions: ReadonlyArray<SessionInfo> }
 
 const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const projectStore = yield* ProjectStore.Service
+  const sessionStore = yield* SessionStore.Service
+  const remoteStore = yield* RemoteStore.Service
   const machines = yield* Machines.Service
   const self = yield* Identity.Service
   const git = yield* Git.Service
@@ -82,65 +71,60 @@ const make = Effect.gen(function* () {
       Effect.provideService(Git.Service, git),
     )
 
-  const view = <R extends SessionInfo>(name: string, rows: ReadonlyArray<R>) =>
-    Effect.gen(function* () {
-      const shown = rows.filter((row) => row.address.id !== "")
-      const kinds = [...new Set(shown.map((row) => row.runtime))]
+  const view = <R extends SessionInfo>(name: string, rows: ReadonlyArray<R>) => machines.viewSessions(name, rows)
 
-      const views = new Map(
-        yield* Effect.forEach(
-          kinds,
-          (kind) =>
-            machines
-              .ensure(
-                name,
-                kind,
-                new Map(shown.flatMap((row) => (row.runtime === kind ? [[row.id, row.address.id] as const] : []))),
-              )
-              .pipe(Effect.map((found) => [kind, found] as const)),
-          { concurrency: "unbounded" },
-        ),
-      )
-
-      return rows.map((row): R => {
-        const found = row.address.id === "" ? undefined : views.get(row.runtime)
-        const terminal = found?.terminals.get(row.id)
-
-        return {
-          ...row,
-          id: addressed(name, row.id),
-          machine: name,
-          address: terminal === undefined ? { machine: name, id: "" } : { machine: "local", id: terminal.id },
-          ...(terminal === undefined && found?.note !== undefined && { view: found.note }),
-        }
-      })
-    })
-
-  const call = <A, E>(
-    machine: string,
-    project: string,
-    by: string,
-    f: (client: PipeClient, headers: Record<string, string>) => Effect.Effect<A, E>,
-  ) => Effect.flatMap(machines.link(machine), (link) => link.call(f(link.client, peerHeaders(self.id, project, by))))
+  const call = <A, E>(machine: string, project: string, by: string, f: (client: PipeClient) => Effect.Effect<A, E>) =>
+    Effect.flatMap(machines.link(machine), (link) =>
+      link.call(withHeaders(f(link.client), remoteHeaders(self.id, project, by))),
+    )
 
   const relay = Effect.fn("Remote.relay")(<A, E>(at: At, project: string, by: string, f: Forwarded<A, E>) =>
-    call(at.machine, project, by, (client, headers) => f(client, at, { headers })),
+    call(at.machine, project, by, (client) => f(client, at)),
   )
 
   return {
     relay,
 
     forward: Effect.fn("Remote.forward")(
-      <A extends { readonly id: string } | null, E>(at: At, project: string, by: string, f: Forwarded<A, E>) =>
-        Effect.map(relay(at, project, by, f), (row): A =>
-          row === null ? row : { ...row, id: addressed(at.machine, row.id) },
+      <A extends { readonly id: string; readonly machine?: string | undefined } | null, E>(
+        at: At,
+        project: string,
+        by: string,
+        f: Forwarded<A, E>,
+      ) => Effect.map(relay(at, project, by, f), (row): A => (row === null ? row : { ...row, machine: at.machine })),
+    ),
+
+    link: Effect.fn("Remote.link")(
+      (
+        machine: string,
+        edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>,
+      ) =>
+        Effect.flatMap(machines.link(machine), (link) =>
+          link.call(
+            withHeaders(link.client["server.remote"]["remote.link"]({ payload: { edges } }), remoteHeaders(self.id)),
+          ),
+        ),
+    ),
+
+    unlink: Effect.fn("Remote.unlink")(
+      (
+        machine: string,
+        edges: ReadonlyArray<{ readonly from: string; readonly to: string; readonly remote?: string | undefined }>,
+      ) =>
+        Effect.flatMap(machines.link(machine), (link) =>
+          link.call(
+            withHeaders(link.client["server.remote"]["remote.unlink"]({ payload: { edges } }), remoteHeaders(self.id)),
+          ),
         ),
     ),
 
     harnesses: Effect.fn("Remote.harnesses")((machine: string, provider: string | undefined) =>
       Effect.flatMap(machines.link(machine), (link) =>
         link.call(
-          link.client["Harnesses.List"](provider === undefined ? {} : { provider }, { headers: peerHeaders(self.id) }),
+          withHeaders(
+            link.client["server.harness"]["harness.list"]({ query: provider === undefined ? {} : { provider } }),
+            remoteHeaders(self.id),
+          ),
         ),
       ),
     ),
@@ -158,9 +142,13 @@ const make = Effect.gen(function* () {
               })
 
             return link.stream(
-              link.client["Project.Clone"](
-                { url: input.url, ...(input.directory !== undefined && { directory: input.directory }) },
-                { headers: peerHeaders(self.id) },
+              Stream.unwrap(
+                withHeaders(
+                  link.client["server.project"]["project.clone"]({
+                    payload: { url: input.url, ...(input.directory !== undefined && { directory: input.directory }) },
+                  }),
+                  remoteHeaders(self.id),
+                ),
               ),
             )
           }
@@ -177,7 +165,7 @@ const make = Effect.gen(function* () {
 
           const added = locateProject(dest).pipe(
             provided,
-            Effect.flatMap((at) => resolveProject(db, at)),
+            Effect.flatMap((at) => resolveProject(projectStore, at)),
             Effect.map((project) => ({ projectId: project.id, directory: project.directory })),
             Effect.mapError(failed),
           )
@@ -204,7 +192,9 @@ const make = Effect.gen(function* () {
           message: `${machine} runs a vibest that does not list agents; run vibest update there`,
         })
 
-      return yield* link.call(link.client["Agents.List"]({}, { headers: peerHeaders(self.id) }))
+      return yield* link.call(
+        withHeaders(link.client["server.agent"]["agent.list"]({ query: {} }), remoteHeaders(self.id)),
+      )
     }),
     worktrees: Effect.fn("Remote.worktrees")((machine: string, project: string | undefined) =>
       Effect.gen(function* () {
@@ -217,13 +207,16 @@ const make = Effect.gen(function* () {
           })
 
         return yield* link.call(
-          link.client["Worktree.List"](project === undefined ? {} : { project }, { headers: peerHeaders(self.id) }),
+          withHeaders(
+            link.client["server.worktree"]["worktree.list"]({ query: project === undefined ? {} : { project } }),
+            remoteHeaders(self.id),
+          ),
         )
       }),
     ),
 
     list: Effect.fn("Remote.list")(function* (scope: ListScope, by: string, stopped: boolean | undefined) {
-      if (Predicate.isTagged(scope, "Peer")) return { sessions: [], machines: [] }
+      if (Predicate.isTagged(scope, "Remote")) return { sessions: [], machines: [] }
 
       const each = yield* Effect.forEach(
         yield* machines.states,
@@ -232,9 +225,12 @@ const make = Effect.gen(function* () {
             ? Effect.succeed({ machine: info, sessions: [] })
             : link
                 .call(
-                  link.client.List(stopped === undefined ? {} : { stopped }, {
-                    headers: peerHeaders(self.id, scope.id, by),
-                  }),
+                  withHeaders(
+                    link.client["server.session"]["session.list"]({
+                      query: stopped === undefined ? {} : { stopped },
+                    }),
+                    remoteHeaders(self.id, scope.id, by),
+                  ),
                 )
                 .pipe(
                   Effect.matchEffect({
@@ -253,16 +249,39 @@ const make = Effect.gen(function* () {
       return { sessions: each.flatMap((e) => e.sessions), machines: each.map((e) => e.machine) }
     }),
 
-    get: Effect.fn("Remote.get")((at: At, project: string, by: string, p: PayloadOf<"Get">) =>
-      relay(at, project, by, (c, { id }, o) => c.Get({ ...p, id }, o)).pipe(
+    liveSessions: Effect.fn("Remote.liveSessions")(function* (machine: string, project: string) {
+      const link = yield* machines.link(machine)
+
+      return (yield* link.call(
+        withHeaders(
+          link.client["server.session"]["session.list"]({ query: {} }),
+          remoteHeaders(self.id, project, REMOTE_BY_USER),
+        ),
+      )).sessions
+    }),
+
+    get: Effect.fn("Remote.get")((at: At, project: string, by: string) =>
+      relay(at, project, by, (c, { id }) => c["server.session"]["session.get"]({ params: { id }, query: {} })).pipe(
         Effect.flatMap((row) => Effect.map(view(at.machine, [row]), (rows) => rows[0]!)),
       ),
     ),
 
-    peek: Effect.fn("Remote.peek")(function* (at: At, project: string, by: string, p: PayloadOf<"Peek">) {
-      const { text } = yield* relay(at, project, by, (c, { id }, o) => c.Peek({ ...p, id }, o))
+    peek: Effect.fn("Remote.peek")(function* (
+      at: At,
+      project: string,
+      by: string,
+      p: { readonly lines?: number | undefined },
+    ) {
+      const { text } = yield* relay(at, project, by, (c, { id }) =>
+        c["server.session"]["session.peek"]({
+          params: { id },
+          query: p.lines !== undefined ? { lines: p.lines } : {},
+        }),
+      )
 
-      const row = yield* relay(at, project, by, (c, { id }, o) => c.Get({ id }, o)).pipe(
+      const row = yield* relay(at, project, by, (c, { id }) =>
+        c["server.session"]["session.get"]({ params: { id }, query: {} }),
+      ).pipe(
         Effect.flatMap((row) => view(at.machine, [row])),
         Effect.map((rows) => rows[0]),
         Effect.orElseSucceed(() => undefined),
@@ -270,14 +289,14 @@ const make = Effect.gen(function* () {
 
       return {
         text,
-        ...(row !== undefined && row.address.id !== "" && { terminal: row.address.id }),
+        ...(row?.terminal !== null && row?.terminal !== undefined && { terminal: row.terminal }),
         ...(row?.view !== undefined && { view: row.view }),
       }
     }),
 
     spawn: Effect.fn("Remote.spawn")(function* (
       machine: string,
-      input: PayloadOf<"Spawn">,
+      input: SpawnPayload,
       from: { readonly project: string; readonly session: string },
     ) {
       const refused = REFUSED.flatMap(([key, flag]) => (input[key] !== undefined ? [flag] : []))
@@ -288,14 +307,14 @@ const make = Effect.gen(function* () {
       if (input.files !== undefined && input.files.length > 0) {
         const link = yield* machines.link(machine)
 
-        if (link.capabilities.peerSpawnFiles !== true)
+        if (link.capabilities.remoteSpawnFiles !== true)
           return yield* new MachineFailed({
             message: `${machine} runs a vibest that does not take --file; run vibest update there`,
           })
       }
 
-      const repositories = yield* db.project.projectRemote(from.project)
-      const directory = yield* db.project.projectDirectory(from.project)
+      const repositories = yield* projectStore.projectRemote(from.project)
+      const directory = yield* projectStore.projectDirectory(from.project)
 
       const folders =
         directory !== undefined
@@ -341,12 +360,12 @@ const make = Effect.gen(function* () {
 
       const capabilities = (yield* machines.link(machine)).capabilities
 
-      if (input.project !== undefined && capabilities.peerSpawnProject !== true)
+      if (input.project !== undefined && capabilities.remoteSpawnProject !== true)
         return yield* new MachineFailed({
           message: `${machine} runs a vibest that does not take --project; run vibest update on ${machine}`,
         })
 
-      if ("repositories" in sent && capabilities.peerSpawnRepositories !== true)
+      if ("repositories" in sent && capabilities.remoteSpawnRepositories !== true)
         return yield* new MachineFailed({
           message: `${machine} runs a vibest that does not take a project of several repositories; run vibest update on ${machine}`,
         })
@@ -359,9 +378,9 @@ const make = Effect.gen(function* () {
           ? undefined
           : yield* machines.ensure(machine, runtime, new Map(), true)
 
-      const spawned = yield* call(machine, from.project, from.session, (client, headers) =>
-        client["Peer.Spawn"](
-          {
+      const spawned = yield* call(machine, from.project, from.session, (client) =>
+        client["server.remote"]["remote.spawn"]({
+          payload: {
             ...sent,
             ...(input.project !== undefined && { project: input.project }),
             agent: input.agent,
@@ -374,12 +393,17 @@ const make = Effect.gen(function* () {
             request: input.request ?? randomId(),
             ...(input.files !== undefined && { files: input.files }),
           },
-          { headers },
-        ),
+        }),
       )
 
+      const machineRow = yield* remoteStore.machineNamed(machine)
+
+      if (machineRow !== undefined)
+        yield* sessionStore.linkSessions([{ from: from.session, to: spawned.session, remote: machineRow.remoteId }])
+
       return {
-        id: addressed(machine, spawned.session),
+        id: spawned.session,
+        machine,
         harness: spawned.harness,
         ...(spawned.provider !== undefined && { provider: spawned.provider }),
         ...(spawned.model !== undefined && { model: spawned.model }),
@@ -401,7 +425,9 @@ export const node = LayerNode.make({
   service: Service,
   layer: layer,
   deps: [
-    Db.node,
+    ProjectStore.node,
+    SessionStore.node,
+    RemoteStore.node,
     Git.node,
     Machines.node,
     Runtimes.node,

@@ -12,56 +12,42 @@ import {
   HarnessUnavailable,
   type HarnessId,
 } from "@vibest/schema/session"
-import {
-  Clock,
-  Context,
-  Crypto,
-  Deferred,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  Predicate,
-  Ref,
-  Schema,
-} from "effect"
+import { LayerNode } from "@vibest/util/layer-node"
+import { Clock, Context, Deferred, Effect, FileSystem, Layer, Option, Path, Predicate, Ref, Schema } from "effect"
+import { SecureRandom } from "effect/crypto"
 import { Hex } from "effect/encoding"
 
-import { definitionLaunch } from "../agent-launch.ts"
-import { Agents, unknownAgent } from "../agents.ts"
+import { definitionLaunch } from "../agent/launch.ts"
+import { Agents, unknownAgent } from "../agent/registry.ts"
 import {
   type NewSession,
   type ProcessStart,
   type SessionRow,
   harnessIdOf,
   runtimeOf,
-  terminalOf,
   archived,
-} from "../database/db-rows.ts"
-import { Db } from "../database/db.ts"
-import type { PeerStart } from "../database/remote.ts"
-import type { TeamStart } from "../database/session.ts"
-import { Drain } from "../drain.ts"
-import { LayerNode } from "../effect/layer-node.ts"
+} from "../database/rows.ts"
 import { PlatformNode } from "../effect/platform.ts"
-import { Git } from "../git.ts"
 import { harnessCatalog, harnessOptions, Harness, preflight } from "../harness.ts"
-import { Harnesses, unprovided } from "../harnesses.ts"
+import { Harnesses, unprovided } from "../harness/registry.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, safeRepositoryDirectory } from "../paths.ts"
 import { Plugins, type Routing } from "../plugin.ts"
 import { listProjectRepositories, type PinnedFolder } from "../project/create.ts"
 import * as Reactor from "../reactor.ts"
-import { sessionEnvelope } from "../replies.ts"
-import { machinesListing as machines, Runtimes } from "../runtimes.ts"
+import type { RemoteStart } from "../remote/sql.ts"
+import { Drain } from "../runtime/drain.ts"
+import { machinesListing as machines, Runtimes } from "../runtime/registry.ts"
 import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
+import { Git } from "../worktree/git.ts"
 import { directoryLock, SessionLocks } from "./locks.ts"
 import { Placement } from "./placement.ts"
+import { sessionEnvelope } from "./replies.ts"
 import { Starts } from "./starts.ts"
+import { SessionStore } from "./store.ts"
 
 export * as Spawn from "./spawn.ts"
 
-export class TeamRefused extends Schema.TaggedError<TeamRefused>()("TeamRefused", { message: Schema.String }) {}
+export class LinkRefused extends Schema.TaggedError<LinkRefused>()("LinkRefused", { message: Schema.String }) {}
 
 export const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
@@ -92,6 +78,20 @@ export const attachmentNames = (names: ReadonlyArray<string>) => {
 export const withAttachedFiles = (prompt: string, paths: ReadonlyArray<string>) =>
   paths.length === 0 ? prompt : `${prompt}${prompt.endsWith("\n") ? "\n" : "\n\n"}Attached files: ${paths.join(", ")}`
 
+export const resolveLiveTarget = (sessionStore: SessionStore.Interface, projectId: string) => (ref: string) =>
+  Effect.gen(function* () {
+    const id = yield* sessionStore.resolveSession(ref)
+    const row = yield* sessionStore.getSession(id)
+
+    if (row === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
+
+    if (row.projectId !== projectId) return yield* new LinkRefused({ message: `${id} belongs to another project` })
+
+    if (archived(row)) return yield* new NoSuchSession({ id, message: `${id} was archived` })
+
+    return id
+  })
+
 export interface SpawnInput {
   readonly machine: RuntimeMachine
   readonly root: string
@@ -109,9 +109,11 @@ export interface SpawnInput {
   readonly request?: string | undefined
   readonly commit?: string | undefined
   readonly folders?: ReadonlyArray<PinnedFolder> | undefined
-  readonly origin?: PeerStart | undefined
+  readonly origin?: RemoteStart | undefined
   readonly files?: ReadonlyArray<Attachment> | undefined
-  readonly team?: TeamStart | undefined
+  readonly from?: ReadonlyArray<string> | undefined
+  readonly to?: ReadonlyArray<string> | undefined
+  readonly with?: ReadonlyArray<string> | undefined
 }
 
 export interface Spawned extends Routing {
@@ -123,7 +125,7 @@ export interface Spawned extends Routing {
 }
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db.Service
+  const sessionStore = yield* SessionStore.Service
   const runtimes = yield* Runtimes.Service
   const harness = yield* Harness.Service
   const harnesses = yield* Harnesses.Service
@@ -133,7 +135,7 @@ export const make = Effect.gen(function* () {
   const layout = yield* Layout
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const crypto = yield* Crypto.Crypto
+  const secureRandom = yield* SecureRandom.SecureRandom
   const git = yield* Git.Service
   const scope = yield* Effect.scope
   const locks = yield* SessionLocks.Service
@@ -176,10 +178,10 @@ export const make = Effect.gen(function* () {
       return rt
     })
 
-  const shareOf = (input: SpawnInput, id: string, runtime: string, machineId: string) =>
+  const shareOf = (input: SpawnInput, id: string, runtime: string) =>
     Effect.gen(function* () {
       const refuse = (why: string) => new NoSuchSession({ id, message: `--share ${id}: ${why}` })
-      const p = yield* db.session.getSession(id)
+      const p = yield* sessionStore.getSession(id)
 
       if (!p) return yield* refuse(`no session ${id}`)
 
@@ -187,10 +189,7 @@ export const make = Effect.gen(function* () {
 
       if (archived(p)) return yield* refuse("it was archived")
 
-      if (runtimeOf(p) !== runtime || terminalOf(p).machine !== machineId)
-        return yield* refuse(
-          `ineligible: it runs in ${runtimeOf(p)} on ${terminalOf(p).machine}, not ${runtime} on ${machineId}`,
-        )
+      if (runtimeOf(p) !== runtime) return yield* refuse(`ineligible: it runs in ${runtimeOf(p)}, not ${runtime}`)
       const worktree = yield* worktreeOf(p).pipe(Effect.mapError((e) => refuse(e.message)))
 
       if (!(yield* fs.exists(worktree).pipe(Effect.orDie)))
@@ -217,20 +216,28 @@ export const make = Effect.gen(function* () {
       const ownLaunch = definitionLaunch(definition, input)
 
       const parent =
-        input.parentSessionId === undefined ? undefined : yield* db.session.getSession(input.parentSessionId)
+        input.parentSessionId === undefined ? undefined : yield* sessionStore.getSession(input.parentSessionId)
 
       const parentRuntime = parent === undefined ? undefined : runtimeOf(parent) || undefined
       const from = input.harness !== undefined || ownLaunch !== undefined ? undefined : parent
 
       const namedShare =
-        input.runtime === undefined && input.share !== undefined ? yield* db.session.getSession(input.share) : undefined
+        input.runtime === undefined && input.share !== undefined
+          ? yield* sessionStore.getSession(input.share)
+          : undefined
 
       const followedShare =
         namedShare !== undefined && namedShare.projectId === input.projectId && !archived(namedShare)
           ? namedShare
           : undefined
 
-      const id = yield* db.session.newSessionId
+      const resolveLink = resolveLiveTarget(sessionStore, input.projectId)
+
+      const fromLinks = yield* Effect.forEach(input.from ?? [], resolveLink)
+      const toLinks = yield* Effect.forEach(input.to ?? [], resolveLink)
+      const withLinks = yield* Effect.forEach(input.with ?? [], resolveLink)
+
+      const id = yield* sessionStore.newSessionId
       const attachments = input.files ?? []
       const sessionFolder = layout.sessionFolder(input.projectId, id)
       const filesFolder = path.join(sessionFolder, "files")
@@ -279,7 +286,7 @@ export const make = Effect.gen(function* () {
             Effect.provideService(Harness.Service, harness),
             Effect.provideService(Harnesses.Service, harnesses),
           ),
-          machine: { id: followedShare === undefined ? input.machine.id : terminalOf(followedShare).machine },
+          machine: { id: input.machine.id },
           runtime: followedShare === undefined ? input.runtime : runtimeOf(followedShare),
           parentRuntime,
           machines: yield* machinesListing,
@@ -362,7 +369,7 @@ export const make = Effect.gen(function* () {
           yield* fs.makeDirectory(parentPath, { recursive: true }).pipe(Effect.mapError((e) => refuse(e.message)))
 
           for (let i = 0; i < ALLOCATION_NAME_ATTEMPTS; i++) {
-            const candidate = Hex.encode(yield* crypto.randomBytes(2).pipe(Effect.orDie))
+            const candidate = Hex.encode(yield* secureRandom.randomBytes(2))
 
             if (!ALLOCATION_LEAF.test(candidate)) continue
             const where = layout.allocationWorktree(repository, candidate)
@@ -412,7 +419,7 @@ export const make = Effect.gen(function* () {
               model: model ?? null,
               harnessSessionId: adapter.ownSessionId ? yield* newId() : null,
               runtime: runtimeKind,
-              address: { machine: decision.machine.id, id: "" },
+              terminal: null,
               status: "unknown",
               startedAt: null,
               exitedAt: null,
@@ -429,7 +436,6 @@ export const make = Effect.gen(function* () {
               ...(model !== undefined && { model }),
               routing,
               runtime: runtimeKind,
-              terminal: "",
               ...(draft.harnessSessionId !== null && { resume: draft.harnessSessionId }),
             }
 
@@ -440,7 +446,7 @@ export const make = Effect.gen(function* () {
                 return locks
                   .withLock(id)(
                     onLock.pipe(
-                      Effect.andThen(db.session.getSession(id)),
+                      Effect.andThen(sessionStore.getSession(id)),
                       Effect.flatMap((row) => (row === undefined ? Effect.void : go(row))),
                     ),
                   )
@@ -457,35 +463,20 @@ export const make = Effect.gen(function* () {
                     folders: input.folders,
                   })
 
-                const inserted = yield* db.session.insertSession(draft, input.projectId, {
+                const inserted = yield* sessionStore.insertSession(draft, input.projectId, {
                   max: yield* starts.maxForNew,
                   cwd,
                   task,
                   parentSessionId: input.parentSessionId,
                   request: input.request,
                   origin: input.origin,
-                  team: input.team,
+                  links: { from: fromLinks, to: toLinks, with: withLinks },
                 })
 
                 if (inserted === "parent-ended")
                   return yield* new NoSuchSession({
                     id: input.parentSessionId!,
                     message: `${input.parentSessionId} has ended and can no longer start sessions`,
-                  })
-
-                if (Predicate.isObject(inserted) && "teamOwner" in inserted)
-                  return yield* new TeamRefused({
-                    message: `team ${inserted.team} is owned by ${inserted.teamOwner}, the session that created it; only it adds members`,
-                  })
-
-                if (Predicate.isObject(inserted) && "teamEnded" in inserted)
-                  return yield* new TeamRefused({
-                    message: `team ${inserted.teamEnded} has ended: none of its members is unfinished; start a new one with a bare --team`,
-                  })
-
-                if (Predicate.isObject(inserted) && "teamUnknown" in inserted)
-                  return yield* new TeamRefused({
-                    message: `no team ${inserted.teamUnknown} in this project; start one with a bare --team`,
                   })
 
                 if (inserted === "waiting") {
@@ -510,9 +501,9 @@ export const make = Effect.gen(function* () {
       const admitted =
         input.share === undefined
           ? yield* admit(undefined)
-          : yield* locks.withLock(directoryLock((yield* db.session.sessionDirectory(input.share)) ?? ""))(
+          : yield* locks.withLock(directoryLock((yield* sessionStore.sessionDirectory(input.share)) ?? ""))(
               Effect.gen(function* () {
-                const shared = yield* shareOf(input, input.share!, runtimeKind, decision.machine.id)
+                const shared = yield* shareOf(input, input.share!, runtimeKind)
 
                 return yield* admit(shared)
               }),
@@ -553,7 +544,7 @@ export const layer = Layer.effect(Service, make)
 
 export const deps = [
   Agents.node,
-  Db.node,
+  SessionStore.node,
   Drain.node,
   Git.node,
   Harness.node,
@@ -563,7 +554,7 @@ export const deps = [
   Runtimes.node,
   SessionLocks.node,
   Starts.node,
-  PlatformNode.crypto,
+  PlatformNode.secureRandom,
   PlatformNode.fileSystem,
   PlatformNode.layout,
   PlatformNode.path,

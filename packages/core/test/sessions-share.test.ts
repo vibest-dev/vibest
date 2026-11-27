@@ -1,25 +1,24 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/database/db"
-import { terminalOf, exitedAt } from "@vibest/core/database/db-rows"
-import { Integration } from "@vibest/core/integration"
+import { terminalOf, exitedAt } from "@vibest/core/database/rows"
+import { Integration } from "@vibest/core/harness/integration"
+import { SessionStore } from "@vibest/core/session/store"
+import { FakeProcesses } from "@vibest/testkit/fake-processes"
+import { FakeRuntime } from "@vibest/testkit/fake-runtime"
+import { until } from "@vibest/testkit/observe"
+import { makeRepository, type TestOptions } from "@vibest/testkit/session"
+import { spawnInput, idleSession, sessionWorktree, test } from "@vibest/testkit/sessions-helpers"
 import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
 import { TestClock } from "effect/testing"
-
-import { FakeProcesses } from "./lib/fake-processes.ts"
-import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until } from "./lib/observe.ts"
-import { makeRepository, type TestOptions } from "./lib/session.ts"
-import { spawnInput, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Session", () => {
   const sharersOfDirectory = (ownerId: string) =>
     Effect.gen(function* () {
-      const db = yield* Db.Service
-      const shared = yield* db.session.sessionDirectory(ownerId)
+      const sessionStore = yield* SessionStore.Service
+      const shared = yield* sessionStore.sessionDirectory(ownerId)
 
       return yield* Effect.filter(
-        (yield* db.session.listSessions({ stopped: true })).filter((s) => s.id !== ownerId),
-        (s) => db.session.sessionDirectory(s.id).pipe(Effect.map((d) => d === shared)),
+        (yield* sessionStore.listSessions({ stopped: true })).filter((s) => s.id !== ownerId),
+        (s) => sessionStore.sessionDirectory(s.id).pipe(Effect.map((d) => d === shared)),
       )
     })
 
@@ -29,18 +28,15 @@ describe.concurrent("Session", () => {
     const state = { armed: false }
 
     const options: TestOptions = {
-      db: (db) => ({
-        ...db,
-        session: {
-          ...db.session,
-          insertSession: (...args) =>
-            state.armed
-              ? Deferred.succeed(reached, undefined).pipe(
-                  Effect.andThen(Deferred.await(go)),
-                  Effect.andThen(db.session.insertSession(...args)),
-                )
-              : db.session.insertSession(...args),
-        },
+      sessionStore: (sessionStore) => ({
+        ...sessionStore,
+        insertSession: (...args) =>
+          state.armed
+            ? Deferred.succeed(reached, undefined).pipe(
+                Effect.andThen(Deferred.await(go)),
+                Effect.andThen(sessionStore.insertSession(...args)),
+              )
+            : sessionStore.insertSession(...args),
       }),
     }
 
@@ -75,7 +71,7 @@ describe.concurrent("Session", () => {
         )
 
         yield* parked.reached
-        const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
+        const archiving = yield* Effect.forkChild(owner.sessions.archive(owner.id))
 
         const listed = yield* Effect.race(
           cwd.reached.pipe(Effect.as(true)),
@@ -128,7 +124,7 @@ describe.concurrent("Session", () => {
 
         yield* split.reached
         const admitted = yield* Fiber.join(spawning)
-        const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
+        const archiving = yield* Effect.forkChild(owner.sessions.archive(owner.id))
         yield* until(
           Effect.sync(() => archiving.pollUnsafe()),
           (exit) => exit !== undefined,
@@ -139,7 +135,7 @@ describe.concurrent("Session", () => {
         assert.isTrue(yield* fs.exists(worktree))
       }).pipe(Effect.ensuring(split.release().pipe(Effect.ignore)))
       yield* until(
-        owner.db.session.getSession((yield* sharersOfDirectory(owner.id))[0]!.id),
+        owner.sessionStore.getSession((yield* sharersOfDirectory(owner.id))[0]!.id),
         (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
       )
     }),
@@ -158,13 +154,13 @@ describe.concurrent("Session", () => {
       const worktree = yield* sessionWorktree(owner.id)
       const mid = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id })
       yield* until(
-        owner.db.session.getSession(mid.id),
+        owner.sessionStore.getSession(mid.id),
         (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
       )
       const midPane = (yield* herdr.agent(mid.id))!.terminal
       yield* herdr.runtime.close({ id: midPane })
-      yield* owner.db.session.endProcess(mid.id, "exited")
-      yield* owner.db.session.setStatus(mid.id, "unknown")
+      yield* owner.sessionStore.endProcess(mid.id, "exited")
+      yield* owner.sessionStore.setStatus(mid.id, "unknown")
       yield* parkedBehindShare.arm
       const cwd = yield* processes.holdCwd()
       const split = yield* herdr.hold("open")
@@ -176,7 +172,7 @@ describe.concurrent("Session", () => {
       yield* Effect.gen(function* () {
         const spawning = yield* Effect.forkChild(owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: mid.id }))
         yield* parkedBehindShare.reached
-        const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
+        const archiving = yield* Effect.forkChild(owner.sessions.archive(owner.id))
 
         const listed = yield* Effect.race(
           cwd.reached.pipe(Effect.as(true)),
@@ -223,7 +219,7 @@ describe.concurrent("Session", () => {
       const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo, "claude")), share: owner.id })
       yield* held.reached
       yield* held.release("failed")
-      yield* until(owner.db.session.getSession(id), (w) => !!w && exitedAt(w) !== null)
+      yield* until(owner.sessionStore.getSession(id), (w) => !!w && exitedAt(w) !== null)
 
       const newCloses = (yield* herdr.callsTo("close"))
         .map((c) => c.terminal)
@@ -234,17 +230,17 @@ describe.concurrent("Session", () => {
       assert.isTrue(yield* fs.exists(worktree))
       assert.strictEqual((yield* herdr.callsTo("open")).length, created + 1)
       assert.strictEqual(
-        yield* owner.db.session.sessionDirectory(id),
-        yield* owner.db.session.sessionDirectory(owner.id),
+        yield* owner.sessionStore.sessionDirectory(id),
+        yield* owner.sessionStore.sessionDirectory(owner.id),
       )
       yield* owner.sessions.send(id, "start again")
       const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === created + 2)
       const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
       yield* until(
-        owner.db.session.getSession(id),
-        (w) => w !== undefined && exitedAt(w) === null && terminalOf(w).id !== "",
+        owner.sessionStore.getSession(id),
+        (w) => w !== undefined && exitedAt(w) === null && terminalOf(w) !== null,
       )
-      assert.strictEqual(yield* owner.db.session.currentProcessId(id), reporter)
+      assert.strictEqual(yield* owner.sessionStore.currentProcessId(id), reporter)
       assert.strictEqual(yield* (yield* Integration.Service).ready(id, 4242, undefined, reporter), reporter)
     }),
   )

@@ -1,0 +1,31 @@
+{
+  "name": "@vibest/testkit",
+  "version": "0.0.2-dev",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/sql-sqlite-bun": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@vibest/client": "workspace:*",
+    "@vibest/codemode": "workspace:*",
+    "@vibest/core": "workspace:*",
+    "@vibest/mcp": "workspace:*",
+    "@vibest/platform-bun": "workspace:*",
+    "@vibest/plugin": "workspace:*",
+    "@vibest/plugin-builtins": "workspace:*",
+    "@vibest/protocol": "workspace:*",
+    "@vibest/runtime-herdr": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "@vibest/server": "workspace:*",
+    "@vibest/util": "workspace:*",
+    "effect": "catalog:"
+  }
+}
