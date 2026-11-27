@@ -1,5 +1,6 @@
 import { assert } from "@effect/vitest"
 import { Concurrency } from "@vibest/core/runtime/concurrency"
+import { Reconcile } from "@vibest/core/session/reconcile"
 import { Starts } from "@vibest/core/session/starts"
 import { FakeRuntime } from "@vibest/testkit/fake-runtime"
 import { until } from "@vibest/testkit/observe"
@@ -65,3 +66,23 @@ for (const mode of ["direct", "plugin", "failed-close", "waiting"])
     }),
     { hooked: ["pi", "pulling-pi", "claude"] },
   )
+
+test(
+  "startup reconcile settles before test setup and spawnWorking seeds test/coord before startRoot",
+  Effect.gen(function* () {
+    const repo = yield* makeRepository
+    const { sessions, entryId } = yield* idleSession(repo)
+    assert.isAtLeast((yield* sessions.inMemory).reconciles, 1)
+    const reconcile = yield* Reconcile.Service
+    yield* reconcile.check(entryId)
+    const concurrency = yield* Concurrency.Service
+    yield* concurrency.configure([{ max: 2 }])
+    const starts = yield* Starts.Service
+    const spawn = yield* spawnInput(repo)
+    const { id: b } = yield* sessions.spawn({ ...spawn, name: "B" })
+    const { id: c } = yield* sessions.spawn({ ...spawn, name: "C" })
+    yield* until(starts.waiting, (ids) => ids.join() === [b, c].join())
+    assert.deepStrictEqual(yield* starts.waiting, [b, c])
+  }),
+  { hooked: ["pi", "pulling-pi", "claude"] },
+)

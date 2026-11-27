@@ -76,6 +76,7 @@ export const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
     const sessions = yield* Session.Service
     const sessionStore = yield* SessionStore.Service
     const inboxStore = yield* InboxStore.Service
+    yield* (yield* FakeRuntime).seedAgent("test/coord")
     const { id } = yield* sessions.spawn(yield* spawnInput(repo, harness))
 
     yield* until(
@@ -83,7 +84,6 @@ export const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
       (w) => !!w && ((w.process?.placedAt ?? null) !== null || exitedAt(w) !== null),
     )
     yield* sessions.check(id)
-    yield* (yield* FakeRuntime).seedAgent("test/coord")
     yield* settled
     const row = (yield* sessionStore.getSession(id))!
 

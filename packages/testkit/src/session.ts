@@ -24,6 +24,7 @@ import { Runtimes, make as makeRuntimes } from "@vibest/core/runtime/registry"
 import { Session } from "@vibest/core/session"
 import { Archive } from "@vibest/core/session/archive"
 import { SessionLive } from "@vibest/core/session/live"
+import { Reconcile } from "@vibest/core/session/reconcile"
 import { Sends } from "@vibest/core/session/sends"
 import { SessionStore } from "@vibest/core/session/store"
 import { Summaries } from "@vibest/core/session/summaries"
@@ -66,6 +67,7 @@ import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime, type FakeRuntimeOptions } from "./fake-runtime.ts"
 import { harnessLayer, harnessesLayer, noHostEnv } from "./harnesses.ts"
 import { compile, fakeGit, fakeProcesses, fakeRuntime, platform } from "./layers.ts"
+import { until } from "./observe.ts"
 
 export const runtimeNode = fakeRuntime()
 
@@ -200,6 +202,17 @@ const readyOnStart = LayerNode.make({
   deps: [runtimeNode, SessionStore.node, Harnesses.node],
 })
 
+const startupReconciled = LayerNode.make({
+  name: "test/StartupReconciled",
+  layer: Layer.effectDiscard(
+    Effect.gen(function* () {
+      const reconcile = yield* Reconcile.Service
+      yield* until(reconcile.reconciles, (n) => n >= 1).pipe(Effect.orDie)
+    }),
+  ),
+  deps: [Reconcile.node],
+})
+
 const noTransport: Machines.MachineTransport["Service"] = () =>
   Effect.fail(new Error("no machine transport in this test"))
 
@@ -312,6 +325,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       plugins,
       Agents.node,
       readyOnStart,
+      startupReconciled,
     ]),
     [
       PlatformNode.layout.replace(home),
