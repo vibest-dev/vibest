@@ -1,4 +1,4 @@
-import { type AgentMcpScope, sessionMcpScope } from "@vibest/core/agent/mcp-scope"
+import { type AgentMcpScope, mcpDisallowedMessage, sessionMcpScope } from "@vibest/core/agent/mcp-scope"
 import { Agents } from "@vibest/core/agent/registry"
 import { callerTarget, filterCallerEnv } from "@vibest/core/caller"
 import { locateProject, resolveProject } from "@vibest/core/project/identity"
@@ -137,7 +137,7 @@ export const make = Effect.gen(function* () {
         ? Effect.fail(
             new Forbidden({
               method,
-              message: `agent "${current.value.agent}" does not allow MCP server "${server}"`,
+              message: mcpDisallowedMessage(current.value.agent, server),
             }),
           )
         : Effect.void,

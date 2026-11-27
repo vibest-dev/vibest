@@ -553,6 +553,9 @@ importers:
       effect:
         specifier: 4.1.5
         version: 4.1.5
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   packages/plugin-harnesses:
     dependencies:

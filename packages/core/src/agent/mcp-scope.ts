@@ -8,6 +8,9 @@ export interface AgentMcpScope {
   readonly allowed: ReadonlySet<string>
 }
 
+export const mcpDisallowedMessage = (agent: string, server: string) =>
+  `agent "${agent}" does not allow MCP server "${server}"`
+
 export const sessionMcpScope = (
   sessionStore: SessionStore.Interface,
   agents: Agents.Interface,

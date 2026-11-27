@@ -1,3 +1,4 @@
+import { type AgentMcpScope, mcpDisallowedMessage } from "@vibest/core/agent/mcp-scope"
 import { CodeMode } from "@vibest/core/codemode"
 import { ToolOutput } from "@vibest/core/tool-output"
 import { VibestApi } from "@vibest/protocol/api"
@@ -38,6 +39,22 @@ const extractCallerHeaders = (headers: Headers.Headers): Record<string, string> 
   return CALLER_HEADER in out ? out : undefined
 }
 
+const assertAllowedServers = (
+  scope: Option.Option<AgentMcpScope>,
+  method: string,
+  servers: ReadonlyArray<string> | undefined,
+): Effect.Effect<void, Forbidden> => {
+  if (Option.isNone(scope) || servers === undefined) return Effect.void
+
+  for (const server of servers) {
+    if (server !== VIBEST_NAMESPACE && !scope.value.allowed.has(server)) {
+      return Effect.fail(new Forbidden({ method, message: mcpDisallowedMessage(scope.value.agent, server) }))
+    }
+  }
+
+  return Effect.void
+}
+
 export const CodeModeHandler = HttpApiBuilder.group(VibestApi, "server.codemode", (handlers) =>
   Effect.gen(function* () {
     const codemode = yield* CodeMode.Service
@@ -48,17 +65,7 @@ export const CodeModeHandler = HttpApiBuilder.group(VibestApi, "server.codemode"
       .handle("codemode.execute", ({ payload }) =>
         Effect.gen(function* () {
           const scope = yield* checks.mcpScope
-
-          if (Option.isSome(scope) && payload.servers !== undefined) {
-            for (const server of payload.servers) {
-              if (server !== VIBEST_NAMESPACE && !scope.value.allowed.has(server)) {
-                return yield* new Forbidden({
-                  method: "codemode.execute",
-                  message: `agent "${scope.value.agent}" does not allow MCP server "${server}"`,
-                })
-              }
-            }
-          }
+          yield* assertAllowedServers(scope, "codemode.execute", payload.servers)
 
           const request = yield* HttpServerRequest.HttpServerRequest
           const headers = extractCallerHeaders(request.headers)
@@ -74,16 +81,15 @@ export const CodeModeHandler = HttpApiBuilder.group(VibestApi, "server.codemode"
       )
       .handle("codemode.declarations", ({ query }) =>
         Effect.gen(function* () {
-          if (query.server !== undefined && query.server !== VIBEST_NAMESPACE) {
-            yield* checks.requireMcpServer("codemode.declarations", query.server)
-          }
-
           const scope = yield* checks.mcpScope
+          const servers = query.server !== undefined ? [query.server] : undefined
+          yield* assertAllowedServers(scope, "codemode.declarations", servers)
+
           const allowedExternalServers = Option.isSome(scope) ? [...scope.value.allowed] : undefined
 
           return yield* codemode.declarations({
             directory: query.directory,
-            ...(query.server !== undefined && { servers: [query.server] }),
+            ...(servers !== undefined && { servers }),
             ...(allowedExternalServers !== undefined && { allowedExternalServers }),
           })
         }),

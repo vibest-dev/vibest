@@ -1,4 +1,6 @@
 import type { AgentDefinition, InvalidAgent } from "@vibest/plugin/effect"
+import { Predicate } from "effect"
+import { isMap, isScalar, isSeq, parseDocument, type ParsedNode, type YAMLMap } from "yaml"
 
 export interface AgentFile {
   readonly name: string
@@ -18,9 +20,11 @@ const isKey = (key: string): key is Key => KEY_SET.has(key)
 
 const FILE_ID = /^[a-z][a-z0-9-]{0,31}$/
 
-const NAMED_ENTRY = /^([A-Za-z0-9._-]+|['"][^'"]+['"])\s*:\s*(.*)$/
+const ANONYMOUS_INLINE_WARNING =
+  "inline mcpServers object entry is ignored; list server names configured with vibest mcp add"
 
-const INLINE_NAMED_OBJECT = /^\{\s*([A-Za-z0-9._-]+|['"][^'"]+['"])\s*:\s*\{[\s\S]*\}\s*\}$/
+const inlineIgnoredWarning = (name: string) =>
+  `inline mcpServers config for "${name}" is ignored; configure it centrally with vibest mcp add`
 
 interface Failed {
   readonly error: string
@@ -36,7 +40,16 @@ interface Parsed {
   readonly body: string
 }
 
-const unquoted = (value: string) => value.trim().replace(/^(['"])(.*)\1$/, "$2")
+interface FrontmatterResult {
+  readonly fields: Partial<Record<ScalarKey, string>>
+  readonly mcpServers: ReadonlyArray<string> | undefined
+  readonly warnings: ReadonlyArray<string>
+}
+
+interface CollectedMcpServers {
+  readonly mcpServers: ReadonlyArray<string>
+  readonly warnings: ReadonlyArray<string>
+}
 
 const addUnique = (list: Array<string>, seen: Set<string>, name: string) => {
   const cleaned = name.trim()
@@ -46,77 +59,28 @@ const addUnique = (list: Array<string>, seen: Set<string>, name: string) => {
   list.push(cleaned)
 }
 
-const inlineIgnoredWarning = (name: string) =>
-  `inline mcpServers config for "${name}" is ignored; configure it centrally with vibest mcp add`
+const isNullNode = (node: ParsedNode | null | undefined): boolean =>
+  node === null || node === undefined || (isScalar(node) && (node.value === null || node.value === undefined))
 
-const ANONYMOUS_INLINE_WARNING =
-  "inline mcpServers object entry is ignored; list server names configured with vibest mcp add"
+const collectMapNode = (
+  map: YAMLMap<ParsedNode, ParsedNode | null>,
+  servers: Array<string>,
+  seen: Set<string>,
+  warnings: Array<string>,
+) => {
+  const isNamedServerMap =
+    map.items.length > 0 &&
+    map.items.every(
+      (pair) =>
+        isScalar(pair.key) && Predicate.isString(pair.key.value) && (isNullNode(pair.value) || isMap(pair.value)),
+    )
 
-const splitInlineItems = (content: string): ReadonlyArray<string> => {
-  const items: Array<string> = []
-  let start = 0
-  let braceDepth = 0
-  let bracketDepth = 0
-  let quote: string | undefined
-
-  for (let i = 0; i < content.length; i++) {
-    const ch = content[i]!
-
-    if (quote !== undefined) {
-      if (ch === "\\" && i + 1 < content.length) {
-        i++
-        continue
-      }
-
-      if (ch === quote) quote = undefined
-      continue
+  if (isNamedServerMap) {
+    for (const pair of map.items) {
+      if (!isScalar(pair.key) || !Predicate.isString(pair.key.value)) continue
+      addUnique(servers, seen, pair.key.value)
+      warnings.push(inlineIgnoredWarning(pair.key.value))
     }
-
-    if (ch === '"' || ch === "'") {
-      quote = ch
-      continue
-    }
-
-    if (ch === "{") {
-      braceDepth++
-      continue
-    }
-
-    if (ch === "}") {
-      braceDepth = Math.max(0, braceDepth - 1)
-      continue
-    }
-
-    if (ch === "[") {
-      bracketDepth++
-      continue
-    }
-
-    if (ch === "]") {
-      bracketDepth = Math.max(0, bracketDepth - 1)
-      continue
-    }
-
-    if (ch === "," && braceDepth === 0 && bracketDepth === 0) {
-      items.push(content.slice(start, i).trim())
-      start = i + 1
-    }
-  }
-
-  const tail = content.slice(start).trim()
-
-  if (tail !== "" || items.length > 0) items.push(tail)
-
-  return items
-}
-
-const parseInlineObjectEntry = (entry: string, servers: Array<string>, seen: Set<string>, warnings: Array<string>) => {
-  const named = INLINE_NAMED_OBJECT.exec(entry)
-
-  if (named !== null) {
-    const name = unquoted(named[1]!)
-    addUnique(servers, seen, name)
-    warnings.push(inlineIgnoredWarning(name))
 
     return
   }
@@ -124,211 +88,104 @@ const parseInlineObjectEntry = (entry: string, servers: Array<string>, seen: Set
   warnings.push(ANONYMOUS_INLINE_WARNING)
 }
 
-interface InlineMcpServersResult {
-  readonly mcpServers: ReadonlyArray<string> | undefined
-  readonly warnings: ReadonlyArray<string>
-}
-
-interface BlockMcpServersResult {
-  readonly nextIndex: number
-  readonly mcpServers: ReadonlyArray<string>
-  readonly warnings: ReadonlyArray<string>
-}
-
-const parseInlineMcpServers = (rest: string): InlineMcpServersResult => {
+const collectMcpServers = (node: ParsedNode | null | undefined): CollectedMcpServers => {
+  const servers: Array<string> = []
+  const seen = new Set<string>()
   const warnings: Array<string> = []
 
-  if (rest.startsWith("[")) {
-    if (!rest.endsWith("]")) {
-      warnings.push('malformed mcpServers list; expected closing "]"')
+  if (isNullNode(node)) return { mcpServers: servers, warnings }
 
-      return { mcpServers: undefined, warnings }
-    }
-
-    const inner = rest.slice(1, -1).trim()
-
-    if (inner === "") return { mcpServers: [], warnings }
-
-    const servers: Array<string> = []
-    const seen = new Set<string>()
-
-    for (const rawItem of splitInlineItems(inner)) {
-      if (rawItem === "") continue
-
-      if (rawItem.startsWith("{")) {
-        parseInlineObjectEntry(rawItem, servers, seen, warnings)
+  if (isSeq(node)) {
+    for (const item of node.items) {
+      if (isNullNode(item)) {
+        warnings.push("ignoring empty mcpServers entry")
         continue
       }
 
-      addUnique(servers, seen, unquoted(rawItem))
+      if (isScalar(item) && Predicate.isString(item.value)) {
+        const cleaned = item.value.trim()
+
+        if (cleaned === "") warnings.push("ignoring empty mcpServers entry")
+        else addUnique(servers, seen, cleaned)
+        continue
+      }
+
+      if (isMap(item)) {
+        collectMapNode(item, servers, seen, warnings)
+        continue
+      }
+
+      warnings.push(`ignoring unsupported mcpServers entry ${JSON.stringify(item.toJSON())}`)
     }
 
     return { mcpServers: servers, warnings }
   }
 
-  if (rest.startsWith("{")) {
-    const servers: Array<string> = []
-    const seen = new Set<string>()
-    parseInlineObjectEntry(rest, servers, seen, warnings)
+  if (isMap(node)) {
+    collectMapNode(node, servers, seen, warnings)
 
-    return { mcpServers: servers.length > 0 ? servers : undefined, warnings }
+    return { mcpServers: servers, warnings }
   }
 
-  warnings.push(`mcpServers must be a list of server names; ignoring ${JSON.stringify(rest)}`)
+  if (isScalar(node)) {
+    warnings.push(`mcpServers must be a list of server names; ignoring ${JSON.stringify(node.value)}`)
 
-  return { mcpServers: undefined, warnings }
-}
-
-const consumeNestedLines = (lines: ReadonlyArray<string>, start: number, parentIndent: number) => {
-  let index = start
-  let hasNested = false
-
-  while (index < lines.length) {
-    const line = lines[index]!
-    const trimmed = line.trim()
-
-    if (trimmed === "") {
-      index++
-      continue
-    }
-
-    const indent = line.search(/\S/)
-
-    if (indent <= parentIndent) break
-    hasNested = true
-    index++
+    return { mcpServers: servers, warnings }
   }
 
-  return { nextIndex: index, hasNested }
+  warnings.push("mcpServers must be a list of server names")
+
+  return { mcpServers: servers, warnings }
 }
 
-const parseBlockMcpServers = (lines: ReadonlyArray<string>, start: number): BlockMcpServersResult => {
-  const servers: Array<string> = []
-  const seen = new Set<string>()
-  const warnings: Array<string> = []
-  let index = start
+const frontmatter = (lines: ReadonlyArray<string>): FrontmatterResult | Failed => {
+  const source = lines.join("\n")
 
-  while (index < lines.length) {
-    const line = lines[index]!
-    const trimmed = line.trim()
+  if (source.trim() === "") return { fields: {}, mcpServers: undefined, warnings: [] }
 
-    if (trimmed === "") {
-      index++
-      continue
-    }
+  const doc = parseDocument(source, { uniqueKeys: false })
 
-    const indent = line.search(/\S/)
-
-    if (indent === 0) break
-
-    if (trimmed.startsWith("#")) {
-      index++
-      continue
-    }
-
-    const listMatch = /^-(?:\s+(.*))?$/.exec(trimmed)
-
-    if (listMatch !== null) {
-      const itemRest = (listMatch[1] ?? "").trim()
-      const nested = consumeNestedLines(lines, index + 1, indent)
-      index = nested.nextIndex
-
-      if (itemRest === "") {
-        warnings.push(nested.hasNested ? ANONYMOUS_INLINE_WARNING : "ignoring empty mcpServers entry")
-        continue
-      }
-
-      if (itemRest.startsWith("{")) {
-        parseInlineObjectEntry(itemRest, servers, seen, warnings)
-        continue
-      }
-
-      const named = NAMED_ENTRY.exec(itemRest)
-
-      if (named !== null) {
-        const name = unquoted(named[1]!)
-        addUnique(servers, seen, name)
-        warnings.push(inlineIgnoredWarning(name))
-        continue
-      }
-
-      const name = unquoted(itemRest)
-      addUnique(servers, seen, name)
-
-      if (nested.hasNested) warnings.push(inlineIgnoredWarning(name))
-      continue
-    }
-
-    const nested = consumeNestedLines(lines, index + 1, indent)
-    index = nested.nextIndex
-
-    const named = NAMED_ENTRY.exec(trimmed)
-
-    if (named !== null) {
-      const name = unquoted(named[1]!)
-      addUnique(servers, seen, name)
-      warnings.push(inlineIgnoredWarning(name))
-      continue
-    }
-
-    warnings.push(`ignoring unsupported mcpServers entry ${JSON.stringify(trimmed)}`)
+  if (doc.errors.length > 0) {
+    return failed(`the frontmatter is not valid YAML: ${doc.errors[0]!.message}`)
   }
 
-  return { nextIndex: index, mcpServers: servers, warnings }
-}
+  if (!isMap(doc.contents)) {
+    return failed("the frontmatter must be a key: value mapping")
+  }
 
-const frontmatter = (
-  lines: ReadonlyArray<string>,
-):
-  | {
-      readonly fields: Partial<Record<ScalarKey, string>>
-      readonly mcpServers: ReadonlyArray<string> | undefined
-      readonly warnings: ReadonlyArray<string>
-    }
-  | Failed => {
   const fields: Partial<Record<ScalarKey, string>> = {}
   const warnings: Array<string> = []
   let mcpServers: ReadonlyArray<string> | undefined
   let mcpServersSeen = false
 
-  for (let i = 0; i < lines.length;) {
-    const line = lines[i]!
-
-    if (line.trim() === "") {
-      i++
-      continue
+  for (const pair of doc.contents.items) {
+    if (!isScalar(pair.key) || !Predicate.isString(pair.key.value)) {
+      return failed("the frontmatter keys must be strings")
     }
 
-    const match = /^([A-Za-z][\w-]*):(.*)$/.exec(line)
-
-    if (match === null) return failed(`the frontmatter line ${JSON.stringify(line)} is not key: value`)
-    const key = match[1]!
+    const key = pair.key.value
 
     if (!isKey(key)) return failed(`unknown key ${key}; the keys are ${KEYS.join(", ")}`)
 
     if (key === "mcpServers") {
       if (mcpServersSeen) return failed("mcpServers is given twice")
       mcpServersSeen = true
-      const rest = match[2]!.trim()
-
-      if (rest === "") {
-        const block = parseBlockMcpServers(lines, i + 1)
-        mcpServers = block.mcpServers
-        warnings.push(...block.warnings)
-        i = block.nextIndex
-      } else {
-        const inline = parseInlineMcpServers(rest)
-        mcpServers = inline.mcpServers
-        warnings.push(...inline.warnings)
-        i++
-      }
-
+      const collected = collectMcpServers(pair.value)
+      mcpServers = collected.mcpServers
+      warnings.push(...collected.warnings)
       continue
     }
 
     if (fields[key] !== undefined) return failed(`${key} is given twice`)
-    fields[key] = unquoted(match[2]!)
-    i++
+
+    if (isNullNode(pair.value)) {
+      fields[key] = ""
+      continue
+    }
+
+    if (!isScalar(pair.value)) return failed(`${key} must be a string`)
+
+    fields[key] = String(pair.value.value).trim()
   }
 
   return { fields, mcpServers, warnings }

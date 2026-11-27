@@ -1,7 +1,7 @@
 import type { Automation } from "@vibest/schema/automation"
 import { Clock, Duration, Effect, FiberMap, Option, Predicate, Result, Stream } from "effect"
 
-import type { AgentMcpScope } from "../agent/mcp-scope.ts"
+import { type AgentMcpScope, mcpDisallowedMessage } from "../agent/mcp-scope.ts"
 import type { Mcp } from "../mcp.ts"
 import { AutomationEventStream } from "./event.ts"
 import type { ExecuteOptions } from "./execute.ts"
@@ -78,7 +78,7 @@ export const createWatchManager = ({
           const scope = yield* resolveMcpScope(row.sessionId)
 
           if (Option.isSome(scope) && !scope.value.allowed.has(trigger.server)) {
-            yield* pauseWith(row, now, `agent "${scope.value.agent}" does not allow MCP server "${trigger.server}"`, {
+            yield* pauseWith(row, now, mcpDisallowedMessage(scope.value.agent, trigger.server), {
               lastRunAt: now,
             })
 

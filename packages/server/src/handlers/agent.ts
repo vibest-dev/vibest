@@ -38,10 +38,7 @@ export const AgentHandler = HttpApiBuilder.group(VibestApi, "server.agent", (han
 
           const directory = header(REPOSITORY_HEADER) ?? header(CWD_HEADER)
           const configured = yield* mcp.list(directory)
-
-          const configuredByName = new Map<string, (typeof configured)[number]>(
-            configured.map((server) => [server.name, server]),
-          )
+          const configuredByName = new Map(configured.map((server) => [String(server.name), server]))
 
           return {
             agents: agents.all.map(
@@ -54,7 +51,7 @@ export const AgentHandler = HttpApiBuilder.group(VibestApi, "server.agent", (han
 
                     if (info === undefined) {
                       combinedWarnings.push(`mcpServers entry "${name}" is not configured in vibest mcp`)
-                    } else if (info.disabled === true || info.status.status === "disabled") {
+                    } else if (info.disabled === true) {
                       combinedWarnings.push(`mcpServers entry "${name}" is disabled in vibest mcp`)
                     }
                   }
