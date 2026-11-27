@@ -3,7 +3,7 @@ import { checking, focused, nextCommand, run } from "herdr"
 
 import { projectGroups } from "../../shared/project-groups.ts"
 import { isProjectTab } from "../../shared/project-space.ts"
-import { followProjects, openProject, previousProject, selectedProject } from "../../shared/session-ui.ts"
+import { followProjects, openProject, previousProject, seeFinished, selectedProject } from "../../shared/session-ui.ts"
 import { themeColors } from "../../shared/theme-colors.ts"
 import { VibestFeed } from "../../shared/vibest-source.ts"
 import { type ProjectsUi, ProjectsView } from "./view.ts"
@@ -72,7 +72,10 @@ export default class Projects extends View implements ProjectsUi {
 
     this.selected = selectedProject(groups)
 
-    if (!checking()) followProjects(groups, this.cx)
+    if (!checking()) {
+      followProjects(groups, this.cx)
+      seeFinished(state.sessions)
+    }
 
     return new ProjectsView(themeColors(), this).render(groups, state.note)
   }

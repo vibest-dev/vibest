@@ -142,3 +142,13 @@ export const groupAgents = (group: ProjectGroup): AgentRow[] => {
 
   return agentTree(group.members.flatMap((m) => (m === primary || !m.main ? m.sessions : [m.main, ...m.sessions])))
 }
+
+export const extraLinks = (session: VibestSession, sessions: readonly VibestSession[]): string[] => {
+  const tree = new Set(sessions.flatMap((s) => (s.parentId === session.id ? [s.id] : [])))
+
+  if (session.parentId !== null) tree.add(session.parentId)
+
+  const names = new Map(sessions.map((s) => [s.id, s.name]))
+
+  return session.to.flatMap((id) => (tree.has(id) ? [] : [names.get(id) ?? id.slice(0, 8)]))
+}

@@ -3,11 +3,11 @@ import { div, type Element, svg } from "gpui-kit"
 
 import { icon } from "../../shared/icon-button.ts"
 import { liveMetrics } from "../../shared/live-metrics.ts"
-import { type AgentRow, groupAgents, type ProjectGroup } from "../../shared/project-groups.ts"
+import { type AgentRow, extraLinks, groupAgents, type ProjectGroup } from "../../shared/project-groups.ts"
 import { showSession, statusMark } from "../../shared/session-ui.ts"
 import { SMALL, TEXT } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
-import { LOCAL, type VibestState } from "../../shared/vibest-model.ts"
+import { LOCAL, type VibestSession, type VibestState } from "../../shared/vibest-model.ts"
 
 export const projectAgents = (group: ProjectGroup | undefined): AgentRow[] => (group ? groupAgents(group) : [])
 
@@ -16,8 +16,10 @@ export const shownGroup = (groups: readonly ProjectGroup[], selected: string | n
 
 const machineLabel = (machine: string): string => (machine === LOCAL ? "This machine" : machine)
 
-const agentRow = (t: Theme, { session: s, depth }: AgentRow, now: number): Element =>
-  v_flex()
+const agentRow = (t: Theme, { session: s, depth }: AgentRow, now: number, all: readonly VibestSession[]): Element => {
+  const links = extraLinks(s, all)
+
+  return v_flex()
     .id(`agent-${s.machine}-${s.id}`)
     .pl(8 + depth * 16)
     .pr(8)
@@ -51,6 +53,16 @@ const agentRow = (t: Theme, { session: s, depth }: AgentRow, now: number): Eleme
         .child(div().flex_none().child(machineLabel(s.machine)))
         .child(div().flex_1().min_w(0).truncate().child(s.branch)),
     )
+    .when(links.length > 0, (el) =>
+      el.child(
+        div()
+          .truncate()
+          .text_size(SMALL())
+          .text_color(t.dim)
+          .child(`→ ${links.join(", ")}`),
+      ),
+    )
+}
 
 export const agentsView = (t: Theme, group: ProjectGroup | undefined, state: VibestState, now: number): Element => {
   const rows = projectAgents(group)
@@ -104,7 +116,7 @@ export const agentsView = (t: Theme, group: ProjectGroup | undefined, state: Vib
               .child(group ? "No agents in this project." : "No vibest projects yet."),
           ),
         )
-        .children(rows.map((row) => agentRow(t, row, now)))
+        .children(rows.map((row) => agentRow(t, row, now, state.sessions)))
         .children(
           offline.map((m) =>
             div()

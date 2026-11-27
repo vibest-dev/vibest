@@ -37,6 +37,8 @@ interface WireSession {
   readonly git: { readonly branch: string } | null
   readonly lastActive: number
   readonly parentId: string | null
+  readonly finished?: number | null
+  readonly to?: readonly { readonly id: string }[]
   readonly machine?: string
 }
 
@@ -103,6 +105,8 @@ const session = (s: WireSession): VibestSession => ({
   branch: branchOf(s.git),
   terminal: herdrAddress(s.terminal, s.machine),
   lastActive: s.lastActive,
+  finished: s.finished ?? null,
+  to: (s.to ?? []).map((ref) => ref.id),
 })
 
 const machine = (m: WireMachine): VibestMachine => ({ name: m.name, state: m.state, reason: m.reason ?? "" })

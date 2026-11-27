@@ -46,7 +46,11 @@ interface LaunchParams {
   readonly focus: boolean
 }
 
-const call = async <T>(method: string, path: string, body?: LaunchParams): Promise<T | null> => {
+interface SeenParams {
+  readonly finished: number
+}
+
+const call = async <T>(method: string, path: string, body?: LaunchParams | SeenParams): Promise<T | null> => {
   const d = await daemon()
 
   if (!d) throw new Error("vibestd is not running")
@@ -69,6 +73,10 @@ const call = async <T>(method: string, path: string, body?: LaunchParams): Promi
 
 export const launch = async (params: LaunchParams): Promise<void> => {
   await call<object>("POST", "/api/session/launch", params)
+}
+
+export const markSeen = async (id: string, finished: number): Promise<void> => {
+  await call<object>("POST", `/api/session/${id}/seen`, { finished })
 }
 
 export interface HarnessChoice {

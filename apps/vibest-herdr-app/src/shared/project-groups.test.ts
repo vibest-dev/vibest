@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { agentTree, groupAgents, groupKey, mainSession, projectGroups } from "./project-groups.ts"
+import { agentTree, extraLinks, groupAgents, groupKey, mainSession, projectGroups } from "./project-groups.ts"
 import { mockState } from "./vibest-mock.ts"
 import { LOCAL, loudest, type VibestProject, type VibestSession } from "./vibest-model.ts"
 
@@ -141,5 +141,22 @@ describe("groupAgents", () => {
       ["remote-child", 1],
       ["remote-root", 0],
     ])
+  })
+})
+
+describe("extraLinks", () => {
+  const s = (id: string, parentId: string | null, to: string[]): VibestSession => ({
+    ...mockState(NOW).sessions[0]!,
+    id,
+    name: id.toUpperCase(),
+    parentId,
+    to,
+  })
+
+  it("names the sessions a session may message beyond its parent and children", () => {
+    const sessions = [s("main", null, ["a"]), s("a", "main", ["main", "a1", "b", "gone-session"]), s("a1", "a", ["a"])]
+
+    expect(extraLinks(sessions[1]!, [...sessions, s("b", "main", [])])).toEqual(["B", "gone-ses"])
+    expect(extraLinks(sessions[0]!, sessions)).toEqual([])
   })
 })

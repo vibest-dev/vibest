@@ -6,8 +6,8 @@ import type { MachineMember, ProjectGroup } from "./project-groups.ts"
 import { isProjectTab, local, PROJECT_SPACE, TAB_PREFIX } from "./project-space.ts"
 import { SMALL } from "./text-size.ts"
 import type { Theme } from "./theme-colors.ts"
-import type { VibestSession } from "./vibest-model.ts"
-import { launch } from "./vibest-source.ts"
+import { LOCAL, type VibestSession } from "./vibest-model.ts"
+import { launch, markSeen } from "./vibest-source.ts"
 
 export const relativeTime = (at: number | null, now: number): string => {
   if (at === null) return ""
@@ -173,5 +173,32 @@ export const followProjects = (groups: readonly ProjectGroup[], cx: Context): vo
 
     if (start?.projectId === m.project.id && start.machine === m.machine) showMain(terminal, start.label, m, cx)
     else if (tabs.has(projectTab(m))) adopt(terminal, m)
+  }
+}
+
+const seenSent = new Set<string>()
+
+const drawnTerminals = (): Set<string> => {
+  const f = focused()
+
+  if (!f || !window.is_window_active()) return new Set()
+
+  const inTab = panes().flatMap((p) => (p.tab === f.tab && p.terminal ? [p.terminal] : []))
+
+  return new Set([...inTab, ...[f.agent, f.shown].filter((t): t is string => t !== null)])
+}
+
+export const seeFinished = (sessions: readonly VibestSession[]): void => {
+  const drawn = drawnTerminals()
+
+  for (const s of sessions) {
+    if (s.machine !== LOCAL || s.status !== "done" || s.finished === null) continue
+
+    const key = `${s.id}:${s.finished}`
+
+    if (s.terminal === null || !drawn.has(s.terminal) || seenSent.has(key)) continue
+
+    seenSent.add(key)
+    markSeen(s.id, s.finished).catch(() => seenSent.delete(key))
   }
 }

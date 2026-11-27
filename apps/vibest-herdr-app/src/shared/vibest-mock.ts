@@ -39,6 +39,8 @@ const session = (
   branch: name === "entry" ? "main" : `feat/${name.toLowerCase().replaceAll(" ", "-")}`,
   terminal: null,
   lastActive: now - ago * MIN,
+  finished: null,
+  to: [],
 })
 
 export const mockState = (now: number): VibestState => ({

@@ -27,6 +27,8 @@ export interface VibestSession {
   readonly branch: string
   readonly terminal: string | null
   readonly lastActive: number | null
+  readonly finished: number | null
+  readonly to: readonly string[]
 }
 
 export interface VibestMachine {
