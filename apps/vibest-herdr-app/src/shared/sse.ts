@@ -28,13 +28,7 @@ const frame = (block: string): WatchFrame | null => {
 
   const body = data.join("\n")
 
-  if (event === "message") {
-    try {
-      return { result: [JSON.parse(body)] }
-    } catch {
-      throw new Error(`DBG ${body.length} [${body.slice(0, 30)}] [${body.slice(-30)}]`)
-    }
-  }
+  if (event === "message") return { result: [JSON.parse(body)] }
 
   const error = (() => {
     try {
