@@ -1,7 +1,6 @@
 import childProcess from "node:child_process"
 import crypto from "node:crypto"
-import fs from "node:fs"
-import fsPromises from "node:fs/promises"
+import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -60,46 +59,29 @@ const spawnCmd = (
     })
   })
 
-const setupIsolatedPiDir = async (piDir: string, provider: string, model: string): Promise<void> => {
-  await fsPromises.mkdir(piDir, { recursive: true, mode: 0o700 })
-  const userPi = path.join(os.homedir(), ".pi", "agent")
-
-  for (const name of ["auth.json", "models.json", "models-store.json", "cliproxyapi.json", "trust.json"]) {
-    await fsPromises.copyFile(path.join(userPi, name), path.join(piDir, name)).catch(() => undefined)
-  }
-
-  const entries = await fsPromises.readdir(userPi).catch(() => [])
+const setupPiSessionDir = async (piDir: string): Promise<void> => {
+  await fs.mkdir(path.join(piDir, "sessions"), { recursive: true, mode: 0o700 })
+  const userPi = process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent")
+  const entries = await fs.readdir(userPi, { withFileTypes: true }).catch(() => [])
 
   for (const entry of entries) {
-    if (entry.startsWith("cliproxyapi-models")) {
-      await fsPromises.copyFile(path.join(userPi, entry), path.join(piDir, entry)).catch(() => undefined)
+    if (entry.name === "sessions") continue
+    const src = path.join(userPi, entry.name)
+    const dst = path.join(piDir, entry.name)
+
+    if (entry.isFile()) {
+      await fs.copyFile(src, dst).catch(() => undefined)
+    } else {
+      await fs.symlink(src, dst).catch(() => undefined)
     }
   }
-
-  const userNpm = path.join(userPi, "npm")
-
-  if (fs.existsSync(userNpm)) {
-    await fsPromises.symlink(userNpm, path.join(piDir, "npm")).catch(() => undefined)
-  }
-
-  const settings = {
-    defaultProvider: provider,
-    defaultModel: model,
-    defaultThinkingLevel: "medium",
-    quietStartup: true,
-    packages: ["npm:@getpie/pi-cliproxyapi-provider"],
-  }
-
-  await fsPromises.writeFile(path.join(piDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`, {
-    mode: 0o600,
-  })
 }
 
 const collectJsonlFiles = async (dir: string): Promise<ReadonlyArray<string>> => {
   const out: Array<string> = []
 
   const walk = async (current: string): Promise<void> => {
-    const items = await fsPromises.readdir(current, { withFileTypes: true }).catch(() => [])
+    const items = await fs.readdir(current, { withFileTypes: true }).catch(() => [])
 
     for (const item of items) {
       const full = path.join(current, item.name)
@@ -107,7 +89,7 @@ const collectJsonlFiles = async (dir: string): Promise<ReadonlyArray<string>> =>
       if (item.isDirectory()) {
         await walk(full)
       } else if (item.isFile() && item.name.endsWith(".jsonl")) {
-        const text = await fsPromises.readFile(full, "utf8").catch(() => "")
+        const text = await fs.readFile(full, "utf8").catch(() => "")
 
         if (text.trim()) out.push(text)
       }
@@ -126,7 +108,7 @@ const teardownWorld = async (
   hcSocket: string,
   env: NodeJS.ProcessEnv,
 ): Promise<void> => {
-  const pidText = await fsPromises.readFile(path.join(vibestHome, "vibestd.pid"), "utf8").catch(() => "")
+  const pidText = await fs.readFile(path.join(vibestHome, "vibestd.pid"), "utf8").catch(() => "")
 
   if (pidText) {
     try {
@@ -181,8 +163,8 @@ const teardownWorld = async (
     }
   }
 
-  await fsPromises.rm(worldRoot, { recursive: true, force: true }).catch(() => undefined)
-  await fsPromises.rm(extRoot, { recursive: true, force: true }).catch(() => undefined)
+  await fs.rm(worldRoot, { recursive: true, force: true }).catch(() => undefined)
+  await fs.rm(extRoot, { recursive: true, force: true }).catch(() => undefined)
 }
 
 export const runStoryEval = async (story: StorySpec, opts: EvalCliOptions): Promise<StoryRunReport> => {
@@ -239,20 +221,20 @@ export const runStoryEval = async (story: StorySpec, opts: EvalCliOptions): Prom
 
   try {
     for (const d of [vibestHome, xdgDir, stateDir, zdotDir, repoDir, extRoot]) {
-      await fsPromises.mkdir(d, { recursive: true })
+      await fs.mkdir(d, { recursive: true })
     }
 
-    await fsPromises.writeFile(
+    await fs.writeFile(
       path.join(zdotDir, ".zshenv"),
       `export PATH=${shSingle(path.dirname(VIBEST_BIN))}:"$PATH"\n`,
       "utf8",
     )
 
-    await setupIsolatedPiDir(piDir, opts.provider, opts.model)
+    await setupPiSessionDir(piDir)
     const setupRes = await story.setup(worldRoot, extRoot, repoDir)
     teardownStory = setupRes.teardown
 
-    await fsPromises.writeFile(
+    await fs.writeFile(
       path.join(vibestHome, "mcp.json"),
       `${JSON.stringify({ mcpServers: setupRes.mcpServers }, null, 2)}\n`,
       "utf8",
@@ -392,9 +374,9 @@ export const runStoryEval = async (story: StorySpec, opts: EvalCliOptions): Prom
       void 0
     }
 
-    const logText = await fsPromises.readFile(path.join(vibestHome, "vibestd.log"), "utf8").catch(() => "")
+    const logText = await fs.readFile(path.join(vibestHome, "vibestd.log"), "utf8").catch(() => "")
     const httpLogs = parseVibestHttpLogs(logText)
-    const spillFiles = await fsPromises.readdir(path.join(vibestHome, "tool-output")).catch(() => [])
+    const spillFiles = await fs.readdir(path.join(vibestHome, "tool-output")).catch(() => [])
     const jsonlDocs = await collectJsonlFiles(path.join(piDir, "sessions"))
     const { turns, metrics } = parsePiTranscript(jsonlDocs, httpLogs, spillFiles)
 
