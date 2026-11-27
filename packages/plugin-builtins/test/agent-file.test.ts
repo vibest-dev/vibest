@@ -63,4 +63,124 @@ describe("agent files", () => {
     assert.include(errorOf(result, "old"), "unknown key extends")
     assert.include(errorOf(result, "blank"), "description is empty")
   })
+
+  it("parses mcpServers in inline, empty, and block list forms without warnings", () => {
+    const result = read(
+      file("empty-inline.md", "---\ndescription: none\nmcpServers: []\n---\nBody."),
+      file("empty-block.md", "---\ndescription: none\nmcpServers:\nharness: pi\n---\nBody."),
+      file("inline.md", "---\ndescription: inline\nmcpServers: [context7, \"github\", 'linear', context7]\n---\nBody."),
+      file(
+        "block.md",
+        "---\ndescription: block\nmcpServers:\n  - context7\n  - \"github\"\n  - 'context7'\n---\nBody.",
+      ),
+    )
+
+    assert.deepStrictEqual(result.invalid, [])
+    assert.deepStrictEqual(result.definitions, [
+      { id: "empty-inline", description: "none", system: "Body.", mcpServers: [] },
+      { id: "empty-block", description: "none", system: "Body.", harness: "pi", mcpServers: [] },
+      { id: "inline", description: "inline", system: "Body.", mcpServers: ["context7", "github", "linear"] },
+      { id: "block", description: "block", system: "Body.", mcpServers: ["context7", "github"] },
+    ])
+  })
+
+  it("keeps agents valid with non-blocking warnings for Claude Code inline mcpServers objects and malformed scalars", () => {
+    const result = read(
+      file(
+        "claude-block.md",
+        [
+          "---",
+          "description: claude style",
+          "mcpServers:",
+          "  - context7",
+          "  - playwright:",
+          "      type: stdio",
+          "      command: npx",
+          '      args: ["@playwright/mcp"]',
+          "  - sentry: { type: remote, url: https://sentry.example/mcp }",
+          "  - { type: stdio, command: npx }",
+          "---",
+          "Body.",
+        ].join("\n"),
+      ),
+      file("scalar.md", "---\ndescription: scalar\nmcpServers: 123\n---\nBody."),
+      file("dup.md", "---\ndescription: dup\nmcpServers: []\nmcpServers: []\n---\nBody."),
+    )
+
+    assert.deepStrictEqual(
+      result.definitions.map((d) => d.id),
+      ["claude-block", "scalar"],
+    )
+
+    const claude = result.definitions.find((d) => d.id === "claude-block")!
+    assert.deepStrictEqual(claude.mcpServers, ["context7", "playwright", "sentry"])
+    assert.strictEqual(claude.warnings?.length, 3)
+    assert.include(claude.warnings![0], 'inline mcpServers config for "playwright" is ignored')
+    assert.include(claude.warnings![1], 'inline mcpServers config for "sentry" is ignored')
+    assert.include(claude.warnings![2], "inline mcpServers object entry is ignored")
+
+    const scalar = result.definitions.find((d) => d.id === "scalar")!
+    assert.deepStrictEqual(scalar.mcpServers, [])
+    assert.strictEqual(scalar.warnings?.length, 1)
+    assert.include(scalar.warnings![0], "must be a list")
+
+    assert.include(errorOf(result, "dup"), "mcpServers is given twice")
+  })
+
+  it("handles YAML block anonymous objects, inline comments, multi-key inline maps, and multi-line flow lists without failing open", () => {
+    const result = read(
+      file(
+        "anon-block.md",
+        [
+          "---",
+          "description: block anonymous",
+          "mcpServers:",
+          "  - type: stdio",
+          "    command: npx",
+          "---",
+          "Body.",
+        ].join("\n"),
+      ),
+      file("inline-comment.md", "---\ndescription: comment\nmcpServers: [alpha, beta] # comment\n---\nBody."),
+      file("anon-inline.md", "---\ndescription: anon inline\nmcpServers: { type: stdio, command: npx }\n---\nBody."),
+      file(
+        "multi-inline-map.md",
+        "---\ndescription: multi map\nmcpServers: { alpha: { command: npx }, beta: { command: uvx } }\n---\nBody.",
+      ),
+      file(
+        "block-comment.md",
+        ["---", "description: block comment", "mcpServers:", "  - alpha # comment", "---", "Body."].join("\n"),
+      ),
+      file(
+        "multiline-flow.md",
+        ["---", "description: flow", "mcpServers: [", "  alpha,", "  beta", "]", "---", "Body."].join("\n"),
+      ),
+    )
+
+    assert.deepStrictEqual(result.invalid, [])
+
+    const byId = (id: string) => result.definitions.find((d) => d.id === id)!
+
+    assert.deepStrictEqual(byId("anon-block").mcpServers, [])
+    assert.strictEqual(byId("anon-block").warnings?.length, 1)
+    assert.include(byId("anon-block").warnings![0], "inline mcpServers object entry is ignored")
+
+    assert.deepStrictEqual(byId("inline-comment").mcpServers, ["alpha", "beta"])
+    assert.isUndefined(byId("inline-comment").warnings)
+
+    assert.deepStrictEqual(byId("anon-inline").mcpServers, [])
+    assert.strictEqual(byId("anon-inline").warnings?.length, 1)
+    assert.include(byId("anon-inline").warnings![0], "inline mcpServers object entry is ignored")
+
+    assert.deepStrictEqual(byId("multi-inline-map").mcpServers, ["alpha", "beta"])
+    assert.strictEqual(byId("multi-inline-map").warnings?.length, 2)
+    assert.include(byId("multi-inline-map").warnings![0], 'inline mcpServers config for "alpha" is ignored')
+    assert.include(byId("multi-inline-map").warnings![1], 'inline mcpServers config for "beta" is ignored')
+
+    assert.deepStrictEqual(byId("block-comment").mcpServers, ["alpha"])
+    assert.isUndefined(byId("block-comment").warnings)
+
+    assert.deepStrictEqual(byId("multiline-flow").mcpServers, ["alpha", "beta"])
+    assert.isUndefined(byId("multiline-flow").warnings)
+  })
 })

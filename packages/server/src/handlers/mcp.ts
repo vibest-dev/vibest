@@ -1,7 +1,7 @@
 import { Mcp } from "@vibest/core/mcp"
 import { ToolOutput } from "@vibest/core/tool-output"
 import { VibestApi } from "@vibest/protocol/api"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 
 import * as CallerChecks from "./caller.ts"
@@ -13,58 +13,105 @@ export const McpHandler = HttpApiBuilder.group(VibestApi, "server.mcp", (handler
     const checks = yield* CallerChecks.Service
 
     return handlers
-      .handle("mcp.list", ({ query }) => mcp.list(query.directory))
+      .handle("mcp.list", ({ query }) =>
+        Effect.gen(function* () {
+          const scope = yield* checks.mcpScope
+          const items = yield* mcp.list(query.directory)
+
+          return Option.isSome(scope) ? items.filter((item) => scope.value.allowed.has(item.name)) : items
+        }),
+      )
       .handle("mcp.add", ({ params, payload }) =>
         checks.cliOnly("mcp.add").pipe(Effect.andThen(mcp.add(params.server, payload))),
       )
       .handle("mcp.remove", ({ params }) =>
         checks.cliOnly("mcp.remove").pipe(Effect.andThen(mcp.remove(params.server))),
       )
-      .handle("mcp.connect", ({ params, payload }) => mcp.connect(params.server, payload?.directory))
-      .handle("mcp.disconnect", ({ params }) => mcp.disconnect(params.server))
-      .handle("mcp.tools", ({ query }) => mcp.tools(query.server, query.directory))
-      .handle("mcp.search", ({ query }) => mcp.search(query.q, query.directory))
-      .handle("mcp.describe", ({ params, query }) => mcp.describe(params.server, params.tool, query.directory))
-      .handle("mcp.call", ({ params, payload }) =>
-        mcp
-          .call({
-            server: params.server,
-            tool: params.tool,
-            args: payload.arguments,
-            directory: payload.directory,
-          })
-          .pipe(
-            Effect.flatMap((result) =>
-              toolOutput.truncateCallResult({
-                server: params.server,
-                tool: params.tool,
-                result,
-                maxBytes: payload.maxBytes,
-                scratchpadDir: payload.scratchpadDir,
-              }),
-            ),
-          ),
+      .handle("mcp.connect", ({ params, payload }) =>
+        checks
+          .requireMcpServer("mcp.connect", params.server)
+          .pipe(Effect.andThen(mcp.connect(params.server, payload?.directory))),
       )
-      .handle("mcp.events", ({ params, query }) => mcp.events(params.server, query.directory))
-      .handle("mcp.skills", ({ params, query }) => mcp.skills(params.server, query.directory))
-      .handle("mcp.read", ({ params, payload }) =>
-        mcp
-          .read({
-            server: params.server,
-            uri: payload.uri,
-            directory: payload.directory,
-          })
-          .pipe(
-            Effect.flatMap((result) =>
-              toolOutput.truncateResourceResult({
-                server: params.server,
-                uri: payload.uri,
-                result,
-                maxBytes: payload.maxBytes,
-                scratchpadDir: payload.scratchpadDir,
-              }),
-            ),
+      .handle("mcp.disconnect", ({ params }) =>
+        checks.requireMcpServer("mcp.disconnect", params.server).pipe(Effect.andThen(mcp.disconnect(params.server))),
+      )
+      .handle("mcp.tools", ({ query }) =>
+        Effect.gen(function* () {
+          if (query.server !== undefined) {
+            yield* checks.requireMcpServer("mcp.tools", query.server)
+
+            return yield* mcp.tools(query.server, query.directory)
+          }
+
+          const scope = yield* checks.mcpScope
+          const tools = yield* mcp.tools(undefined, query.directory)
+
+          return Option.isSome(scope) ? tools.filter((tool) => scope.value.allowed.has(tool.server)) : tools
+        }),
+      )
+      .handle("mcp.search", ({ query }) =>
+        Effect.gen(function* () {
+          const scope = yield* checks.mcpScope
+          const hits = yield* mcp.search(query.q, query.directory)
+
+          return Option.isSome(scope) ? hits.filter((hit) => scope.value.allowed.has(hit.server)) : hits
+        }),
+      )
+      .handle("mcp.describe", ({ params, query }) =>
+        checks
+          .requireMcpServer("mcp.describe", params.server)
+          .pipe(Effect.andThen(mcp.describe(params.server, params.tool, query.directory))),
+      )
+      .handle("mcp.call", ({ params, payload }) =>
+        checks.requireMcpServer("mcp.call", params.server).pipe(
+          Effect.andThen(
+            mcp.call({
+              server: params.server,
+              tool: params.tool,
+              args: payload.arguments,
+              directory: payload.directory,
+            }),
           ),
+          Effect.flatMap((result) =>
+            toolOutput.truncateCallResult({
+              server: params.server,
+              tool: params.tool,
+              result,
+              maxBytes: payload.maxBytes,
+              scratchpadDir: payload.scratchpadDir,
+            }),
+          ),
+        ),
+      )
+      .handle("mcp.events", ({ params, query }) =>
+        checks
+          .requireMcpServer("mcp.events", params.server)
+          .pipe(Effect.andThen(mcp.events(params.server, query.directory))),
+      )
+      .handle("mcp.skills", ({ params, query }) =>
+        checks
+          .requireMcpServer("mcp.skills", params.server)
+          .pipe(Effect.andThen(mcp.skills(params.server, query.directory))),
+      )
+      .handle("mcp.read", ({ params, payload }) =>
+        checks.requireMcpServer("mcp.read", params.server).pipe(
+          Effect.andThen(
+            mcp.read({
+              server: params.server,
+              uri: payload.uri,
+              directory: payload.directory,
+            }),
+          ),
+          Effect.flatMap((result) =>
+            toolOutput.truncateResourceResult({
+              server: params.server,
+              uri: payload.uri,
+              result,
+              maxBytes: payload.maxBytes,
+              scratchpadDir: payload.scratchpadDir,
+            }),
+          ),
+        ),
       )
       .handle("mcp.authStart", ({ params }) =>
         checks.cliOnly("mcp.authStart").pipe(Effect.andThen(mcp.authStart(params.server))),

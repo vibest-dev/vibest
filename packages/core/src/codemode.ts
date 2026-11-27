@@ -28,6 +28,7 @@ export interface EngineExecuteInput {
 export interface ExecuteOptions {
   readonly allowTool?: ToolPolicy | undefined
   readonly headers?: Readonly<Record<string, string>> | undefined
+  readonly allowedExternalServers?: ReadonlyArray<string> | undefined
 }
 
 export interface BuiltinToolsProvider {
@@ -72,6 +73,7 @@ export interface Interface {
   readonly declarations: (input?: {
     readonly directory?: string | undefined
     readonly servers?: ReadonlyArray<string> | undefined
+    readonly allowedExternalServers?: ReadonlyArray<string> | undefined
   }) => Effect.Effect<CodeModeSchema.DeclarationsResult>
 }
 
@@ -85,24 +87,36 @@ export const layer = Layer.effect(
     const builtinTools = yield* BuiltinTools
     const engine = yield* makeHost()
 
-    const partitionServers = (servers: ReadonlyArray<string> | undefined) => {
+    const partitionServers = (
+      servers: ReadonlyArray<string> | undefined,
+      allowedExternalServers?: ReadonlyArray<string> | undefined,
+    ) => {
       if (servers === undefined || servers.length === 0) {
-        return { includeBuiltin: builtinTools !== undefined, externalServers: undefined }
+        return { includeBuiltin: builtinTools !== undefined, externalServers: allowedExternalServers }
       }
 
       const includeBuiltin = builtinTools !== undefined && servers.includes(builtinTools.namespace)
 
-      const externalServers =
+      const requestedExternal =
         builtinTools !== undefined ? servers.filter((name) => name !== builtinTools.namespace) : servers
 
-      return { includeBuiltin, externalServers }
+      if (allowedExternalServers === undefined) {
+        return { includeBuiltin, externalServers: requestedExternal }
+      }
+
+      const allowedSet = new Set(allowedExternalServers)
+
+      return {
+        includeBuiltin,
+        externalServers: requestedExternal.filter((name) => allowedSet.has(name)),
+      }
     }
 
     const execute = Effect.fn("CodeMode.execute")(function* (
       request: CodeModeSchema.ExecuteRequest,
       options?: ExecuteOptions,
     ): Effect.fn.Return<CodeModeSchema.ExecutionResult> {
-      const { includeBuiltin, externalServers } = partitionServers(request.servers)
+      const { includeBuiltin, externalServers } = partitionServers(request.servers, options?.allowedExternalServers)
 
       const mcpDispatcher = yield* createLazyMcpDispatcher(mcp, {
         directory: request.directory,
@@ -142,9 +156,10 @@ export const layer = Layer.effect(
       input: {
         readonly directory?: string | undefined
         readonly servers?: ReadonlyArray<string> | undefined
+        readonly allowedExternalServers?: ReadonlyArray<string> | undefined
       } = {},
     ): Effect.fn.Return<CodeModeSchema.DeclarationsResult> {
-      const { includeBuiltin, externalServers } = partitionServers(input.servers)
+      const { includeBuiltin, externalServers } = partitionServers(input.servers, input.allowedExternalServers)
 
       const mounted = yield* mountMcpTools(mcp, {
         directory: input.directory,

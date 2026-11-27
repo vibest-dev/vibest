@@ -1,6 +1,7 @@
 import type { Automation } from "@vibest/schema/automation"
-import { Clock, Duration, Effect, FiberMap, Predicate, Result, Stream } from "effect"
+import { Clock, Duration, Effect, FiberMap, Option, Predicate, Result, Stream } from "effect"
 
+import { type AgentMcpScope, mcpDisallowedMessage } from "../agent/mcp-scope.ts"
 import type { Mcp } from "../mcp.ts"
 import { AutomationEventStream } from "./event.ts"
 import type { ExecuteOptions } from "./execute.ts"
@@ -22,9 +23,19 @@ export interface WatchDeps {
     extra?: Pick<SettlePatch, "failures" | "lastRunAt">,
   ) => Effect.Effect<void>
   readonly executeRow: (row: AutomationRow, now: number, options?: ExecuteOptions) => Effect.Effect<void>
+  readonly resolveMcpScope: (sessionId: string) => Effect.Effect<Option.Option<AgentMcpScope>>
 }
 
-export const createWatchManager = ({ store, mcp, arm, cancel, withRunLock, pauseWith, executeRow }: WatchDeps) =>
+export const createWatchManager = ({
+  store,
+  mcp,
+  arm,
+  cancel,
+  withRunLock,
+  pauseWith,
+  executeRow,
+  resolveMcpScope,
+}: WatchDeps) =>
   Effect.gen(function* () {
     const watches = yield* FiberMap.make<Automation.ID>()
 
@@ -61,6 +72,18 @@ export const createWatchManager = ({ store, mcp, arm, cancel, withRunLock, pause
           yield* pauseWith(row, now, "No replay cursor; recreate the watch to start from now", { lastRunAt: now })
 
           return
+        }
+
+        if (row.sessionId !== null) {
+          const scope = yield* resolveMcpScope(row.sessionId)
+
+          if (Option.isSome(scope) && !scope.value.allowed.has(trigger.server)) {
+            yield* pauseWith(row, now, mcpDisallowedMessage(scope.value.agent, trigger.server), {
+              lastRunAt: now,
+            })
+
+            return
+          }
         }
 
         const resolved = yield* Effect.result(

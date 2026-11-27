@@ -1,13 +1,16 @@
+import { type AgentMcpScope, mcpDisallowedMessage, sessionMcpScope } from "@vibest/core/agent/mcp-scope"
+import { Agents } from "@vibest/core/agent/registry"
 import { callerTarget, filterCallerEnv } from "@vibest/core/caller"
 import { locateProject, resolveProject } from "@vibest/core/project/identity"
 import { ProjectStore } from "@vibest/core/project/store"
 import { Runtimes } from "@vibest/core/runtime/registry"
+import { SessionStore } from "@vibest/core/session/store"
 import { Git } from "@vibest/core/worktree/git"
 import type { ACCESS } from "@vibest/protocol/access"
 import { Forbidden } from "@vibest/protocol/errors"
 import { Caller, type CallerIdentity } from "@vibest/protocol/middleware"
 import { NotInRepository } from "@vibest/schema/session"
-import { Context, Effect, FileSystem, Layer, Path, Predicate } from "effect"
+import { Context, Effect, FileSystem, Layer, Option, Path, Predicate } from "effect"
 
 type Access = typeof ACCESS
 
@@ -21,6 +24,8 @@ export type Agent = Extract<CallerIdentity, { _tag: "Cli" | "Ui" | "Session" }>
 
 export const make = Effect.gen(function* () {
   const projectStore = yield* ProjectStore.Service
+  const sessionStore = yield* SessionStore.Service
+  const agents = yield* Agents.Service
   const runtimes = yield* Runtimes.Service
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -120,7 +125,38 @@ export const make = Effect.gen(function* () {
       return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
     })
 
-  return { agent, atProject, resolveAt, findAt, projectOf, scope, machineFromCaller, cliOnly, userOnly, self }
+  const mcpScope: Effect.Effect<Option.Option<AgentMcpScope>, never, Caller> = Effect.flatMap(Caller, (c) =>
+    Predicate.isTagged(c, "Session")
+      ? sessionMcpScope(sessionStore, agents, c.sessionId)
+      : Effect.succeed(Option.none()),
+  )
+
+  const requireMcpServer = (method: string, server: string) =>
+    Effect.flatMap(mcpScope, (current) =>
+      Option.isSome(current) && !current.value.allowed.has(server)
+        ? Effect.fail(
+            new Forbidden({
+              method,
+              message: mcpDisallowedMessage(current.value.agent, server),
+            }),
+          )
+        : Effect.void,
+    )
+
+  return {
+    agent,
+    atProject,
+    resolveAt,
+    findAt,
+    projectOf,
+    scope,
+    machineFromCaller,
+    cliOnly,
+    userOnly,
+    self,
+    mcpScope,
+    requireMcpServer,
+  }
 })
 
 export type Checks = Effect.Success<typeof make>

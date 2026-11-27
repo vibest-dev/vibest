@@ -2,6 +2,7 @@ import { CodeMode } from "@vibest/schema/codemode"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/http-api"
 
+import { Forbidden } from "../errors.ts"
 import { CallerMiddleware, ProtocolMiddleware } from "../middleware.ts"
 
 export const CodeModeGroup = HttpApiGroup.make("server.codemode")
@@ -9,6 +10,7 @@ export const CodeModeGroup = HttpApiGroup.make("server.codemode")
     HttpApiEndpoint.post("codemode.execute", "/api/codemode/execute", {
       payload: CodeMode.ExecuteRequest,
       success: CodeMode.ExecutionResult,
+      error: [Forbidden],
     }).annotateMerge(
       OpenApi.annotations({
         identifier: "codemode.execute",
@@ -23,6 +25,7 @@ export const CodeModeGroup = HttpApiGroup.make("server.codemode")
         server: Schema.optional(Schema.String),
       },
       success: CodeMode.DeclarationsResult,
+      error: [Forbidden],
     }).annotateMerge(
       OpenApi.annotations({
         identifier: "codemode.declarations",

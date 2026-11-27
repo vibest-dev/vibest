@@ -296,6 +296,8 @@ export const AgentListing = Schema.Struct({
       harness: Schema.optional(Schema.String),
       provider: Schema.optional(Schema.String),
       model: Schema.optional(Schema.String),
+      mcpServers: Schema.optional(Schema.Array(Schema.String)),
+      warnings: Schema.optional(Schema.Array(Schema.String)),
       system: Schema.String,
     }),
   ),

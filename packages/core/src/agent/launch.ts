@@ -113,7 +113,9 @@ export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input
   const text = input.systemPrompt === undefined ? yield* projectText(layout.project(input.projectId)) : undefined
 
   const mcpServers =
-    input.systemPrompt === undefined ? yield* configuredMcpServers(layout.home, input.worktree ?? input.root) : []
+    input.systemPrompt === undefined
+      ? yield* configuredMcpServers(layout.home, input.worktree ?? input.root, definition.mcpServers)
+      : []
 
   const saved = yield* input.session
   const scratchpadDir = layout.scratchpadDir(saved.projectId)

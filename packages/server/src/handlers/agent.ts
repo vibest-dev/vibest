@@ -1,8 +1,9 @@
 import { Agents } from "@vibest/core/agent/registry"
+import { Mcp } from "@vibest/core/mcp"
 import { Session } from "@vibest/core/session"
 import { VibestApi } from "@vibest/protocol/api"
 import { Forbidden } from "@vibest/protocol/errors"
-import { CALLER_HEADER } from "@vibest/protocol/protocol"
+import { CALLER_HEADER, CWD_HEADER, REPOSITORY_HEADER } from "@vibest/protocol/protocol"
 import { Effect } from "effect"
 import { HttpServerRequest } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
@@ -15,16 +16,18 @@ export const AgentHandler = HttpApiBuilder.group(VibestApi, "server.agent", (han
   Effect.gen(function* () {
     const { cliOnly } = yield* CallerChecks.Service
     const agents = yield* Agents.Service
+    const mcp = yield* Mcp.Service
     const sessions = yield* Session.Service
     const remote = yield* Remote.Service
 
     return handlers
       .handle("agent.list", ({ query: { machine } }) =>
         Effect.gen(function* () {
-          if (machine !== undefined) {
-            const request = yield* HttpServerRequest.HttpServerRequest
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const header = reader(request.headers)
 
-            if (reader(request.headers)(CALLER_HEADER) === "remote")
+          if (machine !== undefined) {
+            if (header(CALLER_HEADER) === "remote")
               return yield* new Forbidden({
                 method: "agent.list",
                 message: "a remote asks for this machine's agents only",
@@ -33,16 +36,40 @@ export const AgentHandler = HttpApiBuilder.group(VibestApi, "server.agent", (han
             return yield* remote.agents(machine)
           }
 
+          const directory = header(REPOSITORY_HEADER) ?? header(CWD_HEADER)
+          const configured = yield* mcp.list(directory)
+          const configuredByName = new Map(configured.map((server) => [String(server.name), server]))
+
           return {
-            agents: agents.all.map(({ id, description, plugin, harness, provider, model, system }) => ({
-              id,
-              description,
-              plugin,
-              ...(harness !== undefined && { harness }),
-              ...(provider !== undefined && { provider }),
-              ...(model !== undefined && { model }),
-              system,
-            })),
+            agents: agents.all.map(
+              ({ id, description, plugin, harness, provider, model, mcpServers, warnings, system }) => {
+                const combinedWarnings = [...(warnings ?? [])]
+
+                if (mcpServers !== undefined) {
+                  for (const name of mcpServers) {
+                    const info = configuredByName.get(name)
+
+                    if (info === undefined) {
+                      combinedWarnings.push(`mcpServers entry "${name}" is not configured in vibest mcp`)
+                    } else if (info.disabled === true) {
+                      combinedWarnings.push(`mcpServers entry "${name}" is disabled in vibest mcp`)
+                    }
+                  }
+                }
+
+                return {
+                  id,
+                  description,
+                  plugin,
+                  ...(harness !== undefined && { harness }),
+                  ...(provider !== undefined && { provider }),
+                  ...(model !== undefined && { model }),
+                  ...(mcpServers !== undefined && { mcpServers }),
+                  ...(combinedWarnings.length > 0 && { warnings: combinedWarnings }),
+                  system,
+                }
+              },
+            ),
             invalid: agents.invalid.map(({ id, source, error, plugin }) => ({ id, source, error, plugin })),
           }
         }),

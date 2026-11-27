@@ -147,8 +147,10 @@ export const make = Effect.gen(function* () {
     const creatorLinked =
       creator !== undefined && (yield* inboxStore.maySend(session.id, creator.id, creator.remote ?? ""))
 
+    const definition = yield* definitionIn(agents, session.agent)
+
     return systemPrompt({
-      system: (yield* definitionIn(agents, session.agent)).system,
+      system: definition.system,
       id: session.id,
       checkout,
       sharer: yield* sessionStore.earlierSharer(session.id),
@@ -157,7 +159,11 @@ export const make = Effect.gen(function* () {
       projectDir: layout.project(session.projectId),
       scratchpadDir: layout.scratchpadDir(session.projectId),
       agents: agents.all,
-      mcpServers: yield* configuredMcpServers(layout.home, directory || projectDirectory || undefined),
+      mcpServers: yield* configuredMcpServers(
+        layout.home,
+        directory || projectDirectory || undefined,
+        definition.mcpServers,
+      ),
       ...(yield* projectText(layout.project(session.projectId))),
     })
   }, provided)

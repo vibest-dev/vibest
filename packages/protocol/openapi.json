@@ -7814,6 +7814,32 @@
                                 }
                               ]
                             },
+                            "mcpServers": {
+                              "anyOf": [
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "warnings": {
+                              "anyOf": [
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
                             "system": {
                               "type": "string"
                             }
@@ -8926,16 +8952,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }
@@ -9035,16 +9061,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }
@@ -9132,16 +9158,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }
@@ -9324,16 +9350,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }
@@ -9431,16 +9457,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }
@@ -9599,16 +9625,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }
@@ -9706,16 +9732,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }
@@ -9812,16 +9838,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }
@@ -10419,16 +10445,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }
@@ -10516,16 +10542,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }
@@ -10593,16 +10619,16 @@
               }
             },
             "403": {
-              "description": "InvalidCaller | Forbidden",
+              "description": "Forbidden | InvalidCaller",
               "content": {
                 "application/json": {
                   "schema": {
                     "anyOf": [
                       {
-                        "$ref": "#/components/schemas/InvalidCallerEncoded"
+                        "$ref": "#/components/schemas/ForbiddenEncoded"
                       },
                       {
-                        "$ref": "#/components/schemas/ForbiddenEncoded"
+                        "$ref": "#/components/schemas/InvalidCallerEncoded"
                       }
                     ]
                   }

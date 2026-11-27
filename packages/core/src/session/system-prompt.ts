@@ -222,15 +222,17 @@ const readMcpConfigFile = (fs: FileSystem.FileSystem, filePath: string) =>
 export const configuredMcpServers = Effect.fn("configuredMcpServers")(function* (
   vibestHome: string,
   directory?: string,
+  allowedMcpServers?: ReadonlyArray<string>,
 ) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const globalServers = yield* readMcpConfigFile(fs, path.join(vibestHome, "mcp.json"))
   const projectServers = directory ? yield* readMcpConfigFile(fs, path.join(directory, ".mcp.json")) : {}
   const merged = { ...globalServers, ...projectServers }
+  const allowed = allowedMcpServers !== undefined ? new Set(allowedMcpServers) : undefined
 
   return Object.entries(merged).flatMap(([name, config]) =>
-    config.disabled === true ? [] : [{ name, type: config.type }],
+    config.disabled === true || (allowed !== undefined && !allowed.has(name)) ? [] : [{ name, type: config.type }],
   )
 })
 

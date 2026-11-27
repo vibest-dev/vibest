@@ -7,7 +7,14 @@ import { expect, herdr, readDb, replyOf, Skip, until, type World } from "../worl
 import { piShadow } from "../world/shadow.ts"
 
 type Listed = {
-  agents: Array<{ id: string; description: string; plugin: string; harness?: string }>
+  agents: Array<{
+    id: string
+    description: string
+    plugin: string
+    harness?: string
+    mcpServers?: Array<string>
+    warnings?: Array<string>
+  }>
   invalid: Array<{ id?: string; source: string; error: string; plugin: string }>
 }
 
@@ -437,6 +444,130 @@ const checks: ReadonlyArray<Check> = [
         const id = await runId(w, ["--agent", "code-reviewer", "pi", "--", ask("claudefmt")])
         await resultOf(w, id, "claudefmt")
         expect((model.systemOf("claudefmt") ?? "").includes("CLAUDE-FORMAT-MARK"), "the Claude-format prompt")
+      } finally {
+        model.stop()
+      }
+    },
+  },
+  {
+    id: "S68",
+    title:
+      "an agent file's mcpServers scopes Session facts and vibestd MCP routing while Claude Code inline objects and unconfigured names produce non-blocking warnings",
+    run: async (w) => {
+      needs("pi", "herdr")
+      const { model } = await withEntry(w, "mcpscope")
+      const mcpDir = path.join(w.root, "mcp-fixtures")
+      const alphaScript = path.join(mcpDir, "alpha.mjs")
+      const betaScript = path.join(mcpDir, "beta.mjs")
+      const betaSentinel = path.join(mcpDir, "beta-spawned.txt")
+
+      const makeServer = (name: string, sentinel?: string) => `
+import fs from "node:fs"
+import readline from "node:readline"
+${sentinel !== undefined ? `fs.writeFileSync(${JSON.stringify(sentinel)}, "spawned", "utf8")` : ""}
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity })
+const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\\n")
+rl.on("line", (line) => {
+  if (!line.trim()) return
+  const msg = JSON.parse(line)
+  if (msg.method === "initialize") {
+    send({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: {
+        protocolVersion: msg.params?.protocolVersion ?? "2025-03-26",
+        capabilities: { tools: {} },
+        serverInfo: { name: ${JSON.stringify(name)}, version: "1.0.0" },
+      },
+    })
+    return
+  }
+  if (msg.method === "tools/list") {
+    send({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: { tools: [{ name: "ping", description: "Ping", inputSchema: { type: "object", properties: {} } }] },
+    })
+    return
+  }
+  if (msg.method === "tools/call" && msg.params?.name === "ping") {
+    send({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: { content: [{ type: "text", text: ${JSON.stringify(`pong:${name}`)} }] },
+    })
+  }
+})
+`
+
+      try {
+        await fs.mkdir(mcpDir, { recursive: true })
+        await fs.writeFile(alphaScript, makeServer("alpha"))
+        await fs.writeFile(betaScript, makeServer("beta", betaSentinel))
+        await fs.writeFile(
+          path.join(w.vibestHome, "mcp.json"),
+          JSON.stringify({
+            mcpServers: {
+              alpha: { type: "local", command: [process.execPath, alphaScript], protocol: "legacy" },
+              beta: { type: "local", command: [process.execPath, betaScript], protocol: "legacy" },
+            },
+          }),
+        )
+
+        await writeAgent(
+          w,
+          "scoped.md",
+          [
+            "---",
+            "description: scoped MCP agent",
+            "mcpServers:",
+            "  - alpha",
+            "  - ghost:",
+            "      type: stdio",
+            "      command: npx",
+            "---",
+            "SCOPED-MCP-MARK",
+          ].join("\n"),
+        )
+
+        await listed(w, "scoped agent listed with warnings", (l) => l.agents.some((a) => a.id === "scoped"))
+        const scoped = (await listing(w)).agents.find((a) => a.id === "scoped")
+        expect(
+          JSON.stringify(scoped?.mcpServers) === JSON.stringify(["alpha", "ghost"]) &&
+            (scoped?.warnings ?? []).some((m) => m.includes('inline mcpServers config for "ghost" is ignored')) &&
+            (scoped?.warnings ?? []).some((m) => m.includes('mcpServers entry "ghost" is not configured')),
+          `scoped agent listing: ${JSON.stringify(scoped)}`,
+        )
+
+        const id = await runId(w, ["--agent", "scoped", "pi", "--", ask("mcpscope")])
+        await resultOf(w, id, "mcpscope")
+        const system = model.systemOf("mcpscope") ?? ""
+        expect(
+          system.includes("SCOPED-MCP-MARK") && system.includes("alpha (local)") && !system.includes("beta (local)"),
+          `scoped session facts: ${system}`,
+        )
+
+        const projectId = path.basename((await w.json<{ directory: string }>(["project", "info"])).directory)
+        const sessionEnv = { VIBEST_SESSION_ID: id, VIBEST_PROJECT_ID: projectId }
+
+        const mcpListed = await w.vibest(["mcp", "list"], { env: sessionEnv })
+        expect(mcpListed.code === 0, `scoped mcp list: ${mcpListed.code} ${mcpListed.stderr}${mcpListed.stdout}`)
+        const visibleNames = (JSON.parse(mcpListed.stdout) as Array<{ name: string }>).map((s) => s.name)
+        expect(JSON.stringify(visibleNames) === JSON.stringify(["alpha"]), `visible servers: ${mcpListed.stdout}`)
+
+        const alphaOk = await w.vibest(["mcp", "call", "alpha", "ping", "{}"], { env: sessionEnv })
+        expect(
+          alphaOk.code === 0 && alphaOk.stdout.includes("pong:alpha"),
+          `alpha call: ${alphaOk.code} ${alphaOk.stderr}${alphaOk.stdout}`,
+        )
+
+        const betaRefused = await w.vibest(["mcp", "call", "beta", "ping", "{}"], { env: sessionEnv })
+        expect(
+          betaRefused.code !== 0 &&
+            (betaRefused.stderr + betaRefused.stdout).includes('does not allow MCP server "beta"'),
+          `beta call should be Forbidden: ${betaRefused.code} ${betaRefused.stderr}${betaRefused.stdout}`,
+        )
+        expect(!(await Bun.file(betaSentinel).exists()), "beta must never be spawned for a disallowed session")
       } finally {
         model.stop()
       }

@@ -4,9 +4,12 @@ import { Caller } from "@vibest/protocol/middleware"
 import { Effect, Predicate } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 
+import * as CallerChecks from "./caller.ts"
+
 export const AutomationHandler = HttpApiBuilder.group(VibestApi, "server.automation", (handlers) =>
   Effect.gen(function* () {
     const automation = yield* Automation.Service
+    const checks = yield* CallerChecks.Service
 
     return handlers
       .handle("automation.create", ({ payload }) =>
@@ -14,6 +17,10 @@ export const AutomationHandler = HttpApiBuilder.group(VibestApi, "server.automat
           const caller = yield* Caller
 
           if (Predicate.isTagged(caller, "Session")) {
+            if (payload.trigger.type === "event") {
+              yield* checks.requireMcpServer("automation.create", payload.trigger.server)
+            }
+
             return yield* automation.create({
               ...payload,
               sessionId: caller.sessionId,

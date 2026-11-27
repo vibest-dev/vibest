@@ -20,6 +20,7 @@
     "@vibest/runtime-herdr": "workspace:*",
     "@vibest/runtime-herdr-core": "workspace:*",
     "@vibest/runtime-rex": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "yaml": "^2.9.1"
   }
 }
