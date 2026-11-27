@@ -23,4 +23,5 @@ minimumReleaseAge: 0
 allowBuilds:
   # Transitive dependencies of @earendil-works/pi-coding-agent, which @vibest/harness-pi only uses for types: their scripts are not needed.
   "@google/genai": false
+  "@parcel/watcher": false
   protobufjs: false

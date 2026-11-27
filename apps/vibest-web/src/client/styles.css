@@ -1,0 +1,206 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Menlo, ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-code: var(--code);
+  --color-code-foreground: var(--code-foreground);
+  --color-code-highlight: var(--code-highlight);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --accent: --alpha(var(--color-black) / 4%);
+  --accent-foreground: var(--color-neutral-800);
+  --background: var(--color-white);
+  --border: --alpha(var(--color-black) / 8%);
+  --card: var(--color-white);
+  --card-foreground: var(--color-neutral-800);
+  --destructive: var(--color-red-500);
+  --destructive-foreground: var(--color-red-700);
+  --foreground: var(--color-neutral-800);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-700);
+  --input: --alpha(var(--color-black) / 10%);
+  --muted: --alpha(var(--color-black) / 4%);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
+  --popover: var(--color-white);
+  --popover-foreground: var(--color-neutral-800);
+  --primary: var(--color-neutral-800);
+  --primary-foreground: var(--color-neutral-50);
+  --ring: var(--color-neutral-400);
+  --secondary: --alpha(var(--color-black) / 4%);
+  --secondary-foreground: var(--color-neutral-800);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-700);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-700);
+  --code: var(--color-white);
+  --code-foreground: var(--foreground);
+  --code-highlight: --alpha(var(--color-black) / 4%);
+  --sidebar: var(--color-neutral-100);
+  --sidebar-accent: --alpha(var(--color-black) / 4%);
+  --sidebar-accent-foreground: var(--color-neutral-800);
+  --sidebar-border: --alpha(var(--color-black) / 8%);
+  --sidebar-foreground: color-mix(in srgb, var(--color-neutral-800) 72%, var(--sidebar));
+  --sidebar-primary: var(--color-neutral-800);
+  --sidebar-primary-foreground: var(--color-neutral-50);
+  --sidebar-ring: var(--color-neutral-400);
+}
+
+.dark {
+  --accent: --alpha(var(--color-white) / 5%);
+  --accent-foreground: var(--color-neutral-100);
+  --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
+  --border: --alpha(var(--color-white) / 7%);
+  --card: color-mix(in srgb, var(--background) 97%, var(--color-white));
+  --card-foreground: var(--color-neutral-100);
+  --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
+  --destructive-foreground: var(--color-red-400);
+  --foreground: var(--color-neutral-100);
+  --info: var(--color-blue-500);
+  --info-foreground: var(--color-blue-400);
+  --input: --alpha(var(--color-white) / 9%);
+  --muted: --alpha(var(--color-white) / 4%);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-400) 88%, var(--color-neutral-500));
+  --popover: color-mix(in srgb, var(--background) 96%, var(--color-white));
+  --popover-foreground: var(--color-neutral-100);
+  --primary: var(--color-neutral-100);
+  --primary-foreground: var(--color-neutral-900);
+  --ring: var(--color-neutral-500);
+  --secondary: --alpha(var(--color-white) / 5%);
+  --secondary-foreground: var(--color-neutral-100);
+  --success: var(--color-emerald-500);
+  --success-foreground: var(--color-emerald-400);
+  --warning: var(--color-amber-500);
+  --warning-foreground: var(--color-amber-400);
+  --code: color-mix(in srgb, var(--background) 98%, var(--color-white));
+  --code-foreground: var(--foreground);
+  --code-highlight: --alpha(var(--color-white) / 4%);
+  --sidebar: var(--color-neutral-950);
+  --sidebar-accent: --alpha(var(--color-white) / 5%);
+  --sidebar-accent-foreground: var(--color-neutral-100);
+  --sidebar-border: --alpha(var(--color-white) / 6%);
+  --sidebar-foreground: color-mix(in srgb, var(--color-neutral-100) 68%, var(--sidebar));
+  --sidebar-primary: var(--color-neutral-100);
+  --sidebar-primary-foreground: var(--color-neutral-900);
+  --sidebar-ring: var(--color-neutral-500);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    @apply h-dvh w-full overflow-hidden bg-sidebar text-foreground font-sans antialiased;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+}
+
+.wterm-host .wterm {
+  --term-font-size: 12px;
+  --term-row-height: 16px;
+  --term-bg: #0c0d10;
+  --term-fg: #e4e4e7;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 8px;
+}
+
+.markdown-prose h1 {
+  @apply mt-3 mb-1.5 text-lg font-semibold tracking-tight;
+}
+
+.markdown-prose h2 {
+  @apply mt-3 mb-1.5 text-sm font-semibold tracking-tight;
+}
+
+.markdown-prose h3 {
+  @apply mt-2.5 mb-1 text-xs font-semibold;
+}
+
+.markdown-prose p {
+  @apply my-1.5 leading-relaxed;
+}
+
+.markdown-prose ul,
+.markdown-prose ol {
+  @apply my-1.5 pl-5 list-disc space-y-0.5;
+}
+
+.markdown-prose code {
+  @apply rounded bg-muted px-1.5 py-0.5 font-mono text-[11.5px];
+}
+
+.markdown-prose pre {
+  @apply my-2 overflow-x-auto rounded-lg border border-border bg-code p-3 text-xs;
+}
+
+.markdown-prose pre code {
+  @apply bg-transparent p-0;
+}
+
+.markdown-prose table {
+  @apply my-2.5 w-full border-collapse text-xs;
+}
+
+.markdown-prose th,
+.markdown-prose td {
+  @apply border border-border px-2.5 py-1.5 text-left;
+}
+
+.markdown-prose th {
+  @apply bg-muted/60 font-medium;
+}

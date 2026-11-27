@@ -1,0 +1,29 @@
+{
+  "name": "@vibest/web",
+  "version": "0.0.2-dev",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "bun src/build-client.ts",
+    "start": "bun src/server.ts",
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run apps/vibest-web"
+  },
+  "dependencies": {
+    "@effect/ui": "https://pkg.pr.new/Effect-TS/ui/@effect/ui@ec0cf0e",
+    "@effect/ui-kit": "https://pkg.pr.new/Effect-TS/ui/@effect/ui-kit@ec0cf0e",
+    "@vibest/client": "workspace:*",
+    "@vibest/protocol": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "@wterm/dom": "0.6.0",
+    "effect": "catalog:",
+    "marked": "^15.0.7",
+    "mermaid": "^11.4.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "@vibest/tsconfig": "workspace:*",
+    "tailwindcss": "^4.1.0"
+  }
+}

@@ -5,7 +5,12 @@ export default defineConfig({
   test: {
     globalSetup: ["./vitest.globalSetup.ts"],
     setupFiles: ["./vitest.setup.ts"],
-    include: ["packages/*/test/**/*.test.ts", "tools/eval/test/**/*.test.ts", "tools/oxlint/**/*.test.mjs"],
+    include: [
+      "apps/vibest-web/test/**/*.test.ts",
+      "packages/*/test/**/*.test.ts",
+      "tools/eval/test/**/*.test.ts",
+      "tools/oxlint/**/*.test.mjs",
+    ],
     fileParallelism: true,
     maxConcurrency: 8,
     testTimeout: 30_000,
