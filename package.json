@@ -11,7 +11,7 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "typecheck": "turbo run typecheck && pnpm run lint",
-    "test": "turbo run test && bun ./node_modules/vitest/vitest.mjs run tools/oxlint && bun test e2e/test",
+    "test": "turbo run test && bun ./node_modules/vitest/vitest.mjs run tools/oxlint tools/eval && bun test e2e/test",
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
