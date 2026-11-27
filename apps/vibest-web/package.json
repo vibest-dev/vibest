@@ -11,28 +11,19 @@
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run apps/vibest-web"
   },
   "dependencies": {
-    "@base-ui/react": "^1.0.0",
     "@effect/platform-bun": "catalog:",
-    "@excalidraw/excalidraw": "^0.18.0",
+    "@effect/ui": "https://pkg.pr.new/Effect-TS/ui/@effect/ui@ec0cf0e",
+    "@effect/ui-kit": "https://pkg.pr.new/Effect-TS/ui/@effect/ui-kit@ec0cf0e",
     "@vibest/client": "workspace:*",
     "@vibest/protocol": "workspace:*",
     "@vibest/schema": "workspace:*",
     "@wterm/dom": "0.6.0",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
     "effect": "catalog:",
-    "lucide-react": "^0.475.0",
     "marked": "^15.0.7",
-    "mermaid": "^11.4.1",
-    "motion": "^12.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.3.0"
+    "mermaid": "^11.4.1"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.0",
-    "@types/react": "^19.0.10",
-    "@types/react-dom": "^19.0.4",
     "@vibest/tsconfig": "workspace:*",
     "tailwindcss": "^4.1.0",
     "tw-animate-css": "^1.3.0"

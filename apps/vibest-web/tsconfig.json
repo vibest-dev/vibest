@@ -1,8 +1,9 @@
 {
   "extends": "@vibest/tsconfig/base.json",
   "compilerOptions": {
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx"
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
   "include": ["src", "test"]
 }

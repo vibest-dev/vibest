@@ -2,19 +2,17 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { BunServices, BunSocket } from "@effect/platform-bun"
-import { cliHeaders, connect } from "@vibest/client/client"
-import { SocketConnector } from "@vibest/client/socket-connector"
-import type { ProjectRow, WatchEvent, WatchSession } from "@vibest/protocol/rpc"
+import { cliHeaders, connect, HttpConnector, withHeaders } from "@vibest/client/client"
+import { nodeUnixHttpClient } from "@vibest/client/unix-http.node"
+import type { ProjectRow, WatchEvent, WatchSession } from "@vibest/protocol/schemas"
 import { Effect, Layer, Match, Option, Schema, Stream } from "effect"
-import { RpcClient } from "effect/rpc"
 
 import { scanProjectFiles, watchProjectDirectories } from "./project-files.ts"
 import type {
   DaemonStatus,
+  PeekResult,
   ProjectFileEntry,
   ProjectSummary,
-  PeekResult,
   SessionItem,
   StreamPayload,
   TimelineEntry,
@@ -95,10 +93,7 @@ const DemoStateSchema = Schema.Struct({
 
 const decodeDemoState = Schema.decodeUnknownOption(DemoStateSchema)
 
-const socketLayer = Layer.mergeAll(
-  BunServices.layer,
-  Layer.succeed(SocketConnector.Service, (endpoint) => BunSocket.makeNet({ path: endpoint })),
-)
+const httpLayer = Layer.succeed(HttpConnector.Service, nodeUnixHttpClient)
 
 export interface BridgeOptions {
   readonly vibestHome: string
@@ -134,8 +129,8 @@ function isNeedsYou(status: SessionItem["status"], executionState: SessionItem["
   return status === "blocked" || executionState === "failed" || executionState === "lost"
 }
 
-function toSessionItem(raw: WatchSession, entryIds: ReadonlySet<string>): SessionItem {
-  const isEntry = entryIds.has(raw.id) || raw.parentId === null
+function toSessionItem(raw: WatchSession): SessionItem {
+  const isEntry = raw.parentId === null
 
   return {
     id: raw.id,
@@ -149,7 +144,7 @@ function toSessionItem(raw: WatchSession, entryIds: ReadonlySet<string>): Sessio
     projectId: raw.projectId,
     parentId: raw.parentId,
     runtime: raw.runtime,
-    machine: raw.machine ?? raw.address.machine ?? "local",
+    machine: raw.machine ?? "local",
     worktree: raw.worktree,
     repositoryRoot: raw.repositoryRoot,
     git: raw.git
@@ -171,18 +166,17 @@ function toSessionItem(raw: WatchSession, entryIds: ReadonlySet<string>): Sessio
   }
 }
 
-function summarizeProject(
-  row: {
-    readonly id: string
-    readonly directory: string | null
-    readonly entrySessionId: string | null
-    readonly activity: ProjectRow["activity"]
-    readonly name?: string
-    readonly machine?: string
-    readonly branch?: string
-  },
-  sessions: ReadonlyArray<SessionItem>,
-): ProjectSummary {
+interface RawProjectRecord {
+  readonly id: string
+  readonly directory: string | null
+  readonly entrySessionId?: string | null | undefined
+  readonly activity: ProjectRow["activity"]
+  readonly name?: string | undefined
+  readonly machine?: string | undefined
+  readonly branch?: string | undefined
+}
+
+function summarizeProject(row: RawProjectRecord, sessions: ReadonlyArray<SessionItem>): ProjectSummary {
   const projectSessions = sessions.flatMap((s) => (s.projectId === row.id ? [s] : []))
   const entry = projectSessions.find((s) => s.id === row.entrySessionId || s.isEntry)
   let activeSubagents = 0
@@ -231,20 +225,7 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
   const demoStatePath = path.join(options.vibestHome, "web-demo-state.json")
 
   const listeners = new Set<(event: StreamPayload) => void>()
-
-  const rawProjects = new Map<
-    string,
-    {
-      readonly id: string
-      readonly directory: string | null
-      readonly entrySessionId: string | null
-      readonly activity: ProjectRow["activity"]
-      readonly name?: string
-      readonly machine?: string
-      readonly branch?: string
-    }
-  >()
-
+  const rawProjects = new Map<string, RawProjectRecord>()
   const sessionsMap = new Map<string, SessionItem>()
   const filesByProject = new Map<string, ReadonlyArray<ProjectFileEntry>>()
   const timelinesBySession = new Map<string, TimelineEntry[]>()
@@ -387,20 +368,24 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
     attachFileWatchers()
   }
 
+  const snapshot = (): WorkspaceSnapshot => ({
+    daemon: state.daemon,
+    projects: computeProjects(),
+    sessions: Array.from(sessionsMap.values()).sort((a, b) => b.lastActive - a.lastActive),
+    filesByProject: computeFilesRecord(),
+  })
+
   const applyWatchEvent = Match.type<WatchEvent>().pipe(
     Match.tag("Snapshot", (ev) => {
       rawProjects.clear()
       sessionsMap.clear()
-      const entryIds = new Set<string>()
 
       for (const project of ev.projects) {
         rawProjects.set(project.id, project)
-
-        if (project.entrySessionId) entryIds.add(project.entrySessionId)
       }
 
       for (const session of ev.sessions) {
-        sessionsMap.set(session.id, toSessionItem(session, entryIds))
+        sessionsMap.set(session.id, toSessionItem(session))
       }
 
       attachFileWatchers()
@@ -418,13 +403,7 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
       emit({ type: "project", data: summary })
     }),
     Match.tag("Session", (ev) => {
-      const entryIds = new Set<string>()
-
-      for (const project of rawProjects.values()) {
-        if (project.entrySessionId) entryIds.add(project.entrySessionId)
-      }
-
-      const mapped = toSessionItem(ev.session, entryIds)
+      const mapped = toSessionItem(ev.session)
       sessionsMap.set(mapped.id, mapped)
       emit({ type: "session", data: mapped })
 
@@ -445,16 +424,18 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
         emit({ type: "project", data: summarizeProject(projRow, Array.from(sessionsMap.values())) })
       }
     }),
+    Match.tag("Machine", () => {}),
+    Match.tag("MachineRemoved", () => {}),
     Match.exhaustive,
   )
 
-  const runLiveRpc = <A, E>(
+  const runLiveApi = <A, E>(
     fn: (client: Effect.Success<ReturnType<typeof connect>>) => Effect.Effect<A, E>,
   ): Promise<A> => {
     const program = connect(socketPath).pipe(
-      Effect.flatMap((client) => RpcClient.withHeaders(fn(client), cliHeaders(options.repositoryRoot))),
+      Effect.flatMap((client) => withHeaders(fn(client), cliHeaders(options.repositoryRoot))),
       Effect.scoped,
-      Effect.provide(socketLayer),
+      Effect.provide(httpLayer),
     )
 
     return Effect.runPromise(program)
@@ -485,10 +466,10 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
 
     const watchProgram = Effect.gen(function* () {
       const client = yield* connect(socketPath)
-      const ping = yield* client.Ping(undefined)
+      const ping = yield* client["server.daemon"]["daemon.ping"]()
 
-      const load = yield* RpcClient.withHeaders(
-        client["Machine.Load"]({}).pipe(Effect.option),
+      const load = yield* withHeaders(
+        client["server.machine"]["machine.load"]({ query: {} }).pipe(Effect.option),
         cliHeaders(options.repositoryRoot),
       )
 
@@ -510,15 +491,17 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
       }
       emit({ type: "daemon", data: state.daemon })
 
-      yield* RpcClient.withHeaders(
-        Stream.runForEach(client.Watch(undefined), (event) =>
-          Effect.sync(() => {
-            if (!state.closed) applyWatchEvent(event)
-          }),
-        ),
+      const watchStream = yield* withHeaders(
+        client["server.watch"]["watch.subscribe"](),
         cliHeaders(options.repositoryRoot),
       )
-    }).pipe(Effect.scoped, Effect.provide(socketLayer))
+
+      yield* Stream.runForEach(watchStream, (event) =>
+        Effect.sync(() => {
+          if (!state.closed) applyWatchEvent(event)
+        }),
+      )
+    }).pipe(Effect.scoped, Effect.provide(httpLayer))
 
     void Effect.runPromise(watchProgram, { signal: controller.signal })
       .then(() => {
@@ -544,13 +527,6 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
     startLiveWatch()
   }
 
-  const snapshot = (): WorkspaceSnapshot => ({
-    daemon: state.daemon,
-    projects: computeProjects(),
-    sessions: Array.from(sessionsMap.values()).sort((a, b) => b.lastActive - a.lastActive),
-    filesByProject: computeFilesRecord(),
-  })
-
   const getTimeline = async (projectId: string, sessionId: string): Promise<ReadonlyArray<TimelineEntry>> => {
     const stored = timelinesBySession.get(sessionId) ?? []
     const session = sessionsMap.get(sessionId)
@@ -575,7 +551,9 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
 
     if (state.daemon.mode === "live" && state.daemon.connected) {
       try {
-        const detail = await runLiveRpc((client) => client.Get({ id: sessionId }))
+        const detail = await runLiveApi((client) =>
+          client["server.session"]["session.get"]({ params: { id: sessionId }, query: {} }),
+        )
 
         if (detail.reply?.text) {
           entries.push({
@@ -586,7 +564,7 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
             senderLabel: session?.name ?? sessionId.slice(0, 8),
             senderSessionId: sessionId,
             content: detail.reply.text,
-            createdAt: detail.reply.endedAt,
+            createdAt: detail.reply.endedAt ?? Date.now(),
             status: detail.reply.status === "failed" ? "failed" : "completed",
             attachments: [],
           })
@@ -621,12 +599,14 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
 
     if (state.daemon.mode === "live" && state.daemon.connected) {
       try {
-        const res = await runLiveRpc((client) => client.Peek({ id: sessionId, lines: 80 }))
+        const res = await runLiveApi((client) =>
+          client["server.session"]["session.peek"]({ params: { id: sessionId }, query: { lines: 80 } }),
+        )
 
         return {
           sessionId,
           text: res.text,
-          terminal: res.terminal ?? res.text,
+          terminal: res.text,
           updatedAt: Date.now(),
         }
       } catch (err) {
@@ -671,7 +651,12 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
 
     if (state.daemon.mode === "live" && state.daemon.connected && !options.safeActions) {
       try {
-        await runLiveRpc((client) => client.Send({ id: sessionId, message: formattedMessage }))
+        await runLiveApi((client) =>
+          client["server.session"]["session.send"]({
+            params: { id: sessionId },
+            payload: { message: formattedMessage },
+          }),
+        )
 
         return { ok: true, entry: null }
       } catch (err) {
@@ -715,7 +700,9 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
   const interruptSession = async (sessionId: string): Promise<{ readonly ok: boolean; readonly message: string }> => {
     if (state.daemon.mode === "live" && state.daemon.connected && !options.safeActions) {
       try {
-        const res = await runLiveRpc((client) => client.Interrupt({ id: sessionId }))
+        const res = await runLiveApi((client) =>
+          client["server.session"]["session.interrupt"]({ params: { id: sessionId }, query: {} }),
+        )
 
         return { ok: true, message: res.message }
       } catch (err) {
@@ -743,7 +730,9 @@ export function createVibestBridge(options: BridgeOptions): VibestBridge {
   const archiveSession = async (sessionId: string): Promise<{ readonly ok: boolean; readonly message: string }> => {
     if (state.daemon.mode === "live" && state.daemon.connected && !options.safeActions) {
       try {
-        await runLiveRpc((client) => client.Remove({ id: sessionId }))
+        await runLiveApi((client) =>
+          client["server.session"]["session.archive"]({ params: { id: sessionId }, payload: {} }),
+        )
 
         return { ok: true, message: `Archived ${sessionId.slice(0, 8)}` }
       } catch (err) {

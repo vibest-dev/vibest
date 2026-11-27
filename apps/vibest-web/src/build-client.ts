@@ -10,7 +10,7 @@ export async function buildClientAssets(): Promise<string> {
   const distDir = path.join(ROOT_DIR, "dist")
   fs.mkdirSync(distDir, { recursive: true })
 
-  const entryPoint = path.join(MODULE_DIR, "client", "main.tsx")
+  const entryPoint = path.join(MODULE_DIR, "client", "main.ts")
 
   const buildResult = await Bun.build({
     entrypoints: [entryPoint],
@@ -26,25 +26,12 @@ export async function buildClientAssets(): Promise<string> {
     },
     define: {
       "process.env.NODE_ENV": JSON.stringify("production"),
-      "process.env.IS_PREACT": JSON.stringify("false"),
     },
   })
 
   if (!buildResult.success) {
     const messages = buildResult.logs.map((log) => log.message).join("\n")
     throw new Error(`Client bundle failed:\n${messages}`)
-  }
-
-  const excalidrawCssSrc = path.join(ROOT_DIR, "node_modules", "@excalidraw", "excalidraw", "dist", "prod", "index.css")
-
-  if (fs.existsSync(excalidrawCssSrc)) {
-    fs.copyFileSync(excalidrawCssSrc, path.join(distDir, "excalidraw.css"))
-  }
-
-  const excalidrawFontsSrc = path.join(ROOT_DIR, "node_modules", "@excalidraw", "excalidraw", "dist", "prod", "fonts")
-
-  if (fs.existsSync(excalidrawFontsSrc)) {
-    fs.cpSync(excalidrawFontsSrc, path.join(distDir, "excalidraw-assets", "fonts"), { recursive: true })
   }
 
   const wtermCssSrc = path.join(ROOT_DIR, "node_modules", "@wterm", "dom", "src", "terminal.css")
@@ -69,11 +56,7 @@ export async function buildClientAssets(): Promise<string> {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Vibest — Web Management Hub</title>
   <link rel="stylesheet" href="/wterm.css" />
-  <link rel="stylesheet" href="/excalidraw.css" />
   <link rel="stylesheet" href="/styles.css" />
-  <script>
-    window.EXCALIDRAW_ASSET_PATH = "/excalidraw-assets/";
-  </script>
 </head>
 <body>
   <div id="root"></div>
