@@ -9,6 +9,7 @@ import { Harnesses } from "../harness/registry.ts"
 import type { AgentDefinition, AgentsDomain } from "../plugin/domains.ts"
 import { type Runtime, type Terminal } from "../runtime/registry.ts"
 import {
+  configuredMcpServers,
   projectText,
   SystemPromptDirUnsafe,
   systemPrompt,
@@ -111,6 +112,9 @@ export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input
 
   const text = input.systemPrompt === undefined ? yield* projectText(layout.project(input.projectId)) : undefined
 
+  const mcpServers =
+    input.systemPrompt === undefined ? yield* configuredMcpServers(layout.home, input.worktree ?? input.root) : []
+
   const saved = yield* input.session
   const scratchpadDir = layout.scratchpadDir(saved.projectId)
 
@@ -123,6 +127,7 @@ export const sessionCommand = Effect.fn("sessionCommand")(function* <E, R>(input
       projectDir: layout.project(saved.projectId),
       scratchpadDir,
       agents: (yield* Agents.Service).all,
+      mcpServers,
       preferences: text?.preferences ?? "",
       memories: text?.memories ?? "",
     })
