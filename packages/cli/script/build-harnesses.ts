@@ -10,9 +10,12 @@ fs.rmSync(outdir, { recursive: true, force: true })
 for (const harness of ["pi", "claude", "cursor", "agy"]) {
   const harnessDir = path.join(packagesDir, `harness-${harness}`)
 
-  const { exitCode } = Bun.spawnSync(["bun", path.join(harnessDir, "script/build.ts"), path.join(outdir, harness)], {
-    stdio: ["inherit", "inherit", "inherit"],
-  })
+  const { exitCode } = Bun.spawnSync(
+    [process.execPath, path.join(harnessDir, "script/build.ts"), path.join(outdir, harness)],
+    {
+      stdio: ["inherit", "inherit", "inherit"],
+    },
+  )
 
   if (exitCode !== 0) process.exit(exitCode)
   const skills = path.join(harnessDir, harness === "pi" ? "src/skills" : "skills")
