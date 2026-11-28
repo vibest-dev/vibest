@@ -6,7 +6,9 @@ const HEAD_END = [13, 10, 13, 10]
 const BLOCK_END = [10, 10]
 
 const find = (bytes: Uint8Array, needle: readonly number[]): number => {
-  for (let i = 0; i + needle.length <= bytes.length; i++) {
+  const [first = -1] = needle
+
+  for (let i = bytes.indexOf(first); i >= 0 && i + needle.length <= bytes.length; i = bytes.indexOf(first, i + 1)) {
     if (needle.every((b, j) => bytes[i + j] === b)) return i
   }
 
